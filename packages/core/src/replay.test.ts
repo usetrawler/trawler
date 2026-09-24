@@ -151,6 +151,14 @@ describe("runReplay", () => {
     expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "error", error: "the browser failed 3 times in a row" });
   });
 
+  test("a secret cut by the size limit is masked before it is cut", async () => {
+    const model = scriptedModel([report({ completed: true, observed: "x".repeat(3990) + "hunter22-secret", blockedAt: null })]);
+    const { promise, events } = replay(model);
+    const { observation } = await promise;
+    expect(observation.observed).not.toContain("hunter22-s");
+    expect(JSON.stringify(events)).not.toContain("hunter22-s");
+  });
+
   test("keeps a very long report to a readable size", async () => {
     const model = scriptedModel([report({ completed: true, observed: "x".repeat(20_000), blockedAt: null })]);
     const { observation } = await replay(model).promise;

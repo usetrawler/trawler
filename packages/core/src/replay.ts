@@ -68,7 +68,7 @@ export async function runReplay(opts: {
       if (!completed && (blockedAt == null || !Number.isInteger(blockedAt) || blockedAt < 1 || blockedAt > stepCount)) {
         return `rejected: blockedAt: give the number of the step you could not do; there are only ${stepCount} steps`;
       }
-      report = opts.scrubber.scrub({ completed, observed: observed.trim().slice(0, MAX_OBSERVED_CHARS), blockedAt: completed ? null : blockedAt! });
+      report = { completed, observed: Array.from(opts.scrubber.scrub(observed.trim())).slice(0, MAX_OBSERVED_CHARS).join(""), blockedAt: completed ? null : blockedAt! };
       return "reported";
     }),
   });
@@ -79,7 +79,7 @@ export async function runReplay(opts: {
   const outcome = await runAgentLoop({
     model: opts.model,
     tools: { ...queue.tools, sign_in, report_replay },
-    instructions: () => `${instructions}\n\nTool call ${usage.steps + 1} of ${opts.maxSteps} allowed.`,
+    instructions: () => `${instructions}\n\nTurn ${usage.steps + 1} of ${opts.maxSteps}.`,
     nudge: NUDGE,
     scrubber: opts.scrubber,
     budget: opts.budget,
