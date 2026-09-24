@@ -46,7 +46,10 @@ export function sessionTools(opts: {
 }) {
   const { state, emit, jobId } = opts;
   const goalIds = () => [...state.goals.keys()];
-  const unknownGoal = (goal: unknown) => `rejected: unknown goal ${String(goal)}; use one of ${goalIds().join(", ")}`;
+  const unknownGoal = (goal: unknown) =>
+    typeof goal === "string" && goal.trim()
+      ? `rejected: unknown goal ${goal}; use one of ${goalIds().join(", ")}`
+      : `rejected: goal: missing; use one of ${goalIds().join(", ")}`;
   const closed = "rejected: the session is already finished";
 
   return {
@@ -65,17 +68,18 @@ export function sessionTools(opts: {
       description:
         "Record a defect or a friction the moment you have seen it. kind: defect | friction. severity: low | medium | high. reproduction: the literal steps, one per array item; a defect needs at least two.",
       inputSchema: z.object({
-        kind: z.unknown().optional(),
-        goal: z.unknown().optional(),
-        title: z.unknown().optional(),
-        observed: z.unknown().optional(),
-        reproduction: z.unknown().optional(),
-        severity: z.unknown().optional(),
+        kind: z.string().nullish(),
+        goal: z.string().nullish(),
+        title: z.string().nullish(),
+        observed: z.string().nullish(),
+        reproduction: z.union([z.array(z.string()), z.string()]).nullish(),
+        severity: z.string().nullish(),
       }),
       execute: async (input) => {
         if (state.finished !== null) return closed;
-        if (typeof input.goal !== "string" || !state.goals.has(input.goal)) return unknownGoal(input.goal);
-        const candidate = { ...input, kind: lower(input.kind), severity: lower(input.severity), reproduction: steps(input.reproduction), id: "pending" };
+        const goal = lower(input.goal);
+        if (typeof goal !== "string" || !state.goals.has(goal)) return unknownGoal(input.goal);
+        const candidate = { ...input, goal, kind: lower(input.kind), severity: lower(input.severity), reproduction: steps(input.reproduction), id: "pending" };
         const parsed = FindingSchema.safeParse(candidate);
         if (!parsed.success) {
           const tooFew = candidate.kind === "defect" && Array.isArray(candidate.reproduction) && candidate.reproduction.length < 2;
@@ -92,10 +96,12 @@ export function sessionTools(opts: {
     }),
     goal_status: tool({
       description: "Record where a goal ended up: reached, or failed with where you stopped. A later call for the same goal replaces the earlier one.",
-      inputSchema: z.object({ goal: z.unknown().optional(), status: z.unknown().optional(), note: z.string().nullish() }),
-      execute: async ({ goal, status, note }) => {
+      inputSchema: z.object({ goal: z.string().nullish(), status: z.string().nullish(), note: z.string().nullish() }),
+      execute: async (input) => {
         if (state.finished !== null) return closed;
-        if (typeof goal !== "string" || !state.goals.has(goal)) return unknownGoal(goal);
+        const goal = lower(input.goal);
+        const { status, note } = input;
+        if (typeof goal !== "string" || !state.goals.has(goal)) return unknownGoal(input.goal);
         const normalised = lower(status);
         if (normalised !== "reached" && normalised !== "failed") return `rejected: status: use reached or failed`;
         const outcome = { goal, status: normalised, note: note ?? "" } as const;
@@ -108,6 +114,7 @@ export function sessionTools(opts: {
       description: "Type a stored account's username and password into two fields, by their snapshot refs. You never see the password.",
       inputSchema: z.object({ account: z.string(), usernameField: z.string(), passwordField: z.string() }),
       execute: async ({ account, usernameField, passwordField }) => {
+        if (state.finished !== null) return closed;
         const a = opts.accounts.find((x) => x.ref === account);
         if (!a) return `rejected: unknown account ${account}; known: ${opts.accounts.map((x) => x.ref).join(", ") || "none"}`;
         opts.scrubber.add(a.password);

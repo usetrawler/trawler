@@ -126,6 +126,17 @@ describe("note, goal_status and finish", () => {
     expect(state.goals.get("sign-up")?.status).toBe("not_attempted");
     expect(events).toHaveLength(0);
   });
+  test("goal ids are matched in any case", async () => {
+    const { tools, state } = setup();
+    await tools.goal_status.execute!({ goal: "Sign-Up", status: "reached", note: "" }, ctx);
+    expect(await tools.submit_finding.execute!({ ...finding, goal: " SIGN-UP " }, ctx)).toBe("recorded f1");
+    expect(state.goals.get("sign-up")?.status).toBe("reached");
+    expect(state.findings[0]!.goal).toBe("sign-up");
+  });
+  test("a missing goal is named as missing", async () => {
+    const { tools } = setup();
+    expect(await tools.goal_status.execute!({ status: "reached" }, ctx)).toBe("rejected: goal: missing; use one of sign-up, invoice");
+  });
   test("goal_status accepts any case for status", async () => {
     const { tools, state } = setup();
     await tools.goal_status.execute!({ goal: "sign-up", status: "Reached", note: "" }, ctx);
@@ -159,7 +170,7 @@ describe("note, goal_status and finish", () => {
     expect(state.finished).toBe("all good");
   });
   test("after finish, nothing changes the session", async () => {
-    const { tools, state, events } = setup();
+    const { tools, state, events, fillField } = setup();
     await tools.goal_status.execute!({ goal: "sign-up", status: "reached", note: "" }, ctx);
     await tools.goal_status.execute!({ goal: "invoice", status: "reached", note: "" }, ctx);
     await tools.finish.execute!({ summary: "first" }, ctx);
@@ -168,6 +179,8 @@ describe("note, goal_status and finish", () => {
     expect(await tools.goal_status.execute!({ goal: "sign-up", status: "failed", note: "" }, ctx)).toBe("rejected: the session is already finished");
     expect(await tools.submit_finding.execute!(finding, ctx)).toBe("rejected: the session is already finished");
     expect(await tools.note.execute!({ text: "late" }, ctx)).toBe("rejected: the session is already finished");
+    expect(await tools.sign_in.execute!({ account: "solo", usernameField: "e3", passwordField: "e4" }, ctx)).toBe("rejected: the session is already finished");
+    expect(fillField).not.toHaveBeenCalled();
     expect(state.finished).toBe("first");
     expect(state.goals.get("sign-up")?.status).toBe("reached");
     expect(events).toHaveLength(before);
