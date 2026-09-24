@@ -11,7 +11,7 @@ const NO_REPORT: ReplayObservation = { completed: false, observed: "the replay s
 const NUDGE = "Every turn must call a tool; plain text does nothing. Carry on with the steps, and call report_replay when you are done or blocked.";
 
 const MAX_OBSERVED_CHARS = 4000;
-const JUDGE_OUTPUT_TOKENS = 200;
+const JUDGE_OUTPUT_TOKENS = 1000;
 
 const isNoReport = (o: ReplayObservation) => !o.completed && o.blockedAt === null;
 
