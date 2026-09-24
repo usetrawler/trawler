@@ -30,6 +30,12 @@ describe("SecretScrubber forms", () => {
   test("a combining mark typed after the secret does not hide it", () => {
     expect(scrubbed("hunter2e", "value: hunter2e\u0301 end")).toBe("value: •••\u0301 end");
   });
+  test("matches a secret stored in mixed normalisation, as typed", () => {
+    const mixed = "p\u00e4o\u0308sswrd1";
+    expect(mixed).not.toBe(mixed.normalize("NFC"));
+    expect(mixed).not.toBe(mixed.normalize("NFD"));
+    expect(scrubbed(mixed, `fill('${mixed}') q=${encodeURIComponent(mixed)}`)).toBe("fill('•••') q=•••");
+  });
   test("removes percent-encoded forms of a decomposed secret", () => {
     const nfd = "pässwörd1".normalize("NFD");
     expect(scrubbed(nfd, `q=${encodeURIComponent(nfd)}`)).toBe("q=•••");
@@ -82,6 +88,11 @@ describe("SecretScrubber masking", () => {
     s.add("hunter22");
     const shared = { pw: "hunter22" };
     expect(s.scrub({ a: shared, b: shared })).toEqual({ a: { pw: "•••" }, b: { pw: "•••" } });
+  });
+  test("wide typed arrays are not decoded as text", () => {
+    const s = new SecretScrubber();
+    s.add("hunter22");
+    expect(s.scrub(new Uint16Array([104, 117, 110, 116, 101, 114, 50, 50]))).toBe("[binary]");
   });
   test("typed arrays are decoded before scrubbing", () => {
     const s = new SecretScrubber();

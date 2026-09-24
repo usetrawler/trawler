@@ -21,7 +21,7 @@ function forms(s: string): string[] {
 }
 
 function variants(secret: string): string[] {
-  return [...forms(secret.normalize("NFC")), ...forms(secret.normalize("NFD"))];
+  return [...forms(secret), ...forms(secret.normalize("NFC")), ...forms(secret.normalize("NFD"))];
 }
 
 function isPlainObject(v: object): boolean {
@@ -89,7 +89,8 @@ export class SecretScrubber {
     try {
       if (Array.isArray(value)) return value.map((v) => this.#scrub(v, ancestors));
       if (value instanceof Error) return { name: this.#scrubText(value.name), message: this.#scrubText(value.message) };
-      if (ArrayBuffer.isView(value)) return this.#scrubText(new TextDecoder().decode(value));
+      if (value instanceof Uint8Array || value instanceof DataView) return this.#scrubText(new TextDecoder().decode(value));
+      if (ArrayBuffer.isView(value)) return "[binary]";
       if (value instanceof ArrayBuffer) return this.#scrubText(new TextDecoder().decode(new Uint8Array(value)));
       if (isPlainObject(value)) {
         return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, this.#scrub(v, ancestors)]));
