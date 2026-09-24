@@ -7,6 +7,12 @@ import { asSystem, withOrg } from "./tenancy.ts";
 import pg from "pg";
 import { databaseUrl, onServer, testDb } from "./test-db.ts";
 
+async function memberships(login: string): Promise<string[]> {
+  return onServer(async (c) =>
+    (await c.query<{ name: string }>("SELECT r.rolname AS name FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid WHERE m.member = $1::regrole ORDER BY 1", [login])).rows.map((r) => r.name),
+  );
+}
+
 async function grantAppLoginIn(url: string, login: string) {
   const client = new pg.Client({ connectionString: url });
   await client.connect();
@@ -141,6 +147,7 @@ describe("as the production login: no superuser, roles granted without inheritan
     });
     try {
       await expect(onServer((c) => grantAppLogin(c, sneaky))).rejects.toThrow(/inherits/);
+      expect(await memberships(sneaky)).toEqual(["trawler_app"]);
     } finally {
       await onServer(async (c) => {
         await c.query(`DROP ROLE ${sneaky}`);
@@ -157,6 +164,7 @@ describe("as the production login: no superuser, roles granted without inheritan
     await sql.raw(`alter table owned owner to ${owner}`).execute(db);
     try {
       await expect(grantAppLoginIn(t.url, owner)).rejects.toThrow(/owns/);
+      expect(await memberships(owner)).toEqual([]);
     } finally {
       await sql`drop table owned`.execute(db);
       await onServer((c) => c.query(`DROP ROLE ${owner}`));

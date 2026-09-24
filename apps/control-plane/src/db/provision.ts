@@ -12,12 +12,19 @@ export async function grantAppLogin(owner: pg.ClientBase, login: string): Promis
   if (!role) throw new Error(`role ${login} does not exist`);
   if (role.rolsuper || role.rolbypassrls) throw new Error(`role ${login} must not be a superuser or bypass row-level security`);
   if (!role.rolcanlogin) throw new Error(`role ${login} must be able to log in`);
-  await owner.query(`GRANT trawler_app, trawler_bypass TO ${login} WITH INHERIT FALSE, SET TRUE`);
-  const check = await owner.query<{ inherits: boolean; owns: boolean }>(
-    `SELECT pg_has_role($1, 'trawler_app', 'USAGE') OR pg_has_role($1, 'trawler_bypass', 'USAGE') AS inherits,
-            EXISTS (SELECT FROM pg_class WHERE relrowsecurity AND pg_has_role($1, relowner, 'USAGE')) AS owns`,
-    [login],
-  );
-  if (check.rows[0]!.inherits) throw new Error(`role ${login} still inherits the tenancy roles through another grant; revoke it first`);
-  if (check.rows[0]!.owns) throw new Error(`role ${login} owns a table under row-level security; it must not own tenant tables`);
+  await owner.query("BEGIN");
+  try {
+    await owner.query(`GRANT trawler_app, trawler_bypass TO ${login} WITH INHERIT FALSE, SET TRUE`);
+    const check = await owner.query<{ inherits: boolean; owns: boolean }>(
+      `SELECT pg_has_role($1, 'trawler_app', 'USAGE') OR pg_has_role($1, 'trawler_bypass', 'USAGE') AS inherits,
+              EXISTS (SELECT FROM pg_class WHERE relrowsecurity AND pg_has_role($1, relowner, 'USAGE')) AS owns`,
+      [login],
+    );
+    if (check.rows[0]!.inherits) throw new Error(`role ${login} still inherits the tenancy roles through another grant; revoke it first`);
+    if (check.rows[0]!.owns) throw new Error(`role ${login} owns a table under row-level security; it must not own tenant tables`);
+    await owner.query("COMMIT");
+  } catch (err) {
+    await owner.query("ROLLBACK");
+    throw err;
+  }
 }
