@@ -392,8 +392,10 @@ describe("password fields", () => {
       const snap = await snapshot(b);
       await b.tools.browser_click!.execute!({ target: refOf(snap, "Save"), element: "save" }, ctx);
       const started = Date.now();
-      await b.tools.browser_press_key!.execute!({ key: "ArrowDown" }, ctx);
+      const pressed = JSON.stringify(await b.tools.browser_press_key!.execute!({ key: "ArrowDown" }, ctx));
       expect(Date.now() - started).toBeLessThan(10_000);
+      expect(pressed).toMatch(/dialog/i);
+      expect(pressed).not.toMatch(/password field/);
       const handled = (await b.tools.browser_handle_dialog!.execute!({ accept: true }, ctx)) as { isError?: boolean };
       expect(handled.isError).toBeFalsy();
       expect(await snapshot(b)).toContain("alert page");
