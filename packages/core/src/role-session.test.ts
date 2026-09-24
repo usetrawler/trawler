@@ -99,7 +99,8 @@ describe("runRoleSession", () => {
     const { result, usage } = await run(model).promise;
     expect(result.stoppedBy).toBe("finish");
     expect(usage.steps).toBe(4);
-    expect(JSON.stringify(model.doGenerateCalls[1]!.prompt)).toContain("Every turn must call a tool");
+    const users = model.doGenerateCalls[1]!.prompt.filter((m) => m.role === "user");
+    expect(JSON.stringify(users.at(-1))).toContain("Continue with the goals, and call finish once every goal has a status.");
   });
 
   test("a model that keeps answering in plain text ends the session with a reason", async () => {
