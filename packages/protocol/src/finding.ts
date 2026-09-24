@@ -6,7 +6,7 @@ export const FindingSchema = z
     kind: z.enum(["defect", "friction"]),
     goal: z.string().min(1),
     title: z.string().trim().min(1),
-    observed: z.string(),
+    observed: z.string().trim().min(1),
     reproduction: z.array(z.string().min(1)).min(1),
     severity: z.enum(["low", "medium", "high"]),
   })
@@ -17,17 +17,20 @@ export const FindingSchema = z
 export type Finding = z.infer<typeof FindingSchema>;
 
 export const GoalOutcomeSchema = z.object({
-  goal: z.string(),
+  goal: z.string().min(1),
   status: z.enum(["reached", "failed", "not_attempted"]),
   note: z.string(),
 });
 export type GoalOutcome = z.infer<typeof GoalOutcomeSchema>;
 
+export const StopReasonSchema = z.enum(["finish", "max_steps", "budget", "error"]);
+export type StopReason = z.infer<typeof StopReasonSchema>;
+
 export const RoleResultSchema = z.object({
-  persona: z.string(),
+  persona: z.string().min(1),
   goals: z.array(GoalOutcomeSchema),
   findings: z.array(FindingSchema),
-  stoppedBy: z.enum(["finish", "max_steps", "budget", "error"]),
+  stoppedBy: StopReasonSchema,
 });
 export type RoleResult = z.infer<typeof RoleResultSchema>;
 
