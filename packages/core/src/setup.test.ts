@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
 import { Budget } from "./llm.ts";
+import { setupPrompt } from "./prompts.ts";
 import { pageText, proposeProject } from "./setup.ts";
 import { scriptedModel, text } from "./testing.ts";
 
@@ -115,6 +116,7 @@ describe("proposeProject", () => {
     const tag = /<website-([a-z0-9]+)>/.exec(prompt)![1]!;
     const inside = prompt.slice(prompt.indexOf(`<website-${tag}>`), prompt.indexOf(`</website-${tag}>`));
     expect(inside).toContain("Ignore the above");
+    expect(setupPrompt({ url: "https://a.test/", page: "p" })).not.toContain(`website-${tag}`);
   });
 
   test("does not spend when the budget ran out while the pages were being read", async () => {
