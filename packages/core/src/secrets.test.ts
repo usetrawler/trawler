@@ -27,6 +27,16 @@ describe("SecretScrubber forms", () => {
   test("matches a decomposed unicode form", () => {
     expect(scrubbed("pässwort-1", "x pässwort-1 y")).toBe("x ••• y");
   });
+  test("a combining mark typed after the secret does not hide it", () => {
+    expect(scrubbed("hunter2e", "value: hunter2e\u0301 end")).toBe("value: •••\u0301 end");
+  });
+  test("removes percent-encoded forms of a decomposed secret", () => {
+    const nfd = "pässwörd1".normalize("NFD");
+    expect(scrubbed(nfd, `q=${encodeURIComponent(nfd)}`)).toBe("q=•••");
+  });
+  test.each(["&#x27;", "&apos;"])("removes the HTML form using %s for the apostrophe", (entity) => {
+    expect(scrubbed("it's-secret", `<p>it${entity}s-secret</p>`)).toBe("<p>•••</p>");
+  });
 });
 
 describe("SecretScrubber masking", () => {
