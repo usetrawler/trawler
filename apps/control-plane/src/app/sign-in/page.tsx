@@ -5,7 +5,8 @@ import { SignInButtons } from "./sign-in-buttons.tsx";
 
 export const dynamic = "force-dynamic";
 
-export default async function SignInPage() {
+export default async function SignInPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const { error } = await searchParams;
   const session = await getAuth().api.getSession({ headers: await headers() });
   if (session) redirect("/new");
   return (
@@ -19,6 +20,7 @@ export default async function SignInPage() {
       </section>
       <section className="flex flex-col gap-4 border border-line bg-panel p-6">
         <p className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Sign in</p>
+        {error && <p role="alert" className="text-sm text-bad">Signing in did not work. Please try again.</p>}
         <SignInButtons providers={signInProviders()} />
         <p className="text-sm text-muted">No passwords. Your first sign-in creates a workspace you can rename later.</p>
       </section>

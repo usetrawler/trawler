@@ -15,6 +15,7 @@ export function readEnv(env: Record<string, string | undefined> = process.env): 
   const missing = ["DATABASE_URL", "BETTER_AUTH_SECRET", "BETTER_AUTH_URL"].filter((k) => !env[k]);
   if (missing.length) throw new Error(`missing environment variables: ${missing.join(", ")}`);
   if ((env.BETTER_AUTH_SECRET ?? "").length < 32) throw new Error("BETTER_AUTH_SECRET must be at least 32 characters");
+  if (env.NODE_ENV === "production" && !env.BETTER_AUTH_URL!.startsWith("https://")) throw new Error("BETTER_AUTH_URL must use https in production");
   const devIssuer = env.TRAWLER_DEV_OIDC_ISSUER;
   if (devIssuer && env.NODE_ENV === "production") throw new Error("TRAWLER_DEV_OIDC_ISSUER must never be set in production");
   return {

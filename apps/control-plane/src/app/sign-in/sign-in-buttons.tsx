@@ -10,7 +10,7 @@ export function SignInButtons({ providers }: { providers: Array<keyof typeof LAB
   const go = async (provider: keyof typeof LABELS) => {
     setPending(provider);
     setError(null);
-    const result = await authClient.signIn.social({ provider, callbackURL: "/new" });
+    const result = await authClient.signIn.social({ provider, callbackURL: "/new", errorCallbackURL: "/sign-in?error=sign-in" });
     if (result.error) {
       setError(result.error.message ?? "Sign-in failed. Try again.");
       setPending(null);

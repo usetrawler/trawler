@@ -14,7 +14,12 @@ test("names every missing variable and refuses a short secret", () => {
   expect(() => readEnv({ ...base, BETTER_AUTH_SECRET: "short" })).toThrow(/32 characters/);
 });
 
+test("production needs an https address", () => {
+  expect(() => readEnv({ ...base, NODE_ENV: "production" })).toThrow(/https/);
+  expect(readEnv({ ...base, NODE_ENV: "production", BETTER_AUTH_URL: "https://app.usetrawler.com" }).baseURL).toBe("https://app.usetrawler.com");
+});
+
 test("the development sign-in can never be enabled in production", () => {
   expect(readEnv({ ...base, TRAWLER_DEV_OIDC_ISSUER: "http://localhost:4500" }).devOidc?.issuer).toBe("http://localhost:4500");
-  expect(() => readEnv({ ...base, NODE_ENV: "production", TRAWLER_DEV_OIDC_ISSUER: "http://localhost:4500" })).toThrow(/never be set in production/);
+  expect(() => readEnv({ ...base, NODE_ENV: "production", BETTER_AUTH_URL: "https://app.usetrawler.com", TRAWLER_DEV_OIDC_ISSUER: "http://localhost:4500" })).toThrow(/never be set in production/);
 });
