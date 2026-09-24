@@ -7,7 +7,7 @@ export const FindingSchema = z
     goal: z.string().min(1),
     title: z.string().trim().min(1),
     observed: z.string().trim().min(1),
-    reproduction: z.array(z.string().min(1)).min(1),
+    reproduction: z.array(z.string().trim().min(1)).min(1),
     severity: z.enum(["low", "medium", "high"]),
   })
   .refine((f) => f.kind !== "defect" || f.reproduction.length >= 2, {
