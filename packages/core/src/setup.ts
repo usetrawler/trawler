@@ -12,7 +12,6 @@ const MAX_FOCUS_CHARS = 500;
 const SETUP_OUTPUT_TOKENS = 4_000;
 
 const MAX_HTML_CHARS = 2_000_000;
-const MAX_TAG_CHARS = 5_000;
 const DROPPED_ELEMENTS = new Set(["script", "style", "noscript", "svg", "template"]);
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
 
@@ -29,20 +28,23 @@ function decodeEntities(text: string): string {
 
 function tagEnd(html: string, from: number): number {
   let quote: string | null = null;
-  const limit = Math.min(html.length, from + MAX_TAG_CHARS);
-  for (let i = from; i < limit; i++) {
+  let lastSolid = "";
+  for (let i = from; i < html.length; i++) {
     const c = html[i]!;
     if (quote) {
       if (c === quote) quote = null;
-    } else if (c === '"' || c === "'") quote = c;
+      continue;
+    }
+    if ((c === '"' || c === "'") && lastSolid === "=") quote = c;
     else if (c === ">") return i;
+    if (!/\s/.test(c)) lastSolid = c;
   }
   return -1;
 }
 
 function attributes(tag: string): Map<string, string> {
   const found = new Map<string, string>();
-  for (const m of tag.matchAll(/([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g)) {
+  for (const m of tag.matchAll(/(?<=^|[\s"'/])([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g)) {
     found.set(m[1]!.toLowerCase(), m[2] ?? m[3] ?? m[4] ?? "");
   }
   return found;
@@ -67,7 +69,7 @@ export function pageText(input: string, maxChars: number): string {
     }
     parts.push(html.slice(i, lt));
     if (html.startsWith("<!--", lt)) {
-      const close = html.indexOf("-->", lt + 4);
+      const close = html.indexOf("-->", lt + 2);
       if (close === -1) break;
       parts.push(" ");
       i = close + 3;
@@ -90,7 +92,7 @@ export function pageText(input: string, maxChars: number): string {
       if (attrs.get("name")?.toLowerCase() === "description") description = attrs.get("content") ?? "";
     }
     if (DROPPED_ELEMENTS.has(name) && !tag.endsWith("/")) {
-      const closer = new RegExp(`</${name}\\b`, "ig");
+      const closer = new RegExp(`</${name}(?=[\\s/>])`, "ig");
       closer.lastIndex = i;
       const found = closer.exec(html);
       if (!found) break;

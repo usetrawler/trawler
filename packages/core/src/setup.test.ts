@@ -21,9 +21,9 @@ describe("pageText", () => {
   });
 
   test("stays fast on hostile markup", () => {
-    for (const unit of ['<meta name="description"', "<", "<!--", "<script>", "<meta ", '<a title="'] ) {
+    for (const unit of ['<meta name="description"', "<", "<!--", "<script>", "<meta ", '<a title="', `<meta ${"a".repeat(4990)}>`, "a =  "]) {
       const started = performance.now();
-      pageText(unit.repeat(200_000), 12_000);
+      pageText(unit.repeat(Math.ceil(2_000_000 / unit.length)), 12_000);
       expect(performance.now() - started).toBeLessThan(1500);
     }
   });
@@ -34,6 +34,13 @@ describe("pageText", () => {
     expect(pageText("<p>before</p><!-- never closed", 1000)).toBe("before");
     expect(pageText("&#xD800; &#0; x", 1000)).toBe("\uFFFD \uFFFD x");
     expect(pageText("ab😀", 3)).toBe("ab");
+    expect(pageText(`<h1>Top</h1><img src="data:image/png;base64,${"A".repeat(6000)}"><p>Pricing</p>`, 1000)).toBe("Top Pricing");
+    expect(pageText(`<div data-page="${"&quot;k&quot;:1,".repeat(1000)}"><h1>Dashboard</h1></div>`, 1000)).toBe("Dashboard");
+    expect(pageText(`<p>a</p><img alt=Fred's src=x.png><p>Main</p>`, 1000)).toBe("a Main");
+    expect(pageText(`<p>a</p><div class="x" "><p>Main</p>`, 1000)).toBe("a Main");
+    expect(pageText("a<!-->b<p>c</p>", 1000)).toBe("a b c");
+    expect(pageText("<script>x</script-foo>LEAK</script>ok", 1000)).toBe("ok");
+    expect(pageText(`<meta name="description" content="first"><meta name="description" content="second">`, 1000)).toBe("first");
   });
 
   test("truncates", () => {
@@ -100,12 +107,21 @@ describe("proposeProject", () => {
     expect(project.personas[1]!.brief.length).toBeLessThanOrEqual(800);
     expect(project.goals.map((g) => g.instruction)).toEqual(["Goal 1", "Goal 2", "Goal 3", "Goal 4", "Goal 5", "Goal 6"]);
     expect(usage.costUsd).toBeCloseTo(0.002, 10);
+    const tooLong = { ...proposal, personas: [{ id: "Zoë " + "x".repeat(80), name: "Zoë", brief: "b" }], goals: [{ id: "g", instruction: "I".repeat(1000) }] };
+    const capped = (await propose(scriptedModel([text(JSON.stringify(tooLong))])).promise).project;
+    expect(capped.goals[0]!.instruction.length).toBe(300);
+    expect(capped.personas[0]!.id.startsWith("zoe-")).toBe(true);
+    expect(capped.personas[0]!.id.length).toBeLessThanOrEqual(40);
   });
 
   test("scopes the proposal to a focus when one is given", async () => {
     const model = scriptedModel([text(JSON.stringify(proposal))]);
     const { project } = await propose(model, { focus: "the new team-invite flow" }).promise;
     expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toContain("the new team-invite flow");
+    expect(model.doGenerateCalls[0]!.maxOutputTokens).toBe(4000);
+    const long = scriptedModel([text(JSON.stringify(proposal))]);
+    await propose(long, { focus: "f".repeat(2000) }).promise;
+    expect(JSON.stringify(long.doGenerateCalls[0]!.prompt)).not.toContain("f".repeat(501));
     expect(project.name).toBe("Acme");
   });
 
@@ -178,7 +194,9 @@ describe("proposeProject", () => {
     const budget = new Budget(0.1);
     budget.add(0.2);
     const model = scriptedModel([text(JSON.stringify(proposal))]);
-    await expect(propose(model, { budget }).promise).rejects.toThrow(/budget/);
+    const run = propose(model, { budget });
+    await expect(run.promise).rejects.toThrow(/budget/);
+    expect(run.fetched).toEqual([]);
     expect(model.doGenerateCalls).toHaveLength(0);
   });
 });
