@@ -1,0 +1,86 @@
+import { randomBytes } from "node:crypto";
+import { sql } from "kysely";
+import { afterAll, beforeAll, expect, test } from "vitest";
+import { ProjectConfigSchema } from "@usetrawler/protocol";
+import { asSystem, withOrg } from "../db/tenancy.ts";
+import { testDb } from "../db/test-db.ts";
+import { Keyring } from "../lib/secrets.ts";
+import { createProject, listProjects, loadProjectConfig, projectForEditing, replacePlan } from "./projects.ts";
+
+const t = await testDb();
+afterAll(() => t.drop());
+const keys = new Keyring(randomBytes(32));
+
+const config = ProjectConfigSchema.parse({
+  name: "Acme",
+  targetUrl: "https://app.acme.test/",
+  docsUrl: "https://docs.acme.test/start",
+  description: "Invoices.",
+  personas: [{ id: "ana", name: "Ana", brief: "You invoice.", accountRef: "ana" }, { id: "lee", name: "Lee", brief: "You browse." }],
+  goals: [{ id: "sign-in", instruction: "Get in." }, { id: "invoice", instruction: "Send an invoice." }],
+  accounts: [{ ref: "ana", username: "ana@acme.test", password: "hunter22-secret" }],
+  httpCredentials: { username: "staging", password: "gate-pass-123" },
+  extraHeaders: { "x-env": "stg" },
+  secretHeaders: { "x-bypass": "bypass-token-123" },
+});
+
+beforeAll(async () => {
+  for (const org of ["org-a", "org-b"]) {
+    await sql`insert into organization (id, name, slug, "createdAt") values (${org}, ${org}, ${org}, now())`.execute(t.db);
+  }
+});
+
+test("a project round-trips to exactly the config the runner uses", async () => {
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys, { focus: "invoices" }));
+  const loaded = await withOrg(t.db, "org-a", (tx) => loadProjectConfig(tx, "org-a", id, keys));
+  expect(loaded).toEqual(config);
+});
+
+test("secrets are stored encrypted and never come back from list or edit queries", async () => {
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  const raw = JSON.stringify(await asSystem(t.db, async (tx) => ({
+    accounts: await tx.selectFrom("target_accounts").selectAll().execute(),
+    gates: await tx.selectFrom("target_gates").selectAll().execute(),
+  })));
+  for (const secret of ["hunter22-secret", "gate-pass-123", "bypass-token-123"]) expect(raw).not.toContain(secret);
+  const listed = JSON.stringify(await withOrg(t.db, "org-a", (tx) => listProjects(tx)));
+  const editing = JSON.stringify(await withOrg(t.db, "org-a", (tx) => projectForEditing(tx, id)));
+  for (const secret of ["hunter22-secret", "gate-pass-123", "bypass-token-123", "v1:"]) {
+    expect(listed).not.toContain(secret);
+    expect(editing).not.toContain(secret);
+  }
+  expect(editing).toContain("ana@acme.test");
+});
+
+test("another organisation can neither see nor load the project", async () => {
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  expect(await withOrg(t.db, "org-b", (tx) => projectForEditing(tx, id))).toBeNull();
+  await expect(withOrg(t.db, "org-b", (tx) => loadProjectConfig(tx, "org-b", id, keys))).rejects.toThrow(/not found/);
+  expect((await withOrg(t.db, "org-b", (tx) => listProjects(tx))).map((p) => p.id)).not.toContain(id);
+});
+
+test("a persona cannot be attached to another organisation's project, even by the system role", async () => {
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  await expect(asSystem(t.db, (tx) => tx.insertInto("personas").values({ org_id: "org-b", project_id: id, key: "x", name: "X", brief: "b", position: 9 }).execute())).rejects.toThrow(/foreign key/);
+});
+
+test("ciphertext copied from one organisation's row does not decrypt in another", async () => {
+  const a = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  const b = await withOrg(t.db, "org-b", (tx) => createProject(tx, "org-b", config, keys));
+  const secret = await asSystem(t.db, async (tx) => (await tx.selectFrom("target_accounts").select("password_secret").where("project_id", "=", a).executeTakeFirstOrThrow()).password_secret);
+  await asSystem(t.db, (tx) => tx.updateTable("target_accounts").set({ password_secret: secret }).where("project_id", "=", b).execute());
+  await expect(withOrg(t.db, "org-b", (tx) => loadProjectConfig(tx, "org-b", b, keys))).rejects.toThrow(/could not be decrypted/);
+});
+
+test("replacing the plan keeps accounts and validates the result", async () => {
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  await withOrg(t.db, "org-a", (tx) => replacePlan(tx, "org-a", id, {
+    personas: [{ id: "zed", name: "Zed", brief: "You are new.", accountRef: "ana" }],
+    goals: [{ id: "export", instruction: "Export last month." }],
+  }));
+  const loaded = await withOrg(t.db, "org-a", (tx) => loadProjectConfig(tx, "org-a", id, keys));
+  expect(loaded.personas.map((p) => p.id)).toEqual(["zed"]);
+  expect(loaded.goals.map((g) => g.id)).toEqual(["export"]);
+  expect(loaded.accounts.map((a) => a.ref)).toEqual(["ana"]);
+  await expect(withOrg(t.db, "org-a", (tx) => replacePlan(tx, "org-a", id, { personas: [{ id: "q", name: "Q", brief: "b", accountRef: "nobody" }], goals: [{ id: "g", instruction: "x" }] }))).rejects.toThrow(/unknown account/);
+});

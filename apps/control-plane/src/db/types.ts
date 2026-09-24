@@ -27,6 +27,15 @@ export interface Account {
   userId: string;
 }
 
+export interface Goals {
+  id: Generated<string>;
+  instruction: string;
+  key: string;
+  org_id: string;
+  position: number;
+  project_id: string;
+}
+
 export interface Invitation {
   createdAt: Generated<Timestamp>;
   email: string;
@@ -55,6 +64,30 @@ export interface Organization {
   slug: string;
 }
 
+export interface Personas {
+  account_ref: string | null;
+  brief: string;
+  id: Generated<string>;
+  key: string;
+  name: string;
+  org_id: string;
+  position: number;
+  project_id: string;
+}
+
+export interface Projects {
+  allowed_origins: Generated<string[]>;
+  created_at: Generated<Timestamp>;
+  description: Generated<string>;
+  docs_url: string | null;
+  focus: string | null;
+  id: Generated<string>;
+  name: string;
+  org_id: string;
+  target_url: string;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface Session {
   activeOrganizationId: string | null;
   createdAt: Generated<Timestamp>;
@@ -65,6 +98,27 @@ export interface Session {
   updatedAt: Timestamp;
   userAgent: string | null;
   userId: string;
+}
+
+export interface TargetAccounts {
+  id: Generated<string>;
+  org_id: string;
+  password_hint: string;
+  password_secret: string;
+  project_id: string;
+  ref: string;
+  username: string;
+}
+
+export interface TargetGates {
+  id: Generated<string>;
+  kind: string;
+  name: string;
+  org_id: string;
+  project_id: string;
+  secret: string | null;
+  secret_hint: string | null;
+  value: string | null;
 }
 
 export interface User {
@@ -88,10 +142,15 @@ export interface Verification {
 
 export interface DB {
   account: Account;
+  goals: Goals;
   invitation: Invitation;
   member: Member;
   organization: Organization;
+  personas: Personas;
+  projects: Projects;
   session: Session;
+  target_accounts: TargetAccounts;
+  target_gates: TargetGates;
   user: User;
   verification: Verification;
 }
