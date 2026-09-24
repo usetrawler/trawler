@@ -3,6 +3,8 @@ import { wrapLanguageModel, type LanguageModelMiddleware } from "ai";
 
 type OpenRouterOptions = { provider?: Record<string, unknown> } & Record<string, unknown>;
 
+const PROVIDER_PREFERENCES = { data_collection: "deny" } as const;
+
 const denyDataCollection: LanguageModelMiddleware = {
   specificationVersion: "v4",
   transformParams: async ({ params }) => {
@@ -11,7 +13,11 @@ const denyDataCollection: LanguageModelMiddleware = {
       ...params,
       providerOptions: {
         ...params.providerOptions,
-        openrouter: { ...openrouter, provider: { ...openrouter.provider, data_collection: "deny" } },
+        openrouter: {
+          ...openrouter,
+          usage: { include: true },
+          provider: { ...PROVIDER_PREFERENCES, ...openrouter.provider, ...PROVIDER_PREFERENCES },
+        },
       },
     };
   },
@@ -20,19 +26,19 @@ const denyDataCollection: LanguageModelMiddleware = {
 export function createModel(opts: { modelId: string; apiKey: string; baseURL?: string; fetch?: typeof globalThis.fetch }) {
   const provider = createOpenRouter({ apiKey: opts.apiKey, baseURL: opts.baseURL, fetch: opts.fetch, compatibility: "strict" });
   return wrapLanguageModel({
-    model: provider(opts.modelId, { usage: { include: true }, provider: { data_collection: "deny" } }),
+    model: provider(opts.modelId),
     middleware: denyDataCollection,
   });
 }
 
-function finite(n: unknown): number {
+function nonNegativeCost(n: unknown): number {
   return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 export function stepCost(step: { providerMetadata?: Record<string, unknown> }): number {
   const usage = (step.providerMetadata?.openrouter as { usage?: { cost?: unknown; costDetails?: { upstreamInferenceCost?: unknown } } } | undefined)?.usage;
-  const charged = finite(usage?.cost);
-  const upstream = finite(usage?.costDetails?.upstreamInferenceCost);
+  const charged = nonNegativeCost(usage?.cost);
+  const upstream = nonNegativeCost(usage?.costDetails?.upstreamInferenceCost);
   return upstream > charged ? charged + upstream : charged;
 }
 

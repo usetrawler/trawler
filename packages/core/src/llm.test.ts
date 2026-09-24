@@ -22,6 +22,10 @@ test("stepCost does not double-count when upstream cost equals the charge", () =
   expect(stepCost({ providerMetadata: { openrouter: { usage: { cost: 0.0001102, costDetails: { upstreamInferenceCost: 0.0001102 } } } } })).toBeCloseTo(0.0001102, 10);
 });
 
+test("stepCost over-counts rather than under-counts when OpenRouter sells below the upstream price", () => {
+  expect(stepCost({ providerMetadata: { openrouter: { usage: { cost: 0.8, costDetails: { upstreamInferenceCost: 1 } } } } })).toBeCloseTo(1.8, 10);
+});
+
 test("stepCost ignores negative and non-finite values", () => {
   expect(stepCost({ providerMetadata: { openrouter: { usage: { cost: Number.NaN } } } })).toBe(0);
   expect(stepCost({ providerMetadata: { openrouter: { usage: { cost: -1 } } } })).toBe(0);
@@ -56,12 +60,10 @@ test("budget trips once spend reaches the limit", () => {
 });
 
 const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
-const bodies: Record<string, unknown>[] = [];
 
 async function fakeOpenRouter(url: RequestInfo | URL, init?: RequestInit) {
   const body = JSON.parse(String(init?.body));
   calls.push({ url: String(url), body });
-  bodies.push(body);
   if (body.stream) {
     const sse = [
       { id: "gen-1", model: "m", choices: [{ index: 0, delta: { role: "assistant", content: "hi" }, finish_reason: null }] },
@@ -87,6 +89,13 @@ test("createModel keeps data_collection deny when a call passes its own provider
   expect(calls[0]!.body).toMatchObject({ provider: { order: ["deepinfra"], data_collection: "deny" }, usage: { include: true } });
 });
 
+test("createModel keeps usage accounting on when a call tries to turn it off", async () => {
+  calls.length = 0;
+  const model = createModel({ modelId: "m", apiKey: "k", fetch: fakeOpenRouter });
+  await generateText({ model, prompt: "hello", providerOptions: { openrouter: { usage: { include: false }, provider: { data_collection: "allow" } } } });
+  expect(calls[0]!.body).toMatchObject({ usage: { include: true }, provider: { data_collection: "deny" } });
+});
+
 test("createModel talks to a custom base URL such as our proxy", async () => {
   calls.length = 0;
   const model = createModel({ modelId: "m", apiKey: "k", baseURL: "https://proxy.local/llm/v1/", fetch: fakeOpenRouter });
@@ -104,10 +113,10 @@ test("createModel asks for usage in streamed responses and reads their cost", as
 });
 
 test("createModel sends usage accounting and data_collection deny to OpenRouter", async () => {
-  bodies.length = 0;
+  calls.length = 0;
   const model = createModel({ modelId: "deepseek/deepseek-v4.1-flash", apiKey: "k", fetch: fakeOpenRouter });
   const result = await generateText({ model, prompt: "hello" });
-  expect(bodies[0]).toMatchObject({ model: "deepseek/deepseek-v4.1-flash", usage: { include: true }, provider: { data_collection: "deny" } });
+  expect(calls[0]!.body).toMatchObject({ model: "deepseek/deepseek-v4.1-flash", usage: { include: true }, provider: { data_collection: "deny" } });
   expect(stepCost(result.steps[0]!)).toBeCloseTo(0.00002, 10);
 });
 
@@ -119,6 +128,13 @@ test("scriptedModel plays one response per step and reports the configured cost"
   const r2 = await generateText({ model, prompt: "b" });
   expect(r2.text).toBe("done");
   expect(model.doGenerateCalls).toHaveLength(2);
+});
+
+test("scriptedModel gives every tool call its own id", async () => {
+  const model = scriptedModel([toolCall("a", {}), toolCall("b", {})]);
+  const r1 = await generateText({ model, prompt: "x" });
+  const r2 = await generateText({ model, prompt: "y" });
+  expect(r1.toolCalls[0]?.toolCallId).not.toBe(r2.toolCalls[0]?.toolCallId);
 });
 
 test("scriptedModel fails loudly once its script is exhausted", async () => {
