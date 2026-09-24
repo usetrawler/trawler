@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { describe, expect, test } from "vitest";
+import { MockLanguageModelV4 } from "ai/test";
 import { ProjectConfigSchema, RunEventSchema, type RunEventInput } from "@usetrawler/protocol";
 import { Budget } from "./llm.ts";
 import { runRoleSession } from "./role-session.ts";
@@ -103,6 +104,41 @@ describe("runRoleSession", () => {
     expect(JSON.stringify(users.at(-1))).toContain("Continue with the goals, and call finish once every goal has a status.");
   });
 
+  test("after a nudge the model still sees everything it did before", async () => {
+    const model = scriptedModel([toolCall("note", { text: "signup is at /join" }), toolCall("browser_snapshot", {}), text("thinking"), reached("sign-up"), reached("invoice"), finish]);
+    await run(model).promise;
+    const afterNudge = JSON.stringify(model.doGenerateCalls[3]!.prompt);
+    expect(afterNudge).toContain('"toolName":"note"');
+    expect(afterNudge).toContain('"toolName":"browser_snapshot"');
+  });
+
+  test("stray text replies between real work do not add up to a stop", async () => {
+    const model = scriptedModel([
+      text("a"), toolCall("browser_snapshot", {}),
+      text("b"), toolCall("browser_snapshot", {}),
+      text("c"), reached("sign-up"), reached("invoice"), finish,
+    ]);
+    const { result } = await run(model).promise;
+    expect(result.stoppedBy).toBe("finish");
+  });
+
+  test("a reply cut off mid tool call is answered and the session goes on", async () => {
+    const usage = { inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 5, text: 5, reasoning: undefined } };
+    const step = (parts: unknown[], finish: "length" | "tool-calls") => ({ content: parts, finishReason: { unified: finish, raw: undefined }, usage, warnings: [] });
+    const call = (id: string, name: string, input: unknown) => ({ type: "tool-call", toolCallId: id, toolName: name, input: JSON.stringify(input) });
+    const responses = [
+      step([call("c1", "browser_snapshot", {})], "length"),
+      step([call("c2", "goal_status", { goal: "sign-up", status: "reached", note: "" })], "tool-calls"),
+      step([call("c3", "goal_status", { goal: "invoice", status: "reached", note: "" })], "tool-calls"),
+      step([call("c4", "finish", { summary: "x" })], "tool-calls"),
+    ];
+    let i = 0;
+    const model = new MockLanguageModelV4({ doGenerate: async () => responses[i++] as never });
+    const { result } = await run(model as never).promise;
+    expect(result.stoppedBy).toBe("finish");
+    expect(JSON.stringify(model.doGenerateCalls[1]!.prompt)).toContain("Your reply was cut off before this tool ran");
+  });
+
   test("a model that keeps answering in plain text ends the session with a reason", async () => {
     const model = scriptedModel([text("a"), text("b"), text("c"), text("d")]);
     const { promise, events } = run(model);
@@ -128,6 +164,45 @@ describe("runRoleSession", () => {
     const { result, usage } = await run(model, { browserTools: dead }).promise;
     expect(result).toMatchObject({ stoppedBy: "error", error: "the browser failed 3 times in a row" });
     expect(usage.steps).toBe(3);
+  });
+
+  test("a browser that recovers resets the crash count", async () => {
+    let calls = 0;
+    const flaky = { browser_snapshot: tool({ inputSchema: z.object({}), execute: async (): Promise<string> => { calls++; if (calls % 3 === 0) return "ok"; throw new Error("Target closed"); } }) };
+    const model = scriptedModel([...Array.from({ length: 6 }, () => toolCall("browser_snapshot", {})), reached("sign-up"), reached("invoice"), finish]);
+    const { result } = await run(model, { browserTools: flaky }).promise;
+    expect(result.stoppedBy).toBe("finish");
+  });
+
+  test("browser calls in one step never overlap, sign_in included", async () => {
+    const log: string[] = [];
+    const slow = (name: string) => tool({ inputSchema: z.object({}), execute: async () => { log.push(`${name}-start`); await new Promise((r) => setTimeout(r, 20)); log.push(`${name}-end`); return "ok"; } });
+    const model = scriptedModel([[toolCall("browser_click", {}), toolCall("browser_hover", {}), toolCall("sign_in", { account: "solo", usernameField: "e3", passwordField: "e4" })], reached("sign-up"), reached("invoice"), finish]);
+    const fillField = async (_ref: string, _text: string, kind: string) => { log.push(`fill-${kind}-start`); await new Promise((r) => setTimeout(r, 20)); log.push(`fill-${kind}-end`); return "typed"; };
+    await run(model, { browserTools: { browser_click: slow("click"), browser_hover: slow("hover") }, fillField }).promise;
+    for (let i = 0; i < log.length; i += 2) expect(log[i + 1]).toBe(log[i]!.replace("-start", "-end"));
+  });
+
+  test("results over 1500 characters are elided once a newer one arrives", async () => {
+    const medium = { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => ({ content: [{ type: "text", text: "m".repeat(2000) }] }) }) };
+    const model = scriptedModel([toolCall("browser_snapshot", {}), toolCall("browser_snapshot", {}), reached("sign-up"), reached("invoice"), finish]);
+    await run(model, { browserTools: medium }).promise;
+    const last = JSON.stringify(model.doGenerateCalls.at(-1)!.prompt);
+    expect(last.split("m".repeat(2000)).length - 1).toBe(1);
+  });
+
+  test("a failing event sink stops the session with that error", async () => {
+    let n = 0;
+    const model = scriptedModel([toolCall("browser_snapshot", {}), toolCall("browser_snapshot", {}), toolCall("browser_snapshot", {})]);
+    const { result } = await run(model, { emit: (e) => { if (e.type === "step" && ++n === 1) throw new Error("sink down"); } }).promise;
+    expect(result).toMatchObject({ stoppedBy: "error", error: "sink down" });
+  });
+
+  test("a sink that fails at the very end still returns the findings", async () => {
+    const model = scriptedModel([toolCall("submit_finding", { kind: "friction", goal: "invoice", title: "lost", observed: "could not find it", reproduction: ["a"], severity: "low" }), reached("sign-up"), reached("invoice"), finish]);
+    const { result } = await run(model, { emit: (e) => { if (e.type === "job_finished") throw new Error("sink down"); } }).promise;
+    expect(result.findings).toHaveLength(1);
+    expect(result.stoppedBy).toBe("error");
   });
 
   test("a persona can only sign in with its own account", async () => {

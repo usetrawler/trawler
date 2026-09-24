@@ -34,6 +34,9 @@ describe("ProjectConfig", () => {
   test.each(["javascript:alert(1)", "file:///etc/passwd", "localhost:3000", "ftp://acme.test"])("rejects target url %s", (targetUrl) => {
     expect(() => ProjectConfigSchema.parse({ ...project, targetUrl })).toThrow();
   });
+  test.each(["not a url", "", "http://"])("reports an invalid URL %j as a validation issue", (targetUrl) => {
+    expect(ProjectConfigSchema.safeParse({ ...project, targetUrl }).success).toBe(false);
+  });
   test("rejects credentials embedded in a URL", () => {
     expect(() => ProjectConfigSchema.parse({ ...project, targetUrl: "https://user:pw@staging.acme.test" })).toThrow(/credentials/);
   });
