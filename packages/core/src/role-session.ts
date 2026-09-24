@@ -106,7 +106,7 @@ export async function runRoleSession(opts: {
         model: opts.model,
         tools,
         messages: history,
-        stopWhen: done,
+        stopWhen: [done, ({ steps }) => steps.at(-1)?.finishReason === "length"],
         prepareStep: async ({ messages }) => ({
           instructions: opts.scrubber.scrub(base + sessionStatus(state.notes, [...state.goals.values()], usage.steps, opts.maxSteps)),
           messages: opts.scrubber.scrub(pruneMessages(messages, { keepLargeResults: 1, largeResultChars: 1500 })),
