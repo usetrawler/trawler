@@ -10,6 +10,9 @@ export const JobUsageSchema = z.object({
 });
 export type JobUsage = z.infer<typeof JobUsageSchema>;
 
+export const JobStopReasonSchema = z.union([StopReasonSchema, z.enum(["report", "no_report", "done"])]);
+export type JobStopReason = z.infer<typeof JobStopReasonSchema>;
+
 const base = { seq: z.number().int().positive(), at: z.iso.datetime(), jobId: z.string().min(1) };
 
 export const RunEventSchema = z.discriminatedUnion("type", [
@@ -20,7 +23,7 @@ export const RunEventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("goal_status"), outcome: GoalOutcomeSchema }),
   z.object({ ...base, type: z.literal("blocked_request"), url: z.string() }),
   z.object({ ...base, type: z.literal("verdict"), findingId: z.string().min(1), verdict: VerdictSchema, observed: z.string() }),
-  z.object({ ...base, type: z.literal("job_finished"), usage: JobUsageSchema, stoppedBy: z.union([StopReasonSchema, z.enum(["report", "no_report", "done"])]) }),
+  z.object({ ...base, type: z.literal("job_finished"), usage: JobUsageSchema, stoppedBy: JobStopReasonSchema }),
 ]);
 export type RunEvent = z.infer<typeof RunEventSchema>;
 export type RunEventInput = RunEvent extends infer E ? (E extends RunEvent ? Omit<E, "seq" | "at"> : never) : never;

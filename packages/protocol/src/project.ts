@@ -33,7 +33,7 @@ export const ProjectConfigSchema = z
     targetUrl: httpUrl,
     description: z.string().default(""),
     docsUrl: httpUrl.optional(),
-    allowedOrigins: z.array(httpUrl.transform((u) => new URL(u).origin)).min(1),
+    allowedOrigins: z.array(httpUrl.transform((u) => new URL(u).origin)).default([]),
     personas: z.array(PersonaSchema).min(1),
     goals: z.array(GoalSchema).min(1),
     accounts: z.array(TargetAccountSchema).default([]),

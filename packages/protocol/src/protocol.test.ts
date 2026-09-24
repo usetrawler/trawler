@@ -45,6 +45,21 @@ describe("ProjectConfig", () => {
   test("rejects a misspelt key instead of dropping it", () => {
     expect(() => ProjectConfigSchema.parse({ ...project, httpCredential: { username: "u", password: "p" } })).toThrow();
   });
+  test("allowed origins default to the target's origin", () => {
+    const { allowedOrigins, ...rest } = project;
+    expect(ProjectConfigSchema.parse(rest).allowedOrigins).toEqual(["https://staging.acme.test"]);
+  });
+  test("reports an unknown account on the persona's accountRef", () => {
+    const result = ProjectConfigSchema.safeParse({ ...project, accounts: [] });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(["personas", 0, "accountRef"]);
+  });
+  test("rejects an unknown key inside httpCredentials", () => {
+    expect(() => ProjectConfigSchema.parse({ ...project, httpCredentials: { username: "u", password: "p", realm: "staging" } })).toThrow(/realm/);
+  });
+  test("rejects empty basic-auth credentials", () => {
+    expect(() => ProjectConfigSchema.parse({ ...project, httpCredentials: { username: "u", password: "" } })).toThrow();
+  });
   test("rejects an empty accountRef", () => {
     expect(() => ProjectConfigSchema.parse({ ...project, personas: [{ ...project.personas[0], accountRef: "" }] })).toThrow();
   });
@@ -79,6 +94,9 @@ describe("RunEvent", () => {
   });
   test("rejects a finding event carrying an invalid finding", () => {
     expect(() => RunEventSchema.parse({ seq: 1, at: "2026-09-24T10:00:00.000Z", jobId: "x", type: "finding", finding: { id: "f1", kind: "defect", goal: "g", title: "t", observed: "o", reproduction: ["one"], severity: "low" } })).toThrow(/two reproduction steps/);
+  });
+  test("numbers steps from one", () => {
+    expect(() => RunEventSchema.parse({ seq: 1, at: "2026-09-24T10:00:00.000Z", jobId: "x", type: "step", step: 0, tool: null, costUsd: 0 })).toThrow();
   });
   test("rejects an unknown stop reason", () => {
     const usage = { model: "m", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
