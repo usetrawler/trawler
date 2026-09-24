@@ -1,7 +1,7 @@
 import { createMCPClient } from "@ai-sdk/mcp";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createConnection } from "@playwright/mcp";
-import { chromium, type Route } from "playwright";
+import { chromium, type ElementHandle, type Frame, type Route } from "playwright";
 import { jsonSchema, type Tool, type ToolSet } from "ai";
 import type { SecretScrubber } from "./secrets.ts";
 import type { FieldKind } from "./session-tools.ts";
@@ -34,12 +34,27 @@ const STRIP_SPECULATION = `(() => {
 })();`;
 const CLOSED = /Target page, context or browser has been closed|Browser has been closed/;
 const INTERRUPTED = /is interrupted by another navigation/;
-const FOCUSED_SECRET = `() => {
-  if (!document.hasFocus()) return false;
+const DEEPEST_ACTIVE = `(() => {
   let el = document.activeElement;
   while (el && el.shadowRoot && el.shadowRoot.activeElement) el = el.shadowRoot.activeElement;
-  return !!el && (el.getAttribute?.("${SECRET_MARK}") === "1" || (el instanceof HTMLInputElement && el.type === "password"));
-}`;
+  return el;
+})()`;
+
+async function focusIsOnSecretIn(frame: Frame, depth = 0): Promise<boolean> {
+  if (depth > 10) return true;
+  const active = (await frame.evaluateHandle(DEEPEST_ACTIVE)).asElement() as ElementHandle | null;
+  if (!active) return false;
+  const secret = await active.evaluate(
+    (el: any, mark: string) => el.getAttribute(mark) === "1" || (el.tagName === "INPUT" && String(el.type).toLowerCase() === "password"),
+    SECRET_MARK,
+  );
+  if (secret) return true;
+  for (const child of frame.childFrames()) {
+    const owner = await child.frameElement().catch(() => null);
+    if (owner && (await owner.evaluate((a: unknown, b: unknown) => a === b, active))) return focusIsOnSecretIn(child, depth + 1);
+  }
+  return false;
+}
 
 export interface Browser {
   tools: ToolSet;
@@ -165,10 +180,7 @@ export async function openBrowser(opts: {
 
     const focusIsOnSecret = async () => {
       for (const page of context.pages()) {
-        for (const frame of page.frames()) {
-          const secret = await frame.evaluate(FOCUSED_SECRET).catch(() => false);
-          if (secret) return true;
-        }
+        if (await focusIsOnSecretIn(page.mainFrame()).catch(() => true)) return true;
       }
       return false;
     };

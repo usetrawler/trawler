@@ -11,6 +11,8 @@ const ctx = { toolCallId: "t", messages: [], context: {} };
 const PASSWORD = "hunter22-secret";
 let server: Server;
 let foreign: Server;
+let second: Server;
+let secondOrigin = "";
 let origin = "";
 let foreignOrigin = "";
 const seen: Record<string, IncomingMessage["headers"]> = {};
@@ -34,6 +36,11 @@ beforeAll(async () => {
     socket.destroy();
   });
   foreignOrigin = await listen(foreign);
+  second = createServer((_req, res) => {
+    res.setHeader("content-type", "text/html");
+    res.end(`<html><body><input aria-label="Inner password" type="password"></body></html>`);
+  });
+  secondOrigin = await listen(second);
   server = createServer((req, res) => {
     seen[req.url ?? ""] = req.headers;
     const html = (body: string) => {
@@ -67,6 +74,19 @@ beforeAll(async () => {
       case "/rules.json":
         res.setHeader("content-type", "application/speculationrules+json");
         return res.end(JSON.stringify({ prefetch: [{ source: "list", urls: [`${foreignOrigin}/header-prefetch`] }] }));
+      case "/shadow":
+        return html(`<div id="host"></div><script>document.getElementById("host").attachShadow({ mode: "open" }).innerHTML = '<input aria-label="Shadow password" type="password">';</script>`);
+      case "/cross-frame":
+        return html(`<iframe src="${secondOrigin}/"></iframe>`);
+      case "/dialog":
+        return html(`<button onclick="document.getElementById('r').textContent = confirm('Sure?') ? 'yes' : 'no'">Delete</button><p id="r">none</p>`);
+      case "/upload":
+        return html(`<input type="file" aria-label="Avatar"><p>upload page</p>`);
+      case "/sw-page":
+        return html(`<p id="s">sw?</p><script>const show = (t) => document.getElementById("s").textContent = t; Promise.race([navigator.serviceWorker ? navigator.serviceWorker.register("/sw.js").then(() => "sw registered", () => "sw refused") : Promise.resolve("sw refused"), new Promise((r) => setTimeout(() => r("sw refused"), 1000))]).then(show);</script>`);
+      case "/sw.js":
+        res.setHeader("content-type", "application/javascript");
+        return res.end(`self.addEventListener("install", (e) => e.waitUntil(fetch("${foreignOrigin}/sw-leak").catch(() => {})));`);
       case "/img-redirect":
         return html(`<p>image</p><img src="/redirect-foreign">`);
       case "/sse-page":
@@ -93,6 +113,7 @@ beforeAll(async () => {
 afterAll(() => {
   server.close();
   foreign.close();
+  second.close();
 });
 
 async function withBrowser(fn: (b: Browser, blocked: string[], dir: string) => Promise<void>, extra: Partial<Parameters<typeof openBrowser>[0]> = {}) {
@@ -265,6 +286,46 @@ describe("password fields", () => {
     });
   }, 60_000);
 
+  test("keys are refused while a password field inside a shadow root has focus", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/shadow`);
+      const snap = await snapshot(b);
+      const ref = refOf(snap, "Shadow password");
+      expect(await b.fillField(ref, PASSWORD, "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: ref, element: "password" }, ctx);
+      const out = (await b.tools.browser_press_key!.execute!({ key: "Home" }, ctx)) as { isError?: boolean };
+      expect(out.isError).toBe(true);
+      expect(await snapshot(b)).not.toMatch(/hunter/);
+    });
+  }, 60_000);
+
+  test("keys are refused while a password field inside a cross-origin frame has focus", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/cross-frame`);
+      await new Promise((r) => setTimeout(r, 300));
+      const snap = await snapshot(b);
+      const ref = refOf(snap, "Inner password");
+      expect(await b.fillField(ref, PASSWORD, "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: ref, element: "password" }, ctx);
+      for (const key of ["Home", "ArrowRight", "X"]) {
+        const out = (await b.tools.browser_press_key!.execute!({ key }, ctx)) as { isError?: boolean };
+        expect(out.isError).toBe(true);
+      }
+      expect(await snapshot(b)).not.toMatch(/hunter/);
+    }, { allowedOrigins: [origin, secondOrigin] });
+  }, 60_000);
+
+  test("keys work again once focus leaves the password field", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, origin);
+      const snap = await snapshot(b);
+      await b.fillField(refOf(snap, "Password"), PASSWORD, "password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Email"), element: "email" }, ctx);
+      const out = (await b.tools.browser_press_key!.execute!({ key: "a" }, ctx)) as { isError?: boolean };
+      expect(out.isError).toBeFalsy();
+    });
+  }, 60_000);
+
   test("the model cannot type into a password field", async () => {
     await withBrowser(async (b) => {
       await navigate(b, origin);
@@ -347,6 +408,49 @@ describe("robustness", () => {
       await navigate(b, `${origin}/sse-page`);
       await b.tools.browser_wait_for!.execute!({ text: "got hello" }, ctx);
       expect(await snapshot(b)).toContain("got hello");
+    });
+  }, 60_000);
+});
+
+describe("page states", () => {
+  test("a confirm dialog can be answered instead of locking the session", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/dialog`);
+      const snap = await snapshot(b);
+      const button = /button \\"Delete\\" \[ref=([a-z0-9]+)\]/.exec(snap)![1]!;
+      await b.tools.browser_click!.execute!({ target: button, element: "Delete" }, ctx);
+      await b.tools.browser_handle_dialog!.execute!({ accept: true }, ctx);
+      expect(await snapshot(b)).toContain("yes");
+    });
+  }, 60_000);
+
+  test("a file chooser can be cancelled but never given local files", async () => {
+    await withBrowser(async (b) => {
+      const schema = JSON.stringify((b.tools.browser_file_upload!.inputSchema as { jsonSchema: unknown }).jsonSchema);
+      expect(schema).not.toContain("paths");
+      await navigate(b, `${origin}/upload`);
+      const snap = await snapshot(b);
+      const ref = /button \\"Avatar\\"[^\n]*?\[ref=([a-z0-9]+)\]/.exec(snap)?.[1] ?? /\[ref=([a-z0-9]+)\][^\n]*Avatar|Avatar[^\n]*\[ref=([a-z0-9]+)\]/.exec(snap)?.slice(1).find(Boolean);
+      await b.tools.browser_click!.execute!({ target: ref!, element: "Avatar" }, ctx);
+      await b.tools.browser_file_upload!.execute!({ paths: ["/etc/passwd"] }, ctx);
+      expect(await snapshot(b)).toContain("upload page");
+    });
+  }, 60_000);
+
+  test("a service worker cannot reach foreign origins", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/sw-page`);
+      await new Promise((r) => setTimeout(r, 1500));
+      expect(foreignHits.filter((h) => h.includes("sw-leak"))).toEqual([]);
+    });
+  }, 60_000);
+
+  test("an action with no page change says what to do next", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, origin);
+      const snap = await snapshot(b);
+      const out = JSON.stringify(await b.tools.browser_type!.execute!({ target: refOf(snap, "Email"), text: "x", element: "email" }, ctx));
+      expect(out).toContain("Call browser_snapshot to see the page");
     });
   }, 60_000);
 });
