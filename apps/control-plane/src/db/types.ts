@@ -9,6 +9,22 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
 
+export type Int8 = ColumnType<string, bigint | number | string, bigint | number | string>;
+
+export type Json = JsonValue;
+
+export type JsonArray = JsonValue[];
+
+export type JsonObject = {
+  [x: string]: JsonValue | undefined;
+};
+
+export type JsonPrimitive = boolean | number | string | null;
+
+export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
+
+export type Numeric = ColumnType<string, number | string, number | string>;
+
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
 export interface Account {
@@ -25,6 +41,34 @@ export interface Account {
   scope: string | null;
   updatedAt: Timestamp;
   userId: string;
+}
+
+export interface Findings {
+  created_at: Generated<Timestamp>;
+  goal: string;
+  id: Generated<string>;
+  job_id: string;
+  key: string;
+  kind: string;
+  observed: string;
+  org_id: string;
+  persona_key: string;
+  replay: Json | null;
+  reproduction: Json;
+  run_id: string;
+  severity: string;
+  title: string;
+  updated_at: Generated<Timestamp>;
+  verdict: string | null;
+}
+
+export interface GoalOutcomes {
+  goal: string;
+  note: Generated<string>;
+  org_id: string;
+  persona_key: string;
+  run_id: string;
+  status: string;
 }
 
 export interface Goals {
@@ -45,6 +89,26 @@ export interface Invitation {
   organizationId: string;
   role: string | null;
   status: string;
+}
+
+export interface Jobs {
+  counted_cost: Generated<Numeric>;
+  created_at: Generated<Timestamp>;
+  error: string | null;
+  finding_key: string | null;
+  finished_at: Timestamp | null;
+  id: Generated<string>;
+  kind: string;
+  lease_until: Timestamp | null;
+  org_id: string;
+  persona_key: string | null;
+  position: number;
+  run_id: string;
+  started_at: Timestamp | null;
+  status: Generated<string>;
+  stopped_by: string | null;
+  token_hash: string | null;
+  usage: Json | null;
 }
 
 export interface Member {
@@ -86,6 +150,36 @@ export interface Projects {
   org_id: string;
   target_url: string;
   updated_at: Generated<Timestamp>;
+}
+
+export interface RunEvents {
+  at: Timestamp;
+  id: Generated<Int8>;
+  job_id: string;
+  org_id: string;
+  payload: Json;
+  run_id: string;
+  seq: number;
+  type: string;
+}
+
+export interface Runs {
+  agent_model: string;
+  budget_usd: Numeric;
+  config_snapshot: Json;
+  cost_usd: Generated<Numeric>;
+  created_at: Generated<Timestamp>;
+  created_by: string;
+  finished_at: Timestamp | null;
+  id: Generated<string>;
+  judge_model: string;
+  max_steps: number;
+  number: number;
+  org_id: string;
+  project_id: string;
+  replay_steps: number;
+  started_at: Timestamp | null;
+  status: Generated<string>;
 }
 
 export interface Session {
@@ -150,12 +244,17 @@ export interface Verification {
 
 export interface DB {
   account: Account;
+  findings: Findings;
+  goal_outcomes: GoalOutcomes;
   goals: Goals;
   invitation: Invitation;
+  jobs: Jobs;
   member: Member;
   organization: Organization;
   personas: Personas;
   projects: Projects;
+  run_events: RunEvents;
+  runs: Runs;
   session: Session;
   setup_attempts: SetupAttempts;
   target_accounts: TargetAccounts;
