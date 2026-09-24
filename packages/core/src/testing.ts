@@ -5,10 +5,8 @@ const usage = {
   outputTokens: { total: 20, text: 20, reasoning: undefined },
 };
 
-let callNo = 0;
-
 export function toolCall(name: string, input: unknown) {
-  return { type: "tool-call" as const, toolCallId: `call-${++callNo}`, toolName: name, input: JSON.stringify(input) };
+  return { type: "tool-call" as const, toolName: name, input: JSON.stringify(input) };
 }
 
 export function text(t: string) {
@@ -16,8 +14,8 @@ export function text(t: string) {
 }
 
 export function scriptedModel(responses: Array<ReturnType<typeof toolCall> | ReturnType<typeof text>>, costPerStep = 0.001) {
-  const results = responses.map((part) => ({
-    content: [part],
+  const results = responses.map((part, i) => ({
+    content: [part.type === "tool-call" ? { ...part, toolCallId: `call-${i + 1}` } : part],
     finishReason: { unified: part.type === "tool-call" ? ("tool-calls" as const) : ("stop" as const), raw: undefined },
     usage,
     providerMetadata: { openrouter: { usage: { cost: costPerStep } } },
