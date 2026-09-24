@@ -13,7 +13,13 @@
     "typecheck": "tsc -p . && npm run typecheck --workspaces",
     "test": "vitest run",
     "runner": "tsx apps/runner/src/main.ts",
-    "control-plane": "npm run dev -w @usetrawler/control-plane"
+    "control-plane": "npm run dev -w @usetrawler/control-plane",
+    "test:unit": "vitest run --project unit",
+    "db:up": "docker compose up -d --wait postgres",
+    "db:down": "docker compose down",
+    "db:migrate": "docker compose run --rm flyway migrate",
+    "db:validate": "docker compose run --rm flyway validate",
+    "db:codegen": "kysely-codegen --dialect postgres --url postgres://trawler:trawler@localhost:54329/trawler --exclude-pattern flyway_schema_history --out-file apps/control-plane/src/db/types.ts"
   },
   "devDependencies": {
     "@types/node": "^24.13.6",
