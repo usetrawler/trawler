@@ -9,8 +9,19 @@ BEGIN
 END
 $$;
 
-ALTER ROLE trawler_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
-ALTER ROLE trawler_bypass NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+ALTER ROLE trawler_app NOLOGIN NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+ALTER ROLE trawler_bypass NOLOGIN NOCREATEDB NOCREATEROLE BYPASSRLS;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname IN ('trawler_app', 'trawler_bypass') AND (rolsuper OR rolreplication)) THEN
+    RAISE EXCEPTION 'the tenancy roles must not be superuser or replication roles';
+  END IF;
+  IF EXISTS (SELECT FROM pg_auth_members WHERE member IN ('trawler_app'::regrole, 'trawler_bypass'::regrole)) THEN
+    RAISE EXCEPTION 'the tenancy roles must not be members of other roles';
+  END IF;
+END
+$$;
 
 GRANT USAGE ON SCHEMA public TO trawler_app, trawler_bypass;
 

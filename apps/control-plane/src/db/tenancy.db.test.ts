@@ -4,7 +4,18 @@ import { randomUUID } from "node:crypto";
 import { createDb } from "./index.ts";
 import { grantAppLogin } from "./provision.ts";
 import { asSystem, withOrg } from "./tenancy.ts";
+import pg from "pg";
 import { databaseUrl, onServer, testDb } from "./test-db.ts";
+
+async function grantAppLoginIn(url: string, login: string) {
+  const client = new pg.Client({ connectionString: url });
+  await client.connect();
+  try {
+    await grantAppLogin(client, login);
+  } finally {
+    await client.end();
+  }
+}
 
 const t = await testDb();
 const db = t.db;
@@ -110,9 +121,46 @@ describe("as the production login: no superuser, roles granted without inheritan
     expect(await asSystem(app, async (tx) => (await sql<Row>`select name from widgets order by name`.execute(tx)).rows.length)).toBe(3);
   });
 
-  test("a superuser or bypass login is refused", async () => {
+  test("a superuser, a non-login role, a built-in role or a bad name is refused", async () => {
     await expect(onServer((c) => grantAppLogin(c, "trawler"))).rejects.toThrow(/superuser/);
     await expect(onServer((c) => grantAppLogin(c, "bad name"))).rejects.toThrow(/plain role name/);
+    await expect(onServer((c) => grantAppLogin(c, "pg_monitor"))).rejects.toThrow(/plain role name/);
+    await expect(onServer((c) => grantAppLogin(c, "trawler_app"))).rejects.toThrow(/log in/);
+  });
+
+  test("a login that still inherits the app role through another grant is refused", async () => {
+    const other = `${login}_adm`;
+    const sneaky = `${login}_x`;
+    await onServer(async (c) => {
+      await c.query(`CREATE ROLE ${other} NOLOGIN`);
+      await c.query(`CREATE ROLE ${sneaky} LOGIN NOSUPERUSER`);
+      await c.query(`GRANT trawler_app TO ${other} WITH ADMIN OPTION`);
+      await c.query(`SET ROLE ${other}`);
+      await c.query(`GRANT trawler_app TO ${sneaky}`);
+      await c.query("RESET ROLE");
+    });
+    try {
+      await expect(onServer((c) => grantAppLogin(c, sneaky))).rejects.toThrow(/inherits/);
+    } finally {
+      await onServer(async (c) => {
+        await c.query(`DROP ROLE ${sneaky}`);
+        await c.query(`DROP ROLE ${other}`);
+      });
+    }
+  });
+
+  test("a login that owns a table under row-level security is refused", async () => {
+    const owner = `${login}_own`;
+    await onServer((c) => c.query(`CREATE ROLE ${owner} LOGIN NOSUPERUSER`));
+    await sql.raw(`create table owned (id int, org_id text not null)`).execute(db);
+    await sql`call make_tenant_table('owned')`.execute(db);
+    await sql.raw(`alter table owned owner to ${owner}`).execute(db);
+    try {
+      await expect(grantAppLoginIn(t.url, owner)).rejects.toThrow(/owns/);
+    } finally {
+      await sql`drop table owned`.execute(db);
+      await onServer((c) => c.query(`DROP ROLE ${owner}`));
+    }
   });
 });
 
