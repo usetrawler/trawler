@@ -4,4 +4,6 @@ export { MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
 export { newSessionState, sessionTools, type FieldKind, type FillField, type SessionState, type SessionTools } from "./session-tools.ts";
 export { BROWSER_TOOLS, openBrowser, type Browser } from "./browser.ts";
 export { runRoleSession } from "./role-session.ts";
-export { rolePrompt, sessionStatus } from "./prompts.ts";
+export { judgePrompt, replayPrompt, rolePrompt, sessionStatus } from "./prompts.ts";
+export { judge, runReplay } from "./replay.ts";
+export { browserQueue, runAgentLoop } from "./agent-loop.ts";
