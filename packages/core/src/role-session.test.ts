@@ -157,6 +157,30 @@ describe("runRoleSession", () => {
     expect(ids.sort()).toEqual(["a", "b"]);
   });
 
+  test("cut-offs and text replies spread between real work do not add up to a stop", async () => {
+    const usage = { inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 5, text: 5, reasoning: undefined } };
+    let n = 0;
+    const call = (name: string, input: unknown, finish: "tool-calls" | "length" = "tool-calls") => ({ content: [{ type: "tool-call", toolCallId: `k${n++}`, toolName: name, input: JSON.stringify(input) }], finishReason: { unified: finish, raw: undefined }, usage, warnings: [] });
+    const say = (t: string) => ({ content: [{ type: "text", text: t }], finishReason: { unified: "stop", raw: undefined }, usage, warnings: [] });
+    const snap = () => call("browser_snapshot", {});
+    const cut = () => call("browser_snapshot", {}, "length");
+    const responses = [say("a"), say("b"), snap(), snap(), cut(), say("c"), snap(), cut(), snap(), snap(), cut(), snap(), cut(),
+      call("goal_status", { goal: "sign-up", status: "reached", note: "" }), call("goal_status", { goal: "invoice", status: "reached", note: "" }), call("finish", { summary: "x" })];
+    let i = 0;
+    const model = new MockLanguageModelV4({ doGenerate: async () => responses[i++] as never });
+    const { result } = await run(model as never, { maxSteps: 40 }).promise;
+    expect(result.stoppedBy).toBe("finish");
+  });
+
+  test("single truncated calls cut off again and again end the session with a reason", async () => {
+    const usage = { inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 5, text: 5, reasoning: undefined } };
+    let i = 0;
+    const model = new MockLanguageModelV4({ doGenerate: async () => ({ content: [{ type: "tool-call", toolCallId: `t${i++}`, toolName: "note", input: '{"text":"hal' }], finishReason: { unified: "length", raw: undefined }, usage, warnings: [] }) as never });
+    const { result, usage: used } = await run(model as never).promise;
+    expect(result).toMatchObject({ stoppedBy: "error", error: "the model's replies were cut off 3 times in a row" });
+    expect(used.steps).toBe(3);
+  });
+
   test("replies that keep getting cut off end the session with a reason", async () => {
     const usage = { inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 5, text: 5, reasoning: undefined } };
     let i = 0;
