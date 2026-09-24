@@ -354,6 +354,15 @@ describe("runRoleSession", () => {
     expect(last.split("x".repeat(6000)).length - 1).toBe(1);
   });
 
+  test("warns the persona when the steps are running out", async () => {
+    const model = scriptedModel(Array.from({ length: 10 }, () => toolCall("browser_snapshot", {})));
+    await run(model, { maxSteps: 10 }).promise;
+    const prompts = model.doGenerateCalls.map((c) => JSON.stringify(c.prompt[0]));
+    expect(prompts[5]).not.toMatch(/steps left/);
+    expect(prompts[7]).toContain("Only 3 steps left: give every open goal a status now (reached or failed) and call finish.");
+    expect(prompts[9]).toContain("Only 1 step left");
+  });
+
   test("tells the persona who they are, where to go and which goals to try", async () => {
     const model = scriptedModel([reached("sign-up"), reached("invoice"), finish]);
     await run(model).promise;
