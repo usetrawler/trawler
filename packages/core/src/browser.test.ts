@@ -80,6 +80,8 @@ beforeAll(async () => {
         return html(`<input aria-label="Password" type="password"><button onclick="const o=document.querySelector('input');const n=document.createElement('input');n.type=o.type==='password'?'text':'password';n.setAttribute('aria-label','Password');n.value=o.value;o.replaceWith(n)">Show password</button>`);
       case "/enter":
         return html(`<input aria-label="Password" type="password" onkeydown="if (event.key === 'Enter') document.getElementById('r').textContent = 'submitted'"><p id="r">waiting</p>`);
+      case "/alert-login":
+        return html(`<input aria-label="Password" type="password"><button onclick="alert(\x27Wrong password\x27)">Sign in</button>`);
       case "/alert":
         return html(`<button onclick="alert('Saved')">Save</button><p>alert page</p>`);
       case "/shadow":
@@ -399,6 +401,34 @@ describe("password fields", () => {
       const handled = (await b.tools.browser_handle_dialog!.execute!({ accept: true }, ctx)) as { isError?: boolean };
       expect(handled.isError).toBeFalsy();
       expect(await snapshot(b)).toContain("alert page");
+    });
+  }, 60_000);
+
+  test("an alert right after signing in does not hang the session", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/alert-login`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), PASSWORD, "password")).toBe("typed the password");
+      const started = Date.now();
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Sign in"), element: "sign in" }, ctx);
+      const pressed = JSON.stringify(await b.tools.browser_press_key!.execute!({ key: "ArrowDown" }, ctx));
+      expect(Date.now() - started).toBeLessThan(15_000);
+      expect(pressed).toMatch(/dialog/i);
+      const handled = (await b.tools.browser_handle_dialog!.execute!({ accept: true }, ctx)) as { isError?: boolean };
+      expect(handled.isError).toBeFalsy();
+      expect(await snapshot(b)).not.toMatch(/hunter/);
+    });
+  }, 60_000);
+
+  test("a filled field stays guarded after the page changes its value", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/neuter`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), PASSWORD, "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Tamper"), element: "tamper" }, ctx);
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Password"), element: "password" }, ctx);
+      const out = (await b.tools.browser_press_key!.execute!({ key: "Home" }, ctx)) as { isError?: boolean };
+      expect(out.isError).toBe(true);
     });
   }, 60_000);
 

@@ -36,6 +36,7 @@ const STRIP_SPECULATION = `(() => {
 const MAX_HELD_FIELDS = 20;
 const KEYS_SAFE_ON_SECRETS = new Set(["Enter", "Tab", "Shift+Tab", "Escape"]);
 const FOCUS_CHECK_MS = 2000;
+const HANDLE_READ_MS = 500;
 function fieldStateOf(el: any, mark: string) {
   return {
     marked: !!el && (el.hasAttribute?.(mark) || (el instanceof HTMLInputElement && el.type.toLowerCase() === "password")),
@@ -51,6 +52,10 @@ const DEEPEST_ACTIVE = `(() => {
 })()`;
 
 type FieldState = { marked: boolean; value: string };
+
+function within<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([work, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))]);
+}
 
 async function focusIsOnSecretIn(frame: Frame, filled: ElementHandle[], holdsSecret: (value: string) => boolean, depth = 0): Promise<boolean> {
   if (depth > 10) return true;
@@ -192,22 +197,33 @@ export async function openBrowser(opts: {
 
     const typedSecrets = new Set<string>();
     const holdsSecret = (value: string) => [...typedSecrets].some((secret) => value.includes(secret));
+    let dialogOpen = false;
+    context.on("page", (page) => {
+      page.on("dialog", () => (dialogOpen = true));
+      page.on("framenavigated", (frame) => {
+        if (frame === page.mainFrame()) dialogOpen = false;
+      });
+    });
     let filled: ElementHandle[] = [];
+    const lastValues = new WeakMap<ElementHandle, string>();
     const liveFilled = async () => {
-      const alive = await Promise.all(filled.map((h) => h.evaluate(() => true).catch(() => false)));
+      const alive = await Promise.all(filled.map((h) => within(h.evaluate(() => true).catch(() => false), HANDLE_READ_MS, true)));
       filled = filled.filter((_, i) => alive[i]);
       return filled;
+    };
+    const readValue = async (h: ElementHandle) => {
+      if (dialogOpen) return lastValues.get(h) ?? "";
+      const read = h.evaluate((el: any) => String(el.value ?? "")).then((value) => (lastValues.set(h, value), value));
+      return within(read.catch(() => lastValues.get(h) ?? ""), HANDLE_READ_MS, lastValues.get(h) ?? "");
     };
     const scrubWithFilledValues = async <T>(result: T): Promise<T> => {
       const live = new SecretScrubber();
       for (const h of await liveFilled()) {
-        const value = await h.evaluate((el: any) => String(el.value ?? "")).catch(() => "");
+        const value = await readValue(h);
         if (value.length >= MIN_SECRET_LENGTH) live.add(value);
       }
       return live.scrub(opts.scrubber.scrub(result));
     };
-    let dialogOpen = false;
-    context.on("page", (page) => page.on("dialog", () => (dialogOpen = true)));
     const focusCheck = async () => {
       const held = await liveFilled();
       for (const page of context.pages()) {
