@@ -134,5 +134,6 @@ describe("runRoleSession", () => {
     expect(system).toContain("https://acme.test");
     expect(system).toContain("[sign-up] Create an account.");
     expect(system).toContain('account \\"solo\\"');
+    expect(system).toContain("as target");
   });
 });
