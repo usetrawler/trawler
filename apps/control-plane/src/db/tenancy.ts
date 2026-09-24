@@ -5,7 +5,7 @@ import type { DB } from "./types.ts";
 export type Tx = Transaction<DB>;
 
 export async function withOrg<T>(db: Database, orgId: string, work: (tx: Tx) => Promise<T>): Promise<T> {
-  if (!orgId.trim()) throw new Error("an organisation is required for tenant data");
+  if (!orgId.trim() || orgId !== orgId.trim()) throw new Error("a valid organisation is required for tenant data");
   return db.transaction().execute(async (tx) => {
     await sql`set local role trawler_app`.execute(tx);
     await sql`select set_config('app.org_id', ${orgId}, true)`.execute(tx);

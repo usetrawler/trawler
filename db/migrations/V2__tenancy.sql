@@ -9,11 +9,16 @@ BEGIN
 END
 $$;
 
+ALTER ROLE trawler_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+ALTER ROLE trawler_bypass NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+
 GRANT USAGE ON SCHEMA public TO trawler_app, trawler_bypass;
 
 CREATE FUNCTION current_org() RETURNS text
   LANGUAGE sql STABLE
-  AS $$ SELECT nullif(current_setting('app.org_id', true), '') $$;
+  BEGIN ATOMIC
+    SELECT nullif(pg_catalog.current_setting('app.org_id', true), '');
+  END;
 
 CREATE PROCEDURE make_tenant_table(target regclass)
   LANGUAGE plpgsql

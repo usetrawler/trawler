@@ -1,11 +1,14 @@
 import { sql } from "kysely";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { randomUUID } from "node:crypto";
 import { createDb } from "./index.ts";
+import { grantAppLogin } from "./provision.ts";
 import { asSystem, withOrg } from "./tenancy.ts";
-import { testDb } from "./test-db.ts";
+import { databaseUrl, onServer, testDb } from "./test-db.ts";
 
 const t = await testDb();
 const db = t.db;
+afterAll(() => t.drop());
 type Row = { id: string; org_id: string; name: string };
 
 beforeAll(async () => {
@@ -14,7 +17,6 @@ beforeAll(async () => {
   await withOrg(db, "org-a", (tx) => sql`insert into widgets (org_id, name) values ('org-a', 'a1'), ('org-a', 'a2')`.execute(tx));
   await withOrg(db, "org-b", (tx) => sql`insert into widgets (org_id, name) values ('org-b', 'b1')`.execute(tx));
 });
-afterAll(() => t.drop());
 
 const names = async (orgId: string) =>
   withOrg(db, orgId, async (tx) => (await sql<Row>`select * from widgets order by name`.execute(tx)).rows.map((r) => r.name));
@@ -65,7 +67,59 @@ test("the system role sees every organisation, for login lookups and ingestion o
   expect(all).toEqual(["a1", "a2", "b1"]);
 });
 
-test("an empty organisation id is refused before touching the database", async () => {
+test("an empty or padded organisation id is refused before touching the database", async () => {
   await expect(withOrg(db, "", async () => 1)).rejects.toThrow(/organisation/);
   await expect(withOrg(db, "  ", async () => 1)).rejects.toThrow(/organisation/);
+  await expect(withOrg(db, " org-a", async () => 1)).rejects.toThrow(/organisation/);
+});
+
+describe("as the production login: no superuser, roles granted without inheritance", () => {
+  const login = `trawler_login_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+  let app: ReturnType<typeof createDb>;
+  beforeAll(async () => {
+    await onServer(async (c) => {
+      await c.query(`CREATE ROLE ${login} LOGIN PASSWORD 'test-only-password' NOSUPERUSER NOBYPASSRLS`);
+      await grantAppLogin(c, login);
+    });
+    const url = new URL(databaseUrl(t.name));
+    url.username = login;
+    url.password = "test-only-password";
+    app = createDb(url.toString(), 2);
+  });
+  afterAll(async () => {
+    await app.destroy();
+    await onServer((c) => c.query(`DROP ROLE IF EXISTS ${login}`));
+  });
+
+  test("tenant queries see only their organisation", async () => {
+    expect(await withOrg(app, "org-b", async (tx) => (await sql<Row>`select name from widgets`.execute(tx)).rows.map((r) => r.name))).toEqual(["b1"]);
+  });
+
+  test("outside withOrg the login cannot read tenant tables at all", async () => {
+    await expect(sql`select * from widgets`.execute(app)).rejects.toThrow(/permission denied/);
+  });
+
+  test("resetting the role inside withOrg does not escape to more data", async () => {
+    await expect(withOrg(app, "org-a", async (tx) => {
+      await sql`reset role`.execute(tx);
+      return sql`select * from widgets`.execute(tx);
+    })).rejects.toThrow(/permission denied/);
+  });
+
+  test("the system role still works for lookups", async () => {
+    expect(await asSystem(app, async (tx) => (await sql<Row>`select name from widgets order by name`.execute(tx)).rows.length)).toBe(3);
+  });
+
+  test("a superuser or bypass login is refused", async () => {
+    await expect(onServer((c) => grantAppLogin(c, "trawler"))).rejects.toThrow(/superuser/);
+    await expect(onServer((c) => grantAppLogin(c, "bad name"))).rejects.toThrow(/plain role name/);
+  });
+});
+
+test("the roles keep safe attributes even if they existed before", async () => {
+  const { rows } = await sql<{ rolname: string; rolcanlogin: boolean; rolbypassrls: boolean; rolsuper: boolean }>`select rolname, rolcanlogin, rolbypassrls, rolsuper from pg_roles where rolname in ('trawler_app', 'trawler_bypass') order by rolname`.execute(db);
+  expect(rows).toEqual([
+    { rolname: "trawler_app", rolcanlogin: false, rolbypassrls: false, rolsuper: false },
+    { rolname: "trawler_bypass", rolcanlogin: false, rolbypassrls: true, rolsuper: false },
+  ]);
 });
