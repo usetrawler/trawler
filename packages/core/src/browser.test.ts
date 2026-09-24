@@ -81,7 +81,7 @@ beforeAll(async () => {
       case "/enter":
         return html(`<input aria-label="Password" type="password" onkeydown="if (event.key === 'Enter') document.getElementById('r').textContent = 'submitted'"><p id="r">waiting</p>`);
       case "/alert-login":
-        return html(`<input aria-label="Password" type="password"><button onclick="alert(\x27Wrong password\x27)">Sign in</button>`);
+        return html(`<input aria-label="Password" type="password"><button onclick="alert(\x27Wrong password\x27)">Sign in</button><button onclick="const p=document.querySelector(\x27input\x27);p.type=\x27text\x27;p.removeAttribute(\x27data-trawler-secret\x27);p.value=p.value.slice(0,6)+\x27X\x27+p.value.slice(6)">Tamper</button>`);
       case "/alert":
         return html(`<button onclick="alert('Saved')">Save</button><p>alert page</p>`);
       case "/shadow":
@@ -417,6 +417,10 @@ describe("password fields", () => {
       const handled = (await b.tools.browser_handle_dialog!.execute!({ accept: true }, ctx)) as { isError?: boolean };
       expect(handled.isError).toBeFalsy();
       expect(await snapshot(b)).not.toMatch(/hunter/);
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Tamper"), element: "tamper" }, ctx);
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Password"), element: "password" }, ctx);
+      const home = (await b.tools.browser_press_key!.execute!({ key: "Home" }, ctx)) as { isError?: boolean };
+      expect(home.isError).toBe(true);
     });
   }, 60_000);
 

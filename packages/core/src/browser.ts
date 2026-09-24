@@ -302,7 +302,11 @@ export async function openBrowser(opts: {
         }
         const out = (await type({ target: ref, element: kind === "password" ? "password field" : "username field", text }, internalCall)) as McpResult;
         if (out?.isError) return `failed: ${opts.scrubber.scrub(textOf(out))}`;
-        if (kind === "password") typedSecrets.add(text);
+        if (kind === "password") {
+          typedSecrets.add(text);
+          const held = filled.at(-1);
+          if (held) lastValues.set(held, text);
+        }
         return kind === "password" ? "typed the password" : "typed the username";
       },
       async close() {
