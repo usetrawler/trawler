@@ -4,7 +4,7 @@ import { Budget, createModel, stepCost } from "./llm.ts";
 import { scriptedModel, text, toolCall } from "./testing.ts";
 
 test("stepCost reads OpenRouter usage accounting", () => {
-  expect(stepCost({ providerMetadata: { openrouter: { usage: { cost: 0.0012 } } } })).toBeCloseTo(0.0012);
+  expect(stepCost({ providerMetadata: { openrouter: { usage: { cost: 0.0012 } } } })).toBeCloseTo(0.0012, 10);
 });
 
 test("stepCost is zero when the provider reports nothing", () => {
@@ -14,12 +14,12 @@ test("stepCost is zero when the provider reports nothing", () => {
 });
 
 test("stepCost adds the upstream provider cost for BYOK requests", () => {
-  expect(stepCost({ providerMetadata: { openrouter: { usage: { cost: 0.95, costDetails: { upstreamInferenceCost: 19 } } } } })).toBeCloseTo(19.95);
-  expect(stepCost({ providerMetadata: { openrouter: { usage: { cost: 0, costDetails: { upstreamInferenceCost: 0.02 } } } } })).toBeCloseTo(0.02);
+  expect(stepCost({ providerMetadata: { openrouter: { usage: { cost: 0.95, costDetails: { upstreamInferenceCost: 19 } } } } })).toBeCloseTo(19.95, 10);
+  expect(stepCost({ providerMetadata: { openrouter: { usage: { cost: 0, costDetails: { upstreamInferenceCost: 0.02 } } } } })).toBeCloseTo(0.02, 10);
 });
 
 test("stepCost does not double-count when upstream cost equals the charge", () => {
-  expect(stepCost({ providerMetadata: { openrouter: { usage: { cost: 0.0001102, costDetails: { upstreamInferenceCost: 0.0001102 } } } } })).toBeCloseTo(0.0001102);
+  expect(stepCost({ providerMetadata: { openrouter: { usage: { cost: 0.0001102, costDetails: { upstreamInferenceCost: 0.0001102 } } } } })).toBeCloseTo(0.0001102, 10);
 });
 
 test("stepCost ignores negative and non-finite values", () => {
@@ -52,7 +52,7 @@ test("budget trips once spend reaches the limit", () => {
   expect(b.exceeded).toBe(false);
   b.add(0.4);
   expect(b.exceeded).toBe(true);
-  expect(b.spent).toBeCloseTo(1);
+  expect(b.spent).toBeCloseTo(1, 10);
 });
 
 const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
@@ -100,7 +100,7 @@ test("createModel asks for usage in streamed responses and reads their cost", as
   const result = streamText({ model, prompt: "hello" });
   await result.consumeStream();
   expect(calls[0]!.body).toMatchObject({ stream: true, stream_options: { include_usage: true } });
-  expect(stepCost((await result.steps)[0]!)).toBeCloseTo(0.00002);
+  expect(stepCost((await result.steps)[0]!)).toBeCloseTo(0.00002, 10);
 });
 
 test("createModel sends usage accounting and data_collection deny to OpenRouter", async () => {
@@ -108,7 +108,7 @@ test("createModel sends usage accounting and data_collection deny to OpenRouter"
   const model = createModel({ modelId: "deepseek/deepseek-v4.1-flash", apiKey: "k", fetch: fakeOpenRouter });
   const result = await generateText({ model, prompt: "hello" });
   expect(bodies[0]).toMatchObject({ model: "deepseek/deepseek-v4.1-flash", usage: { include: true }, provider: { data_collection: "deny" } });
-  expect(stepCost(result.steps[0]!)).toBeCloseTo(0.00002);
+  expect(stepCost(result.steps[0]!)).toBeCloseTo(0.00002, 10);
 });
 
 test("scriptedModel plays one response per step and reports the configured cost", async () => {
