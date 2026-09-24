@@ -83,7 +83,7 @@ test("measures json and content outputs by their serialized size", () => {
   const content: ModelMessage = { role: "tool", content: [{ type: "tool-result", toolCallId: "2", toolName: "browser_click", output: { type: "content", value: [{ type: "text", text: big }] } }] };
   const out = pruneMessages([json, content, result("3", "browser_snapshot", big)], opts);
   expect(outputOf(out[0]).value).toBe(`[browser_navigate result elided: ${JSON.stringify({ content: [{ type: "text", text: big }] }).length} chars]`);
-  expect(outputOf(out[1]).value).toMatch(/^\[browser_click result elided: \d+ chars\]$/);
+  expect(outputOf(out[1]).value).toBe(`[browser_click result elided: ${JSON.stringify([{ type: "text", text: big }]).length} chars]`);
 });
 
 test("keeps the last N when asked for more than one", () => {
