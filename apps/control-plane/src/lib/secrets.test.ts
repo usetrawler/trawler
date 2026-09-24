@@ -65,14 +65,29 @@ test("the error never contains the ciphertext or key", () => {
   }
 });
 
-test("text that is not well formed is refused", () => {
+test("text that is not well formed, or a secret bound to nothing, is refused", () => {
   expect(() => ring.encrypt("\uD800", where)).toThrow(/well formed/);
+  expect(() => ring.encrypt("x", [])).toThrow(/context/);
+});
+
+test("the keyring keeps its own copy of the keys", () => {
+  const k = randomBytes(32);
+  const own = new Keyring(k);
+  const box = own.encrypt("hunter22-secret", where);
+  k.fill(0);
+  expect(own.decrypt(box, where)).toBe("hunter22-secret");
+});
+
+test("a bad previous key names the right variable", async () => {
+  const { keyringFromEnv } = await import("./secrets.ts");
+  expect(() => keyringFromEnv({ TRAWLER_MASTER_KEY: randomBytes(32).toString("base64"), TRAWLER_PREVIOUS_MASTER_KEYS: "short" })).toThrow(/TRAWLER_PREVIOUS_MASTER_KEYS/);
 });
 
 test("last4 shows the end only of long secrets", () => {
   expect(last4("sk-or-v1-abcdef1234569f3a")).toBe("…9f3a");
   expect(last4("hunter22")).toBe("…");
   expect(last4("abc")).toBe("…");
+  expect(last4("abcdefghijklmnop🔑abc")).toBe("…🔑abc");
 });
 
 test("the master key must be 32 random-looking bytes in canonical base64", () => {

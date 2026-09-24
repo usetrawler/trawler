@@ -11,12 +11,12 @@ function canonical(value: string): Buffer | null {
   return bytes.toString("base64url") === value ? bytes : null;
 }
 
-export function masterKeyFrom(value: string | undefined): Buffer {
-  if (!value) throw new Error("TRAWLER_MASTER_KEY is not set");
+export function masterKeyFrom(value: string | undefined, name = "TRAWLER_MASTER_KEY"): Buffer {
+  if (!value) throw new Error(`${name} is not set`);
   const key = Buffer.from(value, "base64");
-  if (key.toString("base64") !== value) throw new Error("TRAWLER_MASTER_KEY must be canonical base64");
-  if (key.length !== 32) throw new Error("TRAWLER_MASTER_KEY must be 32 bytes, base64 encoded");
-  if (new Set(key).size < 8) throw new Error("TRAWLER_MASTER_KEY does not look random");
+  if (key.toString("base64") !== value) throw new Error(`${name} must be canonical base64`);
+  if (key.length !== 32) throw new Error(`${name} must be 32 bytes, base64 encoded`);
+  if (new Set(key).size < 8) throw new Error(`${name} does not look random`);
   return key;
 }
 
@@ -29,13 +29,17 @@ export class Keyring {
   constructor(active: Buffer, previous: Buffer[] = []) {
     for (const key of [active, ...previous]) {
       if (key.length !== 32) throw new Error("encryption keys must be 32 bytes");
-      this.#keys.set(keyId(key), key);
+      const id = keyId(key);
+      const known = this.#keys.get(id);
+      if (known && !known.equals(key)) throw new Error("two different keys share an id");
+      this.#keys.set(id, Buffer.from(key));
     }
-    this.#active = active;
+    this.#active = Buffer.from(active);
   }
 
   encrypt(plain: string, context: string[]): string {
     if (!plain.isWellFormed()) throw new Error("secrets must be well formed text");
+    if (context.length === 0) throw new Error("a secret must be bound to a context");
     const iv = randomBytes(IV_BYTES);
     const cipher = createCipheriv("aes-256-gcm", this.#active, iv, { authTagLength: TAG_BYTES });
     cipher.setAAD(Buffer.from(JSON.stringify(context)));
@@ -65,10 +69,11 @@ export class Keyring {
 }
 
 export function keyringFromEnv(env: Record<string, string | undefined> = process.env): Keyring {
-  const previous = (env.TRAWLER_PREVIOUS_MASTER_KEYS ?? "").split(",").map((k) => k.trim()).filter(Boolean).map(masterKeyFrom);
+  const previous = (env.TRAWLER_PREVIOUS_MASTER_KEYS ?? "").split(",").map((k) => k.trim()).filter(Boolean).map((k) => masterKeyFrom(k, "TRAWLER_PREVIOUS_MASTER_KEYS"));
   return new Keyring(masterKeyFrom(env.TRAWLER_MASTER_KEY), previous);
 }
 
 export function last4(secret: string): string {
-  return secret.length >= 16 ? `…${secret.slice(-4)}` : "…";
+  const chars = Array.from(secret);
+  return chars.length >= 16 ? `…${chars.slice(-4).join("")}` : "…";
 }
