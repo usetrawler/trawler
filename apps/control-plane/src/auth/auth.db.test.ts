@@ -2,8 +2,9 @@ import { createHmac } from "node:crypto";
 import { sql } from "kysely";
 import pg from "pg";
 import { afterAll, expect, test } from "vitest";
-import { testDb } from "../db/test-db.ts";
-import { createAuth } from "./auth.ts";
+import { grantAppLogin } from "../db/provision.ts";
+import { onServer, testDb } from "../db/test-db.ts";
+import { authPool, createAuth } from "./auth.ts";
 
 const t = await testDb();
 afterAll(() => t.drop());
@@ -101,5 +102,37 @@ test("the tenant role cannot read sessions, accounts or verification tokens", as
   for (const table of ["session", "account", "verification", "user"]) {
     const { rows } = await sql<{ ok: boolean }>`select has_table_privilege('trawler_app', ${`"${table}"`}, 'SELECT') as ok`.execute(t.db);
     expect(rows[0]!.ok, table).toBe(false);
+  }
+});
+
+test("auth works as the production login, through its own role only", async () => {
+  const login = `auth_login_${Date.now().toString(36)}`;
+  await onServer((c) => c.query(`CREATE ROLE ${login} LOGIN PASSWORD 'test-only-password' NOSUPERUSER NOBYPASSRLS`));
+  const owner = new pg.Pool({ connectionString: t.url, max: 1 });
+  await grantAppLogin(owner, login);
+  await owner.end();
+  const url = new URL(t.url);
+  url.username = login;
+  url.password = "test-only-password";
+  const loginPool = authPool(url.toString());
+  const prodAuth = createAuth({ pool: loginPool, secret: SECRET, baseURL: "http://localhost:3000" });
+  try {
+    const ctx = await prodAuth.$context;
+    const user = await ctx.internalAdapter.createUser({ email: "prod@acme.test", emailVerified: true, name: "Prod" }, { method: "admin" });
+    const session = (await ctx.internalAdapter.createSession(user.id, false)) as { activeOrganizationId?: string | null };
+    expect(session.activeOrganizationId).toBeTruthy();
+    const plain = new pg.Pool({ connectionString: url.toString(), max: 1 });
+    await expect(plain.query('select * from "session"')).rejects.toThrow(/permission denied/);
+    await plain.end();
+  } finally {
+    await loginPool.end();
+    await onServer(async (c) => {
+      await c.query(`REASSIGN OWNED BY ${login} TO trawler`).catch(() => undefined);
+      await c.query(`DROP OWNED BY ${login}`).catch(() => undefined);
+    });
+    const drop = new pg.Pool({ connectionString: t.url, max: 1 });
+    await drop.query(`DROP OWNED BY ${login}`).catch(() => undefined);
+    await drop.end();
+    await onServer((c) => c.query(`DROP ROLE IF EXISTS ${login}`));
   }
 });

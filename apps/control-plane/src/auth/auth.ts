@@ -1,9 +1,10 @@
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { Kysely, PostgresDialect, sql, type Transaction } from "kysely";
-import type pg from "pg";
+import pg from "pg";
 import { onboard, type OnboardingStore } from "./onboarding.ts";
-import { authPlugins } from "./plugins.ts";
+import { devSignIn, organizationPlugin } from "./plugins.ts";
 
 export interface AuthOptions {
   pool: pg.Pool;
@@ -20,6 +21,10 @@ type AuthTables = {
   organization: { id: string; name: string; slug: string; createdAt: Date };
   user: { id: string; email: string; emailVerified: boolean; name: string };
 };
+
+export function authPool(connectionString: string, max = 10): pg.Pool {
+  return new pg.Pool({ connectionString, max, options: "-c role=trawler_auth" });
+}
 
 export function createAuth(options: AuthOptions) {
   const db = new Kysely<AuthTables>({ dialect: new PostgresDialect({ pool: options.pool }) });
@@ -66,11 +71,14 @@ export function createAuth(options: AuthOptions) {
       return org.id;
     },
   });
-  const onboardSerialised = (user: AuthTables["user"]) =>
-    db.transaction().execute(async (tx) => {
+  const onboardSerialised = async (user: AuthTables["user"]) => {
+    const [existing] = await storeFor(db).organizationsOf(user.id);
+    if (existing) return existing;
+    return db.transaction().execute(async (tx) => {
       await sql`select pg_advisory_xact_lock(hashtextextended(${`onboard:${user.id}`}, 0))`.execute(tx);
       return onboard(storeFor(tx), user);
     });
+  };
 
   const auth = betterAuth({
     secret: options.secret,
@@ -82,13 +90,17 @@ export function createAuth(options: AuthOptions) {
       ...(options.github ? { github: options.github } : {}),
       ...(options.google ? { google: options.google } : {}),
     },
-    plugins: [...authPlugins(options.devOidc), nextCookies()],
+    plugins: [organizationPlugin(), ...devSignIn(options.devOidc), nextCookies()],
     databaseHooks: {
       session: {
         create: {
           before: async (session) => {
-            const user = await db.selectFrom("user").selectAll().where("id", "=", session.userId).executeTakeFirstOrThrow();
-            return { data: { ...session, activeOrganizationId: await onboardSerialised(user) } };
+            try {
+              const user = await db.selectFrom("user").selectAll().where("id", "=", session.userId).executeTakeFirstOrThrow();
+              return { data: { ...session, activeOrganizationId: await onboardSerialised(user) } };
+            } catch {
+              throw new APIError("INTERNAL_SERVER_ERROR", { message: "workspace_setup_failed" });
+            }
           },
         },
       },

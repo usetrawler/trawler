@@ -23,9 +23,9 @@ async function grantWith(owner: pg.PoolClient, login: string): Promise<void> {
   if (!role.rolcanlogin) throw new Error(`role ${login} must be able to log in`);
   await owner.query("BEGIN");
   try {
-    await owner.query(`GRANT trawler_app, trawler_bypass TO ${login} WITH INHERIT FALSE, SET TRUE`);
+    await owner.query(`GRANT trawler_app, trawler_bypass, trawler_auth TO ${login} WITH INHERIT FALSE, SET TRUE`);
     const check = await owner.query<{ inherits: boolean; owns: boolean }>(
-      `SELECT pg_has_role($1, 'trawler_app', 'USAGE') OR pg_has_role($1, 'trawler_bypass', 'USAGE') AS inherits,
+      `SELECT pg_has_role($1, 'trawler_app', 'USAGE') OR pg_has_role($1, 'trawler_bypass', 'USAGE') OR pg_has_role($1, 'trawler_auth', 'USAGE') AS inherits,
               EXISTS (SELECT FROM pg_class WHERE relrowsecurity AND pg_has_role($1, relowner, 'USAGE')) AS owns`,
       [login],
     );

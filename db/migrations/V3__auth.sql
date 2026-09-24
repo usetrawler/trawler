@@ -29,3 +29,16 @@ create index "invitation_email_idx" on "invitation" ("email");
 create unique index "member_organization_user_key" on "member" ("organizationId", "userId");
 
 create unique index "account_provider_account_key" on "account" ("providerId", "accountId");
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'trawler_auth') THEN
+    CREATE ROLE trawler_auth NOLOGIN NOBYPASSRLS;
+  END IF;
+END
+$$;
+
+ALTER ROLE trawler_auth NOLOGIN NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+
+GRANT USAGE ON SCHEMA public TO trawler_auth;
+GRANT SELECT, INSERT, UPDATE, DELETE ON "user", "session", "account", "verification", "organization", "member", "invitation" TO trawler_auth;
