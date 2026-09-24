@@ -12,6 +12,7 @@ const MAX_BROWSER_CRASHES = 3;
 const NUDGE = "Every turn must call a tool; plain text does nothing. Continue with the goals, and call finish once every goal has a status.";
 
 const CUT_OFF = "Your reply was cut off before this tool ran. Call one tool at a time.";
+const CUT_OFF_TEXT = "Your reply was cut off. Plain text does nothing; call one tool at a time.";
 
 function oneAtATime() {
   let queue: Promise<unknown> = Promise.resolve();
@@ -135,9 +136,9 @@ export async function runRoleSession(opts: {
           error = `the model's replies were cut off ${MAX_CUT_OFFS} times in a row`;
           break;
         }
+        if (last.toolCalls.length === 0) history = [...history, { role: "user", content: CUT_OFF_TEXT }];
         continue;
       }
-      cutOffs = 0;
       if (last.toolCalls.length > 0) continue;
       silentTurns++;
       if (silentTurns >= MAX_SILENT_TURNS) {

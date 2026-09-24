@@ -181,6 +181,36 @@ describe("runRoleSession", () => {
     expect(used.steps).toBe(3);
   });
 
+  test("a plain-text reply that was cut off is followed by a note telling the model why", async () => {
+    const usage = { inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 5, text: 5, reasoning: undefined } };
+    const prompts: unknown[][] = [];
+    const model = new MockLanguageModelV4({
+      doGenerate: async ({ prompt }) => {
+        prompts.push(prompt as unknown[]);
+        return { content: [{ type: "text", text: "I will now" }], finishReason: { unified: "length", raw: undefined }, usage, warnings: [] } as never;
+      },
+    });
+    const { result } = await run(model as never).promise;
+    expect(result).toMatchObject({ stoppedBy: "error", error: "the model's replies were cut off 3 times in a row" });
+    const lastOfSecond = prompts[1]!.at(-1) as { role: string; content: Array<{ text?: string }> };
+    expect(lastOfSecond.role).toBe("user");
+    expect(JSON.stringify(lastOfSecond.content)).toMatch(/cut off/);
+  });
+
+  test("a plain-text reply between cut-offs does not reset their count", async () => {
+    const usage = { inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 5, text: 5, reasoning: undefined } };
+    let i = 0;
+    const model = new MockLanguageModelV4({
+      doGenerate: async () =>
+        (i++ % 2 === 0
+          ? { content: [{ type: "tool-call", toolCallId: `z${i}`, toolName: "note", input: '{"text":"ha' }], finishReason: { unified: "length", raw: undefined }, usage, warnings: [] }
+          : { content: [{ type: "text", text: "thinking" }], finishReason: { unified: "stop", raw: undefined }, usage, warnings: [] }) as never,
+    });
+    const { result, usage: used } = await run(model as never).promise;
+    expect(result).toMatchObject({ stoppedBy: "error" });
+    expect(used.steps).toBeLessThanOrEqual(5);
+  });
+
   test("replies that keep getting cut off end the session with a reason", async () => {
     const usage = { inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 5, text: 5, reasoning: undefined } };
     let i = 0;
