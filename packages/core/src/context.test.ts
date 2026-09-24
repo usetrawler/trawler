@@ -43,6 +43,14 @@ test("is idempotent and does not mutate its input", () => {
   expect(msgs).toEqual(copy);
 });
 
+test("stays idempotent when the threshold is below the length of an elision marker", () => {
+  const msgs: ModelMessage[] = [result("1", "browser_snapshot", big), result("2", "browser_snapshot", big)];
+  const tiny = { keepLargeResults: 1, largeResultChars: 10 };
+  const once = pruneMessages(msgs, tiny);
+  expect(pruneMessages(once, tiny)).toEqual(once);
+  expect(outputOf(once[1]).value).toBe(big);
+});
+
 test("measures json and content outputs by their serialized size", () => {
   const json: ModelMessage = { role: "tool", content: [{ type: "tool-result", toolCallId: "1", toolName: "browser_navigate", output: { type: "json", value: { content: [{ type: "text", text: big }] } } }] };
   const content: ModelMessage = { role: "tool", content: [{ type: "tool-result", toolCallId: "2", toolName: "browser_click", output: { type: "content", value: [{ type: "text", text: big }] } }] };
