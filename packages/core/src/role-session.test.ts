@@ -137,6 +137,31 @@ describe("runRoleSession", () => {
     const { result } = await run(model as never).promise;
     expect(result.stoppedBy).toBe("finish");
     expect(JSON.stringify(model.doGenerateCalls[1]!.prompt)).toContain("Your reply was cut off before this tool ran");
+    expect(JSON.stringify(model.doGenerateCalls[1]!.prompt)).not.toContain("Continue with the goals");
+  });
+
+  test("a cut-off reply mixing a whole call with a truncated one is answered too", async () => {
+    const usage = { inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 5, text: 5, reasoning: undefined } };
+    const step = (parts: unknown[], finish: "length" | "tool-calls") => ({ content: parts, finishReason: { unified: finish, raw: undefined }, usage, warnings: [] });
+    const responses = [
+      step([{ type: "tool-call", toolCallId: "a", toolName: "browser_snapshot", input: "{}" }, { type: "tool-call", toolCallId: "b", toolName: "note", input: '{"text":"half' }], "length"),
+      step([{ type: "tool-call", toolCallId: "c", toolName: "goal_status", input: JSON.stringify({ goal: "sign-up", status: "reached", note: "" }) }], "tool-calls"),
+      step([{ type: "tool-call", toolCallId: "d", toolName: "goal_status", input: JSON.stringify({ goal: "invoice", status: "reached", note: "" }) }], "tool-calls"),
+      step([{ type: "tool-call", toolCallId: "e", toolName: "finish", input: JSON.stringify({ summary: "x" }) }], "tool-calls"),
+    ];
+    let i = 0;
+    const model = new MockLanguageModelV4({ doGenerate: async () => responses[i++] as never });
+    const { result } = await run(model as never).promise;
+    expect(result.stoppedBy).toBe("finish");
+  });
+
+  test("replies that keep getting cut off end the session with a reason", async () => {
+    const usage = { inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 5, text: 5, reasoning: undefined } };
+    let i = 0;
+    const model = new MockLanguageModelV4({ doGenerate: async () => ({ content: [{ type: "tool-call", toolCallId: `x${i++}`, toolName: "browser_snapshot", input: "{}" }], finishReason: { unified: "length", raw: undefined }, usage, warnings: [] }) as never });
+    const { result, usage: used } = await run(model as never).promise;
+    expect(result).toMatchObject({ stoppedBy: "error", error: "the model's replies were cut off 3 times in a row" });
+    expect(used.steps).toBe(3);
   });
 
   test("a model that keeps answering in plain text ends the session with a reason", async () => {
