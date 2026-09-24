@@ -60,6 +60,12 @@ beforeAll(async () => {
         return html(`<p id="s">connecting</p><script>const w = new WebSocket("${foreignOrigin.replace("http", "ws")}/sock"); w.onerror = () => document.getElementById("s").textContent = "socket refused";</script>`);
       case "/spec":
         return html(`<p>speculation</p><script type="speculationrules">{"prefetch":[{"source":"list","urls":["${foreignOrigin}/prefetch"]}],"prerender":[{"source":"list","urls":["${foreignOrigin}/prerender"]}]}</script><script>const s=document.createElement("script");s.type="speculationrules";s.textContent=JSON.stringify({prefetch:[{source:"list",urls:["${foreignOrigin}/dyn-prefetch"]}]});document.body.appendChild(s);</script>`);
+      case "/spec-header":
+        res.setHeader("speculation-rules", '"/rules.json"');
+        return html(`<p>speculation header</p>`);
+      case "/rules.json":
+        res.setHeader("content-type", "application/speculationrules+json");
+        return res.end(JSON.stringify({ prefetch: [{ source: "list", urls: [`${foreignOrigin}/header-prefetch`] }] }));
       case "/img-redirect":
         return html(`<p>image</p><img src="/redirect-foreign">`);
       case "/sse-page":
@@ -286,6 +292,27 @@ describe("robustness", () => {
       await new Promise((r) => setTimeout(r, 1500));
       expect(foreignHits.filter((h) => /prefetch|prerender/.test(h))).toEqual([]);
     });
+  }, 60_000);
+
+  test("speculation rules announced in a response header cannot reach foreign origins", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/spec-header`);
+      await new Promise((r) => setTimeout(r, 1500));
+      expect(foreignHits.filter((h) => h.includes("header-prefetch"))).toEqual([]);
+    });
+  }, 60_000);
+
+  test("once the browser is gone, tools throw instead of returning errors forever", async () => {
+    const scrubber = new SecretScrubber();
+    const dir = mkdtempSync(join(tmpdir(), "trw-"));
+    const b = await openBrowser({ allowedOrigins: [origin], outputDir: dir, scrubber, onBlocked: () => {} });
+    try {
+      await navigate(b, origin);
+      await b.close();
+      await expect(b.tools.browser_snapshot!.execute!({}, ctx)).rejects.toThrow(/browser has closed|closed client/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }, 60_000);
 
   test("a sub-resource redirect to a foreign origin is not followed", async () => {

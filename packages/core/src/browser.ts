@@ -30,10 +30,7 @@ const STRIP_SPECULATION = `(() => {
     }
   }).observe(document, { childList: true, subtree: true });
 })();`;
-
-function withoutSpeculationRules(html: string): string {
-  return html.replace(/<script\b[^>]*type\s*=\s*["']?speculationrules["']?[^>]*>[\s\S]*?<\/script>/gi, "");
-}
+const CLOSED = /Target page, context or browser has been closed|Browser has been closed/;
 
 export interface Browser {
   tools: ToolSet;
@@ -105,6 +102,8 @@ export async function openBrowser(opts: {
   let blockedNavigation: string | null = null;
 
   const chrome = await chromium.launch({ headless: opts.headless ?? true });
+  let disconnected = false;
+  chrome.on("disconnected", () => (disconnected = true));
   try {
     const context = await chrome.newContext({
       httpCredentials: opts.httpCredentials,
@@ -131,8 +130,7 @@ export async function openBrowser(opts: {
           if (!isAllowed(next)) return block(route, next);
         }
         const headers = Object.fromEntries(Object.entries(response.headers()).filter(([k]) => k.toLowerCase() !== "speculation-rules"));
-        if (!(headers["content-type"] ?? "").includes("text/html")) return await route.fulfill({ response, headers });
-        return await route.fulfill({ response, headers, body: withoutSpeculationRules(await response.text()) });
+        return await route.fulfill({ response, headers });
       } catch {
         return route.abort("failed").catch(() => undefined);
       }
@@ -164,6 +162,7 @@ export async function openBrowser(opts: {
       tools[name] = {
         ...withoutFileParameters(t),
         execute: async (input, options) => {
+          if (disconnected) throw new Error("the browser has closed");
           const safeInput = Object.fromEntries(Object.entries(input as Record<string, unknown>).filter(([k]) => !WRITES_FILES.includes(k)));
           if (name === "browser_press_key" && (await probe({ function: `() => { let el = document.activeElement; while (el && el.contentDocument) el = el.contentDocument.activeElement; return (${isSecretField})(el); }` })) === true) {
             return refused("Keys cannot be pressed while a password field has focus. Click somewhere else first.");
@@ -179,6 +178,7 @@ export async function openBrowser(opts: {
           }
           blockedNavigation = null;
           const result = (await execute(safeInput, options)) as McpResult;
+          if (result?.isError && CLOSED.test(textOf(result))) throw new Error("the browser has closed");
           if (blockedNavigation) {
             result.content = [...(result.content ?? []), { type: "text", text: `### Blocked\n${blockedNavigation} is outside the allowed origins, so the browser did not open it. Go back or navigate to an allowed page.` }];
           }
