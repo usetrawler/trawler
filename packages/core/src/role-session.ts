@@ -124,7 +124,11 @@ export async function runRoleSession(opts: {
       history = answered.messages;
       const last = result.steps.at(-1);
       if (done() || !last) break;
-      if (answered.answered > 0) {
+      if (result.steps.length > 1) {
+        silentTurns = 0;
+        cutOffs = 0;
+      }
+      if (last.finishReason === "length" || answered.answered > 0) {
         cutOffs++;
         if (cutOffs >= MAX_CUT_OFFS) {
           stoppedBy = "error";
@@ -135,7 +139,7 @@ export async function runRoleSession(opts: {
       }
       cutOffs = 0;
       if (last.toolCalls.length > 0) continue;
-      silentTurns = result.steps.length > 1 ? 1 : silentTurns + 1;
+      silentTurns++;
       if (silentTurns >= MAX_SILENT_TURNS) {
         stoppedBy = "error";
         error = `the model stopped calling tools ${MAX_SILENT_TURNS} turns in a row`;
