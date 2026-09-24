@@ -7,6 +7,7 @@ import type { SecretScrubber } from "./secrets.ts";
 import { newSessionState, sessionTools, type FillField } from "./session-tools.ts";
 
 const MAX_SILENT_TURNS = 3;
+const MAX_CUT_OFFS = 3;
 const MAX_BROWSER_CRASHES = 3;
 const NUDGE = "Every turn must call a tool; plain text does nothing. Continue with the goals, and call finish once every goal has a status.";
 
@@ -43,15 +44,17 @@ function serialised(tools: ToolSet, run: ReturnType<typeof oneAtATime>, onCrash:
   );
 }
 
-function answerUnrunToolCalls(messages: ModelMessage[]): ModelMessage[] {
-  const last = messages.at(-1);
-  if (last?.role !== "assistant" || typeof last.content === "string") return messages;
-  const calls = last.content.filter((p) => p.type === "tool-call");
-  if (calls.length === 0) return messages;
-  return [
-    ...messages,
-    { role: "tool", content: calls.map((c) => ({ type: "tool-result" as const, toolCallId: c.toolCallId, toolName: c.toolName, output: { type: "error-text" as const, value: CUT_OFF } })) },
-  ];
+function answerUnrunToolCalls(messages: ModelMessage[]): { messages: ModelMessage[]; answered: number } {
+  const at = messages.findLastIndex((m) => m.role === "assistant");
+  const assistant = messages[at];
+  if (!assistant || assistant.role !== "assistant" || typeof assistant.content === "string") return { messages, answered: 0 };
+  const done = new Set(
+    messages.slice(at + 1).flatMap((m) => (m.role === "tool" ? m.content.filter((p) => p.type === "tool-result").map((p) => p.toolCallId) : [])),
+  );
+  const open = assistant.content.filter((p) => p.type === "tool-call" && !done.has(p.toolCallId));
+  if (open.length === 0) return { messages, answered: 0 };
+  const results = open.map((c) => ({ type: "tool-result" as const, toolCallId: (c as { toolCallId: string }).toolCallId, toolName: (c as { toolName: string }).toolName, output: { type: "error-text" as const, value: CUT_OFF } }));
+  return { messages: [...messages, { role: "tool", content: results }], answered: open.length };
 }
 
 export async function runRoleSession(opts: {
@@ -96,6 +99,7 @@ export async function runRoleSession(opts: {
   const done = () => state.finished !== null || usage.steps >= opts.maxSteps || opts.budget.exceeded || crashes >= MAX_BROWSER_CRASHES || emitFailure !== undefined;
   let history: ModelMessage[] = [{ role: "user", content: "Begin." }];
   let silentTurns = 0;
+  let cutOffs = 0;
   try {
     while (!done()) {
       const result = await generateText({
@@ -116,9 +120,20 @@ export async function runRoleSession(opts: {
           }
         },
       });
-      history = answerUnrunToolCalls([...history, ...result.responseMessages]);
+      const answered = answerUnrunToolCalls([...history, ...result.responseMessages]);
+      history = answered.messages;
       const last = result.steps.at(-1);
       if (done() || !last) break;
+      if (answered.answered > 0) {
+        cutOffs++;
+        if (cutOffs >= MAX_CUT_OFFS) {
+          stoppedBy = "error";
+          error = `the model's replies were cut off ${MAX_CUT_OFFS} times in a row`;
+          break;
+        }
+        continue;
+      }
+      cutOffs = 0;
       if (last.toolCalls.length > 0) continue;
       silentTurns = result.steps.length > 1 ? 1 : silentTurns + 1;
       if (silentTurns >= MAX_SILENT_TURNS) {
