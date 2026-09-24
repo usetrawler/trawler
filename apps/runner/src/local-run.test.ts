@@ -145,7 +145,7 @@ test("failed jobs are recorded as events and replay failures leave a trace", asy
   let n = 0;
   const open: OpenBrowser = async () => {
     n++;
-    if (n === 2 || n === 3) throw new Error("no chromium");
+    if (n === 2 || n === 3) throw new Error("no chromium hunter22-secret");
     return { tools: {}, fillField: async () => "typed", close: async () => {} };
   };
   const events: RunEventInput[] = [];
@@ -154,8 +154,9 @@ test("failed jobs are recorded as events and replay failures leave a trace", asy
     emit: (e) => events.push(e), openBrowser: open,
   });
   expect(events.filter((e) => e.jobId === "role:p2").map((e) => e.type)).toEqual(["job_started", "job_finished"]);
-  expect(events.find((e) => e.jobId === "role:p2" && e.type === "job_finished")).toMatchObject({ stoppedBy: "error", error: "no chromium" });
-  expect(events.find((e) => e.jobId === "replay:f1" && e.type === "job_finished")).toMatchObject({ stoppedBy: "error", error: "no chromium" });
+  expect(events.find((e) => e.jobId === "role:p2" && e.type === "job_finished")).toMatchObject({ stoppedBy: "error", error: "no chromium •••" });
+  expect(events.find((e) => e.jobId === "replay:f1" && e.type === "job_finished")).toMatchObject({ stoppedBy: "error", error: "no chromium •••" });
+  expect(summary.replayErrors).toEqual({ f1: "no chromium •••" });
   expect(summary.jobs.map((j) => j.jobId)).toEqual(["role:p1", "role:p2", "replay:f1"]);
 });
 

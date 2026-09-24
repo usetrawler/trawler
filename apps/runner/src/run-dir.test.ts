@@ -33,6 +33,7 @@ const summary: RunSummary = {
       { id: "f4", kind: "defect", goal: "g", title: "Never checked", observed: "o", reproduction: ["x", "y"], severity: "low" },
     ],
   }],
+  replayErrors: { f4: "no chromium" },
   replays: { f1: { completed: true, observed: "Internal Server Error", blockedAt: null }, f3: { completed: false, observed: "No export button", blockedAt: 2 } },
   verdicts: { f1: "confirmed", f3: "refuted" },
 };
@@ -45,7 +46,7 @@ test("report groups findings by verdict and shows cost and the replay", () => {
   expect(md).toMatch(/## Refuted defects[\s\S]*Flaky export[\s\S]*could not carry out step 2/);
   expect(md).toMatch(/## Friction[\s\S]*Hidden billing/);
   expect(md).not.toContain("budget ran out");
-  expect(md).toMatch(/## Defects not judged[\s\S]*Never checked/);
+  expect(md).toMatch(/## Defects not judged[\s\S]*Never checked[\s\S]*Replay: failed to run\. no chromium/);
 });
 
 test("report says when the budget ran out", () => {
@@ -58,7 +59,7 @@ test("model text cannot break the report's structure", () => {
 });
 
 test("a replay without a report is described once", () => {
-  const md = renderReport({ ...summary, replays: { ...summary.replays, f4: { completed: false, observed: "the replay session wrote no report", blockedAt: null } } });
+  const md = renderReport({ ...summary, replayErrors: {}, replays: { ...summary.replays, f4: { completed: false, observed: "the replay session wrote no report", blockedAt: null } } });
   expect(md).toContain("Replay: wrote no report.");
   expect(md).not.toContain("wrote no report. the replay session wrote no report");
 });

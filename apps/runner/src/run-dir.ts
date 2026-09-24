@@ -13,6 +13,7 @@ export interface RunSummary {
   jobs: Array<{ jobId: string } & JobUsage>;
   roles: RoleResult[];
   replays: Record<string, ReplayObservation>;
+  replayErrors: Record<string, string>;
   verdicts: Record<string, Verdict>;
 }
 
@@ -43,9 +44,11 @@ const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
 
 type Located = Finding & { persona: string };
 
-function describe(f: Located, replay?: ReplayObservation): string {
+function describe(f: Located, replay?: ReplayObservation, replayError?: string): string {
   const steps = f.reproduction.map((step, i) => `${i + 1}. ${oneLine(step)}`).join("\n");
-  const replayed = !replay
+  const replayed = replayError
+    ? `\n\nReplay: failed to run. ${oneLine(replayError)}`
+    : !replay
     ? ""
     : !replay.completed && replay.blockedAt === null
       ? "\n\nReplay: wrote no report."
@@ -56,7 +59,7 @@ function describe(f: Located, replay?: ReplayObservation): string {
 export function renderReport(s: RunSummary): string {
   const findings: Located[] = s.roles.flatMap((r) => r.findings.map((f) => ({ ...f, persona: r.persona })));
   const section = (title: string, items: Located[]) =>
-    items.length === 0 ? "" : `## ${title}\n\n${items.map((f) => describe(f, s.replays[f.id])).join("\n")}\n`;
+    items.length === 0 ? "" : `## ${title}\n\n${items.map((f) => describe(f, s.replays[f.id], s.replayErrors[f.id])).join("\n")}\n`;
   const defects = findings.filter((f) => f.kind === "defect");
   const by = (v: Verdict) => defects.filter((f) => s.verdicts[f.id] === v);
   const jobs = s.jobs.map((j) => `| ${j.jobId} | ${j.model} | ${j.steps} | ${usd(j.costUsd)} |`).join("\n");

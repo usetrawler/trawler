@@ -23,7 +23,7 @@ export async function localRun(opts: {
   const budget = new Budget(opts.budgetUsd);
   const summary: RunSummary = {
     project: opts.project.name, agentModel: opts.agentModelId, judgeModel: opts.judgeModelId,
-    startedAt, finishedAt: startedAt, budgetUsd: opts.budgetUsd, totalCostUsd: 0, jobs: [], roles: [], replays: {}, verdicts: {},
+    startedAt, finishedAt: startedAt, budgetUsd: opts.budgetUsd, totalCostUsd: 0, jobs: [], roles: [], replays: {}, replayErrors: {}, verdicts: {},
   };
   const scrubberFor = () => SecretScrubber.forProject(opts.project);
   let findingNo = 0;
@@ -89,7 +89,9 @@ export async function localRun(opts: {
           browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: opts.replaySteps, emit: opts.emit,
         }),
       ).catch((err) => {
-        recordFailure(`replay:${finding.id}`, "replay", failure(scrubber, err));
+        const error = failure(scrubber, err);
+        recordFailure(`replay:${finding.id}`, "replay", error);
+        summary.replayErrors[finding.id] = error;
         summary.jobs.push({ jobId: `replay:${finding.id}`, ...noUsage(opts.agentModelId) });
         return null;
       });

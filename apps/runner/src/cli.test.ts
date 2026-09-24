@@ -172,6 +172,7 @@ test("fetchPage stops reading at its size cap and refuses error pages", async ()
     expect(page.length).toBeLessThanOrEqual(2_000_000);
     expect(page.length).toBeGreaterThan(1_000_000);
     await new Promise((r) => setTimeout(r, 200));
+    expect(sentAtClose).toBeGreaterThan(0);
     expect(sentAtClose).toBeLessThan(20 * 1024 * 1024);
     await expect(fetchPage(`http://127.0.0.1:${port}/missing`)).rejects.toThrow(/HTTP 404/);
   } finally {
