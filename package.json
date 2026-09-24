@@ -19,7 +19,7 @@
     "db:down": "docker compose down",
     "db:migrate": "docker compose run --rm flyway migrate",
     "db:validate": "docker compose run --rm flyway validate",
-    "db:codegen": "kysely-codegen --dialect postgres --url postgres://trawler:trawler@localhost:54329/trawler --exclude-pattern flyway_schema_history --out-file apps/control-plane/src/db/types.ts"
+    "db:codegen": "tsx apps/control-plane/scripts/codegen.ts"
   },
   "devDependencies": {
     "@types/node": "^24.13.6",
