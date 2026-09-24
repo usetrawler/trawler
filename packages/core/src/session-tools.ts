@@ -10,6 +10,9 @@ export interface SessionState {
   finished: string | null;
 }
 
+export type FieldKind = "username" | "password";
+export type FillField = (ref: string, text: string, kind: FieldKind) => Promise<string>;
+
 export function newSessionState(goals: Goal[]): SessionState {
   return {
     notes: [],
@@ -19,57 +22,71 @@ export function newSessionState(goals: Goal[]): SessionState {
   };
 }
 
+function issues(error: z.ZodError): string {
+  return error.issues.map((i) => (i.path.length ? `${i.path.join(".")}: ${i.message}` : i.message)).join("; ");
+}
+
+function steps(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  return value.split("\n").map((s) => s.replace(/^\s*(\d+[.)]|[-*])\s*/, "").trim()).filter(Boolean);
+}
+
 export function sessionTools(opts: {
   state: SessionState;
-  goals: Goal[];
   accounts: TargetAccount[];
   emit: (e: RunEventInput) => void;
   jobId: string;
-  typeSecret: (ref: string, text: string) => Promise<string>;
+  fillField: FillField;
   scrubber: SecretScrubber;
   newId: () => string;
 }) {
-  const goalIds = new Set(opts.goals.map((g) => g.id));
   const { state, emit, jobId } = opts;
+  const goalIds = () => [...state.goals.keys()];
+  const unknownGoal = (goal: string) => `rejected: unknown goal ${goal}; use one of ${goalIds().join(", ")}`;
 
   return {
     note: tool({
       description: "Add a line to your scratchpad. The scratchpad stays in view for the whole session; old page snapshots do not.",
-      inputSchema: z.object({ text: z.string().min(1) }),
+      inputSchema: z.object({ text: z.string() }),
       execute: async ({ text }) => {
-        state.notes.push(text);
+        if (!text.trim()) return "rejected: text: the note is empty";
         emit({ type: "note", jobId, text });
+        state.notes.push(text);
         return "noted";
       },
     }),
     submit_finding: tool({
-      description: "Record a defect or a friction the moment you have seen it. Defects need literal steps a stranger could follow.",
+      description:
+        "Record a defect or a friction the moment you have seen it. kind: defect | friction. severity: low | medium | high. reproduction: the literal steps, one per array item; a defect needs at least two.",
       inputSchema: z.object({
-        kind: z.enum(["defect", "friction"]),
+        kind: z.string(),
         goal: z.string(),
         title: z.string(),
         observed: z.string(),
-        reproduction: z.array(z.string()),
-        severity: z.enum(["low", "medium", "high"]),
+        reproduction: z.union([z.array(z.string()), z.string()]),
+        severity: z.string(),
       }),
       execute: async (input) => {
-        if (!goalIds.has(input.goal)) return `rejected: unknown goal ${input.goal}; use one of ${[...goalIds].join(", ")}`;
-        const parsed = FindingSchema.safeParse({ ...input, id: "pending" });
-        if (!parsed.success) return `rejected: ${parsed.error.issues.map((i) => i.message).join("; ")}`;
+        if (!state.goals.has(input.goal)) return unknownGoal(input.goal);
+        const parsed = FindingSchema.safeParse({ ...input, reproduction: steps(input.reproduction), id: "pending" });
+        if (!parsed.success) return `rejected: ${issues(parsed.error)}`;
+        const duplicate = state.findings.find((f) => f.goal === parsed.data.goal && f.kind === parsed.data.kind && f.title.toLowerCase() === parsed.data.title.toLowerCase());
+        if (duplicate) return `rejected: already recorded as ${duplicate.id}`;
         const finding = { ...parsed.data, id: opts.newId() };
-        state.findings.push(finding);
         emit({ type: "finding", jobId, finding });
+        state.findings.push(finding);
         return `recorded ${finding.id}`;
       },
     }),
     goal_status: tool({
-      description: "Record where a goal ended up: reached, or failed with where you stopped.",
-      inputSchema: z.object({ goal: z.string(), status: z.enum(["reached", "failed"]), note: z.string() }),
+      description: "Record where a goal ended up: reached, or failed with where you stopped. A later call for the same goal replaces the earlier one.",
+      inputSchema: z.object({ goal: z.string(), status: z.string(), note: z.string() }),
       execute: async ({ goal, status, note }) => {
-        if (!goalIds.has(goal)) return `rejected: unknown goal ${goal}`;
-        const outcome = { goal, status, note };
-        state.goals.set(goal, outcome);
+        if (!state.goals.has(goal)) return unknownGoal(goal);
+        if (status !== "reached" && status !== "failed") return `rejected: status: use reached or failed`;
+        const outcome = { goal, status, note } as const;
         emit({ type: "goal_status", jobId, outcome });
+        state.goals.set(goal, outcome);
         return "recorded";
       },
     }),
@@ -81,20 +98,25 @@ export function sessionTools(opts: {
         if (!a) return `rejected: unknown account ${account}; known: ${opts.accounts.map((x) => x.ref).join(", ") || "none"}`;
         opts.scrubber.add(a.password);
         try {
-          await opts.typeSecret(usernameField, a.username);
-          return opts.scrubber.scrub(await opts.typeSecret(passwordField, a.password));
+          await opts.fillField(usernameField, a.username, "username");
+          return opts.scrubber.scrub(await opts.fillField(passwordField, a.password, "password"));
         } catch (err) {
           return opts.scrubber.scrub(`failed: ${err instanceof Error ? err.message : String(err)}`);
         }
       },
     }),
     finish: tool({
-      description: "End the session with a short summary once every goal has a status.",
+      description: "End the session with a short summary once every goal has a status (reached or failed).",
       inputSchema: z.object({ summary: z.string() }),
       execute: async ({ summary }) => {
+        if (!summary.trim()) return "rejected: summary: write a short summary";
+        const open = [...state.goals.values()].filter((g) => g.status === "not_attempted").map((g) => g.goal);
+        if (open.length) return `rejected: give these goals a status first (goal_status reached or failed): ${open.join(", ")}`;
         state.finished = summary;
         return "finished";
       },
     }),
   };
 }
+
+export type SessionTools = ReturnType<typeof sessionTools>;

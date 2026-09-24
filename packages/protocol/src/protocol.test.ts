@@ -8,7 +8,7 @@ const project = {
   allowedOrigins: ["https://staging.acme.test"],
   personas: [{ id: "solo", name: "Kwame", brief: "Builds side projects alone.", accountRef: "solo" }],
   goals: [{ id: "sign-up", instruction: "Create an account and reach the dashboard." }],
-  accounts: [{ ref: "solo", username: "kwame@acme.test", password: "s3cret" }],
+  accounts: [{ ref: "solo", username: "kwame@acme.test", password: "s3cret-pass" }],
 };
 
 describe("ProjectConfig", () => {
@@ -55,10 +55,14 @@ describe("ProjectConfig", () => {
     expect(result.error?.issues[0]?.path).toEqual(["personas", 0, "accountRef"]);
   });
   test("rejects an unknown key inside httpCredentials", () => {
-    expect(() => ProjectConfigSchema.parse({ ...project, httpCredentials: { username: "u", password: "p", realm: "staging" } })).toThrow(/realm/);
+    expect(() => ProjectConfigSchema.parse({ ...project, httpCredentials: { username: "u", password: "long-enough", realm: "staging" } })).toThrow(/realm/);
   });
   test("rejects empty basic-auth credentials", () => {
     expect(() => ProjectConfigSchema.parse({ ...project, httpCredentials: { username: "u", password: "" } })).toThrow();
+  });
+  test("rejects passwords too short to be scrubbed reliably", () => {
+    expect(() => ProjectConfigSchema.parse({ ...project, accounts: [{ ...project.accounts[0], password: "abc1234" }] })).toThrow();
+    expect(() => ProjectConfigSchema.parse({ ...project, httpCredentials: { username: "u", password: "abc1234" } })).toThrow();
   });
   test("rejects an empty accountRef", () => {
     expect(() => ProjectConfigSchema.parse({ ...project, personas: [{ ...project.personas[0], accountRef: "" }] })).toThrow();
@@ -75,6 +79,9 @@ describe("Finding", () => {
   });
   test("accepts friction with one step", () => {
     expect(FindingSchema.parse({ ...base, kind: "friction", reproduction: ["Looked for billing"] }).kind).toBe("friction");
+  });
+  test("a whitespace-only step does not count towards a defect's two steps", () => {
+    expect(() => FindingSchema.parse({ ...base, reproduction: ["Open /signup", "  "] })).toThrow();
   });
   test("rejects friction with no steps", () => {
     expect(() => FindingSchema.parse({ ...base, kind: "friction", reproduction: [] })).toThrow();

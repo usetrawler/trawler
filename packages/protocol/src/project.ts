@@ -16,10 +16,12 @@ export const GoalSchema = z.strictObject({
 });
 export type Goal = z.infer<typeof GoalSchema>;
 
+export const MIN_PASSWORD_LENGTH = 8;
+
 export const TargetAccountSchema = z.strictObject({
   ref: z.string().min(1),
   username: z.string().min(1),
-  password: z.string().min(1),
+  password: z.string().min(MIN_PASSWORD_LENGTH),
 });
 export type TargetAccount = z.infer<typeof TargetAccountSchema>;
 
@@ -37,7 +39,7 @@ export const ProjectConfigSchema = z
     personas: z.array(PersonaSchema).min(1),
     goals: z.array(GoalSchema).min(1),
     accounts: z.array(TargetAccountSchema).default([]),
-    httpCredentials: z.strictObject({ username: z.string().min(1), password: z.string().min(1) }).optional(),
+    httpCredentials: z.strictObject({ username: z.string().min(1), password: z.string().min(MIN_PASSWORD_LENGTH) }).optional(),
     extraHeaders: z.record(z.string(), z.string()).default({}),
   })
   .superRefine((p, ctx) => {

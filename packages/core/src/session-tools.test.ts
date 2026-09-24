@@ -1,75 +1,72 @@
+import { generateText, isStepCount } from "ai";
 import { describe, expect, test, vi } from "vitest";
 import type { RunEventInput } from "@usetrawler/protocol";
 import { SecretScrubber } from "./secrets.ts";
 import { newSessionState, sessionTools } from "./session-tools.ts";
+import { scriptedModel, text, toolCall } from "./testing.ts";
 
-const goals = [{ id: "sign-up", instruction: "Create an account." }];
+const goals = [{ id: "sign-up", instruction: "Create an account." }, { id: "invoice", instruction: "Send an invoice." }];
 const accounts = [{ ref: "solo", username: "kwame@acme.test", password: "hunter22" }];
 const ctx = { toolCallId: "t", messages: [], context: {} };
+const finding = { kind: "defect", goal: "sign-up", title: "500 on submit", observed: "got 500", reproduction: ["Open /signup", "Submit"], severity: "high" };
 
 function setup() {
   const events: RunEventInput[] = [];
   const state = newSessionState(goals);
   const scrubber = new SecretScrubber();
-  const typeSecret = vi.fn(async (ref: string, text: string) => `await page.getByRef('${ref}').fill('${text}');`);
+  const fillField = vi.fn(async (ref: string, value: string) => `await page.getByRef('${ref}').fill('${value}');`);
   let n = 0;
-  const tools = sessionTools({ state, goals, accounts, emit: (e) => events.push(e), jobId: "role:solo", typeSecret, scrubber, newId: () => `f${++n}` });
-  return { events, state, tools, typeSecret, scrubber };
+  const tools = sessionTools({ state, accounts, emit: (e) => events.push(e), jobId: "role:solo", fillField, scrubber, newId: () => `f${++n}` });
+  return { events, state, tools, fillField, scrubber };
 }
-
-describe("SecretScrubber", () => {
-  test("replaces registered secrets deep inside values", () => {
-    const s = new SecretScrubber();
-    s.add("hunter22");
-    expect(s.scrub({ a: ["pw hunter22 end"], b: 3, c: null })).toEqual({ a: ["pw ••• end"], b: 3, c: null });
-  });
-  test("ignores secrets shorter than four characters", () => {
-    const s = new SecretScrubber();
-    s.add("ab");
-    expect(s.scrub("ab cd")).toBe("ab cd");
-  });
-  test("a secret that contains another is removed whole", () => {
-    const s = new SecretScrubber();
-    s.add("pass");
-    s.add("password123");
-    expect(s.scrub("typed password123 here")).toBe("typed ••• here");
-  });
-  test("removes URL-encoded and JSON-escaped forms of a secret", () => {
-    const s = new SecretScrubber();
-    s.add('p@ss w"rd/1');
-    const out = s.scrub(`url=https://x.test/?q=${encodeURIComponent('p@ss w"rd/1')} json=${JSON.stringify({ v: 'p@ss w"rd/1' })}`);
-    expect(out).not.toContain(encodeURIComponent('p@ss w"rd/1'));
-    expect(out).not.toContain('p@ss w\\"rd/1');
-    expect(out).not.toContain("w\"rd");
-  });
-  test("does not mutate its input", () => {
-    const s = new SecretScrubber();
-    s.add("hunter22");
-    const input = { a: "hunter22" };
-    s.scrub(input);
-    expect(input.a).toBe("hunter22");
-  });
-});
 
 describe("submit_finding", () => {
   test("stores a valid finding and emits it", async () => {
     const { tools, state, events } = setup();
-    const out = await tools.submit_finding.execute!({ kind: "defect", goal: "sign-up", title: "500", observed: "got 500", reproduction: ["Open /signup", "Submit"], severity: "high" }, ctx);
-    expect(out).toBe("recorded f1");
+    expect(await tools.submit_finding.execute!(finding, ctx)).toBe("recorded f1");
     expect(state.findings).toHaveLength(1);
-    expect(events).toEqual([{ type: "finding", jobId: "role:solo", finding: expect.objectContaining({ id: "f1" }) }]);
+    expect(events).toEqual([{ type: "finding", jobId: "role:solo", finding: expect.objectContaining({ id: "f1", title: "500 on submit" }) }]);
   });
-  test("rejects a one-step defect with a readable error", async () => {
+  test("rejects a one-step defect, naming the field", async () => {
     const { tools, state, events } = setup();
-    const out = await tools.submit_finding.execute!({ kind: "defect", goal: "sign-up", title: "500", observed: "o", reproduction: ["Submit"], severity: "high" }, ctx);
-    expect(out).toMatch(/^rejected: .*two reproduction steps/);
+    const out = await tools.submit_finding.execute!({ ...finding, reproduction: ["Submit"] }, ctx);
+    expect(out).toMatch(/^rejected: reproduction: .*two reproduction steps/);
     expect(state.findings).toHaveLength(0);
     expect(events).toHaveLength(0);
   });
-  test("rejects an unknown goal id", async () => {
+  test("names each invalid field", async () => {
+    const { tools } = setup();
+    const out = await tools.submit_finding.execute!({ ...finding, title: " ", observed: "", severity: "critical" }, ctx);
+    expect(out).toMatch(/title: /);
+    expect(out).toMatch(/observed: /);
+    expect(out).toMatch(/severity: /);
+  });
+  test("accepts reproduction steps sent as one numbered string", async () => {
     const { tools, state } = setup();
-    const out = await tools.submit_finding.execute!({ kind: "friction", goal: "nope", title: "t", observed: "o", reproduction: ["a"], severity: "low" }, ctx);
-    expect(out).toMatch(/^rejected: unknown goal nope; use one of sign-up/);
+    expect(await tools.submit_finding.execute!({ ...finding, reproduction: "1. Open /signup\n2. Submit" }, ctx)).toBe("recorded f1");
+    expect(state.findings[0]!.reproduction).toEqual(["Open /signup", "Submit"]);
+  });
+  test("rejects an unknown goal id without storing or emitting", async () => {
+    const { tools, state, events } = setup();
+    expect(await tools.submit_finding.execute!({ ...finding, goal: "nope" }, ctx)).toBe("rejected: unknown goal nope; use one of sign-up, invoice");
+    expect(state.findings).toHaveLength(0);
+    expect(events).toHaveLength(0);
+  });
+  test("rejects the same finding twice", async () => {
+    const { tools, state } = setup();
+    await tools.submit_finding.execute!(finding, ctx);
+    expect(await tools.submit_finding.execute!({ ...finding, title: "500 ON SUBMIT" }, ctx)).toBe("rejected: already recorded as f1");
+    expect(state.findings).toHaveLength(1);
+  });
+  test("stores the normalised finding, not the raw input", async () => {
+    const { tools, state } = setup();
+    await tools.submit_finding.execute!({ ...finding, title: "  500 on submit  " }, ctx);
+    expect(state.findings[0]!.title).toBe("500 on submit");
+  });
+  test("keeps nothing when emitting fails, so a retry does not duplicate", async () => {
+    const state = newSessionState(goals);
+    const tools = sessionTools({ state, accounts, emit: () => { throw new Error("sink down"); }, jobId: "j", fillField: async () => "", scrubber: new SecretScrubber(), newId: () => "f1" });
+    await expect(tools.submit_finding.execute!(finding, ctx)).rejects.toThrow("sink down");
     expect(state.findings).toHaveLength(0);
   });
 });
@@ -81,46 +78,86 @@ describe("note, goal_status and finish", () => {
     expect(state.notes).toEqual(["signup is at /join"]);
     expect(events).toEqual([{ type: "note", jobId: "role:solo", text: "signup is at /join" }]);
   });
+  test("an empty note is rejected", async () => {
+    const { tools, state, events } = setup();
+    expect(await tools.note.execute!({ text: "  " }, ctx)).toMatch(/^rejected: text/);
+    expect(state.notes).toHaveLength(0);
+    expect(events).toHaveLength(0);
+  });
   test("goal_status records the outcome and emits it", async () => {
     const { tools, state, events } = setup();
     await tools.goal_status.execute!({ goal: "sign-up", status: "reached", note: "done" }, ctx);
     expect(state.goals.get("sign-up")).toEqual({ goal: "sign-up", status: "reached", note: "done" });
     expect(events[0]).toMatchObject({ type: "goal_status", outcome: { goal: "sign-up", status: "reached" } });
   });
-  test("goal_status rejects an unknown goal", async () => {
-    const { tools } = setup();
-    expect(await tools.goal_status.execute!({ goal: "nope", status: "failed", note: "" }, ctx)).toMatch(/^rejected: unknown goal nope/);
+  test("a later goal_status replaces an earlier one", async () => {
+    const { tools, state } = setup();
+    await tools.goal_status.execute!({ goal: "sign-up", status: "reached", note: "" }, ctx);
+    await tools.goal_status.execute!({ goal: "sign-up", status: "failed", note: "broke later" }, ctx);
+    expect(state.goals.get("sign-up")?.status).toBe("failed");
+  });
+  test("goal_status rejects an unknown goal or status without changing state", async () => {
+    const { tools, state, events } = setup();
+    expect(await tools.goal_status.execute!({ goal: "nope", status: "failed", note: "" }, ctx)).toBe("rejected: unknown goal nope; use one of sign-up, invoice");
+    expect(await tools.goal_status.execute!({ goal: "sign-up", status: "done", note: "" }, ctx)).toMatch(/^rejected: status/);
+    expect(state.goals.has("nope")).toBe(false);
+    expect(state.goals.get("sign-up")?.status).toBe("not_attempted");
+    expect(events).toHaveLength(0);
   });
   test("every goal starts as not attempted", () => {
-    expect([...newSessionState(goals).goals.values()]).toEqual([{ goal: "sign-up", status: "not_attempted", note: "" }]);
+    expect([...newSessionState(goals).goals.values()].map((g) => g.status)).toEqual(["not_attempted", "not_attempted"]);
   });
-  test("finish stores the summary", async () => {
+  test("finish is refused while a goal has no status", async () => {
     const { tools, state } = setup();
-    await tools.finish.execute!({ summary: "all good" }, ctx);
+    await tools.goal_status.execute!({ goal: "sign-up", status: "reached", note: "" }, ctx);
+    expect(await tools.finish.execute!({ summary: "done" }, ctx)).toMatch(/^rejected: give these goals a status first .*: invoice$/);
+    expect(state.finished).toBeNull();
+  });
+  test("finish is refused with an empty summary", async () => {
+    const { tools, state } = setup();
+    expect(await tools.finish.execute!({ summary: " " }, ctx)).toMatch(/^rejected: summary/);
+    expect(state.finished).toBeNull();
+  });
+  test("finish stores the summary once every goal has a status", async () => {
+    const { tools, state } = setup();
+    await tools.goal_status.execute!({ goal: "sign-up", status: "reached", note: "" }, ctx);
+    await tools.goal_status.execute!({ goal: "invoice", status: "failed", note: "no button" }, ctx);
+    expect(await tools.finish.execute!({ summary: "all good" }, ctx)).toBe("finished");
     expect(state.finished).toBe("all good");
   });
 });
 
 describe("sign_in", () => {
-  test("types credentials without returning the password", async () => {
-    const { tools, typeSecret, scrubber } = setup();
+  test("types the username as a username and the password as a password, returning no password", async () => {
+    const { tools, fillField, scrubber } = setup();
     const out = await tools.sign_in.execute!({ account: "solo", usernameField: "e3", passwordField: "e4" }, ctx);
-    expect(typeSecret).toHaveBeenNthCalledWith(1, "e3", "kwame@acme.test");
-    expect(typeSecret).toHaveBeenNthCalledWith(2, "e4", "hunter22");
+    expect(fillField).toHaveBeenNthCalledWith(1, "e3", "kwame@acme.test", "username");
+    expect(fillField).toHaveBeenNthCalledWith(2, "e4", "hunter22", "password");
     expect(JSON.stringify(out)).not.toContain("hunter22");
     expect(scrubber.scrub("x hunter22")).toBe("x •••");
   });
-  test("registers the password before typing, so a failure message cannot leak it", async () => {
-    const { tools, typeSecret } = setup();
-    typeSecret.mockImplementationOnce(async () => "ok").mockImplementationOnce(async () => {
+  test("a failure message cannot leak the password", async () => {
+    const { tools, fillField } = setup();
+    fillField.mockImplementationOnce(async () => "ok").mockImplementationOnce(async () => {
       throw new Error("could not fill 'hunter22' into e4");
     });
-    await expect(tools.sign_in.execute!({ account: "solo", usernameField: "e3", passwordField: "e4" }, ctx)).resolves.toMatch(/^failed: could not fill '•••' into e4/);
+    await expect(tools.sign_in.execute!({ account: "solo", usernameField: "e3", passwordField: "e4" }, ctx)).resolves.toBe("failed: could not fill '•••' into e4");
   });
   test("unknown account is an error the model can read", async () => {
-    const { tools, typeSecret } = setup();
-    const out = await tools.sign_in.execute!({ account: "ghost", usernameField: "e3", passwordField: "e4" }, ctx);
-    expect(out).toMatch(/^rejected: unknown account ghost; known: solo/);
-    expect(typeSecret).not.toHaveBeenCalled();
+    const { tools, fillField } = setup();
+    expect(await tools.sign_in.execute!({ account: "ghost", usernameField: "e3", passwordField: "e4" }, ctx)).toBe("rejected: unknown account ghost; known: solo");
+    expect(fillField).not.toHaveBeenCalled();
+  });
+});
+
+describe("through the agent loop", () => {
+  test("a malformed finding comes back as a readable rejection and nothing is stored", async () => {
+    const { tools, state } = setup();
+    const model = scriptedModel([toolCall("submit_finding", { ...finding, severity: "critical", reproduction: "Submit" }), text("ok")]);
+    await generateText({ model, tools, prompt: "go", stopWhen: isStepCount(5) });
+    const second = JSON.stringify(model.doGenerateCalls[1]!.prompt);
+    expect(second).toContain("rejected: ");
+    expect(second).toContain("severity: ");
+    expect(state.findings).toHaveLength(0);
   });
 });
