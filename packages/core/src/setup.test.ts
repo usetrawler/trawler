@@ -41,6 +41,9 @@ describe("pageText", () => {
     expect(pageText("a<!-->b<p>c</p>", 1000)).toBe("a b c");
     expect(pageText("<script>x</script-foo>LEAK</script>ok", 1000)).toBe("ok");
     expect(pageText(`<meta name="description" content="first"><meta name="description" content="second">`, 1000)).toBe("first");
+    expect(pageText(`<a title= \x27x > y\x27>L</a><p>Tail</p>`, 1000)).toBe("L Tail");
+    expect(pageText("<svg/>ok", 1000)).toBe("ok");
+    expect(pageText("a".repeat(2_000_000) + " TAIL", 3_000_000)).not.toContain("TAIL");
   });
 
   test("truncates", () => {
