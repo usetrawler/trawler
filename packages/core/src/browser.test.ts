@@ -392,7 +392,7 @@ describe("password fields", () => {
       const snap = await snapshot(b);
       await b.tools.browser_click!.execute!({ target: refOf(snap, "Save"), element: "save" }, ctx);
       const started = Date.now();
-      await b.tools.browser_press_key!.execute!({ key: "Escape" }, ctx);
+      await b.tools.browser_press_key!.execute!({ key: "ArrowDown" }, ctx);
       expect(Date.now() - started).toBeLessThan(10_000);
       const handled = (await b.tools.browser_handle_dialog!.execute!({ accept: true }, ctx)) as { isError?: boolean };
       expect(handled.isError).toBeFalsy();
