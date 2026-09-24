@@ -16,9 +16,11 @@ export const BROWSER_TOOLS = [
   "browser_press_key",
   "browser_hover",
   "browser_wait_for",
+  "browser_handle_dialog",
+  "browser_file_upload",
 ] as const;
 
-const WRITES_FILES = ["filename"];
+const FILE_PARAMETERS = ["filename", "paths"];
 const SECRET_MARK = "data-trawler-secret";
 const EDITS_FIELDS = new Set(["browser_type", "browser_select_option"]);
 const STRIP_SPECULATION = `(() => {
@@ -31,6 +33,13 @@ const STRIP_SPECULATION = `(() => {
   }).observe(document, { childList: true, subtree: true });
 })();`;
 const CLOSED = /Target page, context or browser has been closed|Browser has been closed/;
+const INTERRUPTED = /is interrupted by another navigation/;
+const FOCUSED_SECRET = `() => {
+  if (!document.hasFocus()) return false;
+  let el = document.activeElement;
+  while (el && el.shadowRoot && el.shadowRoot.activeElement) el = el.shadowRoot.activeElement;
+  return !!el && (el.getAttribute?.("${SECRET_MARK}") === "1" || (el instanceof HTMLInputElement && el.type === "password"));
+}`;
 
 export interface Browser {
   tools: ToolSet;
@@ -72,8 +81,8 @@ function evaluatedValue(result: unknown): unknown {
 function withoutFileParameters(t: Tool): Tool {
   const schema = (t.inputSchema as { jsonSchema?: { properties?: Record<string, unknown>; required?: string[] } }).jsonSchema;
   if (!schema?.properties) return t;
-  const properties = Object.fromEntries(Object.entries(schema.properties).filter(([k]) => !WRITES_FILES.includes(k)));
-  return { ...t, inputSchema: jsonSchema({ ...schema, properties, required: (schema.required ?? []).filter((r) => !WRITES_FILES.includes(r)) }) } as Tool;
+  const properties = Object.fromEntries(Object.entries(schema.properties).filter(([k]) => !FILE_PARAMETERS.includes(k)));
+  return { ...t, inputSchema: jsonSchema({ ...schema, properties, required: (schema.required ?? []).filter((r) => !FILE_PARAMETERS.includes(r)) }) } as Tool;
 }
 
 export async function openBrowser(opts: {
@@ -154,6 +163,16 @@ export async function openBrowser(opts: {
     const refused = (text: string) => ({ content: [{ type: "text", text: `### Error\n${text}` }], isError: true });
     const probe = async (args: Record<string, unknown>) => evaluatedValue((await evaluate(args, internalCall)) as McpResult);
 
+    const focusIsOnSecret = async () => {
+      for (const page of context.pages()) {
+        for (const frame of page.frames()) {
+          const secret = await frame.evaluate(FOCUSED_SECRET).catch(() => false);
+          if (secret) return true;
+        }
+      }
+      return false;
+    };
+
     const tools: ToolSet = {};
     for (const name of BROWSER_TOOLS) {
       const t = all[name];
@@ -163,8 +182,8 @@ export async function openBrowser(opts: {
         ...withoutFileParameters(t),
         execute: async (input, options) => {
           if (disconnected) throw new Error("the browser has closed");
-          const safeInput = Object.fromEntries(Object.entries(input as Record<string, unknown>).filter(([k]) => !WRITES_FILES.includes(k)));
-          if (name === "browser_press_key" && (await probe({ function: `() => { let el = document.activeElement; while (el && el.contentDocument) el = el.contentDocument.activeElement; return (${isSecretField})(el); }` })) === true) {
+          const safeInput = Object.fromEntries(Object.entries(input as Record<string, unknown>).filter(([k]) => !FILE_PARAMETERS.includes(k)));
+          if (name === "browser_press_key" && (await focusIsOnSecret())) {
             return refused("Keys cannot be pressed while a password field has focus. Click somewhere else first.");
           }
           if (EDITS_FIELDS.has(name) && typeof safeInput.target === "string" && (await probe({ element: "field", target: safeInput.target, function: isSecretField })) === true) {
@@ -177,8 +196,10 @@ export async function openBrowser(opts: {
             }
           }
           blockedNavigation = null;
-          const result = (await execute(safeInput, options)) as McpResult;
+          let result = (await execute(safeInput, options)) as McpResult;
+          if (name === "browser_navigate" && result?.isError && INTERRUPTED.test(textOf(result))) result = (await execute(safeInput, options)) as McpResult;
           if (result?.isError && CLOSED.test(textOf(result))) throw new Error("the browser has closed");
+          if (!result?.isError && !textOf(result).trim()) result.content = [{ type: "text", text: "Done. Call browser_snapshot to see the page." }];
           if (blockedNavigation) {
             result.content = [...(result.content ?? []), { type: "text", text: `### Blocked\n${blockedNavigation} is outside the allowed origins, so the browser did not open it. Go back or navigate to an allowed page.` }];
           }
@@ -206,6 +227,7 @@ export async function openBrowser(opts: {
       },
       async close() {
         try {
+          await context.unrouteAll({ behavior: "ignoreErrors" }).catch(() => undefined);
           await mcp.close();
         } finally {
           await chrome.close();
