@@ -114,9 +114,14 @@ describe("tools", () => {
       const schema = JSON.stringify((b.tools.browser_snapshot!.inputSchema as { jsonSchema: unknown }).jsonSchema);
       expect(schema).not.toContain("filename");
       await navigate(b, origin);
-      const out = await b.tools.browser_snapshot!.execute!({ filename: "agent-wrote.yml" }, ctx);
-      expect(JSON.stringify(out)).toContain("Welcome back");
       expect(existsSync("agent-wrote.yml")).toBe(false);
+      try {
+        const out = await b.tools.browser_snapshot!.execute!({ filename: "agent-wrote.yml" }, ctx);
+        expect(JSON.stringify(out)).toContain("Welcome back");
+        expect(existsSync("agent-wrote.yml")).toBe(false);
+      } finally {
+        rmSync("agent-wrote.yml", { force: true });
+      }
     });
   }, 60_000);
 
