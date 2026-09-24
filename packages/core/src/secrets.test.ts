@@ -67,6 +67,33 @@ describe("SecretScrubber masking", () => {
     o.self = o;
     expect(s.scrub(o)).toEqual({ pw: "•••", self: "[circular]" });
   });
+  test("an object referenced twice is kept twice, not called circular", () => {
+    const s = new SecretScrubber();
+    s.add("hunter22");
+    const shared = { pw: "hunter22" };
+    expect(s.scrub({ a: shared, b: shared })).toEqual({ a: { pw: "•••" }, b: { pw: "•••" } });
+  });
+  test("typed arrays are decoded before scrubbing", () => {
+    const s = new SecretScrubber();
+    s.add("hunter22");
+    expect(s.scrub(new TextEncoder().encode("pw=hunter22"))).toBe("pw=•••");
+  });
+  test("functions are dropped, so toJSON cannot smuggle a secret out", () => {
+    const s = new SecretScrubber();
+    s.add("hunter22");
+    expect(JSON.stringify(s.scrub({ ok: 1, toJSON: () => "hunter22" }))).toBe('{"ok":1}');
+  });
+  test("an Error's name is scrubbed too", () => {
+    const s = new SecretScrubber();
+    s.add("hunter22");
+    expect(s.scrub(Object.assign(new Error("x"), { name: "hunter22" }))).toEqual({ name: "•••", message: "x" });
+  });
+  test("an object whose conversion throws becomes a placeholder", () => {
+    const s = new SecretScrubber();
+    s.add("hunter22");
+    const odd = new (class { toString(): string { throw new Error("no"); } })();
+    expect(s.scrub(odd)).toBe("[unserialisable]");
+  });
   test("buffers and other objects are scrubbed as text", () => {
     const s = new SecretScrubber();
     s.add("hunter22");
@@ -75,13 +102,13 @@ describe("SecretScrubber masking", () => {
 });
 
 describe("SecretScrubber.forProject", () => {
-  test("registers every password, basic auth in raw and base64 form, and long header values", () => {
+  test("registers every password, basic auth in raw and base64 form, and secret headers only", () => {
     const s = SecretScrubber.forProject({
       accounts: [{ password: "first-pass" }, { password: "second-pass" }],
       httpCredentials: { username: "staging", password: "gate-pass-1" },
-      extraHeaders: { "x-vercel-protection-bypass": "bypass-token-123", "x-env": "stg" },
+      secretHeaders: { "x-vercel-protection-bypass": "bypass-token-123" },
     });
     const basic = Buffer.from("staging:gate-pass-1").toString("base64");
-    expect(s.scrub(`first-pass second-pass gate-pass-1 Basic ${basic} bypass-token-123 stg`)).toBe("••• ••• ••• Basic ••• ••• stg");
+    expect(s.scrub(`first-pass second-pass gate-pass-1 Basic ${basic} bypass-token-123 production`)).toBe("••• ••• ••• Basic ••• ••• production");
   });
 });

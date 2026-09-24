@@ -46,6 +46,28 @@ describe("submit_finding", () => {
     expect(await tools.submit_finding.execute!({ ...finding, reproduction: "1. Open /signup\n2. Submit" }, ctx)).toBe("recorded f1");
     expect(state.findings[0]!.reproduction).toEqual(["Open /signup", "Submit"]);
   });
+  test("keeps step text that starts with a number or a minus", async () => {
+    const { tools, state } = setup();
+    await tools.submit_finding.execute!({ ...finding, reproduction: "3.5 seconds pass\n-1 shown as balance" }, ctx);
+    expect(state.findings[0]!.reproduction).toEqual(["3.5 seconds pass", "-1 shown as balance"]);
+  });
+  test("accepts kind and severity in any case", async () => {
+    const { tools, state } = setup();
+    expect(await tools.submit_finding.execute!({ ...finding, kind: "Defect", severity: " HIGH " }, ctx)).toBe("recorded f1");
+    expect(state.findings[0]).toMatchObject({ kind: "defect", severity: "high" });
+  });
+  test("mentions the two-step rule even when another field is also wrong", async () => {
+    const { tools } = setup();
+    const out = await tools.submit_finding.execute!({ ...finding, severity: "critical", reproduction: ["Submit"] }, ctx);
+    expect(out).toMatch(/severity: /);
+    expect(out).toMatch(/reproduction: a defect needs at least two reproduction steps/);
+  });
+  test("a defect and a friction with the same title are different findings", async () => {
+    const { tools, state } = setup();
+    await tools.submit_finding.execute!(finding, ctx);
+    expect(await tools.submit_finding.execute!({ ...finding, kind: "friction" }, ctx)).toBe("recorded f2");
+    expect(state.findings).toHaveLength(2);
+  });
   test("rejects an unknown goal id without storing or emitting", async () => {
     const { tools, state, events } = setup();
     expect(await tools.submit_finding.execute!({ ...finding, goal: "nope" }, ctx)).toBe("rejected: unknown goal nope; use one of sign-up, invoice");
@@ -104,6 +126,17 @@ describe("note, goal_status and finish", () => {
     expect(state.goals.get("sign-up")?.status).toBe("not_attempted");
     expect(events).toHaveLength(0);
   });
+  test("goal_status accepts any case for status", async () => {
+    const { tools, state } = setup();
+    await tools.goal_status.execute!({ goal: "sign-up", status: "Reached", note: "" }, ctx);
+    expect(state.goals.get("sign-up")?.status).toBe("reached");
+  });
+  test("goal_status keeps nothing when emitting fails", async () => {
+    const state = newSessionState(goals);
+    const tools = sessionTools({ state, accounts, emit: () => { throw new Error("sink down"); }, jobId: "j", fillField: async () => "", scrubber: new SecretScrubber(), newId: () => "f1" });
+    await expect(tools.goal_status.execute!({ goal: "sign-up", status: "reached", note: "" }, ctx)).rejects.toThrow("sink down");
+    expect(state.goals.get("sign-up")?.status).toBe("not_attempted");
+  });
   test("every goal starts as not attempted", () => {
     expect([...newSessionState(goals).goals.values()].map((g) => g.status)).toEqual(["not_attempted", "not_attempted"]);
   });
@@ -124,6 +157,20 @@ describe("note, goal_status and finish", () => {
     await tools.goal_status.execute!({ goal: "invoice", status: "failed", note: "no button" }, ctx);
     expect(await tools.finish.execute!({ summary: "all good" }, ctx)).toBe("finished");
     expect(state.finished).toBe("all good");
+  });
+  test("after finish, nothing changes the session", async () => {
+    const { tools, state, events } = setup();
+    await tools.goal_status.execute!({ goal: "sign-up", status: "reached", note: "" }, ctx);
+    await tools.goal_status.execute!({ goal: "invoice", status: "reached", note: "" }, ctx);
+    await tools.finish.execute!({ summary: "first" }, ctx);
+    const before = events.length;
+    expect(await tools.finish.execute!({ summary: "second" }, ctx)).toBe("rejected: the session is already finished");
+    expect(await tools.goal_status.execute!({ goal: "sign-up", status: "failed", note: "" }, ctx)).toBe("rejected: the session is already finished");
+    expect(await tools.submit_finding.execute!(finding, ctx)).toBe("rejected: the session is already finished");
+    expect(await tools.note.execute!({ text: "late" }, ctx)).toBe("rejected: the session is already finished");
+    expect(state.finished).toBe("first");
+    expect(state.goals.get("sign-up")?.status).toBe("reached");
+    expect(events).toHaveLength(before);
   });
 });
 
@@ -158,6 +205,23 @@ describe("through the agent loop", () => {
     const second = JSON.stringify(model.doGenerateCalls[1]!.prompt);
     expect(second).toContain("rejected: ");
     expect(second).toContain("severity: ");
+    expect(second).toContain("reproduction: a defect needs at least two reproduction steps");
     expect(state.findings).toHaveLength(0);
+  });
+  test("missing or null fields come back as readable rejections, and a missing note is fine", async () => {
+    const { tools, state } = setup();
+    const { title, ...noTitle } = finding;
+    const model = scriptedModel([
+      toolCall("submit_finding", noTitle),
+      toolCall("submit_finding", { ...finding, severity: null }),
+      toolCall("goal_status", { goal: "sign-up", status: "reached" }),
+      text("ok"),
+    ]);
+    await generateText({ model, tools, prompt: "go", stopWhen: isStepCount(5) });
+    const prompts = model.doGenerateCalls.map((c) => JSON.stringify(c.prompt));
+    expect(prompts[1]).toContain("rejected: title: ");
+    expect(prompts[2]).toContain("rejected: severity: ");
+    expect(prompts.join("")).not.toContain("InvalidToolInputError");
+    expect(state.goals.get("sign-up")).toEqual({ goal: "sign-up", status: "reached", note: "" });
   });
 });

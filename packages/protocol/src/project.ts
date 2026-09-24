@@ -41,6 +41,7 @@ export const ProjectConfigSchema = z
     accounts: z.array(TargetAccountSchema).default([]),
     httpCredentials: z.strictObject({ username: z.string().min(1), password: z.string().min(MIN_PASSWORD_LENGTH) }).optional(),
     extraHeaders: z.record(z.string(), z.string()).default({}),
+    secretHeaders: z.record(z.string(), z.string().min(MIN_PASSWORD_LENGTH)).default({}),
   })
   .superRefine((p, ctx) => {
     for (const id of duplicates(p.goals.map((g) => g.id))) ctx.addIssue({ code: "custom", path: ["goals"], message: `duplicate goal id ${id}` });

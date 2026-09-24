@@ -9,15 +9,19 @@ function jsSingleQuoted(s: string): string {
   return jsonEscaped(s).replace(/\\"/g, '"').replace(/'/g, "\\'");
 }
 
-function htmlEscaped(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+function htmlEscaped(s: string, apostrophe: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, apostrophe);
+}
+
+function forms(s: string): string[] {
+  const percent = [encodeURIComponent(s), encodeURI(s), new URLSearchParams({ x: s }).toString().slice(2)];
+  const lowerPercent = percent.map((p) => p.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase()));
+  const html = ["&#39;", "&#x27;", "&apos;"].map((a) => htmlEscaped(s, a));
+  return [s, jsonEscaped(s), jsonEscaped(jsonEscaped(s)), jsSingleQuoted(s), ...html, ...percent, ...lowerPercent];
 }
 
 function variants(secret: string): string[] {
-  const s = secret.normalize("NFC");
-  const percent = [encodeURIComponent(s), encodeURI(s), new URLSearchParams({ x: s }).toString().slice(2)];
-  const lowerPercent = percent.map((p) => p.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase()));
-  return [s, jsonEscaped(s), jsonEscaped(jsonEscaped(s)), jsSingleQuoted(s), htmlEscaped(s), ...percent, ...lowerPercent];
+  return [...forms(secret.normalize("NFC")), ...forms(secret.normalize("NFD"))];
 }
 
 function isPlainObject(v: object): boolean {
@@ -31,7 +35,7 @@ export class SecretScrubber {
   static forProject(project: {
     accounts: { password: string }[];
     httpCredentials?: { username: string; password: string };
-    extraHeaders: Record<string, string>;
+    secretHeaders: Record<string, string>;
   }): SecretScrubber {
     const scrubber = new SecretScrubber();
     for (const account of project.accounts) scrubber.add(account.password);
@@ -41,9 +45,7 @@ export class SecretScrubber {
       scrubber.add(password);
       scrubber.add(basic);
     }
-    for (const value of Object.values(project.extraHeaders)) {
-      if (value.length >= MIN_SECRET_LENGTH) scrubber.add(value);
-    }
+    for (const value of Object.values(project.secretHeaders)) scrubber.add(value);
     return scrubber;
   }
 
@@ -57,7 +59,7 @@ export class SecretScrubber {
   }
 
   #scrubText(input: string): string {
-    const text = input.normalize("NFC");
+    const text = input;
     const ranges: Array<[number, number]> = [];
     for (const needle of this.#needles) {
       for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) ranges.push([at, at + needle.length]);
@@ -78,14 +80,25 @@ export class SecretScrubber {
     return out + text.slice(cursor, start) + MASK + text.slice(end);
   }
 
-  #scrub(value: unknown, seen: WeakSet<object>): unknown {
+  #scrub(value: unknown, ancestors: WeakSet<object>): unknown {
     if (typeof value === "string") return this.#scrubText(value);
+    if (typeof value === "function") return undefined;
     if (value === null || typeof value !== "object") return value;
-    if (seen.has(value)) return "[circular]";
-    seen.add(value);
-    if (Array.isArray(value)) return value.map((v) => this.#scrub(v, seen));
-    if (value instanceof Error) return { name: value.name, message: this.#scrubText(value.message) };
-    if (isPlainObject(value)) return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, this.#scrub(v, seen)]));
-    return this.#scrubText(String(value));
+    if (ancestors.has(value)) return "[circular]";
+    ancestors.add(value);
+    try {
+      if (Array.isArray(value)) return value.map((v) => this.#scrub(v, ancestors));
+      if (value instanceof Error) return { name: this.#scrubText(value.name), message: this.#scrubText(value.message) };
+      if (ArrayBuffer.isView(value)) return this.#scrubText(new TextDecoder().decode(value));
+      if (value instanceof ArrayBuffer) return this.#scrubText(new TextDecoder().decode(new Uint8Array(value)));
+      if (isPlainObject(value)) {
+        return Object.fromEntries(Object.entries(value).flatMap(([k, v]) => (typeof v === "function" ? [] : [[k, this.#scrub(v, ancestors)]])));
+      }
+      return this.#scrubText(String(value));
+    } catch {
+      return "[unserialisable]";
+    } finally {
+      ancestors.delete(value);
+    }
   }
 }

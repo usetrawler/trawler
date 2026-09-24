@@ -26,9 +26,13 @@ function issues(error: z.ZodError): string {
   return error.issues.map((i) => (i.path.length ? `${i.path.join(".")}: ${i.message}` : i.message)).join("; ");
 }
 
+function lower(value: unknown): unknown {
+  return typeof value === "string" ? value.trim().toLowerCase() : value;
+}
+
 function steps(value: unknown): unknown {
   if (typeof value !== "string") return value;
-  return value.split("\n").map((s) => s.replace(/^\s*(\d+[.)]|[-*])\s*/, "").trim()).filter(Boolean);
+  return value.split("\n").map((s) => s.replace(/^\s*(?:\d+[.)]|[-*•])\s+/, "").trim()).filter(Boolean);
 }
 
 export function sessionTools(opts: {
@@ -42,14 +46,16 @@ export function sessionTools(opts: {
 }) {
   const { state, emit, jobId } = opts;
   const goalIds = () => [...state.goals.keys()];
-  const unknownGoal = (goal: string) => `rejected: unknown goal ${goal}; use one of ${goalIds().join(", ")}`;
+  const unknownGoal = (goal: unknown) => `rejected: unknown goal ${String(goal)}; use one of ${goalIds().join(", ")}`;
+  const closed = "rejected: the session is already finished";
 
   return {
     note: tool({
       description: "Add a line to your scratchpad. The scratchpad stays in view for the whole session; old page snapshots do not.",
-      inputSchema: z.object({ text: z.string() }),
+      inputSchema: z.object({ text: z.string().nullish() }),
       execute: async ({ text }) => {
-        if (!text.trim()) return "rejected: text: the note is empty";
+        if (state.finished !== null) return closed;
+        if (!text?.trim()) return "rejected: text: the note is empty";
         emit({ type: "note", jobId, text });
         state.notes.push(text);
         return "noted";
@@ -59,17 +65,23 @@ export function sessionTools(opts: {
       description:
         "Record a defect or a friction the moment you have seen it. kind: defect | friction. severity: low | medium | high. reproduction: the literal steps, one per array item; a defect needs at least two.",
       inputSchema: z.object({
-        kind: z.string(),
-        goal: z.string(),
-        title: z.string(),
-        observed: z.string(),
-        reproduction: z.union([z.array(z.string()), z.string()]),
-        severity: z.string(),
+        kind: z.unknown().optional(),
+        goal: z.unknown().optional(),
+        title: z.unknown().optional(),
+        observed: z.unknown().optional(),
+        reproduction: z.unknown().optional(),
+        severity: z.unknown().optional(),
       }),
       execute: async (input) => {
-        if (!state.goals.has(input.goal)) return unknownGoal(input.goal);
-        const parsed = FindingSchema.safeParse({ ...input, reproduction: steps(input.reproduction), id: "pending" });
-        if (!parsed.success) return `rejected: ${issues(parsed.error)}`;
+        if (state.finished !== null) return closed;
+        if (typeof input.goal !== "string" || !state.goals.has(input.goal)) return unknownGoal(input.goal);
+        const candidate = { ...input, kind: lower(input.kind), severity: lower(input.severity), reproduction: steps(input.reproduction), id: "pending" };
+        const parsed = FindingSchema.safeParse(candidate);
+        if (!parsed.success) {
+          const tooFew = candidate.kind === "defect" && Array.isArray(candidate.reproduction) && candidate.reproduction.length < 2;
+          const hint = tooFew && !parsed.error.issues.some((i) => i.path[0] === "reproduction") ? "; reproduction: a defect needs at least two reproduction steps" : "";
+          return `rejected: ${issues(parsed.error)}${hint}`;
+        }
         const duplicate = state.findings.find((f) => f.goal === parsed.data.goal && f.kind === parsed.data.kind && f.title.toLowerCase() === parsed.data.title.toLowerCase());
         if (duplicate) return `rejected: already recorded as ${duplicate.id}`;
         const finding = { ...parsed.data, id: opts.newId() };
@@ -80,11 +92,13 @@ export function sessionTools(opts: {
     }),
     goal_status: tool({
       description: "Record where a goal ended up: reached, or failed with where you stopped. A later call for the same goal replaces the earlier one.",
-      inputSchema: z.object({ goal: z.string(), status: z.string(), note: z.string() }),
+      inputSchema: z.object({ goal: z.unknown().optional(), status: z.unknown().optional(), note: z.string().nullish() }),
       execute: async ({ goal, status, note }) => {
-        if (!state.goals.has(goal)) return unknownGoal(goal);
-        if (status !== "reached" && status !== "failed") return `rejected: status: use reached or failed`;
-        const outcome = { goal, status, note } as const;
+        if (state.finished !== null) return closed;
+        if (typeof goal !== "string" || !state.goals.has(goal)) return unknownGoal(goal);
+        const normalised = lower(status);
+        if (normalised !== "reached" && normalised !== "failed") return `rejected: status: use reached or failed`;
+        const outcome = { goal, status: normalised, note: note ?? "" } as const;
         emit({ type: "goal_status", jobId, outcome });
         state.goals.set(goal, outcome);
         return "recorded";
@@ -107,9 +121,10 @@ export function sessionTools(opts: {
     }),
     finish: tool({
       description: "End the session with a short summary once every goal has a status (reached or failed).",
-      inputSchema: z.object({ summary: z.string() }),
+      inputSchema: z.object({ summary: z.string().nullish() }),
       execute: async ({ summary }) => {
-        if (!summary.trim()) return "rejected: summary: write a short summary";
+        if (state.finished !== null) return closed;
+        if (!summary?.trim()) return "rejected: summary: write a short summary";
         const open = [...state.goals.values()].filter((g) => g.status === "not_attempted").map((g) => g.goal);
         if (open.length) return `rejected: give these goals a status first (goal_status reached or failed): ${open.join(", ")}`;
         state.finished = summary;

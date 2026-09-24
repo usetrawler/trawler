@@ -64,6 +64,10 @@ describe("ProjectConfig", () => {
     expect(() => ProjectConfigSchema.parse({ ...project, accounts: [{ ...project.accounts[0], password: "abc1234" }] })).toThrow();
     expect(() => ProjectConfigSchema.parse({ ...project, httpCredentials: { username: "u", password: "abc1234" } })).toThrow();
   });
+  test("secret headers must be long enough to scrub, plain headers need not", () => {
+    expect(() => ProjectConfigSchema.parse({ ...project, secretHeaders: { "x-key": "k7Qz9aP" } })).toThrow();
+    expect(ProjectConfigSchema.parse({ ...project, extraHeaders: { "x-env": "stg" } }).extraHeaders).toEqual({ "x-env": "stg" });
+  });
   test("rejects an empty accountRef", () => {
     expect(() => ProjectConfigSchema.parse({ ...project, personas: [{ ...project.personas[0], accountRef: "" }] })).toThrow();
   });
