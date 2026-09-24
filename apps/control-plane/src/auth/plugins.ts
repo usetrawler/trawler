@@ -1,7 +1,7 @@
 import { APIError } from "better-auth/api";
 import { genericOAuth, organization } from "better-auth/plugins";
 
-const CONTROL_OR_BIDI = /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/;
+const INVISIBLE = /[\p{Cc}\p{Cf}]/u;
 
 function refuse(message: string): never {
   throw new APIError("BAD_REQUEST", { code: "INVALID_WORKSPACE", message });
@@ -15,8 +15,11 @@ export const organizationPlugin = () =>
     organizationHooks: {
       beforeUpdateOrganization: async ({ organization: changes }) => {
         if (changes.slug !== undefined && !/^[a-z0-9-]{1,48}$/.test(changes.slug)) refuse("workspace addresses use lowercase letters, digits and dashes, up to 48 characters");
-        if (changes.name !== undefined && (changes.name.trim().length === 0 || changes.name.length > 100 || CONTROL_OR_BIDI.test(changes.name))) refuse("workspace names are 1 to 100 plain characters");
-        if (changes.logo !== undefined && changes.logo !== null && !(changes.logo.length <= 2048 && /^https:\/\//.test(changes.logo) && URL.canParse(changes.logo))) refuse("a workspace logo must be an https address");
+        if (changes.name !== undefined && (changes.name.trim().length === 0 || changes.name.length > 100 || INVISIBLE.test(changes.name))) refuse("workspace names are 1 to 100 plain characters");
+        if (changes.logo !== undefined && changes.logo !== null) {
+          if (!(changes.logo.length <= 2048 && /^https:\/\//.test(changes.logo) && URL.canParse(changes.logo))) refuse("a workspace logo must be an https address");
+          return { data: { ...changes, logo: new URL(changes.logo).href } };
+        }
         if (changes.metadata !== undefined && JSON.stringify(changes.metadata ?? null).length > 4096) refuse("workspace metadata is limited to 4 KB");
       },
     },

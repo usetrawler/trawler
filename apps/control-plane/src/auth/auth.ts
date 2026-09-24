@@ -99,7 +99,8 @@ export function createAuth(options: AuthOptions) {
               const user = await db.selectFrom("user").selectAll().where("id", "=", session.userId).executeTakeFirstOrThrow();
               return { data: { ...session, activeOrganizationId: await onboardSerialised(user) } };
             } catch (err) {
-              console.error("workspace setup failed", err);
+              const e = err as { code?: unknown; message?: unknown };
+              console.error("workspace setup failed", { code: e.code, message: e.message });
               throw new APIError("INTERNAL_SERVER_ERROR", { code: "WORKSPACE_SETUP_FAILED", message: "workspace_setup_failed" });
             }
           },
