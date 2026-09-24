@@ -7,9 +7,12 @@ function store(over: Partial<OnboardingStore> = {}) {
   const s: OnboardingStore = {
     organizationsOf: async () => [],
     pendingInvitation: async () => null,
-    acceptInvitation: async (inv, userId) => void calls.push(`accept ${inv.id} for ${userId}`),
-    slugTaken: async (slug) => taken.has(slug),
-    createOrganization: async (name, slug, userId) => (calls.push(`create ${name} ${slug} for ${userId}`), `org-${slug}`),
+    acceptInvitation: async (inv, userId) => (calls.push(`accept ${inv.id} for ${userId}`), true),
+    createOrganization: async (name, slug, userId) => {
+      if (taken.has(slug)) return null;
+      calls.push(`create ${name} ${slug} for ${userId}`);
+      return `org-${slug}`;
+    },
     ...over,
   };
   return { s, calls };
@@ -38,15 +41,22 @@ describe("onboard", () => {
 
   test("everyone else gets their own organisation, named after them, with a free slug", async () => {
     const { s, calls } = store();
-    expect(await onboard(s, { ...user, id: "u2", email: "kwame@acme.test", name: "Kwame" })).toBe("org-kwame-org-2");
-    expect(calls).toEqual(["create kwame-org kwame-org-2 for u2"]);
+    const org = await onboard(s, { ...user, id: "u2", email: "kwame@acme.test", name: "Kwame" });
+    expect(org).toMatch(/^org-kwame-org-[a-z0-9]{1,6}$/);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatch(/^create kwame-org kwame-org-[a-z0-9]{1,6} for u2$/);
+  });
+
+  test("an invitation someone else already claimed falls back to an own organisation", async () => {
+    const { s } = store({ pendingInvitation: async () => ({ id: "inv1", organizationId: "org-x", role: "member" }), acceptInvitation: async () => false });
+    expect(await onboard(s, user)).toBe("org-ana-silva-org");
   });
 });
 
 describe("orgSlugFor", () => {
   test("uses the email name, then the display name, then a fallback", () => {
     expect(orgSlugFor({ email: "ana.silva+test@acme.test", name: "x" })).toBe("ana-silva-test-org");
-    expect(orgSlugFor({ email: "@@", name: "Zoë Łucja" })).toBe("zoe-ucja-org");
+    expect(orgSlugFor({ email: "@@", name: "Zoë Adèle" })).toBe("zoe-adele-org");
     expect(orgSlugFor({ email: "", name: "李" })).toBe("my-org");
   });
 });

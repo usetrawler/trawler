@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { sql } from "kysely";
 import pg from "pg";
 import { afterAll, expect, test } from "vitest";
@@ -8,7 +9,8 @@ const t = await testDb();
 afterAll(() => t.drop());
 const pool = new pg.Pool({ connectionString: t.url, max: 4 });
 afterAll(() => pool.end());
-const auth = createAuth({ pool, secret: "x".repeat(32), baseURL: "http://localhost:3000" });
+const SECRET = "x".repeat(32);
+const auth = createAuth({ pool, secret: SECRET, baseURL: "http://localhost:3000" });
 
 async function signIn(email: string, emailVerified = true, name = "Someone") {
   const ctx = await auth.$context;
@@ -50,4 +52,54 @@ test("an unverified email does not join by invitation", async () => {
 test("there is no password sign-up", async () => {
   const res = await auth.handler(new Request("http://localhost:3000/api/auth/sign-up/email", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "p@acme.test", password: "hunter22-secret", name: "P" }) }));
   expect(res.status).toBeGreaterThanOrEqual(400);
+});
+
+test("sign-ins racing for the same invitation create exactly one membership", async () => {
+  const owner = await signIn("race-owner@acme.test");
+  await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-race', ${owner.session.activeOrganizationId}, 'racer@acme.test', 'member', 'pending', now() + interval '1 day', ${owner.user.id})`.execute(t.db);
+  const ctx = await auth.$context;
+  const racer = await ctx.internalAdapter.createUser({ email: "racer@acme.test", emailVerified: true, name: "Racer" }, { method: "admin" });
+  const sessions = await Promise.all(Array.from({ length: 6 }, () => ctx.internalAdapter.createSession(racer.id, false) as Promise<{ activeOrganizationId?: string | null }>));
+  const { rows } = await sql<{ n: number }>`select count(*)::int as n from member where "userId" = ${racer.id}`.execute(t.db);
+  expect(rows[0]!.n).toBe(1);
+  expect(new Set(sessions.map((s) => s.activeOrganizationId))).toEqual(new Set([owner.session.activeOrganizationId]));
+});
+
+test("first sign-ins racing for the same slug all get an organisation", async () => {
+  const ctx = await auth.$context;
+  const users = await Promise.all(["same@one.test", "same@two.test", "same@three.test"].map((email) => ctx.internalAdapter.createUser({ email, emailVerified: true, name: "Same" }, { method: "admin" })));
+  const sessions = await Promise.all(users.map((u) => ctx.internalAdapter.createSession(u.id, false) as Promise<{ activeOrganizationId?: string | null }>));
+  expect(sessions.every((s) => !!s.activeOrganizationId)).toBe(true);
+  expect(new Set(sessions.map((s) => s.activeOrganizationId)).size).toBe(3);
+});
+
+test("squatted slugs do not slow down or block a first sign-in", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") select 'sq' || g, 'x', 'victim-org' || case when g = 1 then '' else '-' || g end, now() from generate_series(1, 500) g`.execute(t.db);
+  const started = Date.now();
+  const { session } = await signIn("victim@acme.test");
+  expect(session.activeOrganizationId).toBeTruthy();
+  expect(Date.now() - started).toBeLessThan(2000);
+});
+
+test("clients cannot create or delete organisations directly", async () => {
+  const ctx = await auth.$context;
+  const user = await ctx.internalAdapter.createUser({ email: "client@acme.test", emailVerified: true, name: "Client" }, { method: "admin" });
+  const session = (await ctx.internalAdapter.createSession(user.id, false)) as { token: string; activeOrganizationId?: string | null };
+  const signature = createHmac("sha256", SECRET).update(session.token).digest("base64");
+  const headers = { "content-type": "application/json", origin: "http://localhost:3000", cookie: `better-auth.session_token=${encodeURIComponent(`${session.token}.${signature}`)}` };
+  const me = await auth.handler(new Request("http://localhost:3000/api/auth/get-session", { headers }));
+  expect((await me.json())?.user?.email).toBe("client@acme.test");
+  const create = await auth.handler(new Request("http://localhost:3000/api/auth/organization/create", { method: "POST", headers, body: JSON.stringify({ name: "Squat", slug: "squat-org" }) }));
+  expect(create.status).toBeGreaterThanOrEqual(400);
+  const del = await auth.handler(new Request("http://localhost:3000/api/auth/organization/delete", { method: "POST", headers, body: JSON.stringify({ organizationId: session.activeOrganizationId }) }));
+  expect(del.status).toBeGreaterThanOrEqual(400);
+  const { rows } = await sql<{ squat: number; own: number }>`select (select count(*)::int from organization where slug = 'squat-org') as squat, (select count(*)::int from organization where id = ${session.activeOrganizationId}) as own`.execute(t.db);
+  expect(rows[0]).toEqual({ squat: 0, own: 1 });
+});
+
+test("the tenant role cannot read sessions, accounts or verification tokens", async () => {
+  for (const table of ["session", "account", "verification", "user"]) {
+    const { rows } = await sql<{ ok: boolean }>`select has_table_privilege('trawler_app', ${`"${table}"`}, 'SELECT') as ok`.execute(t.db);
+    expect(rows[0]!.ok, table).toBe(false);
+  }
 });

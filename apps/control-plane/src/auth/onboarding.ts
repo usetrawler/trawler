@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 export interface Invitation {
   id: string;
   organizationId: string;
@@ -7,9 +9,8 @@ export interface Invitation {
 export interface OnboardingStore {
   organizationsOf(userId: string): Promise<string[]>;
   pendingInvitation(email: string): Promise<Invitation | null>;
-  acceptInvitation(invitation: Invitation, userId: string): Promise<void>;
-  slugTaken(slug: string): Promise<boolean>;
-  createOrganization(name: string, slug: string, userId: string): Promise<string>;
+  acceptInvitation(invitation: Invitation, userId: string): Promise<boolean>;
+  createOrganization(name: string, slug: string, userId: string): Promise<string | null>;
 }
 
 export interface NewUser {
@@ -20,7 +21,7 @@ export interface NewUser {
 }
 
 function slug(value: string): string {
-  return value.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/, "");
+  return value.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/, "");
 }
 
 export function orgSlugFor(user: { email: string; name: string }): string {
@@ -33,13 +34,16 @@ export async function onboard(store: OnboardingStore, user: NewUser): Promise<st
   if (existing) return existing;
   if (user.emailVerified) {
     const invitation = await store.pendingInvitation(user.email.trim().toLowerCase());
-    if (invitation) {
-      await store.acceptInvitation(invitation, user.id);
-      return invitation.organizationId;
-    }
+    if (invitation && (await store.acceptInvitation(invitation, user.id))) return invitation.organizationId;
   }
   const base = orgSlugFor(user);
-  let candidate = base;
-  for (let n = 2; await store.slugTaken(candidate); n++) candidate = `${base}-${n}`;
-  return store.createOrganization(base, candidate, user.id);
+  for (const candidate of [base, `${base}-${randomSuffix()}`, `${base}-${randomSuffix()}`, `${base}-${randomSuffix(12)}`]) {
+    const created = await store.createOrganization(base, candidate, user.id);
+    if (created) return created;
+  }
+  throw new Error("could not find a free workspace name");
+}
+
+function randomSuffix(length = 6): string {
+  return randomBytes(length).toString("base64url").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, length) || "x";
 }

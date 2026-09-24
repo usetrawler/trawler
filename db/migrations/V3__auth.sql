@@ -25,4 +25,7 @@ create index "member_userId_idx" on "member" ("userId");
 create index "invitation_organizationId_idx" on "invitation" ("organizationId");
 
 create index "invitation_email_idx" on "invitation" ("email");
-GRANT SELECT, INSERT, UPDATE, DELETE ON "user", "session", "account", "verification", "organization", "member", "invitation" TO trawler_app, trawler_bypass;
+
+create unique index "member_organization_user_key" on "member" ("organizationId", "userId");
+
+create unique index "account_provider_account_key" on "account" ("providerId", "accountId");
