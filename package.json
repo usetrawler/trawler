@@ -1,0 +1,17 @@
+{
+  "name": "trawler",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*", "apps/*"],
+  "engines": { "node": ">=22.12" },
+  "scripts": {
+    "typecheck": "tsc -p packages/protocol && tsc -p packages/core && tsc -p apps/runner",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  }
+}
