@@ -76,6 +76,8 @@ beforeAll(async () => {
         return res.end(JSON.stringify({ prefetch: [{ source: "list", urls: [`${foreignOrigin}/header-prefetch`] }] }));
       case "/neuter":
         return html(`<input aria-label="Password" type="password"><button onclick="const p=document.querySelector('input');p.type='text';p.removeAttribute('data-trawler-secret')">Show</button><button onclick="const p=document.querySelector('input');p.type='text';p.removeAttribute('data-trawler-secret');p.value=p.value.slice(0,6)+'X'+p.value.slice(6)">Tamper</button>`);
+      case "/remount":
+        return html(`<input aria-label="Password" type="password"><button onclick="const o=document.querySelector('input');const n=document.createElement('input');n.type=o.type==='password'?'text':'password';n.setAttribute('aria-label','Password');n.value=o.value;o.replaceWith(n)">Show password</button>`);
       case "/shadow":
         return html(`<div id="host"></div><script>document.getElementById("host").attachShadow({ mode: "open" }).innerHTML = '<input aria-label="Shadow password" type="password">';</script>`);
       case "/cross-frame":
@@ -331,6 +333,24 @@ describe("password fields", () => {
       await b.tools.browser_click!.execute!({ target: refOf(snap, "Tamper"), element: "tamper" }, ctx);
       const after = await snapshot(b);
       expect(after).not.toMatch(/hunter|X22|secret/);
+    });
+  }, 60_000);
+
+  test("a show-password button that swaps in a new field does not let the password be edited", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/remount`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), PASSWORD, "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Show password"), element: "show" }, ctx);
+      const shown = await snapshot(b);
+      await b.tools.browser_click!.execute!({ target: refOf(shown, "Password"), element: "password" }, ctx);
+      for (const key of ["Home", "ArrowRight", "X"]) {
+        const out = (await b.tools.browser_press_key!.execute!({ key }, ctx)) as { isError?: boolean };
+        expect(out.isError).toBe(true);
+      }
+      const typed = (await b.tools.browser_type!.execute!({ target: refOf(shown, "Password"), text: "X", element: "password", slowly: true }, ctx)) as { isError?: boolean };
+      expect(typed.isError).toBe(true);
+      expect(await snapshot(b)).not.toMatch(/hunter|X22|secret/);
     });
   }, 60_000);
 

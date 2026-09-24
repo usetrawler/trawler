@@ -4,7 +4,7 @@ import { createConnection } from "@playwright/mcp";
 import { chromium, type ElementHandle, type Frame, type Route } from "playwright";
 import { jsonSchema, type Tool, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
-import { MIN_SECRET_LENGTH, type SecretScrubber } from "./secrets.ts";
+import { MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
 import type { FieldKind } from "./session-tools.ts";
 
 export const BROWSER_TOOLS = [
@@ -33,6 +33,13 @@ const STRIP_SPECULATION = `(() => {
     }
   }).observe(document, { childList: true, subtree: true });
 })();`;
+const MAX_HELD_FIELDS = 20;
+function fieldStateOf(el: any, mark: string) {
+  return {
+    marked: !!el && (el.hasAttribute?.(mark) || (el instanceof HTMLInputElement && el.type.toLowerCase() === "password")),
+    value: !el ? "" : el.isContentEditable ? String(el.textContent ?? "") : typeof el.value === "string" ? el.value : "",
+  };
+}
 const CLOSED = /Target page, context or browser has been closed|Browser has been closed/;
 const INTERRUPTED = /is interrupted by another navigation/;
 const DEEPEST_ACTIVE = `(() => {
@@ -41,21 +48,20 @@ const DEEPEST_ACTIVE = `(() => {
   return el;
 })()`;
 
-async function focusIsOnSecretIn(frame: Frame, filled: ElementHandle[], depth = 0): Promise<boolean> {
+type FieldState = { marked: boolean; value: string };
+
+async function focusIsOnSecretIn(frame: Frame, filled: ElementHandle[], holdsSecret: (value: string) => boolean, depth = 0): Promise<boolean> {
   if (depth > 10) return true;
   const active = (await frame.evaluateHandle(DEEPEST_ACTIVE)).asElement() as ElementHandle | null;
   if (!active) return false;
   const here: ElementHandle[] = [];
   for (const h of filled) if ((await h.ownerFrame().catch(() => null)) === frame) here.push(h);
-  const secret = await active.evaluate(
-    (el: any, [mark, ...held]: unknown[]) =>
-      held.includes(el) || el.hasAttribute(mark as string) || (el.tagName === "INPUT" && String(el.type).toLowerCase() === "password"),
-    [SECRET_MARK, ...here],
-  );
-  if (secret) return true;
+  const held = await active.evaluate((el: unknown, others: unknown[]) => others.includes(el), here);
+  const field = (await active.evaluate(fieldStateOf, SECRET_MARK).catch(() => null)) as FieldState | null;
+  if (held || !field || field.marked || holdsSecret(field.value)) return true;
   for (const child of frame.childFrames()) {
     const owner = await child.frameElement().catch(() => null);
-    if (owner && (await owner.evaluate((a: unknown, b: unknown) => a === b, active))) return focusIsOnSecretIn(child, filled, depth + 1);
+    if (owner && (await owner.evaluate((a: unknown, b: unknown) => a === b, active))) return focusIsOnSecretIn(child, filled, holdsSecret, depth + 1);
   }
   return false;
 }
@@ -178,26 +184,30 @@ export async function openBrowser(opts: {
     const evaluate = all.browser_evaluate?.execute;
     const type = all.browser_type!.execute!;
     if (!evaluate) throw new Error("Playwright MCP no longer provides browser_evaluate");
-    const isSecretField = `(el) => !!el && (el.hasAttribute?.("${SECRET_MARK}") || (el instanceof HTMLInputElement && el.type === "password"))`;
+    const fieldState = `(el) => (${fieldStateOf.toString()})(el, ${JSON.stringify(SECRET_MARK)})`;
     const refused = (text: string) => ({ content: [{ type: "text", text: `### Error\n${text}` }], isError: true });
     const probe = async (args: Record<string, unknown>) => evaluatedValue((await evaluate(args, internalCall)) as McpResult);
 
+    const typedSecrets = new Set<string>();
+    const holdsSecret = (value: string) => [...typedSecrets].some((secret) => value.includes(secret));
     let filled: ElementHandle[] = [];
     const liveFilled = async () => {
       const alive = await Promise.all(filled.map((h) => h.evaluate(() => true).catch(() => false)));
       filled = filled.filter((_, i) => alive[i]);
       return filled;
     };
-    const maskFilledValues = async () => {
+    const scrubWithFilledValues = async <T>(result: T): Promise<T> => {
+      const live = new SecretScrubber();
       for (const h of await liveFilled()) {
         const value = await h.evaluate((el: any) => String(el.value ?? "")).catch(() => "");
-        if (value.length >= MIN_SECRET_LENGTH) opts.scrubber.add(value);
+        if (value.length >= MIN_SECRET_LENGTH) live.add(value);
       }
+      return live.scrub(opts.scrubber.scrub(result));
     };
     const focusIsOnSecret = async () => {
       const held = await liveFilled();
       for (const page of context.pages()) {
-        if (await focusIsOnSecretIn(page.mainFrame(), held).catch(() => true)) return true;
+        if (await focusIsOnSecretIn(page.mainFrame(), held, holdsSecret).catch(() => true)) return true;
       }
       return false;
     };
@@ -224,8 +234,9 @@ export async function openBrowser(opts: {
           if (name === "browser_press_key" && (await focusIsOnSecret())) {
             return refused("Keys cannot be pressed while a password field has focus. Click somewhere else first.");
           }
-          if (EDITS_FIELDS.has(name) && typeof safeInput.target === "string" && (await probe({ element: "field", target: safeInput.target, function: isSecretField })) === true) {
-            return refused("Password fields can only be filled with sign_in.");
+          if (EDITS_FIELDS.has(name) && typeof safeInput.target === "string") {
+            const field = (await probe({ element: "field", target: safeInput.target, function: fieldState })) as Partial<FieldState> | undefined;
+            if (field?.marked === true || (typeof field?.value === "string" && holdsSecret(field.value))) return refused("Password fields can only be filled with sign_in.");
           }
           if (name === "browser_navigate") {
             const url = typeof safeInput.url === "string" ? safeInput.url : "";
@@ -241,8 +252,7 @@ export async function openBrowser(opts: {
           if (blockedNavigation) {
             result.content = [...(result.content ?? []), { type: "text", text: `### Blocked\n${blockedNavigation} is outside the allowed origins, so the browser did not open it. Go back or navigate to an allowed page.` }];
           }
-          await maskFilledValues();
-          return opts.scrubber.scrub(result);
+          return scrubWithFilledValues(result);
         },
       };
     }
@@ -262,10 +272,11 @@ export async function openBrowser(opts: {
           if (probe.type !== "password") return "failed: the target is not a password field, so the password was not typed";
           const field = await findMarked(mark);
           if (!field) return "failed: the password field could not be found again, so the password was not typed";
-          filled.push(field);
+          filled = [...filled, field].slice(-MAX_HELD_FIELDS);
         }
         const out = (await type({ target: ref, element: kind === "password" ? "password field" : "username field", text }, internalCall)) as McpResult;
         if (out?.isError) return `failed: ${opts.scrubber.scrub(textOf(out))}`;
+        if (kind === "password") typedSecrets.add(text);
         return kind === "password" ? "typed the password" : "typed the username";
       },
       async close() {
