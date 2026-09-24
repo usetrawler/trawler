@@ -142,3 +142,13 @@ test("scriptedModel fails loudly once its script is exhausted", async () => {
   await generateText({ model, prompt: "a" });
   await expect(generateText({ model, prompt: "b" })).rejects.toThrow(/only 1 responses; call 2 has none/);
 });
+
+test("tallyStep adds one step's tokens and cost to the usage and the budget", async () => {
+  const { tallyStep } = await import("./llm.ts");
+  const usage = { model: "m", inputTokens: 1, outputTokens: 2, costUsd: 0.5, steps: 1 };
+  const budget = new Budget(10);
+  const cost = tallyStep(usage, budget, { providerMetadata: { openrouter: { usage: { cost: 0.25 } } }, usage: { inputTokens: 100, outputTokens: 20 } });
+  expect(cost).toBeCloseTo(0.25, 10);
+  expect(usage).toEqual({ model: "m", inputTokens: 101, outputTokens: 22, costUsd: 0.75, steps: 2 });
+  expect(budget.spent).toBeCloseTo(0.25, 10);
+});

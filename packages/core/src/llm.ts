@@ -1,5 +1,6 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { wrapLanguageModel, type LanguageModelMiddleware } from "ai";
+import type { JobUsage } from "@usetrawler/protocol";
 
 type OpenRouterOptions = { provider?: Record<string, unknown> } & Record<string, unknown>;
 
@@ -57,4 +58,18 @@ export class Budget {
   get exceeded(): boolean {
     return this.#spent >= this.limitUsd - 1e-9;
   }
+}
+
+export function tallyStep(
+  usage: JobUsage,
+  budget: Budget,
+  step: { providerMetadata?: Record<string, unknown>; usage: { inputTokens?: number; outputTokens?: number } },
+): number {
+  const cost = stepCost(step);
+  budget.add(cost);
+  usage.steps += 1;
+  usage.costUsd += cost;
+  usage.inputTokens += step.usage.inputTokens ?? 0;
+  usage.outputTokens += step.usage.outputTokens ?? 0;
+  return cost;
 }
