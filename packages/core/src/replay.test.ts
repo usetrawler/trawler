@@ -91,6 +91,12 @@ describe("runReplay", () => {
     expect(results).toMatch(/rejected: observed: describe what you saw/);
   });
 
+  test("the first report in a reply stands", async () => {
+    const model = scriptedModel([[report({ completed: false, observed: "No button", blockedAt: 2 }), report({ completed: true, observed: "Everything fine", blockedAt: null })]]);
+    const { observation } = await replay(model).promise;
+    expect(observation).toEqual({ completed: false, observed: "No button", blockedAt: 2 });
+  });
+
   test("signs in only with the account the steps were written for", async () => {
     const model = scriptedModel([
       toolCall("sign_in", { account: "admin", usernameField: "e1", passwordField: "e2" }),
