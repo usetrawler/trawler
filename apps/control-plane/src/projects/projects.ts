@@ -3,7 +3,7 @@ import type { Tx } from "../db/tenancy.ts";
 import { last4, type Keyring } from "../lib/secrets.ts";
 
 const accountContext = (orgId: string, projectId: string, ref: string) => [orgId, "target_account", projectId, ref, "password"];
-const gateContext = (orgId: string, projectId: string, kind: string, name: string) => [orgId, "target_gate", projectId, kind, name];
+const gateContext = (orgId: string, projectId: string, kind: string, name: string) => [orgId, "target_gate", projectId, kind, kind === "basic_auth" ? "password" : name];
 
 async function insertPlan(tx: Tx, orgId: string, projectId: string, personas: Persona[], goals: Goal[]) {
   if (personas.length) {
@@ -24,21 +24,21 @@ export async function createProject(tx: Tx, orgId: string, config: ProjectConfig
     })
     .returning("id")
     .executeTakeFirstOrThrow();
-  await insertPlan(tx, orgId, id, valid.personas, valid.goals);
   if (valid.accounts.length) {
-    await tx.insertInto("target_accounts").values(valid.accounts.map((a) => ({
-      org_id: orgId, project_id: id, ref: a.ref, username: a.username,
+    await tx.insertInto("target_accounts").values(valid.accounts.map((a, i) => ({
+      org_id: orgId, project_id: id, ref: a.ref, username: a.username, position: i,
       password_secret: keys.encrypt(a.password, accountContext(orgId, id, a.ref)), password_hint: last4(a.password),
     }))).execute();
   }
+  await insertPlan(tx, orgId, id, valid.personas, valid.goals);
   const gates = [
     ...(valid.httpCredentials ? [{ kind: "basic_auth", name: valid.httpCredentials.username, value: null, secret: valid.httpCredentials.password }] : []),
     ...Object.entries(valid.extraHeaders).map(([name, value]) => ({ kind: "header", name, value, secret: null })),
     ...Object.entries(valid.secretHeaders).map(([name, secret]) => ({ kind: "secret_header", name, value: null, secret })),
   ];
   if (gates.length) {
-    await tx.insertInto("target_gates").values(gates.map((g) => ({
-      org_id: orgId, project_id: id, kind: g.kind, name: g.name, value: g.value,
+    await tx.insertInto("target_gates").values(gates.map((g, i) => ({
+      org_id: orgId, project_id: id, kind: g.kind, name: g.name, value: g.value, position: i,
       secret: g.secret === null ? null : keys.encrypt(g.secret, gateContext(orgId, id, g.kind, g.name)),
       secret_hint: g.secret === null ? null : last4(g.secret),
     }))).execute();
@@ -47,13 +47,13 @@ export async function createProject(tx: Tx, orgId: string, config: ProjectConfig
 }
 
 export async function loadProjectConfig(tx: Tx, orgId: string, projectId: string, keys: Keyring): Promise<ProjectConfig> {
-  const project = await tx.selectFrom("projects").selectAll().where("id", "=", projectId).executeTakeFirst();
+  const project = await tx.selectFrom("projects").selectAll().where("id", "=", projectId).where("org_id", "=", orgId).executeTakeFirst();
   if (!project) throw new Error("project not found");
   const [personas, goals, accounts, gates] = await Promise.all([
     tx.selectFrom("personas").selectAll().where("project_id", "=", projectId).orderBy("position").execute(),
     tx.selectFrom("goals").selectAll().where("project_id", "=", projectId).orderBy("position").execute(),
-    tx.selectFrom("target_accounts").selectAll().where("project_id", "=", projectId).orderBy("ref").execute(),
-    tx.selectFrom("target_gates").selectAll().where("project_id", "=", projectId).orderBy("name").execute(),
+    tx.selectFrom("target_accounts").selectAll().where("project_id", "=", projectId).orderBy("position").execute(),
+    tx.selectFrom("target_gates").selectAll().where("project_id", "=", projectId).orderBy("position").execute(),
   ]);
   const basic = gates.find((g) => g.kind === "basic_auth");
   return ProjectConfigSchema.parse({
@@ -71,26 +71,26 @@ export async function loadProjectConfig(tx: Tx, orgId: string, projectId: string
   });
 }
 
-export async function listProjects(tx: Tx) {
-  return tx.selectFrom("projects").select(["id", "name", "target_url", "created_at"]).orderBy("created_at", "desc").execute();
+export async function listProjects(tx: Tx, orgId: string) {
+  return tx.selectFrom("projects").select(["id", "name", "target_url", "created_at"]).where("org_id", "=", orgId).orderBy("created_at", "desc").orderBy("id").execute();
 }
 
-export async function projectForEditing(tx: Tx, projectId: string) {
-  const project = await tx.selectFrom("projects").select(["id", "name", "target_url", "docs_url", "description", "focus", "allowed_origins"]).where("id", "=", projectId).executeTakeFirst();
+export async function projectForEditing(tx: Tx, orgId: string, projectId: string) {
+  const project = await tx.selectFrom("projects").select(["id", "name", "target_url", "docs_url", "description", "focus", "allowed_origins"]).where("id", "=", projectId).where("org_id", "=", orgId).executeTakeFirst();
   if (!project) return null;
   const [personas, goals, accounts, gates] = await Promise.all([
     tx.selectFrom("personas").select(["key", "name", "brief", "account_ref"]).where("project_id", "=", projectId).orderBy("position").execute(),
     tx.selectFrom("goals").select(["key", "instruction"]).where("project_id", "=", projectId).orderBy("position").execute(),
-    tx.selectFrom("target_accounts").select(["ref", "username", "password_hint"]).where("project_id", "=", projectId).orderBy("ref").execute(),
-    tx.selectFrom("target_gates").select(["kind", "name", "value", "secret_hint"]).where("project_id", "=", projectId).orderBy("name").execute(),
+    tx.selectFrom("target_accounts").select(["ref", "username", "password_hint"]).where("project_id", "=", projectId).orderBy("position").execute(),
+    tx.selectFrom("target_gates").select(["kind", "name", "value", "secret_hint"]).where("project_id", "=", projectId).orderBy("position").execute(),
   ]);
   return { ...project, personas, goals, accounts, gates };
 }
 
 export async function replacePlan(tx: Tx, orgId: string, projectId: string, plan: { personas: Persona[]; goals: Goal[] }): Promise<void> {
-  const refs = new Set((await tx.selectFrom("target_accounts").select("ref").where("project_id", "=", projectId).execute()).map((a) => a.ref));
-  const project = await tx.selectFrom("projects").select("target_url").where("id", "=", projectId).executeTakeFirst();
+  const project = await tx.selectFrom("projects").select("target_url").where("id", "=", projectId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
   if (!project) throw new Error("project not found");
+  const refs = new Set((await tx.selectFrom("target_accounts").select("ref").where("project_id", "=", projectId).execute()).map((a) => a.ref));
   const checked = ProjectConfigSchema.safeParse({
     name: "check", targetUrl: project.target_url, personas: plan.personas, goals: plan.goals,
     accounts: [...refs].map((ref) => ({ ref, username: "u", password: "x".repeat(8) })),

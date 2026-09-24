@@ -105,6 +105,7 @@ export interface TargetAccounts {
   org_id: string;
   password_hint: string;
   password_secret: string;
+  position: number;
   project_id: string;
   ref: string;
   username: string;
@@ -115,6 +116,7 @@ export interface TargetGates {
   kind: string;
   name: string;
   org_id: string;
+  position: number;
   project_id: string;
   secret: string | null;
   secret_hint: string | null;

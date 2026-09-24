@@ -6,6 +6,7 @@ import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { createProject, listProjects, loadProjectConfig, projectForEditing, replacePlan } from "./projects.ts";
+import { ProjectConfigSchema as Schema } from "@usetrawler/protocol";
 
 const t = await testDb();
 afterAll(() => t.drop());
@@ -18,7 +19,7 @@ const config = ProjectConfigSchema.parse({
   description: "Invoices.",
   personas: [{ id: "ana", name: "Ana", brief: "You invoice.", accountRef: "ana" }, { id: "lee", name: "Lee", brief: "You browse." }],
   goals: [{ id: "sign-in", instruction: "Get in." }, { id: "invoice", instruction: "Send an invoice." }],
-  accounts: [{ ref: "ana", username: "ana@acme.test", password: "hunter22-secret" }],
+  accounts: [{ ref: "zed", username: "zed@acme.test", password: "zed-password-1" }, { ref: "ana", username: "ana@acme.test", password: "hunter22-secret" }],
   httpCredentials: { username: "staging", password: "gate-pass-123" },
   extraHeaders: { "x-env": "stg" },
   secretHeaders: { "x-bypass": "bypass-token-123" },
@@ -43,8 +44,8 @@ test("secrets are stored encrypted and never come back from list or edit queries
     gates: await tx.selectFrom("target_gates").selectAll().execute(),
   })));
   for (const secret of ["hunter22-secret", "gate-pass-123", "bypass-token-123"]) expect(raw).not.toContain(secret);
-  const listed = JSON.stringify(await withOrg(t.db, "org-a", (tx) => listProjects(tx)));
-  const editing = JSON.stringify(await withOrg(t.db, "org-a", (tx) => projectForEditing(tx, id)));
+  const listed = JSON.stringify(await withOrg(t.db, "org-a", (tx) => listProjects(tx, "org-a")));
+  const editing = JSON.stringify(await withOrg(t.db, "org-a", (tx) => projectForEditing(tx, "org-a", id)));
   for (const secret of ["hunter22-secret", "gate-pass-123", "bypass-token-123", "v1:"]) {
     expect(listed).not.toContain(secret);
     expect(editing).not.toContain(secret);
@@ -54,9 +55,10 @@ test("secrets are stored encrypted and never come back from list or edit queries
 
 test("another organisation can neither see nor load the project", async () => {
   const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
-  expect(await withOrg(t.db, "org-b", (tx) => projectForEditing(tx, id))).toBeNull();
+  expect(await withOrg(t.db, "org-b", (tx) => projectForEditing(tx, "org-b", id))).toBeNull();
   await expect(withOrg(t.db, "org-b", (tx) => loadProjectConfig(tx, "org-b", id, keys))).rejects.toThrow(/not found/);
-  expect((await withOrg(t.db, "org-b", (tx) => listProjects(tx))).map((p) => p.id)).not.toContain(id);
+  expect((await withOrg(t.db, "org-b", (tx) => listProjects(tx, "org-b"))).map((p) => p.id)).not.toContain(id);
+  expect((await asSystem(t.db, (tx) => listProjects(tx, "org-b"))).map((p) => p.id)).not.toContain(id);
 });
 
 test("a persona cannot be attached to another organisation's project, even by the system role", async () => {
@@ -81,6 +83,36 @@ test("replacing the plan keeps accounts and validates the result", async () => {
   const loaded = await withOrg(t.db, "org-a", (tx) => loadProjectConfig(tx, "org-a", id, keys));
   expect(loaded.personas.map((p) => p.id)).toEqual(["zed"]);
   expect(loaded.goals.map((g) => g.id)).toEqual(["export"]);
-  expect(loaded.accounts.map((a) => a.ref)).toEqual(["ana"]);
+  expect(loaded.accounts.map((a) => a.ref)).toEqual(["zed", "ana"]);
   await expect(withOrg(t.db, "org-a", (tx) => replacePlan(tx, "org-a", id, { personas: [{ id: "q", name: "Q", brief: "b", accountRef: "nobody" }], goals: [{ id: "g", instruction: "x" }] }))).rejects.toThrow(/unknown account/);
+});
+
+test("two plan replacements at the same time leave exactly one of them", async () => {
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  const run = (k: string) => withOrg(t.db, "org-a", async (tx) => {
+    await replacePlan(tx, "org-a", id, { personas: [{ id: `p-${k}`, name: k, brief: "b" }], goals: [{ id: `g-${k}`, instruction: "x" }] });
+    await sql`select pg_sleep(0.3)`.execute(tx);
+  });
+  await Promise.allSettled([run("one"), run("two")]);
+  const loaded = await withOrg(t.db, "org-a", (tx) => loadProjectConfig(tx, "org-a", id, keys));
+  const suffixes = new Set([...loaded.personas.map((p) => p.id.slice(2)), ...loaded.goals.map((g) => g.id.slice(2))]);
+  expect(suffixes.size).toBe(1);
+});
+
+test("an account a persona uses cannot disappear from under it", async () => {
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  await expect(withOrg(t.db, "org-a", (tx) => tx.deleteFrom("target_accounts").where("project_id", "=", id).where("ref", "=", "ana").execute())).rejects.toThrow(/foreign key/);
+});
+
+test("only one basic-auth gate per project", async () => {
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  await expect(withOrg(t.db, "org-a", (tx) => tx.insertInto("target_gates").values({ org_id: "org-a", project_id: id, kind: "basic_auth", name: "other", secret: "v1:x", secret_hint: "…", position: 9 }).execute())).rejects.toThrow(/duplicate key|unique/);
+});
+
+test("oversized text is refused by the schema before it reaches the database", () => {
+  const big = "x".repeat(20_000);
+  expect(Schema.safeParse({ ...config, description: big }).success).toBe(false);
+  expect(Schema.safeParse({ ...config, personas: [{ id: "a", name: "A", brief: big }] }).success).toBe(false);
+  expect(Schema.safeParse({ ...config, name: "n".repeat(201) }).success).toBe(false);
+  expect(Schema.safeParse({ ...config, extraHeaders: { "X-Env": "a" }, secretHeaders: { "x-env": "bypass-token-123" } }).success).toBe(false);
 });
