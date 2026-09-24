@@ -5,8 +5,8 @@ import { createModel } from "@usetrawler/core";
 import { getAuth } from "../../server/auth.ts";
 import { getDb, getKeyring } from "../../server/db.ts";
 import { readEnv } from "../../server/env.ts";
-import { safeFetchText } from "../../setup/safe-fetch.ts";
-import { proposeFromUrl } from "../../setup/propose.ts";
+import { FetchRefused, safeFetchText, type RefusalReason } from "../../setup/safe-fetch.ts";
+import { proposeFromUrl, SetupLimited } from "../../setup/propose.ts";
 
 export interface SetupState {
   error?: string;
@@ -19,14 +19,20 @@ function normalise(raw: string): string {
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
-function friendly(message: string): string {
-  if (/not allowed/.test(message)) return "That address is on a private network. Trawler can only read public pages from here.";
-  if (/could not be resolved/.test(message)) return "We could not find that address. Check the spelling.";
-  if (/timed out/.test(message)) return "The page took too long to answer.";
-  if (/HTTP \d+/.test(message)) return `The page answered with an error (${/HTTP \d+/.exec(message)![0]}).`;
-  if (/http\(s\)/.test(message)) return "Enter a web address such as https://app.example.com.";
-  if (/budget|setup model/.test(message)) return "We could not build a plan for this page. Try again in a moment.";
-  return "Something went wrong while reading the page. Try again.";
+const MESSAGES: Record<RefusalReason, string> = {
+  address: "Enter a web address such as https://app.example.com.",
+  too_long: "That address is too long.",
+  private: "That address is on a private network. Trawler can only read public pages from here.",
+  unresolved: "We could not find that address. Check the spelling.",
+  timeout: "The page took too long to answer.",
+  status: "The page answered with an error.",
+  redirects: "The page redirected too many times.",
+};
+
+function friendly(err: unknown): string {
+  if (err instanceof FetchRefused) return err.reason === "status" ? `The page answered with an error (${err.message}).` : MESSAGES[err.reason];
+  if (err instanceof SetupLimited) return "You have started many new projects recently. Try again in a few minutes.";
+  return "We could not build a plan for this page. Try again in a moment.";
 }
 
 export async function startSetup(_previous: SetupState, form: FormData): Promise<SetupState> {
@@ -39,6 +45,7 @@ export async function startSetup(_previous: SetupState, form: FormData): Promise
   const orgId = session.session.activeOrganizationId;
   if (!orgId) return { error: "Your account has no workspace yet. Sign out and in again.", url, focus };
   if (!url.trim()) return { error: "Paste the address of the product to test.", url, focus };
+  if (url.length > 2048) return { error: MESSAGES.too_long, url: url.slice(0, 2048), focus };
   const setup = readEnv().setup;
   if (!setup) return { error: "Setup is not configured on this server.", url, focus };
   let projectId: string;
@@ -48,7 +55,8 @@ export async function startSetup(_previous: SetupState, form: FormData): Promise
       { orgId, url: normalise(url), focus },
     );
   } catch (err) {
-    return { error: friendly(err instanceof Error ? err.message : String(err)), url, focus };
+    console.error("setup failed", { reason: err instanceof FetchRefused ? err.reason : undefined, message: err instanceof Error ? err.message : String(err) });
+    return { error: friendly(err), url, focus };
   }
   redirect(`/projects/${projectId}`);
 }

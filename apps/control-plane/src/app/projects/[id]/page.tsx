@@ -18,7 +18,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   if (!session) redirect("/sign-in");
   const orgId = session.session.activeOrganizationId;
   if (!orgId || !UUID.test(id)) notFound();
-  const project = await withOrg(getDb(), orgId, (tx) => projectForEditing(tx, id));
+  const project = await withOrg(getDb(), orgId, (tx) => projectForEditing(tx, orgId, id));
   if (!project) notFound();
   const organization = await auth.api.getFullOrganization({ headers: requestHeaders });
   return (

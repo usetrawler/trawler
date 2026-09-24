@@ -1,6 +1,6 @@
-import { createServer, type Server } from "node:http";
+import http, { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { blockedAddresses, safeFetchText } from "./safe-fetch.ts";
+import { blockedAddresses, FetchRefused, safeFetchText } from "./safe-fetch.ts";
 
 let server: Server;
 let base = "";
@@ -84,4 +84,33 @@ test("redirect loops, error pages, huge pages and slow pages are handled", async
   expect(big.text.length).toBeLessThanOrEqual(2_000_000);
   await expect(safeFetchText(`${base}/slow`, { blocked: allowLoopback, timeoutMs: 500 })).rejects.toThrow(/timed out/);
   await expect(safeFetchText(`${base}/trickle`, { blocked: allowLoopback, timeoutMs: 800 })).rejects.toThrow(/timed out/);
+});
+
+test("a pooled keep-alive socket to a private host is not reused", async () => {
+  const port = (server.address() as { port: number }).port;
+  await new Promise<void>((resolve) => http.get(`http://localhost:${port}/page`, (res) => { res.resume(); res.on("end", () => resolve()); }));
+  await expect(safeFetchText(`http://localhost:${port}/page`)).rejects.toThrow(/not allowed/);
+});
+
+test("a proxy from the environment is never used", async () => {
+  const saved = { NODE_USE_ENV_PROXY: process.env.NODE_USE_ENV_PROXY, HTTP_PROXY: process.env.HTTP_PROXY };
+  process.env.NODE_USE_ENV_PROXY = "1";
+  process.env.HTTP_PROXY = base;
+  try {
+    await expect(safeFetchText("http://internal-service.corp.invalid/")).rejects.toThrow(/could not be resolved|not allowed/);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+  }
+});
+
+test("very long addresses and embedded private IPv4 forms are refused", async () => {
+  await expect(safeFetchText(`https://example.com/?q=${"a".repeat(3000)}`)).rejects.toThrow(/too long/);
+  for (const url of ["http://[::127.0.0.1]/", "http://[2002:7f00:1::]/", "http://[64:ff9b:1::7f00:1]/", "http://[fec0::1]/"]) {
+    await expect(safeFetchText(url), url).rejects.toThrow(/not allowed/);
+  }
+});
+
+test("refusals carry a reason code for the user interface", async () => {
+  await expect(safeFetchText("http://10.0.0.1/")).rejects.toMatchObject({ reason: "private" });
+  await expect(safeFetchText("ftp://x/")).rejects.toBeInstanceOf(FetchRefused);
 });
