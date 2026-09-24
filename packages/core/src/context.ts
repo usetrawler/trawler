@@ -2,11 +2,13 @@ import type { ModelMessage, ToolResultPart } from "ai";
 
 function size(part: ToolResultPart): number {
   const o = part.output;
-  return o.type === "text" || o.type === "error-text" ? o.value.length : JSON.stringify(o).length;
+  if (o.type === "text" || o.type === "error-text") return o.value.length;
+  return JSON.stringify("value" in o ? o.value : o).length;
 }
 
 function isElided(part: ToolResultPart): boolean {
-  return part.output.type === "text" && /^\[.+ result elided: \d+ chars\]$/.test(part.output.value);
+  const o = part.output;
+  return (o.type === "text" || o.type === "error-text") && /^\[.+ result elided: \d+ chars\]$/.test(o.value);
 }
 
 export function pruneMessages(messages: ModelMessage[], opts: { keepLargeResults: number; largeResultChars: number }): ModelMessage[] {
@@ -25,7 +27,7 @@ export function pruneMessages(messages: ModelMessage[], opts: { keepLargeResults
       ...m,
       content: m.content.map((p, pi) =>
         p.type === "tool-result" && elide.has(`${mi}:${pi}`)
-          ? { ...p, output: { type: "text" as const, value: `[${p.toolName} result elided: ${size(p)} chars]` } }
+          ? { ...p, output: { type: p.output.type.startsWith("error") ? ("error-text" as const) : ("text" as const), value: `[${p.toolName} result elided: ${size(p)} chars]` } }
           : p,
       ),
     };

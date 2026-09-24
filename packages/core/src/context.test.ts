@@ -27,12 +27,31 @@ test("keeps only the latest large result verbatim", () => {
   expect(values).toEqual(["[browser_snapshot result elided: 5000 chars]", "[browser_snapshot result elided: 5000 chars]", big]);
 });
 
-test("small results and non-tool messages are untouched", () => {
-  const msgs: ModelMessage[] = [{ role: "user", content: big }, result("1", "note", "ok"), result("2", "browser_click", big)];
+test("small results and non-tool messages are untouched while older results are elided", () => {
+  const assistant: ModelMessage = { role: "assistant", content: [{ type: "tool-call", toolCallId: "2", toolName: "note", input: {} }] };
+  const msgs: ModelMessage[] = [
+    { role: "system", content: "sys" },
+    result("0", "browser_snapshot", big),
+    { role: "user", content: big },
+    assistant,
+    result("1", "note", "ok"),
+    result("2", "browser_click", big),
+  ];
   const out = pruneMessages(msgs, opts);
+  expect(outputOf(out[1]).value).toMatch(/elided/);
   expect(out[0]).toEqual(msgs[0]);
-  expect(out[1]).toEqual(msgs[1]);
-  expect(outputOf(out[2]).value).toBe(big);
+  expect(out[2]).toEqual(msgs[2]);
+  expect(out[3]).toEqual(assistant);
+  expect(out[4]).toEqual(msgs[4]);
+  expect(outputOf(out[5]).value).toBe(big);
+  expect(out).toHaveLength(msgs.length);
+});
+
+test("an elided error stays an error", () => {
+  const err: ModelMessage = { role: "tool", content: [{ type: "tool-result", toolCallId: "1", toolName: "browser_click", output: { type: "error-text", value: big } }] };
+  const out = pruneMessages([err, result("2", "browser_snapshot", big)], opts);
+  expect(outputOf(out[0])).toEqual({ type: "error-text", value: "[browser_click result elided: 5000 chars]" });
+  expect(pruneMessages(out, opts)).toEqual(out);
 });
 
 test("is idempotent and does not mutate its input", () => {
@@ -81,4 +100,9 @@ test("in a real agent loop the model sees one full snapshot, the latest", async 
   expect(last).not.toContain("A".repeat(6000));
   expect(last).not.toContain("B".repeat(6000));
   expect(last.match(/snap result elided/g)).toHaveLength(2);
+  const prompt = model.doGenerateCalls.at(-1)!.prompt;
+  const callIds = prompt.flatMap((m) => (m.role === "assistant" ? m.content.filter((p) => p.type === "tool-call").map((p) => p.toolCallId) : []));
+  const resultIds = prompt.flatMap((m) => (m.role === "tool" ? m.content.filter((p) => p.type === "tool-result").map((p) => p.toolCallId) : []));
+  expect(callIds).toEqual(["call-1", "call-2", "call-3"]);
+  expect(resultIds).toEqual(callIds);
 });
