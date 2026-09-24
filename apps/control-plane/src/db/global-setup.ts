@@ -1,12 +1,32 @@
+import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { TEMPLATE_DATABASE, onServer } from "./test-db.ts";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { TestProject } from "vitest/node";
+import { onServer } from "./test-db.ts";
 
-export default async function setup(): Promise<void> {
-  await onServer(async (c) => {
-    await c.query(`DROP DATABASE IF EXISTS ${TEMPLATE_DATABASE} WITH (FORCE)`);
-    await c.query(`CREATE DATABASE ${TEMPLATE_DATABASE}`);
-  }).catch((err: unknown) => {
-    throw new Error(`the test database server is not reachable; run \`npm run db:up\` first (${err instanceof Error ? err.message : String(err)})`);
-  });
-  execFileSync("docker", ["compose", "run", "--rm", "-e", `FLYWAY_URL=jdbc:postgresql://postgres:5432/${TEMPLATE_DATABASE}`, "flyway", "migrate", "-q"], { stdio: "inherit" });
+const MIGRATIONS = join(import.meta.dirname, "../../../../db/migrations");
+
+function migrationsHash(): string {
+  const hash = createHash("sha256");
+  for (const file of readdirSync(MIGRATIONS).sort()) hash.update(file).update("\0").update(readFileSync(join(MIGRATIONS, file))).update("\0");
+  return hash.digest("hex").slice(0, 16);
+}
+
+export default async function setup(project: TestProject): Promise<void> {
+  const template = `trawler_tpl_${migrationsHash()}`;
+  const exists = await onServer(async (c) => (await c.query("SELECT 1 FROM pg_database WHERE datname = $1", [template])).rowCount === 1);
+  if (!exists) {
+    const staging = `${template}_${randomUUID().slice(0, 8)}`;
+    await onServer((c) => c.query(`CREATE DATABASE ${staging}`));
+    try {
+      execFileSync("docker", ["compose", "run", "--rm", "-e", `FLYWAY_URL=jdbc:postgresql://postgres:5432/${staging}`, "flyway", "migrate", "-q"], { stdio: "inherit" });
+      await onServer((c) => c.query(`ALTER DATABASE ${staging} RENAME TO ${template}`)).catch(async (err: unknown) => {
+        if ((err as { code?: string }).code !== "42P04") throw err;
+      });
+    } finally {
+      await onServer((c) => c.query(`DROP DATABASE IF EXISTS ${staging} WITH (FORCE)`));
+    }
+  }
+  project.provide("testTemplate", template);
 }

@@ -3,11 +3,9 @@ import { afterAll, expect, test } from "vitest";
 import { testDb } from "./test-db.ts";
 
 const first = await testDb();
+afterAll(() => first.drop());
 const second = await testDb();
-afterAll(async () => {
-  await first.drop();
-  await second.drop();
-});
+afterAll(() => second.drop());
 
 test("every test database starts from the migrated schema", async () => {
   const { rows } = await sql<{ version: string }>`select version from flyway_schema_history where success order by installed_rank`.execute(first.db);

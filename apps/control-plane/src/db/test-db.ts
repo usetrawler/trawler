@@ -1,9 +1,15 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
+import { inject } from "vitest";
 import { createDb, type Database } from "./index.ts";
 
-export const TEST_SERVER_URL = process.env.TRAWLER_TEST_DATABASE_URL ?? "postgres://trawler:trawler@localhost:54329/postgres";
-export const TEMPLATE_DATABASE = "trawler_test_template";
+export const TEST_SERVER_URL = "postgres://trawler:trawler@localhost:54329/postgres";
+
+declare module "vitest" {
+  export interface ProvidedContext {
+    testTemplate: string;
+  }
+}
 
 export function databaseUrl(name: string): string {
   const url = new URL(TEST_SERVER_URL);
@@ -13,7 +19,12 @@ export function databaseUrl(name: string): string {
 
 export async function onServer<T>(work: (client: pg.Client) => Promise<T>): Promise<T> {
   const client = new pg.Client({ connectionString: TEST_SERVER_URL });
-  await client.connect();
+  try {
+    await client.connect();
+  } catch (err) {
+    const code = (err as { code?: string; errors?: Array<{ code?: string }> }).code ?? (err as { errors?: Array<{ code?: string }> }).errors?.[0]?.code;
+    throw new Error(`the test database server at localhost:54329 is not reachable (${code ?? String(err)}); run \`npm run db:up\`, or \`npm run test:unit\` for tests without a database`);
+  }
   try {
     return await work(client);
   } finally {
@@ -23,7 +34,7 @@ export async function onServer<T>(work: (client: pg.Client) => Promise<T>): Prom
 
 export async function testDb(): Promise<{ db: Database; url: string; name: string; drop: () => Promise<void> }> {
   const name = `trawler_test_${randomUUID().replaceAll("-", "")}`;
-  await onServer((c) => c.query(`CREATE DATABASE ${name} TEMPLATE ${TEMPLATE_DATABASE}`));
+  await onServer((c) => c.query(`CREATE DATABASE ${name} TEMPLATE ${inject("testTemplate")}`));
   const url = databaseUrl(name);
   const db = createDb(url, 4);
   return {
