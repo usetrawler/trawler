@@ -11,6 +11,8 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -20,3 +22,8 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build -w @usetrawler/control-plane
+      - name: control plane answers on /healthz
+        run: |
+          PORT=3000 node apps/control-plane/.next/standalone/apps/control-plane/server.js &
+          for i in $(seq 1 30); do curl -sf localhost:3000/healthz && exit 0; sleep 1; done
+          exit 1

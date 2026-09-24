@@ -10,3 +10,6 @@ blob-report/
 coverage/
 .DS_Store
 .next/
+apps/control-plane/next-env.d.ts
+apps/control-plane/AGENTS.md
+apps/control-plane/CLAUDE.md
