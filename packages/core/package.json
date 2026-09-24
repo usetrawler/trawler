@@ -11,9 +11,13 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
+    "@ai-sdk/mcp": "^2.0.58",
+    "@modelcontextprotocol/sdk": "^1.30.1",
     "@openrouter/ai-sdk-provider": "^3.1.0",
+    "@playwright/mcp": "^0.0.82",
     "@usetrawler/protocol": "^0.0.0",
     "ai": "^7.0.114",
+    "playwright": "^1.64.0-alpha-1789764292000",
     "zod": "^4.6.5"
   }
 }
