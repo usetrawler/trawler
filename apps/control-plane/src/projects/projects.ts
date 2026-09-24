@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { ProjectConfigSchema, type Goal, type Persona, type ProjectConfig } from "@usetrawler/protocol";
 import type { Tx } from "../db/tenancy.ts";
 import { last4, type Keyring } from "../lib/secrets.ts";
@@ -14,13 +15,16 @@ async function insertPlan(tx: Tx, orgId: string, projectId: string, personas: Pe
   }
 }
 
+const FocusSchema = z.string().trim().max(500).optional();
+
 export async function createProject(tx: Tx, orgId: string, config: ProjectConfig, keys: Keyring, extra: { focus?: string } = {}): Promise<string> {
   const valid = ProjectConfigSchema.parse(config);
+  const focus = FocusSchema.parse(extra.focus) || null;
   const { id } = await tx
     .insertInto("projects")
     .values({
       org_id: orgId, name: valid.name, target_url: valid.targetUrl, docs_url: valid.docsUrl ?? null,
-      description: valid.description, focus: extra.focus ?? null, allowed_origins: valid.allowedOrigins,
+      description: valid.description, focus, allowed_origins: valid.allowedOrigins,
     })
     .returning("id")
     .executeTakeFirstOrThrow();

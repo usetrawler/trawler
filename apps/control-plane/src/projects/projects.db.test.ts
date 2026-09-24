@@ -109,6 +109,18 @@ test("only one basic-auth gate per project", async () => {
   await expect(withOrg(t.db, "org-a", (tx) => tx.insertInto("target_gates").values({ org_id: "org-a", project_id: id, kind: "basic_auth", name: "other", secret: "v1:x", secret_hint: "…", position: 9 }).execute())).rejects.toThrow(/duplicate key|unique/);
 });
 
+test("parsing a parsed config is stable, even at the origin limit", async () => {
+  const many = Schema.parse({ ...config, allowedOrigins: Array.from({ length: 19 }, (_, i) => `https://o${i}.test`) });
+  expect(Schema.parse(many)).toEqual(many);
+  expect(Schema.safeParse({ ...config, allowedOrigins: Array.from({ length: 20 }, (_, i) => `https://o${i}.test`) }).success).toBe(false);
+  await expect(withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys, { focus: "f".repeat(501) }))).rejects.toThrow(/500|too big/i);
+});
+
+test("header values and basic-auth usernames cannot smuggle extra headers", () => {
+  expect(Schema.safeParse({ ...config, extraHeaders: { "x-a": "ok\r\nset-cookie: x=1" } }).success).toBe(false);
+  expect(Schema.safeParse({ ...config, httpCredentials: { username: "a:b", password: "gate-pass-123" } }).success).toBe(false);
+});
+
 test("oversized text is refused by the schema before it reaches the database", () => {
   const big = "x".repeat(20_000);
   expect(Schema.safeParse({ ...config, description: big }).success).toBe(false);

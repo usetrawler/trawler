@@ -19,6 +19,8 @@ export type Goal = z.infer<typeof GoalSchema>;
 export const MIN_PASSWORD_LENGTH = 8;
 
 const HEADER_NAME = z.string().regex(/^[A-Za-z0-9-]{1,100}$/, "header names are letters, digits and dashes");
+const HEADER_VALUE = z.string().max(4000).regex(/^[^\x00-\x08\x0a-\x1f\x7f]*$/, "header values cannot contain line breaks or control characters");
+const MAX_ORIGINS = 20;
 
 export const TargetAccountSchema = z.strictObject({
   ref: z.string().min(1).max(100),
@@ -37,17 +39,19 @@ export const ProjectConfigSchema = z
     targetUrl: httpUrl,
     description: z.string().max(2000).default(""),
     docsUrl: httpUrl.optional(),
-    allowedOrigins: z.array(httpUrl.transform((u) => new URL(u).origin)).max(20).default([]),
+    allowedOrigins: z.array(httpUrl.transform((u) => new URL(u).origin)).max(MAX_ORIGINS).default([]),
     personas: z.array(PersonaSchema).min(1).max(12),
     goals: z.array(GoalSchema).min(1).max(20),
     accounts: z.array(TargetAccountSchema).max(20).default([]),
-    httpCredentials: z.strictObject({ username: z.string().min(1).max(320), password: z.string().min(MIN_PASSWORD_LENGTH).max(1000) }).optional(),
-    extraHeaders: z.record(HEADER_NAME, z.string().max(4000)).default({}),
-    secretHeaders: z.record(HEADER_NAME, z.string().min(MIN_PASSWORD_LENGTH).max(4000)).default({}),
+    httpCredentials: z.strictObject({ username: z.string().min(1).max(320).regex(/^[^:\x00-\x1f\x7f]+$/, "basic auth usernames cannot contain colons or control characters"), password: z.string().min(MIN_PASSWORD_LENGTH).max(1000) }).optional(),
+    extraHeaders: z.record(HEADER_NAME, HEADER_VALUE).default({}),
+    secretHeaders: z.record(HEADER_NAME, HEADER_VALUE.min(MIN_PASSWORD_LENGTH)).default({}),
   })
   .superRefine((p, ctx) => {
     for (const id of duplicates(p.goals.map((g) => g.id))) ctx.addIssue({ code: "custom", path: ["goals"], message: `duplicate goal id ${id}` });
     for (const id of duplicates(p.personas.map((x) => x.id))) ctx.addIssue({ code: "custom", path: ["personas"], message: `duplicate persona id ${id}` });
+    const target = URL.canParse(p.targetUrl) ? new URL(p.targetUrl).origin : p.targetUrl;
+    if (new Set([target, ...p.allowedOrigins]).size > MAX_ORIGINS) ctx.addIssue({ code: "custom", path: ["allowedOrigins"], message: `at most ${MAX_ORIGINS} origins including the target` });
     for (const ref of duplicates(p.accounts.map((a) => a.ref))) ctx.addIssue({ code: "custom", path: ["accounts"], message: `duplicate account ref ${ref}` });
     for (const name of duplicates([...Object.keys(p.extraHeaders), ...Object.keys(p.secretHeaders)].map((h) => h.toLowerCase()))) ctx.addIssue({ code: "custom", path: ["extraHeaders"], message: `header ${name} is set more than once` });
     const refs = new Set(p.accounts.map((a) => a.ref));
