@@ -1,8 +1,8 @@
 import { createMCPClient } from "@ai-sdk/mcp";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createConnection } from "@playwright/mcp";
-import { chromium } from "playwright";
-import type { ToolSet } from "ai";
+import { chromium, type Route } from "playwright";
+import { jsonSchema, type Tool, type ToolSet } from "ai";
 import type { SecretScrubber } from "./secrets.ts";
 import type { FieldKind } from "./session-tools.ts";
 
@@ -18,25 +18,29 @@ export const BROWSER_TOOLS = [
   "browser_wait_for",
 ] as const;
 
+const WRITES_FILES = ["filename"];
+
 export interface Browser {
   tools: ToolSet;
   fillField(ref: string, text: string, kind: FieldKind): Promise<string>;
   close(): Promise<void>;
 }
 
+type McpResult = { content?: Array<{ type: string; text?: string }>; isError?: boolean };
+
 const internalCall = { toolCallId: "internal", messages: [], context: {} };
 
 function originOf(url: string): string | null {
   try {
-    return new URL(url).origin;
+    const origin = new URL(url).origin;
+    return origin === "null" ? null : origin;
   } catch {
     return null;
   }
 }
 
 function textOf(result: unknown): string {
-  const content = (result as { content?: Array<{ type: string; text?: string }> })?.content ?? [];
-  return content.map((c) => c.text ?? "").join("\n");
+  return ((result as McpResult)?.content ?? []).map((c) => c.text ?? "").join("\n");
 }
 
 function evaluatedValue(result: unknown): unknown {
@@ -53,6 +57,13 @@ function evaluatedValue(result: unknown): unknown {
   return value;
 }
 
+function withoutFileParameters(t: Tool): Tool {
+  const schema = (t.inputSchema as { jsonSchema?: { properties?: Record<string, unknown>; required?: string[] } }).jsonSchema;
+  if (!schema?.properties) return t;
+  const properties = Object.fromEntries(Object.entries(schema.properties).filter(([k]) => !WRITES_FILES.includes(k)));
+  return { ...t, inputSchema: jsonSchema({ ...schema, properties, required: (schema.required ?? []).filter((r) => !WRITES_FILES.includes(r)) }) } as Tool;
+}
+
 export async function openBrowser(opts: {
   allowedOrigins: string[];
   httpCredentials?: { username: string; password: string };
@@ -65,22 +76,50 @@ export async function openBrowser(opts: {
   headless?: boolean;
 }): Promise<Browser> {
   const allowed = new Set(opts.allowedOrigins.map((o) => new URL(o).origin));
+  const isAllowed = (url: string) => {
+    const origin = originOf(url.replace(/^ws(s?):/, "http$1:"));
+    return origin !== null && allowed.has(origin);
+  };
+  const reportedOrigins = new Set<string>();
+  const report = (url: string) => {
+    const key = originOf(url.replace(/^ws(s?):/, "http$1:")) ?? url;
+    if (reportedOrigins.has(key)) return;
+    reportedOrigins.add(key);
+    opts.onBlocked(url);
+  };
+  let blockedNavigation: string | null = null;
+
   const chrome = await chromium.launch({ headless: opts.headless ?? true });
   try {
     const context = await chrome.newContext({
       httpCredentials: opts.httpCredentials,
       extraHTTPHeaders: { ...opts.extraHeaders, ...opts.secretHeaders },
       storageState: opts.storageState,
+      serviceWorkers: "block",
     });
-    await context.route("**/*", (route) => {
-      const url = route.request().url();
-      const origin = originOf(url);
-      if (origin !== null && allowed.has(origin)) return route.continue();
-      opts.onBlocked(url);
+    const block = (route: Route, url: string) => {
+      report(url);
+      if (route.request().isNavigationRequest() && route.request().frame().parentFrame() === null) blockedNavigation = url;
       return route.abort("blockedbyclient");
+    };
+    await context.route("**/*", async (route) => {
+      const url = route.request().url();
+      if (!isAllowed(url)) return block(route, url);
+      const response = await route.fetch({ maxRedirects: 0 });
+      const location = response.headers()["location"];
+      if (response.status() >= 300 && response.status() < 400 && location) {
+        const next = new URL(location, url).href;
+        if (!isAllowed(next)) return block(route, next);
+      }
+      return route.fulfill({ response });
+    });
+    await context.routeWebSocket(/.*/, (ws) => {
+      if (isAllowed(ws.url())) return ws.connectToServer();
+      report(ws.url());
+      return ws.close();
     });
 
-    const server = await createConnection({ snapshot: { mode: "full" }, outputDir: opts.outputDir }, async () => context);
+    const server = await createConnection({ snapshot: { mode: "none" }, codegen: "none", outputDir: opts.outputDir }, async () => context);
     const [clientT, serverT] = InMemoryTransport.createLinkedPair();
     await server.connect(serverT);
     const mcp = await createMCPClient({ transport: clientT });
@@ -91,7 +130,24 @@ export async function openBrowser(opts: {
       const t = all[name];
       if (!t?.execute) throw new Error(`Playwright MCP no longer provides ${name}`);
       const execute = t.execute;
-      tools[name] = { ...t, execute: async (input, options) => opts.scrubber.scrub(await execute(input, options)) };
+      tools[name] = {
+        ...withoutFileParameters(t),
+        execute: async (input, options) => {
+          const safeInput = Object.fromEntries(Object.entries(input as Record<string, unknown>).filter(([k]) => !WRITES_FILES.includes(k)));
+          if (name === "browser_navigate") {
+            const url = typeof safeInput.url === "string" ? safeInput.url : "";
+            if (!/^https?:\/\//i.test(url) || !isAllowed(url)) {
+              return { content: [{ type: "text", text: `### Error\nOnly http(s) addresses on the allowed origins can be opened: ${[...allowed].join(", ")}` }], isError: true };
+            }
+          }
+          blockedNavigation = null;
+          const result = (await execute(safeInput, options)) as McpResult;
+          if (blockedNavigation) {
+            result.content = [...(result.content ?? []), { type: "text", text: `### Blocked\n${blockedNavigation} is outside the allowed origins, so the browser did not open it. Go back or navigate to an allowed page.` }];
+          }
+          return opts.scrubber.scrub(result);
+        },
+      };
     }
     const evaluate = all.browser_evaluate?.execute;
     const type = all.browser_type!.execute!;
@@ -101,22 +157,25 @@ export async function openBrowser(opts: {
       tools,
       async fillField(ref, text, kind) {
         if (kind === "password") {
-          const probe = evaluatedValue(
-            await evaluate(
-              { element: "credential field", target: ref, function: "(el) => ({ type: el instanceof HTMLInputElement ? el.type : null, origin: location.origin })" },
-              internalCall,
-            ),
-          ) as { type?: unknown; origin?: unknown } | undefined;
-          if (typeof probe?.origin !== "string" || !allowed.has(probe.origin)) return "failed: the page is not an allowed origin, so the password was not typed";
+          const raw = (await evaluate(
+            { element: "credential field", target: ref, function: "(el) => ({ type: el instanceof HTMLInputElement ? el.type : null, origin: location.origin })" },
+            internalCall,
+          )) as McpResult;
+          if (raw?.isError) return `failed: ${opts.scrubber.scrub(textOf(raw))}`;
+          const probe = evaluatedValue(raw) as { type?: unknown; origin?: unknown } | undefined;
+          if (typeof probe?.origin !== "string" || !isAllowed(probe.origin)) return "failed: the page is not an allowed origin, so the password was not typed";
           if (probe.type !== "password") return "failed: the target is not a password field, so the password was not typed";
         }
-        const out = await type({ target: ref, element: kind === "password" ? "password field" : "username field", text }, internalCall);
-        const message = opts.scrubber.scrub(textOf(out));
-        return (out as { isError?: boolean })?.isError ? `failed: ${message}` : message;
+        const out = (await type({ target: ref, element: kind === "password" ? "password field" : "username field", text }, internalCall)) as McpResult;
+        if (out?.isError) return `failed: ${opts.scrubber.scrub(textOf(out))}`;
+        return kind === "password" ? "typed the password" : "typed the username";
       },
       async close() {
-        await mcp.close();
-        await chrome.close();
+        try {
+          await mcp.close();
+        } finally {
+          await chrome.close();
+        }
       },
     };
   } catch (err) {
