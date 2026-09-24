@@ -10,15 +10,25 @@ const MAX_SILENT_TURNS = 3;
 const MAX_BROWSER_CRASHES = 3;
 const NUDGE = "Every turn must call a tool; plain text does nothing. Continue with the goals, and call finish once every goal has a status.";
 
-function serialised(tools: ToolSet, onCrash: () => void, onSuccess: () => void): ToolSet {
+const CUT_OFF = "Your reply was cut off before this tool ran. Call one tool at a time.";
+
+function oneAtATime() {
   let queue: Promise<unknown> = Promise.resolve();
+  return <T>(task: () => Promise<T>): Promise<T> => {
+    const run = queue.then(task);
+    queue = run.catch(() => undefined);
+    return run;
+  };
+}
+
+function serialised(tools: ToolSet, run: ReturnType<typeof oneAtATime>, onCrash: () => void, onSuccess: () => void): ToolSet {
   return Object.fromEntries(
     Object.entries(tools).map(([name, t]) => [
       name,
       {
         ...t,
-        execute: (input: unknown, options: unknown) => {
-          const run = queue.then(async () => {
+        execute: (input: unknown, options: unknown) =>
+          run(async () => {
             try {
               const out = await t.execute!(input as never, options as never);
               onSuccess();
@@ -27,13 +37,21 @@ function serialised(tools: ToolSet, onCrash: () => void, onSuccess: () => void):
               onCrash();
               throw err;
             }
-          });
-          queue = run.catch(() => undefined);
-          return run;
-        },
+          }),
       },
     ]),
   );
+}
+
+function answerUnrunToolCalls(messages: ModelMessage[]): ModelMessage[] {
+  const last = messages.at(-1);
+  if (last?.role !== "assistant" || typeof last.content === "string") return messages;
+  const calls = last.content.filter((p) => p.type === "tool-call");
+  if (calls.length === 0) return messages;
+  return [
+    ...messages,
+    { role: "tool", content: calls.map((c) => ({ type: "tool-result" as const, toolCallId: c.toolCallId, toolName: c.toolName, output: { type: "error-text" as const, value: CUT_OFF } })) },
+  ];
 }
 
 export async function runRoleSession(opts: {
@@ -54,12 +72,15 @@ export async function runRoleSession(opts: {
   const emit = (e: RunEventInput) => opts.emit(opts.scrubber.scrub(e));
   const state = newSessionState(opts.project.goals);
   let crashes = 0;
+  const run = oneAtATime();
   const tools = {
-    ...serialised(opts.browserTools, () => crashes++, () => (crashes = 0)),
+    ...serialised(opts.browserTools, run, () => crashes++, () => (crashes = 0)),
     ...sessionTools({
       state,
       accounts: opts.project.accounts.filter((a) => a.ref === opts.persona.accountRef),
-      emit, jobId, fillField: opts.fillField, scrubber: opts.scrubber, newId: opts.newFindingId,
+      emit, jobId,
+      fillField: (ref, text, kind) => run(() => opts.fillField(ref, text, kind)),
+      scrubber: opts.scrubber, newId: opts.newFindingId,
     }),
   };
   const base = rolePrompt({
@@ -95,10 +116,11 @@ export async function runRoleSession(opts: {
           }
         },
       });
-      history = [...history, ...result.response.messages];
+      history = answerUnrunToolCalls([...history, ...result.responseMessages]);
       const last = result.steps.at(-1);
       if (done() || !last) break;
-      silentTurns = last.toolCalls.length === 0 ? silentTurns + 1 : 0;
+      if (last.toolCalls.length > 0) continue;
+      silentTurns = result.steps.length > 1 ? 1 : silentTurns + 1;
       if (silentTurns >= MAX_SILENT_TURNS) {
         stoppedBy = "error";
         error = `the model stopped calling tools ${MAX_SILENT_TURNS} turns in a row`;
@@ -124,6 +146,10 @@ export async function runRoleSession(opts: {
     stoppedBy,
     ...(error ? { error } : {}),
   });
-  emit({ type: "job_finished", jobId, usage, stoppedBy, ...(error ? { error } : {}) });
+  try {
+    emit({ type: "job_finished", jobId, usage, stoppedBy, ...(error ? { error } : {}) });
+  } catch {
+    return { result: { ...result, stoppedBy: "error", error: result.error ?? "could not record the end of the session" }, usage };
+  }
   return { result, usage };
 }

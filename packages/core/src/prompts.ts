@@ -16,7 +16,7 @@ ${goalLines}
 
 Every turn must call a tool; plain text does nothing.
 Use browser_snapshot to see the page; actions such as clicking do not return the page. To act on an element, pass its ref from the latest snapshot (for example e12) as target. Older page results are removed from your view, so write anything you need to remember with note.
-Do not give up on a goal the moment it is awkward, and do not keep going once you are convinced it cannot be done. Spend roughly fifteen steps per goal. After each goal call goal_status with reached or failed.
+Do not give up on a goal the moment it is awkward, and do not keep going once you are convinced it cannot be done. Keep an eye on the step count and leave enough steps for every goal. After each goal call goal_status with reached or failed.
 
 Record findings with submit_finding the moment you see them, not at the end.
 A "defect" is a claim about the product: something behaved wrongly. Its reproduction must be literal enough that a stranger told nothing else can follow it on a fresh copy of the product and see the same thing: exact URLs, exact button labels, exact values typed. If you cannot write steps like that, it is not a defect.

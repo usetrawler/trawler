@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const httpUrl = z.url({ protocol: /^https?$/ }).refine((u) => { const url = new URL(u); return !url.username && !url.password; }, { message: "put credentials in accounts or httpCredentials, not in the URL" });
+const httpUrl = z.url({ protocol: /^https?$/ }).refine((u) => { try { const url = new URL(u); return !url.username && !url.password; } catch { return true; } }, { message: "put credentials in accounts or httpCredentials, not in the URL" });
 
 export const PersonaSchema = z.strictObject({
   id: z.string().regex(/^[a-z0-9-]+$/),
