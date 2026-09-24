@@ -4,10 +4,15 @@
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
-  "exports": {
-    ".": "./src/index.ts"
-  },
   "scripts": {
     "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@usetrawler/core": "^0.0.0",
+    "@usetrawler/protocol": "^0.0.0",
+    "yaml": "^2.9.1"
+  },
+  "bin": {
+    "trawler-runner": "./src/main.ts"
   }
 }
