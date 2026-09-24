@@ -31,6 +31,7 @@ export const RoleResultSchema = z.object({
   goals: z.array(GoalOutcomeSchema),
   findings: z.array(FindingSchema),
   stoppedBy: StopReasonSchema,
+  error: z.string().optional(),
 });
 export type RoleResult = z.infer<typeof RoleResultSchema>;
 

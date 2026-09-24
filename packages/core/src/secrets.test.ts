@@ -83,6 +83,11 @@ describe("SecretScrubber masking", () => {
     o.self = o;
     expect(s.scrub(o)).toEqual({ pw: "•••", self: "[circular]" });
   });
+  test("object keys are scrubbed too", () => {
+    const s = new SecretScrubber();
+    s.add("hunter22");
+    expect(s.scrub({ hunter22: 1 })).toEqual({ "•••": 1 });
+  });
   test("an object referenced twice is kept twice, not called circular", () => {
     const s = new SecretScrubber();
     s.add("hunter22");

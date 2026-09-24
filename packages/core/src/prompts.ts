@@ -14,7 +14,8 @@ ${signIn}
 Work through these goals in order, in the browser, actually trying each one:
 ${goalLines}
 
-Use browser_snapshot to see the page. To act on an element, pass its ref from the latest snapshot (for example e12) as target. Old snapshots are removed from your view, so write anything you need to remember with note.
+Every turn must call a tool; plain text does nothing.
+Use browser_snapshot to see the page; actions such as clicking do not return the page. To act on an element, pass its ref from the latest snapshot (for example e12) as target. Older page results are removed from your view, so write anything you need to remember with note.
 Do not give up on a goal the moment it is awkward, and do not keep going once you are convinced it cannot be done. Spend roughly fifteen steps per goal. After each goal call goal_status with reached or failed.
 
 Record findings with submit_finding the moment you see them, not at the end.
@@ -25,8 +26,8 @@ Report nothing you did not see in the browser. An opinion about the design is no
 When every goal has a status, call finish.`;
 }
 
-export function sessionStatus(notes: string[], goals: GoalOutcome[]): string {
+export function sessionStatus(notes: string[], goals: GoalOutcome[], step: number, maxSteps: number): string {
   const pad = notes.length ? notes.map((n) => `- ${n}`).join("\n") : "(empty)";
   const table = goals.map((g) => `- ${g.goal}: ${g.status}${g.note ? ` — ${g.note}` : ""}`).join("\n");
-  return `\n\n## Your scratchpad\n${pad}\n\n## Goal status\n${table}`;
+  return `\n\n## Your scratchpad\n${pad}\n\n## Goal status\n${table}\n\nStep ${step + 1} of ${maxSteps}.`;
 }
