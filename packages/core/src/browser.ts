@@ -19,6 +19,21 @@ export const BROWSER_TOOLS = [
 ] as const;
 
 const WRITES_FILES = ["filename"];
+const SECRET_MARK = "data-trawler-secret";
+const EDITS_FIELDS = new Set(["browser_type", "browser_select_option"]);
+const STRIP_SPECULATION = `(() => {
+  const strip = (root) => root.querySelectorAll?.('script[type="speculationrules"]').forEach((el) => el.remove());
+  new MutationObserver((records) => {
+    for (const r of records) for (const n of r.addedNodes) {
+      if (n instanceof HTMLScriptElement && n.type === "speculationrules") n.remove();
+      else if (n instanceof Element) strip(n);
+    }
+  }).observe(document, { childList: true, subtree: true });
+})();`;
+
+function withoutSpeculationRules(html: string): string {
+  return html.replace(/<script\b[^>]*type\s*=\s*["']?speculationrules["']?[^>]*>[\s\S]*?<\/script>/gi, "");
+}
 
 export interface Browser {
   tools: ToolSet;
@@ -102,16 +117,25 @@ export async function openBrowser(opts: {
       if (route.request().isNavigationRequest() && route.request().frame().parentFrame() === null) blockedNavigation = url;
       return route.abort("blockedbyclient");
     };
+    await context.addInitScript(STRIP_SPECULATION);
     await context.route("**/*", async (route) => {
-      const url = route.request().url();
+      const request = route.request();
+      const url = request.url();
       if (!isAllowed(url)) return block(route, url);
-      const response = await route.fetch({ maxRedirects: 0 });
-      const location = response.headers()["location"];
-      if (response.status() >= 300 && response.status() < 400 && location) {
-        const next = new URL(location, url).href;
-        if (!isAllowed(next)) return block(route, next);
+      try {
+        if (!request.isNavigationRequest()) return await route.continue();
+        const response = await route.fetch({ maxRedirects: 0 });
+        const location = response.headers()["location"];
+        if (response.status() >= 300 && response.status() < 400 && location) {
+          const next = new URL(location, url).href;
+          if (!isAllowed(next)) return block(route, next);
+        }
+        const headers = Object.fromEntries(Object.entries(response.headers()).filter(([k]) => k.toLowerCase() !== "speculation-rules"));
+        if (!(headers["content-type"] ?? "").includes("text/html")) return await route.fulfill({ response, headers });
+        return await route.fulfill({ response, headers, body: withoutSpeculationRules(await response.text()) });
+      } catch {
+        return route.abort("failed").catch(() => undefined);
       }
-      return route.fulfill({ response });
     });
     await context.routeWebSocket(/.*/, (ws) => {
       if (isAllowed(ws.url())) return ws.connectToServer();
@@ -125,6 +149,13 @@ export async function openBrowser(opts: {
     const mcp = await createMCPClient({ transport: clientT });
     const all = await mcp.tools();
 
+    const evaluate = all.browser_evaluate?.execute;
+    const type = all.browser_type!.execute!;
+    if (!evaluate) throw new Error("Playwright MCP no longer provides browser_evaluate");
+    const isSecretField = `(el) => !!el && (el.getAttribute?.("${SECRET_MARK}") === "1" || (el instanceof HTMLInputElement && el.type === "password"))`;
+    const refused = (text: string) => ({ content: [{ type: "text", text: `### Error\n${text}` }], isError: true });
+    const probe = async (args: Record<string, unknown>) => evaluatedValue((await evaluate(args, internalCall)) as McpResult);
+
     const tools: ToolSet = {};
     for (const name of BROWSER_TOOLS) {
       const t = all[name];
@@ -134,6 +165,12 @@ export async function openBrowser(opts: {
         ...withoutFileParameters(t),
         execute: async (input, options) => {
           const safeInput = Object.fromEntries(Object.entries(input as Record<string, unknown>).filter(([k]) => !WRITES_FILES.includes(k)));
+          if (name === "browser_press_key" && (await probe({ function: `() => { let el = document.activeElement; while (el && el.contentDocument) el = el.contentDocument.activeElement; return (${isSecretField})(el); }` })) === true) {
+            return refused("Keys cannot be pressed while a password field has focus. Click somewhere else first.");
+          }
+          if (EDITS_FIELDS.has(name) && typeof safeInput.target === "string" && (await probe({ element: "field", target: safeInput.target, function: isSecretField })) === true) {
+            return refused("Password fields can only be filled with sign_in.");
+          }
           if (name === "browser_navigate") {
             const url = typeof safeInput.url === "string" ? safeInput.url : "";
             if (!/^https?:\/\//i.test(url) || !isAllowed(url)) {
@@ -149,16 +186,13 @@ export async function openBrowser(opts: {
         },
       };
     }
-    const evaluate = all.browser_evaluate?.execute;
-    const type = all.browser_type!.execute!;
-    if (!evaluate) throw new Error("Playwright MCP no longer provides browser_evaluate");
 
     return {
       tools,
       async fillField(ref, text, kind) {
         if (kind === "password") {
           const raw = (await evaluate(
-            { element: "credential field", target: ref, function: "(el) => ({ type: el instanceof HTMLInputElement ? el.type : null, origin: location.origin })" },
+            { element: "credential field", target: ref, function: `(el) => ({ type: el instanceof HTMLInputElement ? el.type : null, origin: location.origin, marked: (el.setAttribute("${SECRET_MARK}", "1"), true) })` },
             internalCall,
           )) as McpResult;
           if (raw?.isError) return `failed: ${opts.scrubber.scrub(textOf(raw))}`;

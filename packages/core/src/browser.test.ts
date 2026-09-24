@@ -58,6 +58,16 @@ beforeAll(async () => {
         return res.end();
       case "/ws":
         return html(`<p id="s">connecting</p><script>const w = new WebSocket("${foreignOrigin.replace("http", "ws")}/sock"); w.onerror = () => document.getElementById("s").textContent = "socket refused";</script>`);
+      case "/spec":
+        return html(`<p>speculation</p><script type="speculationrules">{"prefetch":[{"source":"list","urls":["${foreignOrigin}/prefetch"]}],"prerender":[{"source":"list","urls":["${foreignOrigin}/prerender"]}]}</script><script>const s=document.createElement("script");s.type="speculationrules";s.textContent=JSON.stringify({prefetch:[{source:"list",urls:["${foreignOrigin}/dyn-prefetch"]}]});document.body.appendChild(s);</script>`);
+      case "/img-redirect":
+        return html(`<p>image</p><img src="/redirect-foreign">`);
+      case "/sse-page":
+        return html(`<p id="s">waiting</p><script>new EventSource("/sse").onmessage = (e) => document.getElementById("s").textContent = "got " + e.data;</script>`);
+      case "/sse":
+        res.setHeader("content-type", "text/event-stream");
+        res.write("data: hello\n\n");
+        return;
       case "/cookie":
         return html(`<p>cookie=${req.headers.cookie ?? "none"}</p>`);
       case "/gate": {
@@ -226,6 +236,79 @@ describe("fillField", () => {
       await navigate(b, `${origin}/frame`);
       const snap = await snapshot(b);
       expect(await b.fillField(refOf(snap, "Password"), PASSWORD, "password")).toMatch(/^failed: .*not an allowed origin/);
+    });
+  }, 60_000);
+});
+
+describe("password fields", () => {
+  test("keys cannot be pressed while a password field has focus", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, origin);
+      const snap = await snapshot(b);
+      await b.fillField(refOf(snap, "Password"), PASSWORD, "password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Password"), element: "password" }, ctx);
+      for (const key of ["Home", "ArrowRight", "X", "Backspace"]) {
+        const out = (await b.tools.browser_press_key!.execute!({ key }, ctx)) as { isError?: boolean; content: Array<{ text: string }> };
+        expect(out.isError).toBe(true);
+        expect(out.content[0]!.text).toMatch(/password field has focus/);
+      }
+      const after = await snapshot(b);
+      expect(after).not.toMatch(/hunter/);
+      expect(after).toContain("•••");
+    });
+  }, 60_000);
+
+  test("the model cannot type into a password field", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, origin);
+      const snap = await snapshot(b);
+      const out = (await b.tools.browser_type!.execute!({ target: refOf(snap, "Password"), text: "guess", element: "password" }, ctx)) as { isError?: boolean; content: Array<{ text: string }> };
+      expect(out.isError).toBe(true);
+      expect(out.content[0]!.text).toMatch(/only be filled with sign_in/);
+    });
+  }, 60_000);
+
+  test("typing into ordinary fields still works", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, origin);
+      const snap = await snapshot(b);
+      const out = (await b.tools.browser_type!.execute!({ target: refOf(snap, "Email"), text: "a@b.test", element: "email" }, ctx)) as { isError?: boolean };
+      expect(out.isError).toBeFalsy();
+      expect(await snapshot(b)).toMatch(/textbox \\"Email\\"[^\n]*: a@b\.test/);
+    });
+  }, 60_000);
+});
+
+describe("robustness", () => {
+  test("speculation rules cannot reach foreign origins", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/spec`);
+      await new Promise((r) => setTimeout(r, 1500));
+      expect(foreignHits.filter((h) => /prefetch|prerender/.test(h))).toEqual([]);
+    });
+  }, 60_000);
+
+  test("a sub-resource redirect to a foreign origin is not followed", async () => {
+    await withBrowser(async (b) => {
+      const before = foreignHits.length;
+      await navigate(b, `${origin}/img-redirect`);
+      await new Promise((r) => setTimeout(r, 500));
+      expect(foreignHits.slice(before).filter((h) => h.startsWith("/stolen"))).toEqual([]);
+    });
+  }, 60_000);
+
+  test("an unreachable allowed origin gives an error instead of crashing", async () => {
+    await withBrowser(async (b) => {
+      const out = await navigate(b, "http://127.0.0.1:1/");
+      expect(out.isError).toBe(true);
+    }, { allowedOrigins: ["http://127.0.0.1:1"] });
+  }, 60_000);
+
+  test("streaming responses work and an open stream does not break close", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/sse-page`);
+      await b.tools.browser_wait_for!.execute!({ text: "got hello" }, ctx);
+      expect(await snapshot(b)).toContain("got hello");
     });
   }, 60_000);
 });
