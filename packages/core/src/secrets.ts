@@ -93,7 +93,7 @@ export class SecretScrubber {
       if (ArrayBuffer.isView(value)) return "[binary]";
       if (value instanceof ArrayBuffer) return this.#scrubText(new TextDecoder().decode(new Uint8Array(value)));
       if (isPlainObject(value)) {
-        return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, this.#scrub(v, ancestors)]));
+        return Object.fromEntries(Object.entries(value).map(([k, v]) => [this.#scrubText(k), this.#scrub(v, ancestors)]));
       }
       return this.#scrubText(String(value));
     } catch {

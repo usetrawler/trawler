@@ -23,7 +23,7 @@ export const RunEventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("goal_status"), outcome: GoalOutcomeSchema }),
   z.object({ ...base, type: z.literal("blocked_request"), url: z.string() }),
   z.object({ ...base, type: z.literal("verdict"), findingId: z.string().min(1), verdict: VerdictSchema, observed: z.string() }),
-  z.object({ ...base, type: z.literal("job_finished"), usage: JobUsageSchema, stoppedBy: JobStopReasonSchema }),
+  z.object({ ...base, type: z.literal("job_finished"), usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().optional() }),
 ]);
 export type RunEvent = z.infer<typeof RunEventSchema>;
 export type RunEventInput = RunEvent extends infer E ? (E extends RunEvent ? Omit<E, "seq" | "at"> : never) : never;
