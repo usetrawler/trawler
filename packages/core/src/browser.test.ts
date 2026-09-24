@@ -78,6 +78,10 @@ beforeAll(async () => {
         return html(`<input aria-label="Password" type="password"><button onclick="const p=document.querySelector('input');p.type='text';p.removeAttribute('data-trawler-secret')">Show</button><button onclick="const p=document.querySelector('input');p.type='text';p.removeAttribute('data-trawler-secret');p.value=p.value.slice(0,6)+'X'+p.value.slice(6)">Tamper</button>`);
       case "/remount":
         return html(`<input aria-label="Password" type="password"><button onclick="const o=document.querySelector('input');const n=document.createElement('input');n.type=o.type==='password'?'text':'password';n.setAttribute('aria-label','Password');n.value=o.value;o.replaceWith(n)">Show password</button>`);
+      case "/enter":
+        return html(`<input aria-label="Password" type="password" onkeydown="if (event.key === 'Enter') document.getElementById('r').textContent = 'submitted'"><p id="r">waiting</p>`);
+      case "/alert":
+        return html(`<button onclick="alert('Saved')">Save</button><p>alert page</p>`);
       case "/shadow":
         return html(`<div id="host"></div><script>document.getElementById("host").attachShadow({ mode: "open" }).innerHTML = '<input aria-label="Shadow password" type="password">';</script>`);
       case "/cross-frame":
@@ -351,6 +355,48 @@ describe("password fields", () => {
       const typed = (await b.tools.browser_type!.execute!({ target: refOf(shown, "Password"), text: "X", element: "password", slowly: true }, ctx)) as { isError?: boolean };
       expect(typed.isError).toBe(true);
       expect(await snapshot(b)).not.toMatch(/hunter|X22|secret/);
+    });
+  }, 60_000);
+
+  test("a refused password fill leaves the field it was aimed at usable", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, origin);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Email"), PASSWORD, "password")).toMatch(/^failed: .*not a password field/);
+      const typed = (await b.tools.browser_type!.execute!({ target: refOf(snap, "Email"), text: "kwame@acme.test", element: "email" }, ctx)) as { isError?: boolean };
+      expect(typed.isError).toBeFalsy();
+      const pressed = (await b.tools.browser_press_key!.execute!({ key: "a" }, ctx)) as { isError?: boolean };
+      expect(pressed.isError).toBeFalsy();
+    });
+  }, 60_000);
+
+  test("Enter, Tab and Escape still work on a password field, other keys do not", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/enter`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), PASSWORD, "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Password"), element: "password" }, ctx);
+      const home = (await b.tools.browser_press_key!.execute!({ key: "Home" }, ctx)) as { isError?: boolean };
+      expect(home.isError).toBe(true);
+      const enter = (await b.tools.browser_press_key!.execute!({ key: "Enter" }, ctx)) as { isError?: boolean };
+      expect(enter.isError).toBeFalsy();
+      expect(await snapshot(b)).toContain("submitted");
+      const tab = (await b.tools.browser_press_key!.execute!({ key: "Tab" }, ctx)) as { isError?: boolean };
+      expect(tab.isError).toBeFalsy();
+    });
+  }, 60_000);
+
+  test("a key pressed while an alert is open answers at once and the alert can still be closed", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/alert`);
+      const snap = await snapshot(b);
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Save"), element: "save" }, ctx);
+      const started = Date.now();
+      await b.tools.browser_press_key!.execute!({ key: "Escape" }, ctx);
+      expect(Date.now() - started).toBeLessThan(10_000);
+      const handled = (await b.tools.browser_handle_dialog!.execute!({ accept: true }, ctx)) as { isError?: boolean };
+      expect(handled.isError).toBeFalsy();
+      expect(await snapshot(b)).toContain("alert page");
     });
   }, 60_000);
 

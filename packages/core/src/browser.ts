@@ -34,6 +34,8 @@ const STRIP_SPECULATION = `(() => {
   }).observe(document, { childList: true, subtree: true });
 })();`;
 const MAX_HELD_FIELDS = 20;
+const KEYS_SAFE_ON_SECRETS = new Set(["Enter", "Tab", "Shift+Tab", "Escape"]);
+const FOCUS_CHECK_MS = 2000;
 function fieldStateOf(el: any, mark: string) {
   return {
     marked: !!el && (el.hasAttribute?.(mark) || (el instanceof HTMLInputElement && el.type.toLowerCase() === "password")),
@@ -204,12 +206,19 @@ export async function openBrowser(opts: {
       }
       return live.scrub(opts.scrubber.scrub(result));
     };
-    const focusIsOnSecret = async () => {
+    let dialogOpen = false;
+    context.on("page", (page) => page.on("dialog", () => (dialogOpen = true)));
+    const focusCheck = async () => {
       const held = await liveFilled();
       for (const page of context.pages()) {
         if (await focusIsOnSecretIn(page.mainFrame(), held, holdsSecret).catch(() => true)) return true;
       }
       return false;
+    };
+    const focusIsOnSecret = async () => {
+      const verdict = await Promise.race([focusCheck(), new Promise<"slow">((r) => setTimeout(() => r("slow"), FOCUS_CHECK_MS))]);
+      if (verdict !== "slow") return verdict;
+      return !dialogOpen;
     };
     const findMarked = async (mark: string) => {
       for (const page of context.pages()) {
@@ -231,7 +240,7 @@ export async function openBrowser(opts: {
         execute: async (input, options) => {
           if (disconnected) throw new Error("the browser has closed");
           const safeInput = Object.fromEntries(Object.entries(input as Record<string, unknown>).filter(([k]) => !FILE_PARAMETERS.includes(k)));
-          if (name === "browser_press_key" && (await focusIsOnSecret())) {
+          if (name === "browser_press_key" && !KEYS_SAFE_ON_SECRETS.has(String(safeInput.key)) && (await focusIsOnSecret())) {
             return refused("Keys cannot be pressed while a password field has focus. Click somewhere else first.");
           }
           if (EDITS_FIELDS.has(name) && typeof safeInput.target === "string") {
@@ -248,6 +257,7 @@ export async function openBrowser(opts: {
           let result = (await execute(safeInput, options)) as McpResult;
           if (name === "browser_navigate" && result?.isError && INTERRUPTED.test(textOf(result))) result = (await execute(safeInput, options)) as McpResult;
           if (result?.isError && CLOSED.test(textOf(result))) throw new Error("the browser has closed");
+          if (name === "browser_handle_dialog" && !result?.isError) dialogOpen = false;
           if (!result?.isError && !textOf(result).trim()) result.content = [{ type: "text", text: "Done. Call browser_snapshot to see the page." }];
           if (blockedNavigation) {
             result.content = [...(result.content ?? []), { type: "text", text: `### Blocked\n${blockedNavigation} is outside the allowed origins, so the browser did not open it. Go back or navigate to an allowed page.` }];
@@ -263,7 +273,7 @@ export async function openBrowser(opts: {
         if (kind === "password") {
           const mark = randomUUID();
           const raw = (await evaluate(
-            { element: "credential field", target: ref, function: `(el) => ({ type: el instanceof HTMLInputElement ? el.type : null, origin: location.origin, marked: (el.setAttribute("${SECRET_MARK}", "${mark}"), true) })` },
+            { element: "credential field", target: ref, function: `(el) => ({ type: el instanceof HTMLInputElement ? el.type : null, origin: location.origin, marked: el instanceof HTMLInputElement && el.type === "password" && (el.setAttribute("${SECRET_MARK}", "${mark}"), true) })` },
             internalCall,
           )) as McpResult;
           if (raw?.isError) return `failed: ${opts.scrubber.scrub(textOf(raw))}`;
