@@ -5,7 +5,7 @@ import { createDb } from "./index.ts";
 import { grantAppLogin } from "./provision.ts";
 import { asSystem, withOrg } from "./tenancy.ts";
 import pg from "pg";
-import { databaseUrl, onServer, testDb } from "./test-db.ts";
+import { databaseUrl, onServer, TEST_SERVER_URL, testDb } from "./test-db.ts";
 
 async function memberships(login: string): Promise<string[]> {
   return onServer(async (c) =>
@@ -14,14 +14,18 @@ async function memberships(login: string): Promise<string[]> {
 }
 
 async function grantAppLoginIn(url: string, login: string) {
-  const client = new pg.Client({ connectionString: url });
-  await client.connect();
+  const pool = new pg.Pool({ connectionString: url, max: 1 });
   try {
-    await grantAppLogin(client, login);
+    await grantAppLogin(pool, login);
   } finally {
-    await client.end();
+    await pool.end();
   }
 }
+
+const withServerPool = <T>(work: (pool: pg.Pool) => Promise<T>) => {
+  const pool = new pg.Pool({ connectionString: TEST_SERVER_URL, max: 1 });
+  return work(pool).finally(() => pool.end());
+};
 
 const t = await testDb();
 const db = t.db;
@@ -96,7 +100,9 @@ describe("as the production login: no superuser, roles granted without inheritan
   beforeAll(async () => {
     await onServer(async (c) => {
       await c.query(`CREATE ROLE ${login} LOGIN PASSWORD 'test-only-password' NOSUPERUSER NOBYPASSRLS`);
-      await grantAppLogin(c, login);
+    });
+    await withServerPool((pool) => grantAppLogin(pool, login));
+    await onServer(async () => {
     });
     const url = new URL(databaseUrl(t.name));
     url.username = login;
@@ -128,10 +134,10 @@ describe("as the production login: no superuser, roles granted without inheritan
   });
 
   test("a superuser, a non-login role, a built-in role or a bad name is refused", async () => {
-    await expect(onServer((c) => grantAppLogin(c, "trawler"))).rejects.toThrow(/superuser/);
-    await expect(onServer((c) => grantAppLogin(c, "bad name"))).rejects.toThrow(/plain role name/);
-    await expect(onServer((c) => grantAppLogin(c, "pg_monitor"))).rejects.toThrow(/plain role name/);
-    await expect(onServer((c) => grantAppLogin(c, "trawler_app"))).rejects.toThrow(/log in/);
+    await expect(withServerPool((pool) => grantAppLogin(pool, "trawler"))).rejects.toThrow(/superuser/);
+    await expect(withServerPool((pool) => grantAppLogin(pool, "bad name"))).rejects.toThrow(/plain role name/);
+    await expect(withServerPool((pool) => grantAppLogin(pool, "pg_monitor"))).rejects.toThrow(/plain role name/);
+    await expect(withServerPool((pool) => grantAppLogin(pool, "trawler_app"))).rejects.toThrow(/log in/);
   });
 
   test("a login that still inherits the app role through another grant is refused", async () => {
@@ -146,7 +152,7 @@ describe("as the production login: no superuser, roles granted without inheritan
       await c.query("RESET ROLE");
     });
     try {
-      await expect(onServer((c) => grantAppLogin(c, sneaky))).rejects.toThrow(/inherits/);
+      await expect(withServerPool((pool) => grantAppLogin(pool, sneaky))).rejects.toThrow(/inherits/);
       expect(await memberships(sneaky)).toEqual(["trawler_app"]);
     } finally {
       await onServer(async (c) => {

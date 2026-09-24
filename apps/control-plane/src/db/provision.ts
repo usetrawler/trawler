@@ -2,8 +2,17 @@ import type pg from "pg";
 
 const IDENTIFIER = /^(?!pg_)[a-z_][a-z0-9_]{0,62}$/;
 
-export async function grantAppLogin(owner: pg.ClientBase, login: string): Promise<void> {
+export async function grantAppLogin(pool: pg.Pool, login: string): Promise<void> {
   if (!IDENTIFIER.test(login)) throw new Error(`not a plain role name: ${login}`);
+  const owner = await pool.connect();
+  try {
+    await grantWith(owner, login);
+  } finally {
+    owner.release();
+  }
+}
+
+async function grantWith(owner: pg.PoolClient, login: string): Promise<void> {
   const { rows } = await owner.query<{ rolsuper: boolean; rolbypassrls: boolean; rolcanlogin: boolean }>(
     "SELECT rolsuper, rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname = $1",
     [login],
@@ -24,7 +33,7 @@ export async function grantAppLogin(owner: pg.ClientBase, login: string): Promis
     if (check.rows[0]!.owns) throw new Error(`role ${login} owns a table under row-level security; it must not own tenant tables`);
     await owner.query("COMMIT");
   } catch (err) {
-    await owner.query("ROLLBACK");
+    await owner.query("ROLLBACK").catch(() => undefined);
     throw err;
   }
 }
