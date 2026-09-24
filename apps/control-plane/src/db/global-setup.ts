@@ -9,7 +9,8 @@ const MIGRATIONS = join(import.meta.dirname, "../../../../db/migrations");
 
 function migrationsHash(): string {
   const hash = createHash("sha256");
-  for (const file of readdirSync(MIGRATIONS).sort()) hash.update(file).update("\0").update(readFileSync(join(MIGRATIONS, file))).update("\0");
+  const files = readdirSync(MIGRATIONS, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith(".sql")).sort();
+  for (const file of files) hash.update(file).update("\0").update(readFileSync(join(MIGRATIONS, file))).update("\0");
   return hash.digest("hex").slice(0, 16);
 }
 
