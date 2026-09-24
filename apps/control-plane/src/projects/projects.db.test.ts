@@ -119,6 +119,8 @@ test("parsing a parsed config is stable, even at the origin limit", async () => 
 test("header values and basic-auth usernames cannot smuggle extra headers", () => {
   expect(Schema.safeParse({ ...config, extraHeaders: { "x-a": "ok\r\nset-cookie: x=1" } }).success).toBe(false);
   expect(Schema.safeParse({ ...config, httpCredentials: { username: "a:b", password: "gate-pass-123" } }).success).toBe(false);
+  expect(Schema.safeParse({ ...config, extraHeaders: { "x-a": "price €" } }).success).toBe(false);
+  expect(Schema.safeParse({ ...config, extraHeaders: { "x-a": "tab\tok" } }).success).toBe(true);
 });
 
 test("oversized text is refused by the schema before it reaches the database", () => {

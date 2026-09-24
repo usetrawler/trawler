@@ -19,7 +19,7 @@ export type Goal = z.infer<typeof GoalSchema>;
 export const MIN_PASSWORD_LENGTH = 8;
 
 const HEADER_NAME = z.string().regex(/^[A-Za-z0-9-]{1,100}$/, "header names are letters, digits and dashes");
-const HEADER_VALUE = z.string().max(4000).regex(/^[^\x00-\x08\x0a-\x1f\x7f]*$/, "header values cannot contain line breaks or control characters");
+const HEADER_VALUE = z.string().max(4000).regex(/^[\t\x20-\x7e\x80-\xff]*$/, "header values are plain Latin-1 text without line breaks");
 const MAX_ORIGINS = 20;
 
 export const TargetAccountSchema = z.strictObject({
@@ -43,7 +43,7 @@ export const ProjectConfigSchema = z
     personas: z.array(PersonaSchema).min(1).max(12),
     goals: z.array(GoalSchema).min(1).max(20),
     accounts: z.array(TargetAccountSchema).max(20).default([]),
-    httpCredentials: z.strictObject({ username: z.string().min(1).max(320).regex(/^[^:\x00-\x1f\x7f]+$/, "basic auth usernames cannot contain colons or control characters"), password: z.string().min(MIN_PASSWORD_LENGTH).max(1000) }).optional(),
+    httpCredentials: z.strictObject({ username: z.string().min(1).max(320).regex(/^[\x20-\x39\x3b-\x7e\x80-\xff]+$/, "basic auth usernames are plain Latin-1 text without colons"), password: z.string().min(MIN_PASSWORD_LENGTH).max(1000) }).optional(),
     extraHeaders: z.record(HEADER_NAME, HEADER_VALUE).default({}),
     secretHeaders: z.record(HEADER_NAME, HEADER_VALUE.min(MIN_PASSWORD_LENGTH)).default({}),
   })
