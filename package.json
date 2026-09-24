@@ -12,7 +12,8 @@
   "scripts": {
     "typecheck": "tsc -p . && npm run typecheck --workspaces",
     "test": "vitest run",
-    "runner": "tsx apps/runner/src/main.ts"
+    "runner": "tsx apps/runner/src/main.ts",
+    "control-plane": "npm run dev -w @usetrawler/control-plane"
   },
   "devDependencies": {
     "@types/node": "^24.13.6",

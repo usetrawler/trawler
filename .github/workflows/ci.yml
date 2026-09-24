@@ -11,6 +11,8 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -19,3 +21,12 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run typecheck
       - run: npm test
+      - run: npm run build -w @usetrawler/control-plane
+      - name: control plane answers on /healthz
+        run: |
+          HOSTNAME=0.0.0.0 PORT=3000 node apps/control-plane/.next/standalone/apps/control-plane/server.js &
+          trap 'kill %1' EXIT
+          for i in $(seq 1 30); do curl -sf -o /dev/null localhost:3000/healthz && break; sleep 1; done
+          curl -sf localhost:3000/healthz
+          css=$(curl -sf localhost:3000/ | grep -o '/_next/static/[^"]*\.css' | head -1)
+          test -n "$css" && curl -sf "localhost:3000$css" > /dev/null
