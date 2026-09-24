@@ -100,6 +100,12 @@ export interface Session {
   userId: string;
 }
 
+export interface SetupAttempts {
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  org_id: string;
+}
+
 export interface TargetAccounts {
   id: Generated<string>;
   org_id: string;
@@ -151,6 +157,7 @@ export interface DB {
   personas: Personas;
   projects: Projects;
   session: Session;
+  setup_attempts: SetupAttempts;
   target_accounts: TargetAccounts;
   target_gates: TargetGates;
   user: User;

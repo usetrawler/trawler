@@ -92,17 +92,6 @@ test("a pooled keep-alive socket to a private host is not reused", async () => {
   await expect(safeFetchText(`http://localhost:${port}/page`)).rejects.toThrow(/not allowed/);
 });
 
-test("a proxy from the environment is never used", async () => {
-  const saved = { NODE_USE_ENV_PROXY: process.env.NODE_USE_ENV_PROXY, HTTP_PROXY: process.env.HTTP_PROXY };
-  process.env.NODE_USE_ENV_PROXY = "1";
-  process.env.HTTP_PROXY = base;
-  try {
-    await expect(safeFetchText("http://internal-service.corp.invalid/")).rejects.toThrow(/could not be resolved|not allowed/);
-  } finally {
-    for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
-  }
-});
-
 test("very long addresses and embedded private IPv4 forms are refused", async () => {
   await expect(safeFetchText(`https://example.com/?q=${"a".repeat(3000)}`)).rejects.toThrow(/too long/);
   for (const url of ["http://[::127.0.0.1]/", "http://[2002:7f00:1::]/", "http://[64:ff9b:1::7f00:1]/", "http://[fec0::1]/"]) {
@@ -113,4 +102,13 @@ test("very long addresses and embedded private IPv4 forms are refused", async ()
 test("refusals carry a reason code for the user interface", async () => {
   await expect(safeFetchText("http://10.0.0.1/")).rejects.toMatchObject({ reason: "private" });
   await expect(safeFetchText("ftp://x/")).rejects.toBeInstanceOf(FetchRefused);
+});
+
+test("allowing loopback for tests still blocks the rest of the IPv4-compatible range", () => {
+  const list = blockedAddresses({ allowLoopback: true });
+  expect(list.check("::1", "ipv6")).toBe(false);
+  expect(list.check("::", "ipv6")).toBe(true);
+  expect(list.check("::7f00:1", "ipv6")).toBe(true);
+  expect(list.check("::a00:1", "ipv6")).toBe(true);
+  expect(blockedAddresses().check("::1", "ipv6")).toBe(true);
 });

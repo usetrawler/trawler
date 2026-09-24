@@ -21,24 +21,28 @@ export const SETUP_LIMITS = { perTenMinutes: 10, perDay: 100 };
 
 export class SetupLimited extends Error {}
 
-async function assertSetupAllowed(db: Database, orgId: string): Promise<void> {
-  const counts = await withOrg(db, orgId, (tx) =>
-    tx
-      .selectFrom("projects")
+async function claimSetupAttempt(db: Database, orgId: string): Promise<void> {
+  await withOrg(db, orgId, async (tx) => {
+    await sql`select pg_advisory_xact_lock(hashtextextended(${`setup:${orgId}`}, 0))`.execute(tx);
+    const counts = await tx
+      .selectFrom("setup_attempts")
       .select((eb) => [
         eb.fn.countAll<string>().filterWhere("created_at", ">", sql<Date>`now() - interval '10 minutes'`).as("recent"),
-        eb.fn.countAll<string>().filterWhere("created_at", ">", sql<Date>`now() - interval '1 day'`).as("today"),
+        eb.fn.countAll<string>().as("today"),
       ])
       .where("org_id", "=", orgId)
-      .executeTakeFirstOrThrow(),
-  );
-  if (Number(counts.recent) >= SETUP_LIMITS.perTenMinutes || Number(counts.today) >= SETUP_LIMITS.perDay) {
-    throw new SetupLimited("too many new projects in a short time");
-  }
+      .where("created_at", ">", sql<Date>`now() - interval '1 day'`)
+      .executeTakeFirstOrThrow();
+    if (Number(counts.recent) >= SETUP_LIMITS.perTenMinutes || Number(counts.today) >= SETUP_LIMITS.perDay) {
+      throw new SetupLimited("too many new projects in a short time");
+    }
+    await tx.insertInto("setup_attempts").values({ org_id: orgId }).execute();
+  });
 }
 
 export async function proposeFromUrl(deps: SetupDeps, input: { orgId: string; url: string; docsUrl?: string; focus?: string }): Promise<string> {
-  await assertSetupAllowed(deps.db, input.orgId);
+  await claimSetupAttempt(deps.db, input.orgId);
+  const productUrl = URL.canParse(input.url) ? new URL(input.url).href : input.url;
   const origins = new Set<string>();
   let refusal: FetchRefused | undefined;
   let project;
@@ -56,7 +60,7 @@ export async function proposeFromUrl(deps: SetupDeps, input: { orgId: string; ur
           origins.add(new URL(finalUrl).origin);
           return text;
         } catch (err) {
-          if (err instanceof FetchRefused && url === input.url) refusal = err;
+          if (err instanceof FetchRefused && url === productUrl) refusal = err;
           throw err;
         }
       },

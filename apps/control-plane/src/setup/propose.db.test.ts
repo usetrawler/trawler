@@ -45,13 +45,23 @@ test("an unreadable page creates nothing", async () => {
   expect(rows[0]!.n).toBe(0);
 });
 
-test("a workspace cannot start unlimited setups", async () => {
+test("a workspace cannot start unlimited setups, even all at once, and failed attempts count", async () => {
   await sql`insert into organization (id, name, slug, "createdAt") values ('org-busy', 'B', 'busy', now())`.execute(t.db);
-  await sql`insert into projects (org_id, name, target_url) select 'org-busy', 'p' || g, 'https://x.test/' from generate_series(1, ${SETUP_LIMITS.perTenMinutes}) g`.execute(t.db);
+  const model = scriptedModel(Array.from({ length: 40 }, () => text("not json")));
+  const attempt = () => proposeFromUrl(
+    { db: t.db, keys, model, modelId: "m", fetchText: async () => (await new Promise((r) => setTimeout(r, 100)), { text: "<h1>x</h1>", finalUrl: "https://x.test/" }) },
+    { orgId: "org-busy", url: "https://x.test/" },
+  );
+  const results = await Promise.allSettled(Array.from({ length: 30 }, attempt));
+  const limited = results.filter((r) => r.status === "rejected" && r.reason instanceof SetupLimited).length;
+  expect(limited).toBe(30 - SETUP_LIMITS.perTenMinutes);
+  expect(model.doGenerateCalls.length).toBe(SETUP_LIMITS.perTenMinutes);
+});
+
+test("the reason for a refusal survives address normalisation", async () => {
   const model = scriptedModel([text(JSON.stringify(proposal))]);
   await expect(proposeFromUrl(
-    { db: t.db, keys, model, modelId: "m", fetchText: async () => ({ text: "<h1>x</h1>", finalUrl: "https://x.test/" }) },
-    { orgId: "org-busy", url: "https://x.test/" },
-  )).rejects.toBeInstanceOf(SetupLimited);
-  expect(model.doGenerateCalls).toHaveLength(0);
+    { db: t.db, keys, model, modelId: "m", fetchText: async () => { throw new FetchRefused("private", "the address is not allowed"); } },
+    { orgId: "org-a", url: "https://Internal.ACME.test" },
+  )).rejects.toMatchObject({ reason: "private" });
 });
