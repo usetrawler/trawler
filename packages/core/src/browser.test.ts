@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -501,7 +501,7 @@ describe("robustness", () => {
   test("a crashed browser makes every tool throw", async () => {
     await withBrowser(async (b) => {
       await navigate(b, origin);
-      execSync(`pkill -9 -P ${process.pid} -f "chrom"`);
+      execFileSync("pkill", ["-9", "-P", String(process.pid), "-f", "chrom"]);
       await new Promise((r) => setTimeout(r, 500));
       await expect(b.tools.browser_snapshot!.execute!({}, ctx)).rejects.toThrow(/browser has closed/);
       await expect(b.tools.browser_click!.execute!({ target: "e1", element: "x" }, ctx)).rejects.toThrow(/browser has closed/);
