@@ -54,6 +54,10 @@ describe("onboard", () => {
 });
 
 describe("orgSlugFor", () => {
+  test("keeps slugs short enough for a random suffix", () => {
+    expect(orgSlugFor({ email: `${"a".repeat(80)}@x.test`, name: "" }).length).toBeLessThanOrEqual(34);
+  });
+
   test("uses the email name, then the display name, then a fallback", () => {
     expect(orgSlugFor({ email: "ana.silva+test@acme.test", name: "x" })).toBe("ana-silva-test-org");
     expect(orgSlugFor({ email: "@@", name: "Zoë Adèle" })).toBe("zoe-adele-org");

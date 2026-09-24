@@ -136,3 +136,16 @@ test("auth works as the production login, through its own role only", async () =
     await onServer((c) => c.query(`DROP ROLE IF EXISTS ${login}`));
   }
 });
+
+test("a workspace that cannot be set up fails with a code the sign-in page can show", async () => {
+  await sql`create function refuse_org() returns trigger language plpgsql as $$ begin raise exception 'forced failure'; end $$`.execute(t.db);
+  await sql`create trigger refuse_org before insert on organization for each row execute function refuse_org()`.execute(t.db);
+  try {
+    const ctx = await auth.$context;
+    const user = await ctx.internalAdapter.createUser({ email: "unlucky@acme.test", emailVerified: true, name: "Unlucky" }, { method: "admin" });
+    await expect(ctx.internalAdapter.createSession(user.id, false)).rejects.toMatchObject({ body: { code: "WORKSPACE_SETUP_FAILED" } });
+  } finally {
+    await sql`drop trigger refuse_org on organization`.execute(t.db);
+    await sql`drop function refuse_org()`.execute(t.db);
+  }
+});

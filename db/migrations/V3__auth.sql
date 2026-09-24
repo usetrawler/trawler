@@ -40,5 +40,16 @@ $$;
 
 ALTER ROLE trawler_auth NOLOGIN NOCREATEDB NOCREATEROLE NOBYPASSRLS;
 
+DO $$
+BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'trawler_auth' AND (rolsuper OR rolreplication)) THEN
+    RAISE EXCEPTION 'the auth role must not be a superuser or replication role';
+  END IF;
+  IF EXISTS (SELECT FROM pg_auth_members WHERE member = 'trawler_auth'::regrole) THEN
+    RAISE EXCEPTION 'the auth role must not be a member of other roles';
+  END IF;
+END
+$$;
+
 GRANT USAGE ON SCHEMA public TO trawler_auth;
 GRANT SELECT, INSERT, UPDATE, DELETE ON "user", "session", "account", "verification", "organization", "member", "invitation" TO trawler_auth;
