@@ -44,6 +44,7 @@ export function browserQueue(browserTools: ToolSet, fillField: FillField) {
   );
   return {
     tools,
+    run,
     fillField: ((ref, text, kind) => run(() => fillField(ref, text, kind))) as FillField,
     crashed: () => crashes >= MAX_BROWSER_CRASHES,
   };

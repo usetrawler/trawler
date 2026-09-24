@@ -66,7 +66,7 @@ export function sessionTools(opts: {
     }),
     submit_finding: tool({
       description:
-        "Record a defect or a friction the moment you have seen it. All fields are required. kind: defect | friction. severity: low | medium | high. reproduction: the literal steps, one per array item; a defect needs at least two.",
+        "Record a defect or a friction the moment you have seen it. All fields are required. kind: defect | friction. severity: low | medium | high. reproduction: the literal actions, one per array item, with no expected or actual result (that goes in observed); a defect needs at least two.",
       inputSchema: z.object({
         kind: z.string().nullish(),
         goal: z.string().nullish(),

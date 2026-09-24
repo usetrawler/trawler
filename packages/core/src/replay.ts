@@ -10,6 +10,23 @@ import { newSessionState, sessionTools, type FillField } from "./session-tools.t
 const NO_REPORT: ReplayObservation = { completed: false, observed: "the replay session wrote no report", blockedAt: null };
 const NUDGE = "Every turn must call a tool; plain text does nothing. Carry on with the steps, and call report_replay when you are done or blocked.";
 
+const MAX_OBSERVED_CHARS = 4000;
+const JUDGE_OUTPUT_TOKENS = 200;
+
+const isNoReport = (o: ReplayObservation) => !o.completed && o.blockedAt === null;
+
+function onlyDefects(finding: Finding, what: string) {
+  if (finding.kind !== "defect") throw new RangeError(`only defects are ${what}, ${finding.id} is ${finding.kind}`);
+}
+
+function emitSafely(emit: (e: RunEventInput) => void, e: RunEventInput) {
+  try {
+    emit(e);
+  } catch {
+    return;
+  }
+}
+
 const emptyUsage = (model: string): JobUsage => ({ model, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 });
 
 export async function runReplay(opts: {
@@ -25,7 +42,7 @@ export async function runReplay(opts: {
   maxSteps: number;
   emit: (e: RunEventInput) => void;
 }): Promise<{ observation: ReplayObservation; usage: JobUsage }> {
-  if (opts.finding.kind !== "defect") throw new RangeError(`only defects are replayed, ${opts.finding.id} is ${opts.finding.kind}`);
+  onlyDefects(opts.finding, "replayed");
   if (!Number.isInteger(opts.maxSteps) || opts.maxSteps < 1) throw new RangeError(`maxSteps must be a positive integer, got ${opts.maxSteps}`);
   const jobId = `replay:${opts.finding.id}`;
   const emit = (e: RunEventInput) => opts.emit(opts.scrubber.scrub(e));
@@ -43,7 +60,7 @@ export async function runReplay(opts: {
   const report_replay = tool({
     description: "Report what you saw while following the steps. completed is true only if you carried out every step; otherwise give the number of the step you could not do as blockedAt.",
     inputSchema: z.object({ completed: z.boolean().nullish(), observed: z.string().nullish(), blockedAt: z.number().nullish() }),
-    execute: async ({ completed, observed, blockedAt }) => {
+    execute: async ({ completed, observed, blockedAt }) => queue.run(async () => {
       if (report) return "rejected: the replay is already reported";
       if (typeof completed !== "boolean") return "rejected: completed: say whether you carried out every step";
       if (!observed?.trim()) return "rejected: observed: describe what you saw";
@@ -51,9 +68,9 @@ export async function runReplay(opts: {
       if (!completed && (blockedAt == null || !Number.isInteger(blockedAt) || blockedAt < 1 || blockedAt > stepCount)) {
         return `rejected: blockedAt: give the number of the step you could not do; there are only ${stepCount} steps`;
       }
-      report = opts.scrubber.scrub({ completed, observed: observed.trim(), blockedAt: completed ? null : blockedAt! });
+      report = opts.scrubber.scrub({ completed, observed: observed.trim().slice(0, MAX_OBSERVED_CHARS), blockedAt: completed ? null : blockedAt! });
       return "reported";
-    },
+    }),
   });
   const instructions = replayPrompt({ targetUrl: opts.project.targetUrl, steps: opts.finding.reproduction, accountRef: opts.accountRef });
   const usage = emptyUsage(opts.modelId);
@@ -62,7 +79,7 @@ export async function runReplay(opts: {
   const outcome = await runAgentLoop({
     model: opts.model,
     tools: { ...queue.tools, sign_in, report_replay },
-    instructions: () => `${instructions}\n\nStep ${usage.steps + 1} of ${opts.maxSteps}.`,
+    instructions: () => `${instructions}\n\nTool call ${usage.steps + 1} of ${opts.maxSteps} allowed.`,
     nudge: NUDGE,
     scrubber: opts.scrubber,
     budget: opts.budget,
@@ -75,7 +92,7 @@ export async function runReplay(opts: {
   });
   const observation: ReplayObservation = report ?? NO_REPORT;
   const stoppedBy: JobStopReason = outcome.stoppedBy === "finish" ? "report" : outcome.stoppedBy;
-  emit({ type: "job_finished", jobId, usage, stoppedBy, ...(outcome.error ? { error: outcome.error } : {}) });
+  emitSafely(emit, { type: "job_finished", jobId, usage, stoppedBy, ...(outcome.error ? { error: outcome.error } : {}) });
   return { observation, usage };
 }
 
@@ -88,29 +105,29 @@ export async function judge(opts: {
   budget: Budget;
   emit: (e: RunEventInput) => void;
 }): Promise<{ verdict: Verdict; usage: JobUsage }> {
+  onlyDefects(opts.finding, "judged");
   const jobId = `judge:${opts.finding.id}`;
-  const emit = (e: RunEventInput) => opts.emit(opts.scrubber.scrub(e));
+  const emit = (e: RunEventInput) => emitSafely(opts.emit, opts.scrubber.scrub(e));
   const usage = emptyUsage(opts.modelId);
   emit({ type: "job_started", jobId, kind: "judge" });
-  let verdict: Verdict = "refuted";
+  let verdict: Verdict = "inconclusive";
   let stoppedBy: JobStopReason = "done";
   let error: string | undefined;
-  if (opts.observation.completed && opts.budget.exceeded) {
-    verdict = "inconclusive";
-    stoppedBy = "budget";
-  } else if (opts.observation.completed) {
+  if (isNoReport(opts.observation)) stoppedBy = "no_report";
+  else if (opts.budget.exceeded) stoppedBy = "budget";
+  else {
     try {
       const { output } = await generateText({
         model: opts.model,
         output: Output.object({ schema: z.object({ verdict: VerdictSchema }) }),
         prompt: opts.scrubber.scrub(judgePrompt(opts.finding, opts.observation)),
+        maxOutputTokens: JUDGE_OUTPUT_TOKENS,
         onStepEnd: (step) => void tallyStep(usage, opts.budget, step),
       });
       verdict = output.verdict;
     } catch (err) {
-      verdict = "inconclusive";
       stoppedBy = "error";
-      error = opts.scrubber.scrub(err instanceof Error ? err.message : String(err));
+      error = err instanceof Error ? err.message : String(err);
     }
   }
   emit({ type: "verdict", jobId, findingId: opts.finding.id, verdict, observed: opts.observation.observed });
