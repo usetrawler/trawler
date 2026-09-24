@@ -66,7 +66,7 @@ export function sessionTools(opts: {
     }),
     submit_finding: tool({
       description:
-        "Record a defect or a friction the moment you have seen it. kind: defect | friction. severity: low | medium | high. reproduction: the literal steps, one per array item; a defect needs at least two.",
+        "Record a defect or a friction the moment you have seen it. All fields are required. kind: defect | friction. severity: low | medium | high. reproduction: the literal steps, one per array item; a defect needs at least two.",
       inputSchema: z.object({
         kind: z.string().nullish(),
         goal: z.string().nullish(),
@@ -95,7 +95,7 @@ export function sessionTools(opts: {
       },
     }),
     goal_status: tool({
-      description: "Record where a goal ended up: reached, or failed with where you stopped. A later call for the same goal replaces the earlier one.",
+      description: "Record where a goal ended up. goal and status are required; status: reached | failed; note: where you stopped or what you saw. A later call for the same goal replaces the earlier one.",
       inputSchema: z.object({ goal: z.string().nullish(), status: z.string().nullish(), note: z.string().nullish() }),
       execute: async (input) => {
         if (state.finished !== null) return closed;
