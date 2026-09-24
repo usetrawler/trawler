@@ -153,6 +153,8 @@ describe("runRoleSession", () => {
     const model = new MockLanguageModelV4({ doGenerate: async () => responses[i++] as never });
     const { result } = await run(model as never).promise;
     expect(result.stoppedBy).toBe("finish");
+    const ids = model.doGenerateCalls[1]!.prompt.flatMap((m) => (m.role === "tool" ? m.content.filter((p) => p.type === "tool-result").map((p) => p.toolCallId) : []));
+    expect(ids.sort()).toEqual(["a", "b"]);
   });
 
   test("replies that keep getting cut off end the session with a reason", async () => {
