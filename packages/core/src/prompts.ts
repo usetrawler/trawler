@@ -30,7 +30,12 @@ When every goal has a status, call finish.`;
 export function sessionStatus(notes: string[], goals: GoalOutcome[], step: number, maxSteps: number): string {
   const pad = notes.length ? notes.map((n) => `- ${n}`).join("\n") : "(empty)";
   const table = goals.map((g) => `- ${g.goal}: ${g.status}${g.note ? ` — ${g.note}` : ""}`).join("\n");
-  return `\n\n## Your scratchpad\n${pad}\n\n## Goal status\n${table}\n\nStep ${step + 1} of ${maxSteps}.`;
+  const left = maxSteps - step;
+  const open = goals.filter((g) => g.status === "not_attempted").length;
+  const warning = left <= Math.max(3, open + 1, Math.ceil(maxSteps / 10))
+    ? ` Only ${left} step${left === 1 ? "" : "s"} left: give every open goal a status now (reached or failed) and call finish.`
+    : "";
+  return `\n\n## Your scratchpad\n${pad}\n\n## Goal status\n${table}\n\nStep ${step + 1} of ${maxSteps}.${warning}`;
 }
 
 export function replayPrompt(p: { targetUrl: string; steps: string[]; accountRef?: string }): string {
@@ -89,5 +94,5 @@ Propose:
 - name: the product's name.
 - description: two sentences on what it is and who it is for, in plain words.
 - personas: 3 or 4 realistic people who would try this product, each with an id (lowercase words joined by dashes), a first name, and a brief of 2 to 4 sentences in second person ("You …") about their situation, patience and what they care about. A brief must not describe the product's features or where anything is.
-- goals: 4 to 6 outcomes such a person wants on their first day, in order, each with an id (lowercase words joined by dashes) and an instruction phrased as the outcome, never as the steps. Start with getting in (signing up or signing in).`;
+- goals: 4 to 6 outcomes such a person wants on their first day, in order, each with an id (lowercase words joined by dashes) and an instruction phrased as the outcome, never as the steps. Each goal is something done in the product and visible in the browser, not an opinion or a decision about it. Start with getting in (signing up or signing in) only if the product has accounts; otherwise start with its first real outcome.`;
 }

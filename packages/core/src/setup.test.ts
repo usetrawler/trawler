@@ -93,6 +93,8 @@ describe("proposeProject", () => {
     const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
     expect(prompt).toContain("Acme at https://app.acme.test/");
     expect(prompt).toContain("Acme at https://docs.acme.test/start");
+    expect(prompt).toMatch(/only if the product has accounts/);
+    expect(prompt).toMatch(/something done in the product/);
   });
 
   test("keeps model output within limits and falls back to sensible values", async () => {
