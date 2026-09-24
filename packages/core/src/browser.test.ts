@@ -74,6 +74,8 @@ beforeAll(async () => {
       case "/rules.json":
         res.setHeader("content-type", "application/speculationrules+json");
         return res.end(JSON.stringify({ prefetch: [{ source: "list", urls: [`${foreignOrigin}/header-prefetch`] }] }));
+      case "/neuter":
+        return html(`<input aria-label="Password" type="password"><button onclick="const p=document.querySelector('input');p.type='text';p.removeAttribute('data-trawler-secret')">Show</button><button onclick="const p=document.querySelector('input');p.type='text';p.removeAttribute('data-trawler-secret');p.value=p.value.slice(0,6)+'X'+p.value.slice(6)">Tamper</button>`);
       case "/shadow":
         return html(`<div id="host"></div><script>document.getElementById("host").attachShadow({ mode: "open" }).innerHTML = '<input aria-label="Shadow password" type="password">';</script>`);
       case "/cross-frame":
@@ -134,7 +136,7 @@ const navigate = (b: Browser, url: string) => b.tools.browser_navigate!.execute!
 const snapshot = async (b: Browser) => JSON.stringify(await b.tools.browser_snapshot!.execute!({}, ctx));
 
 function refOf(snap: string, label: string): string {
-  const ref = new RegExp(`textbox \\\\"${label}\\\\"[^\\n]*?\\[ref=([a-z0-9]+)\\]`).exec(snap)?.[1];
+  const ref = new RegExp(`(?:textbox|button) \\\\"${label}\\\\"[^\\n]*?\\[ref=([a-z0-9]+)\\]`).exec(snap)?.[1];
   if (!ref) throw new Error(`no ref for ${label} in ${snap.slice(0, 400)}`);
   return ref;
 }
@@ -313,6 +315,23 @@ describe("password fields", () => {
       }
       expect(await snapshot(b)).not.toMatch(/hunter/);
     }, { allowedOrigins: [origin, secondOrigin] });
+  }, 60_000);
+
+  test("a page that unmarks the password field and makes it plain text still cannot get it edited or read", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/neuter`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), PASSWORD, "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Show"), element: "show" }, ctx);
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Password"), element: "password" }, ctx);
+      for (const key of ["Home", "ArrowRight", "X"]) {
+        const out = (await b.tools.browser_press_key!.execute!({ key }, ctx)) as { isError?: boolean };
+        expect(out.isError).toBe(true);
+      }
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Tamper"), element: "tamper" }, ctx);
+      const after = await snapshot(b);
+      expect(after).not.toMatch(/hunter|X22|secret/);
+    });
   }, 60_000);
 
   test("keys work again once focus leaves the password field", async () => {

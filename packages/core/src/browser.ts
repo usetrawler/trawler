@@ -3,7 +3,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createConnection } from "@playwright/mcp";
 import { chromium, type ElementHandle, type Frame, type Route } from "playwright";
 import { jsonSchema, type Tool, type ToolSet } from "ai";
-import type { SecretScrubber } from "./secrets.ts";
+import { randomUUID } from "node:crypto";
+import { MIN_SECRET_LENGTH, type SecretScrubber } from "./secrets.ts";
 import type { FieldKind } from "./session-tools.ts";
 
 export const BROWSER_TOOLS = [
@@ -40,18 +41,21 @@ const DEEPEST_ACTIVE = `(() => {
   return el;
 })()`;
 
-async function focusIsOnSecretIn(frame: Frame, depth = 0): Promise<boolean> {
+async function focusIsOnSecretIn(frame: Frame, filled: ElementHandle[], depth = 0): Promise<boolean> {
   if (depth > 10) return true;
   const active = (await frame.evaluateHandle(DEEPEST_ACTIVE)).asElement() as ElementHandle | null;
   if (!active) return false;
+  const here: ElementHandle[] = [];
+  for (const h of filled) if ((await h.ownerFrame().catch(() => null)) === frame) here.push(h);
   const secret = await active.evaluate(
-    (el: any, mark: string) => el.getAttribute(mark) === "1" || (el.tagName === "INPUT" && String(el.type).toLowerCase() === "password"),
-    SECRET_MARK,
+    (el: any, [mark, ...held]: unknown[]) =>
+      held.includes(el) || el.hasAttribute(mark as string) || (el.tagName === "INPUT" && String(el.type).toLowerCase() === "password"),
+    [SECRET_MARK, ...here],
   );
   if (secret) return true;
   for (const child of frame.childFrames()) {
     const owner = await child.frameElement().catch(() => null);
-    if (owner && (await owner.evaluate((a: unknown, b: unknown) => a === b, active))) return focusIsOnSecretIn(child, depth + 1);
+    if (owner && (await owner.evaluate((a: unknown, b: unknown) => a === b, active))) return focusIsOnSecretIn(child, filled, depth + 1);
   }
   return false;
 }
@@ -174,15 +178,37 @@ export async function openBrowser(opts: {
     const evaluate = all.browser_evaluate?.execute;
     const type = all.browser_type!.execute!;
     if (!evaluate) throw new Error("Playwright MCP no longer provides browser_evaluate");
-    const isSecretField = `(el) => !!el && (el.getAttribute?.("${SECRET_MARK}") === "1" || (el instanceof HTMLInputElement && el.type === "password"))`;
+    const isSecretField = `(el) => !!el && (el.hasAttribute?.("${SECRET_MARK}") || (el instanceof HTMLInputElement && el.type === "password"))`;
     const refused = (text: string) => ({ content: [{ type: "text", text: `### Error\n${text}` }], isError: true });
     const probe = async (args: Record<string, unknown>) => evaluatedValue((await evaluate(args, internalCall)) as McpResult);
 
+    let filled: ElementHandle[] = [];
+    const liveFilled = async () => {
+      const alive = await Promise.all(filled.map((h) => h.evaluate(() => true).catch(() => false)));
+      filled = filled.filter((_, i) => alive[i]);
+      return filled;
+    };
+    const maskFilledValues = async () => {
+      for (const h of await liveFilled()) {
+        const value = await h.evaluate((el: any) => String(el.value ?? "")).catch(() => "");
+        if (value.length >= MIN_SECRET_LENGTH) opts.scrubber.add(value);
+      }
+    };
     const focusIsOnSecret = async () => {
+      const held = await liveFilled();
       for (const page of context.pages()) {
-        if (await focusIsOnSecretIn(page.mainFrame()).catch(() => true)) return true;
+        if (await focusIsOnSecretIn(page.mainFrame(), held).catch(() => true)) return true;
       }
       return false;
+    };
+    const findMarked = async (mark: string) => {
+      for (const page of context.pages()) {
+        for (const frame of page.frames()) {
+          const found = await frame.$(`[${SECRET_MARK}="${mark}"]`).catch(() => null);
+          if (found) return found;
+        }
+      }
+      return null;
     };
 
     const tools: ToolSet = {};
@@ -215,6 +241,7 @@ export async function openBrowser(opts: {
           if (blockedNavigation) {
             result.content = [...(result.content ?? []), { type: "text", text: `### Blocked\n${blockedNavigation} is outside the allowed origins, so the browser did not open it. Go back or navigate to an allowed page.` }];
           }
+          await maskFilledValues();
           return opts.scrubber.scrub(result);
         },
       };
@@ -224,14 +251,18 @@ export async function openBrowser(opts: {
       tools,
       async fillField(ref, text, kind) {
         if (kind === "password") {
+          const mark = randomUUID();
           const raw = (await evaluate(
-            { element: "credential field", target: ref, function: `(el) => ({ type: el instanceof HTMLInputElement ? el.type : null, origin: location.origin, marked: (el.setAttribute("${SECRET_MARK}", "1"), true) })` },
+            { element: "credential field", target: ref, function: `(el) => ({ type: el instanceof HTMLInputElement ? el.type : null, origin: location.origin, marked: (el.setAttribute("${SECRET_MARK}", "${mark}"), true) })` },
             internalCall,
           )) as McpResult;
           if (raw?.isError) return `failed: ${opts.scrubber.scrub(textOf(raw))}`;
           const probe = evaluatedValue(raw) as { type?: unknown; origin?: unknown } | undefined;
           if (typeof probe?.origin !== "string" || !isAllowed(probe.origin)) return "failed: the page is not an allowed origin, so the password was not typed";
           if (probe.type !== "password") return "failed: the target is not a password field, so the password was not typed";
+          const field = await findMarked(mark);
+          if (!field) return "failed: the password field could not be found again, so the password was not typed";
+          filled.push(field);
         }
         const out = (await type({ target: ref, element: kind === "password" ? "password field" : "username field", text }, internalCall)) as McpResult;
         if (out?.isError) return `failed: ${opts.scrubber.scrub(textOf(out))}`;
