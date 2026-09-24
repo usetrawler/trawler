@@ -16,5 +16,6 @@ jobs:
       - uses: actions/setup-node@v5
         with: { node-version: 24, cache: npm }
       - run: npm ci
+      - run: npx playwright install --with-deps chromium
       - run: npm run typecheck
       - run: npm test
