@@ -14,7 +14,7 @@ const FETCH_TIMEOUT_MS = 20_000;
 const MAX_PAGE_BYTES = 2_000_000;
 
 const USAGE = `Usage:
-  trawler-runner setup <url> [--docs <url>] [--model <id>] [--out project.yaml] [--force]
+  trawler-runner setup <url> [--docs <url>] [--focus <text>] [--model <id>] [--out project.yaml] [--force]
   trawler-runner run --config project.yaml [--model <id>] [--judge-model <id>] [--budget <usd>] [--max-steps <n>] [--replay-steps <n>] [--headed]
 
 Set OPENROUTER_API_KEY in the environment.`;
@@ -96,7 +96,7 @@ function progress(err: (line: string) => void, e: RunEventInput) {
 async function setup(args: string[], deps: CliDeps, apiKey: () => string): Promise<number> {
   const { values, positionals } = parseArgs({
     args, allowPositionals: true,
-    options: { docs: { type: "string" }, model: { type: "string" }, out: { type: "string", short: "o" }, force: { type: "boolean" }, help: { type: "boolean", short: "h" } },
+    options: { docs: { type: "string" }, focus: { type: "string" }, model: { type: "string" }, out: { type: "string", short: "o" }, force: { type: "boolean" }, help: { type: "boolean", short: "h" } },
   });
   if (values.help) return help(deps);
   const url = positionals[0];
@@ -105,7 +105,7 @@ async function setup(args: string[], deps: CliDeps, apiKey: () => string): Promi
   const file = values.out ?? "project.yaml";
   if (!values.force && existsSync(file)) throw new UsageError(`${file} already exists; pass --out <file> or --force`);
   const { project, usage } = await proposeProject({
-    model: deps.model(modelId, apiKey()), modelId, url, docsUrl: values.docs, budget: new Budget(SETUP_BUDGET_USD), fetchText: deps.fetchText,
+    model: deps.model(modelId, apiKey()), modelId, url, docsUrl: values.docs, focus: values.focus, budget: new Budget(SETUP_BUDGET_USD), fetchText: deps.fetchText,
   });
   writeFileSync(file, YAML.stringify(project), { mode: 0o600 });
   chmodSync(file, 0o600);

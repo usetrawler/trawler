@@ -143,6 +143,7 @@ test("help works on every command", async () => {
 
 test("fetchPage stops reading at its size cap and refuses error pages", async () => {
   const { createServer } = await import("node:http");
+  let sentAtClose = 0;
   const server = createServer((req, res) => {
     if (req.url === "/missing") {
       res.statusCode = 404;
@@ -158,7 +159,10 @@ test("fetchPage stops reading at its size cap and refuses error pages", async ()
       }
       res.end();
     };
-    res.on("close", () => (sent = Infinity));
+    res.on("close", () => {
+      sentAtClose = sent;
+      sent = Infinity;
+    });
     pump();
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -167,9 +171,26 @@ test("fetchPage stops reading at its size cap and refuses error pages", async ()
     const page = await fetchPage(`http://127.0.0.1:${port}/big`);
     expect(page.length).toBeLessThanOrEqual(2_000_000);
     expect(page.length).toBeGreaterThan(1_000_000);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(sentAtClose).toBeLessThan(20 * 1024 * 1024);
     await expect(fetchPage(`http://127.0.0.1:${port}/missing`)).rejects.toThrow(/HTTP 404/);
   } finally {
     server.closeAllConnections();
     server.close();
   }
+});
+
+test("the installed command works from any directory", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const bin = join(import.meta.dirname, "..", "bin", "trawler-runner.js");
+  const out = execFileSync(process.execPath, [bin, "--help"], { cwd: mkdtempSync(join(tmpdir(), "elsewhere-")), encoding: "utf8" });
+  expect(out).toContain("Usage:");
+});
+
+test("setup passes a focus through to the proposal", async () => {
+  const proposal = { name: "Acme", description: "x", personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "Get in." }] };
+  const model = scriptedModel([text(JSON.stringify(proposal))]);
+  const { d } = deps({ model: () => model });
+  expect(await runCli(["setup", "https://a.test/", "-o", join(mkdtempSync(join(tmpdir(), "cfg-")), "p.yaml"), "--focus", "the invite flow"], d)).toBe(0);
+  expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toContain("the invite flow");
 });

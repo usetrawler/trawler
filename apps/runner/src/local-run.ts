@@ -40,11 +40,21 @@ export async function localRun(opts: {
     try {
       return await fn(browser);
     } finally {
-      await Promise.race([browser.close().catch(() => undefined), new Promise((r) => setTimeout(r, CLOSE_TIMEOUT_MS))]);
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([browser.close().catch(() => undefined), new Promise((r) => (timer = setTimeout(r, CLOSE_TIMEOUT_MS)))]);
+      clearTimeout(timer);
     }
   };
   const failure = (scrubber: SecretScrubber, err: unknown) => scrubber.scrub(err instanceof Error ? err.message : String(err));
   const noUsage = (model: string) => ({ model, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 });
+  const recordFailure = (jobId: string, kind: "role_session" | "replay", error: string) => {
+    try {
+      opts.emit({ type: "job_started", jobId, kind });
+      opts.emit({ type: "job_finished", jobId, usage: noUsage(opts.agentModelId), stoppedBy: "error", error });
+    } catch {
+      return;
+    }
+  };
 
   for (const persona of opts.project.personas) {
     if (budget.exceeded) break;
@@ -56,10 +66,14 @@ export async function localRun(opts: {
         browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: opts.maxSteps, emit: opts.emit,
         newFindingId: () => `f${++findingNo}`,
       }),
-    ).catch((err): { result: RoleResult; usage: ReturnType<typeof noUsage> } => ({
-      result: { persona: persona.id, goals: opts.project.goals.map((g) => ({ goal: g.id, status: "not_attempted", note: "" })), findings: [], stoppedBy: "error", error: failure(scrubber, err) },
-      usage: noUsage(opts.agentModelId),
-    }));
+    ).catch((err): { result: RoleResult; usage: ReturnType<typeof noUsage> } => {
+      const error = failure(scrubber, err);
+      recordFailure(jobId, "role_session", error);
+      return {
+        result: { persona: persona.id, goals: opts.project.goals.map((g) => ({ goal: g.id, status: "not_attempted", note: "" })), findings: [], stoppedBy: "error", error },
+        usage: noUsage(opts.agentModelId),
+      };
+    });
     summary.roles.push(result);
     summary.jobs.push({ jobId, ...usage });
   }
@@ -74,7 +88,11 @@ export async function localRun(opts: {
           model: opts.agentModel, modelId: opts.agentModelId, finding, project: opts.project, accountRef,
           browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: opts.replaySteps, emit: opts.emit,
         }),
-      ).catch(() => null);
+      ).catch((err) => {
+        recordFailure(`replay:${finding.id}`, "replay", failure(scrubber, err));
+        summary.jobs.push({ jobId: `replay:${finding.id}`, ...noUsage(opts.agentModelId) });
+        return null;
+      });
       if (!replayed) continue;
       const { observation, usage } = replayed;
       summary.jobs.push({ jobId: `replay:${finding.id}`, ...usage });

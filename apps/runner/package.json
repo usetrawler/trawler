@@ -16,6 +16,6 @@
     "zod": "^4.6.5"
   },
   "bin": {
-    "trawler-runner": "./src/main.ts"
+    "trawler-runner": "./bin/trawler-runner.js"
   }
 }

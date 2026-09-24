@@ -136,3 +136,36 @@ test("a defect is left unjudged when the budget is gone after its replay or the 
   expect(summary.verdicts.f2).toBeUndefined();
   expect(judgeModel.doGenerateCalls).toHaveLength(0);
 });
+
+test("failed jobs are recorded as events and replay failures leave a trace", async () => {
+  const agent = scriptedModel([
+    toolCall("submit_finding", { kind: "defect", goal: "g", title: "Broken", observed: "o", reproduction: ["a", "b"], severity: "high" }),
+    ...finished("p1"),
+  ]);
+  let n = 0;
+  const open: OpenBrowser = async () => {
+    n++;
+    if (n === 2 || n === 3) throw new Error("no chromium");
+    return { tools: {}, fillField: async () => "typed", close: async () => {} };
+  };
+  const events: RunEventInput[] = [];
+  const summary = await localRun({
+    project, agentModel: agent, agentModelId: "a", judgeModel: agent, judgeModelId: "a", budgetUsd: 5, maxSteps: 10, replaySteps: 10,
+    emit: (e) => events.push(e), openBrowser: open,
+  });
+  expect(events.filter((e) => e.jobId === "role:p2").map((e) => e.type)).toEqual(["job_started", "job_finished"]);
+  expect(events.find((e) => e.jobId === "role:p2" && e.type === "job_finished")).toMatchObject({ stoppedBy: "error", error: "no chromium" });
+  expect(events.find((e) => e.jobId === "replay:f1" && e.type === "job_finished")).toMatchObject({ stoppedBy: "error", error: "no chromium" });
+  expect(summary.jobs.map((j) => j.jobId)).toEqual(["role:p1", "role:p2", "replay:f1"]);
+});
+
+test("leaves no timers behind once the run is over", async () => {
+  const agent = scriptedModel([...finished("p1"), ...finished("p2")]);
+  const timers = () => process.getActiveResourcesInfo().filter((r) => r === "Timeout").length;
+  const before = timers();
+  await localRun({
+    project, agentModel: agent, agentModelId: "a", judgeModel: agent, judgeModelId: "a", budgetUsd: 5, maxSteps: 10, replaySteps: 10,
+    emit: () => {}, openBrowser: fakeBrowsers().open,
+  });
+  expect(timers()).toBeLessThanOrEqual(before);
+});
