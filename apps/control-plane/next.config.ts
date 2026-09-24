@@ -8,7 +8,7 @@ const config: NextConfig = {
   output: "standalone",
   outputFileTracingRoot: fileURLToPath(new URL("../..", import.meta.url)),
   transpilePackages: ["@usetrawler/core", "@usetrawler/protocol"],
-  serverExternalPackages: ["playwright", "playwright-core", "@playwright/mcp"],
+  serverExternalPackages: ["@playwright/mcp"],
 };
 
 export default config;

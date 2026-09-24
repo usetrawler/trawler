@@ -6,8 +6,8 @@
   "license": "FSL-1.1-ALv2",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "build": "next build && cp -r .next/static .next/standalone/apps/control-plane/.next/static",
+    "start": "HOSTNAME=0.0.0.0 node .next/standalone/apps/control-plane/server.js",
     "typecheck": "next typegen && tsc -p ."
   },
   "devDependencies": {
