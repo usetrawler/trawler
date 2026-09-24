@@ -8,7 +8,7 @@ describe("pageText", () => {
   test("keeps readable text, the title and the description, and drops code", () => {
     const out = pageText(
       `<html><head><title>Acme</title><meta name="description" content="Invoices for freelancers"><style>a{}</style><script>evil()</script></head>
-       <body><!-- hidden --><h1>Invoices</h1><a href='/p'>Pricing</a><noscript>nojs</noscript><svg><text>logo</text></svg><template>tpl</template></body></html>`,
+       <body><!-- a > b hidden --><h1>Invoices</h1><a href='/p'>Pricing</a><noscript>nojs</noscript><svg><text>logo</text></svg><template>tpl</template></body></html>`,
       1000,
     );
     for (const kept of ["Acme", "Invoices for freelancers", "Invoices", "Pricing"]) expect(out).toContain(kept);
