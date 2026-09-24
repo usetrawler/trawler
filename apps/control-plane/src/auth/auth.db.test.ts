@@ -12,8 +12,8 @@ const auth = createAuth({ pool, secret: "x".repeat(32), baseURL: "http://localho
 
 async function signIn(email: string, emailVerified = true, name = "Someone") {
   const ctx = await auth.$context;
-  const user = await ctx.internalAdapter.createUser({ email, emailVerified, name });
-  const session = await ctx.internalAdapter.createSession(user.id);
+  const user = await ctx.internalAdapter.createUser({ email, emailVerified, name }, { method: "admin" });
+  const session = (await ctx.internalAdapter.createSession(user.id, false)) as { activeOrganizationId?: string | null };
   return { user, session };
 }
 
@@ -27,7 +27,7 @@ test("a first sign-in gets its own organisation, active straight away", async ()
 test("the next sign-in keeps the same organisation", async () => {
   const ctx = await auth.$context;
   const { user, session } = await signIn("bo@acme.test");
-  const again = await ctx.internalAdapter.createSession(user.id);
+  const again = (await ctx.internalAdapter.createSession(user.id, false)) as { activeOrganizationId?: string | null };
   expect(again.activeOrganizationId).toBe(session.activeOrganizationId);
 });
 
