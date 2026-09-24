@@ -65,3 +65,25 @@ test("the reason for a refusal survives address normalisation", async () => {
     { orgId: "org-a", url: "https://Internal.ACME.test" },
   )).rejects.toMatchObject({ reason: "private" });
 });
+
+test("a claim waits for a concurrent claim in the same workspace and sees its attempts", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-l', 'L', 'l', now())`.execute(t.db);
+  let release!: () => void;
+  const released = new Promise<void>((r) => (release = r));
+  let locked!: () => void;
+  const holding = new Promise<void>((r) => (locked = r));
+  const holder = withOrg(t.db, "org-l", async (tx) => {
+    await sql`select pg_advisory_xact_lock(hashtextextended(${"setup:org-l"}, 0))`.execute(tx);
+    locked();
+    await released;
+    await sql`insert into setup_attempts (org_id) select 'org-l' from generate_series(1, ${SETUP_LIMITS.perTenMinutes})`.execute(tx);
+  });
+  await holding;
+  const model = scriptedModel([text("not json")]);
+  const claim = proposeFromUrl({ db: t.db, keys, model, modelId: "m", fetchText: async () => ({ text: "x", finalUrl: "https://x.test/" }) }, { orgId: "org-l", url: "https://x.test/" });
+  await new Promise((r) => setTimeout(r, 200));
+  release();
+  await holder;
+  await expect(claim).rejects.toBeInstanceOf(SetupLimited);
+  expect(model.doGenerateCalls).toHaveLength(0);
+});
