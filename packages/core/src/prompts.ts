@@ -31,7 +31,8 @@ export function sessionStatus(notes: string[], goals: GoalOutcome[], step: numbe
   const pad = notes.length ? notes.map((n) => `- ${n}`).join("\n") : "(empty)";
   const table = goals.map((g) => `- ${g.goal}: ${g.status}${g.note ? ` — ${g.note}` : ""}`).join("\n");
   const left = maxSteps - step;
-  const warning = left <= Math.max(3, Math.ceil(maxSteps / 10))
+  const open = goals.filter((g) => g.status === "not_attempted").length;
+  const warning = left <= Math.max(3, open + 1, Math.ceil(maxSteps / 10))
     ? ` Only ${left} step${left === 1 ? "" : "s"} left: give every open goal a status now (reached or failed) and call finish.`
     : "";
   return `\n\n## Your scratchpad\n${pad}\n\n## Goal status\n${table}\n\nStep ${step + 1} of ${maxSteps}.${warning}`;

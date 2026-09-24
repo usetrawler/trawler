@@ -10,7 +10,10 @@
   "dependencies": {
     "@usetrawler/core": "^0.0.0",
     "@usetrawler/protocol": "^0.0.0",
-    "yaml": "^2.9.1"
+    "ai": "^7.0.114",
+    "tsx": "^4.23.15",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
   },
   "bin": {
     "trawler-runner": "./src/main.ts"

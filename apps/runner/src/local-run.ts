@@ -1,7 +1,9 @@
 import type { LanguageModel } from "ai";
 import { Budget, judge, runReplay, runRoleSession, SecretScrubber, type Browser } from "@usetrawler/core";
-import type { ProjectConfig, RunEventInput } from "@usetrawler/protocol";
+import type { ProjectConfig, RoleResult, RunEventInput } from "@usetrawler/protocol";
 import type { RunSummary } from "./run-dir.ts";
+
+const CLOSE_TIMEOUT_MS = 10_000;
 
 export type OpenBrowser = (opts: { onBlocked: (url: string) => void; scrubber: SecretScrubber }) => Promise<Browser>;
 
@@ -27,13 +29,22 @@ export async function localRun(opts: {
   let findingNo = 0;
 
   const withBrowser = async <T>(jobId: string, scrubber: SecretScrubber, fn: (b: Browser) => Promise<T>): Promise<T> => {
-    const browser = await opts.openBrowser({ onBlocked: (url) => opts.emit(scrubber.scrub({ type: "blocked_request", jobId, url })), scrubber });
+    const onBlocked = (url: string) => {
+      try {
+        opts.emit(scrubber.scrub({ type: "blocked_request", jobId, url }));
+      } catch {
+        return;
+      }
+    };
+    const browser = await opts.openBrowser({ onBlocked, scrubber });
     try {
       return await fn(browser);
     } finally {
-      await browser.close().catch(() => undefined);
+      await Promise.race([browser.close().catch(() => undefined), new Promise((r) => setTimeout(r, CLOSE_TIMEOUT_MS))]);
     }
   };
+  const failure = (scrubber: SecretScrubber, err: unknown) => scrubber.scrub(err instanceof Error ? err.message : String(err));
+  const noUsage = (model: string) => ({ model, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 });
 
   for (const persona of opts.project.personas) {
     if (budget.exceeded) break;
@@ -45,7 +56,10 @@ export async function localRun(opts: {
         browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: opts.maxSteps, emit: opts.emit,
         newFindingId: () => `f${++findingNo}`,
       }),
-    );
+    ).catch((err): { result: RoleResult; usage: ReturnType<typeof noUsage> } => ({
+      result: { persona: persona.id, goals: opts.project.goals.map((g) => ({ goal: g.id, status: "not_attempted", note: "" })), findings: [], stoppedBy: "error", error: failure(scrubber, err) },
+      usage: noUsage(opts.agentModelId),
+    }));
     summary.roles.push(result);
     summary.jobs.push({ jobId, ...usage });
   }
@@ -55,14 +69,18 @@ export async function localRun(opts: {
     for (const finding of role.findings.filter((f) => f.kind === "defect")) {
       if (budget.exceeded) break;
       const scrubber = scrubberFor();
-      const { observation, usage } = await withBrowser(`replay:${finding.id}`, scrubber, (b) =>
+      const replayed = await withBrowser(`replay:${finding.id}`, scrubber, (b) =>
         runReplay({
           model: opts.agentModel, modelId: opts.agentModelId, finding, project: opts.project, accountRef,
           browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: opts.replaySteps, emit: opts.emit,
         }),
-      );
+      ).catch(() => null);
+      if (!replayed) continue;
+      const { observation, usage } = replayed;
       summary.jobs.push({ jobId: `replay:${finding.id}`, ...usage });
       summary.replays[finding.id] = observation;
+      const wroteNoReport = !observation.completed && observation.blockedAt === null;
+      if (wroteNoReport || budget.exceeded) continue;
       const judged = await judge({ model: opts.judgeModel, modelId: opts.judgeModelId, finding, observation, scrubber, budget, emit: opts.emit });
       summary.jobs.push({ jobId: `judge:${finding.id}`, ...judged.usage });
       summary.verdicts[finding.id] = judged.verdict;

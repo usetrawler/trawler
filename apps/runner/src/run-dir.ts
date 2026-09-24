@@ -45,10 +45,12 @@ type Located = Finding & { persona: string };
 
 function describe(f: Located, replay?: ReplayObservation): string {
   const steps = f.reproduction.map((step, i) => `${i + 1}. ${oneLine(step)}`).join("\n");
-  const replayed = replay
-    ? `\n\nReplay: ${replay.completed ? "carried out every step" : replay.blockedAt === null ? "wrote no report" : `could not carry out step ${replay.blockedAt}`}. ${oneLine(replay.observed)}`
-    : "";
-  return `### ${oneLine(f.title)}\n${f.kind}, ${f.severity}, ${f.persona} / ${f.goal}\n\n${f.observed}\n\n${steps}${replayed}\n`;
+  const replayed = !replay
+    ? ""
+    : !replay.completed && replay.blockedAt === null
+      ? "\n\nReplay: wrote no report."
+      : `\n\nReplay: ${replay.completed ? "carried out every step" : `could not carry out step ${replay.blockedAt}`}. ${oneLine(replay.observed)}`;
+  return `### ${oneLine(f.title)}\n${f.kind}, ${f.severity}, ${oneLine(f.persona)} / ${oneLine(f.goal)}\n\n${oneLine(f.observed)}\n\n${steps}${replayed}\n`;
 }
 
 export function renderReport(s: RunSummary): string {
@@ -62,7 +64,7 @@ export function renderReport(s: RunSummary): string {
     .map((r) => `**${r.persona}** (stopped by ${r.stoppedBy}${r.error ? `: ${oneLine(r.error)}` : ""})\n${r.goals.map((g) => `- ${g.goal}: ${g.status}${g.note ? ` — ${oneLine(g.note)}` : ""}`).join("\n")}`)
     .join("\n\n");
   const stopped = s.totalCostUsd >= s.budgetUsd ? ` The ${usd(s.budgetUsd)} budget ran out, so some jobs did not run.` : "";
-  return `# ${s.project}
+  return `# ${oneLine(s.project)}
 
 Agent model ${s.agentModel}, judge model ${s.judgeModel}. Total ${usd(s.totalCostUsd)} of ${usd(s.budgetUsd)}.${stopped}
 
@@ -74,5 +76,5 @@ ${jobs}
 
 ${goals}
 
-${section("Confirmed defects", by("confirmed"))}${section("Inconclusive defects", by("inconclusive"))}${section("Refuted defects", by("refuted"))}${section("Defects not replayed", defects.filter((f) => !s.verdicts[f.id]))}${section("Friction", findings.filter((f) => f.kind === "friction"))}`;
+${section("Confirmed defects", by("confirmed"))}${section("Inconclusive defects", by("inconclusive"))}${section("Refuted defects", by("refuted"))}${section("Defects not judged", defects.filter((f) => !s.verdicts[f.id]))}${section("Friction", findings.filter((f) => f.kind === "friction"))}`;
 }

@@ -99,3 +99,40 @@ test("a browser that fails to close does not end the run", async () => {
   });
   expect(summary.roles.map((r) => r.stoppedBy)).toEqual(["finish", "finish"]);
 });
+
+test("a job that throws does not end the run; its role is recorded as an error", async () => {
+  const agent = scriptedModel([...finished("p2")]);
+  let n = 0;
+  const open: OpenBrowser = async () => {
+    if (n++ === 0) throw new Error("browserType.launch: Timeout exceeded with hunter22-secret");
+    return { tools: {}, fillField: async () => "typed", close: async () => {} };
+  };
+  const summary = await localRun({
+    project, agentModel: agent, agentModelId: "a", judgeModel: agent, judgeModelId: "a", budgetUsd: 5, maxSteps: 10, replaySteps: 10,
+    emit: () => {}, openBrowser: open,
+  });
+  expect(summary.roles.map((r) => [r.persona, r.stoppedBy])).toEqual([["p1", "error"], ["p2", "finish"]]);
+  expect(summary.roles[0]!.error).toMatch(/Timeout exceeded/);
+  expect(summary.roles[0]!.error).not.toContain("hunter22-secret");
+});
+
+test("a defect is left unjudged when the budget is gone after its replay or the replay wrote no report", async () => {
+  const agent = scriptedModel([
+    toolCall("submit_finding", { kind: "defect", goal: "g", title: "One", observed: "o", reproduction: ["a", "b"], severity: "high" }),
+    toolCall("submit_finding", { kind: "defect", goal: "g", title: "Two", observed: "o", reproduction: ["a", "b"], severity: "high" }),
+    ...finished("p1"),
+    ...finished("p2"),
+    text("no report"), text("still none"), text("nothing"),
+    toolCall("report_replay", { completed: true, observed: "It broke", blockedAt: null }),
+  ], 0.001);
+  const judgeModel = scriptedModel([text(JSON.stringify({ verdict: "confirmed" }))]);
+  const summary = await localRun({
+    project, agentModel: agent, agentModelId: "a", judgeModel, judgeModelId: "j", budgetUsd: 0.0095, maxSteps: 10, replaySteps: 10,
+    emit: () => {}, openBrowser: fakeBrowsers().open,
+  });
+  expect(summary.replays.f1?.completed).toBe(false);
+  expect(summary.verdicts.f1).toBeUndefined();
+  expect(summary.replays.f2?.completed).toBe(true);
+  expect(summary.verdicts.f2).toBeUndefined();
+  expect(judgeModel.doGenerateCalls).toHaveLength(0);
+});

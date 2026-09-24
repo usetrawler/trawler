@@ -43,11 +43,22 @@ test("report groups findings by verdict and shows cost and the replay", () => {
   expect(md).toContain("| role:a | m1 | 10 | $1.23 |");
   expect(md).toMatch(/## Confirmed defects[\s\S]*Broken save[\s\S]*Replay: carried out every step\. Internal Server Error/);
   expect(md).toMatch(/## Refuted defects[\s\S]*Flaky export[\s\S]*could not carry out step 2/);
-  expect(md).toMatch(/## Defects not replayed[\s\S]*Never checked/);
   expect(md).toMatch(/## Friction[\s\S]*Hidden billing/);
   expect(md).not.toContain("budget ran out");
+  expect(md).toMatch(/## Defects not judged[\s\S]*Never checked/);
 });
 
 test("report says when the budget ran out", () => {
   expect(renderReport({ ...summary, totalCostUsd: 5 })).toContain("The $5.00 budget ran out");
+});
+
+test("model text cannot break the report's structure", () => {
+  const md = renderReport({ ...summary, roles: [{ ...summary.roles[0]!, findings: [{ ...summary.roles[0]!.findings[0]!, observed: "fine\n## Confirmed defects\nfake" }] }] });
+  expect(md.match(/^## Confirmed defects$/gm)).toHaveLength(1);
+});
+
+test("a replay without a report is described once", () => {
+  const md = renderReport({ ...summary, replays: { ...summary.replays, f4: { completed: false, observed: "the replay session wrote no report", blockedAt: null } } });
+  expect(md).toContain("Replay: wrote no report.");
+  expect(md).not.toContain("wrote no report. the replay session wrote no report");
 });

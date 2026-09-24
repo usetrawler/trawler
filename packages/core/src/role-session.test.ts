@@ -4,6 +4,7 @@ import { describe, expect, test } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
 import { ProjectConfigSchema, RunEventSchema, type RunEventInput } from "@usetrawler/protocol";
 import { Budget } from "./llm.ts";
+import { sessionStatus } from "./prompts.ts";
 import { runRoleSession } from "./role-session.ts";
 import { SecretScrubber } from "./secrets.ts";
 import { scriptedModel, text, toolCall } from "./testing.ts";
@@ -361,6 +362,12 @@ describe("runRoleSession", () => {
     expect(prompts[5]).not.toMatch(/steps left/);
     expect(prompts[7]).toContain("Only 3 steps left: give every open goal a status now (reached or failed) and call finish.");
     expect(prompts[9]).toContain("Only 1 step left");
+  });
+
+  test("the step warning leaves room for every open goal and scales with long sessions", async () => {
+    expect(sessionStatus([], [{ goal: "a", status: "not_attempted", note: "" }, { goal: "b", status: "not_attempted", note: "" }, { goal: "c", status: "not_attempted", note: "" }, { goal: "d", status: "reached", note: "" }], 16, 20)).toMatch(/Only 4 steps left/);
+    expect(sessionStatus([], [], 107, 120)).not.toMatch(/steps left/);
+    expect(sessionStatus([], [], 108, 120)).toMatch(/Only 12 steps left/);
   });
 
   test("tells the persona who they are, where to go and which goals to try", async () => {
