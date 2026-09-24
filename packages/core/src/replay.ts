@@ -10,7 +10,7 @@ import { newSessionState, sessionTools, type FillField } from "./session-tools.t
 const NO_REPORT: ReplayObservation = { completed: false, observed: "the replay session wrote no report", blockedAt: null };
 const NUDGE = "Every turn must call a tool; plain text does nothing. Carry on with the steps, and call report_replay when you are done or blocked.";
 
-const MAX_OBSERVED_CHARS = 4000;
+const MAX_OBSERVED_CODE_POINTS = 4000;
 const JUDGE_OUTPUT_TOKENS = 1000;
 
 const isNoReport = (o: ReplayObservation) => !o.completed && o.blockedAt === null;
@@ -68,7 +68,7 @@ export async function runReplay(opts: {
       if (!completed && (blockedAt == null || !Number.isInteger(blockedAt) || blockedAt < 1 || blockedAt > stepCount)) {
         return `rejected: blockedAt: give the number of the step you could not do; there are only ${stepCount} steps`;
       }
-      report = { completed, observed: Array.from(opts.scrubber.scrub(observed.trim())).slice(0, MAX_OBSERVED_CHARS).join(""), blockedAt: completed ? null : blockedAt! };
+      report = { completed, observed: Array.from(opts.scrubber.scrub(observed.trim())).slice(0, MAX_OBSERVED_CODE_POINTS).join(""), blockedAt: completed ? null : blockedAt! };
       return "reported";
     }),
   });

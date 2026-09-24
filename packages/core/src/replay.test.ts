@@ -159,6 +159,12 @@ describe("runReplay", () => {
     expect(JSON.stringify(events)).not.toContain("hunter22-s");
   });
 
+  test("never cuts a character in half", async () => {
+    const model = scriptedModel([report({ completed: true, observed: "x".repeat(3999) + "😀😀", blockedAt: null })]);
+    const { observation } = await replay(model).promise;
+    expect(observation.observed.endsWith("x😀")).toBe(true);
+  });
+
   test("keeps a very long report to a readable size", async () => {
     const model = scriptedModel([report({ completed: true, observed: "x".repeat(20_000), blockedAt: null })]);
     const { observation } = await replay(model).promise;
