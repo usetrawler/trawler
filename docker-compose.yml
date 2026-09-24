@@ -1,0 +1,32 @@
+name: trawler
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: trawler
+      POSTGRES_PASSWORD: trawler
+      POSTGRES_DB: trawler
+    ports:
+      - "54329:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trawler -d trawler"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  flyway:
+    image: flyway/flyway:11
+    profiles: [tools]
+    volumes:
+      - ./db/migrations:/flyway/sql:ro
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/trawler
+      FLYWAY_USER: trawler
+      FLYWAY_PASSWORD: trawler
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql
+    depends_on:
+      postgres:
+        condition: service_healthy
+volumes:
+  pgdata:

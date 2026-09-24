@@ -20,6 +20,10 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run typecheck
+      - run: npm run db:up
+      - run: npm run db:migrate
+      - run: npm run db:validate
+      - run: npm run db:codegen && git diff --exit-code apps/control-plane/src/db/types.ts
       - run: npm test
       - run: npm run build -w @usetrawler/control-plane
       - name: control plane answers on /healthz
