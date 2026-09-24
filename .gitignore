@@ -9,3 +9,4 @@ playwright-report/
 blob-report/
 coverage/
 .DS_Store
+.next/
