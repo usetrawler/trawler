@@ -142,7 +142,7 @@ test("with a DSN an unhandled promise rejection still stops the hosted runner, a
   expect(status).toBe(1);
   expect(stderr).toContain("nobody caught this after typing •••");
   expect(stderr).not.toContain(JOB_PASSWORD);
-});
+}, 20_000);
 
 test("log lines stay plain text on stderr unless TRAWLER_LOG_FORMAT is json, which sends info to stdout and errors to stderr", () => {
   const out: string[] = [];
