@@ -36,5 +36,5 @@ jobs:
           trap 'kill %1' EXIT
           for i in $(seq 1 30); do curl -sf -o /dev/null localhost:3000/healthz && break; sleep 1; done
           curl -sf localhost:3000/healthz
-          css=$(curl -sf localhost:3000/ | grep -o '/_next/static/[^"]*\.css' | head -1)
+          css=$(curl -s localhost:3000/ci-missing-page | grep -o '/_next/static/[^"]*\.css' | head -1)
           test -n "$css" && curl -sf "localhost:3000$css" > /dev/null
