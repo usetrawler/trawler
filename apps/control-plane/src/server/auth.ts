@@ -22,3 +22,8 @@ export function signInProviders(): Array<"github" | "google" | "dev"> {
   const env = readEnv();
   return [...(env.github ? (["github"] as const) : []), ...(env.google ? (["google"] as const) : []), ...(env.devOidc ? (["dev"] as const) : [])];
 }
+
+export async function canManageBilling(requestHeaders: Headers): Promise<boolean> {
+  const member = await getAuth().api.getActiveMember({ headers: requestHeaders }).catch(() => null);
+  return (member?.role ?? "").split(",").some((role) => role.trim() === "owner" || role.trim() === "admin");
+}

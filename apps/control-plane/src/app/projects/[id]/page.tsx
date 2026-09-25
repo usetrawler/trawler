@@ -2,9 +2,10 @@ import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { AppShell } from "../../../components/app-shell.tsx";
 import { PlanWorkspace } from "./plan-workspace.tsx";
+import { openRouterKeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
 import { projectForEditing } from "../../../projects/projects.ts";
-import { getAuth } from "../../../server/auth.ts";
+import { canManageBilling, getAuth } from "../../../server/auth.ts";
 import { refreshPricesInBackground, runModels } from "../../../runs/catalog.ts";
 import { getDb } from "../../../server/db.ts";
 
@@ -20,7 +21,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   if (!session) redirect("/sign-in");
   const orgId = session.session.activeOrganizationId;
   if (!orgId || !UUID.test(id)) notFound();
-  const project = await withOrg(getDb(), orgId, (tx) => projectForEditing(tx, orgId, id));
+  const [project, keyHint] = await withOrg(getDb(), orgId, (tx) => Promise.all([projectForEditing(tx, orgId, id), openRouterKeyHint(tx, orgId)]));
   if (!project) notFound();
   const organization = await auth.api.getFullOrganization({ headers: requestHeaders });
   const models = await runModels(getDb());
@@ -40,6 +41,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           initialGoals={project.goals.map((g) => ({ id: g.key, instruction: g.instruction }))}
           initialAccounts={project.accounts.map((a) => ({ ref: a.ref, username: a.username, hint: a.password_hint }))}
           models={models}
+          keyHint={keyHint}
+          canManageKey={await canManageBilling(requestHeaders)}
         />
       </div>
     </AppShell>

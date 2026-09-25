@@ -7,9 +7,11 @@ export interface ServerEnv {
   devOidc?: { issuer: string; clientId: string; clientSecret: string };
   setup?: { apiKey: string; model: string };
   runnerToken?: string;
+  openRouterUrl: string;
 }
 
 export const DEFAULT_SETUP_MODEL = "deepseek/deepseek-v4.1-flash";
+export const OPENROUTER_URL = "https://openrouter.ai/api/v1";
 
 function pair(id: string | undefined, secret: string | undefined) {
   return id && secret ? { clientId: id, clientSecret: secret } : undefined;
@@ -21,6 +23,8 @@ export function readEnv(env: Record<string, string | undefined> = process.env): 
   if ((env.BETTER_AUTH_SECRET ?? "").length < 32) throw new Error("BETTER_AUTH_SECRET must be at least 32 characters");
   if (env.NODE_ENV === "production" && !env.BETTER_AUTH_URL!.startsWith("https://")) throw new Error("BETTER_AUTH_URL must use https in production");
   const devIssuer = env.TRAWLER_DEV_OIDC_ISSUER;
+  const openRouterUrl = (env.TRAWLER_OPENROUTER_URL ?? OPENROUTER_URL).replace(/\/+$/, "");
+  if (env.NODE_ENV === "production" && openRouterUrl !== OPENROUTER_URL) throw new Error("TRAWLER_OPENROUTER_URL can only be changed outside production");
   if (devIssuer && env.NODE_ENV === "production") throw new Error("TRAWLER_DEV_OIDC_ISSUER must never be set in production");
   return {
     databaseUrl: env.DATABASE_URL!,
@@ -30,6 +34,7 @@ export function readEnv(env: Record<string, string | undefined> = process.env): 
     google: pair(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET),
     devOidc: devIssuer ? { issuer: devIssuer, clientId: "trawler-dev", clientSecret: "trawler-dev-secret" } : undefined,
     runnerToken: runnerToken(env.TRAWLER_RUNNER_TOKEN),
+    openRouterUrl,
     setup: env.OPENROUTER_API_KEY ? { apiKey: env.OPENROUTER_API_KEY, model: env.TRAWLER_SETUP_MODEL ?? DEFAULT_SETUP_MODEL } : undefined,
   };
 }
