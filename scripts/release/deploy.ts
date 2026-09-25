@@ -44,9 +44,14 @@ async function release(o: DeployOptions, api: Railway, at: Target, service: stri
   log(`${service}: deploying ${image} as ${id}`);
   const deadline = now() + timeoutMs;
   while (true) {
-    const { deployment } = await api.query<{ deployment: { status: string; deploymentStopped: boolean } }>("query($id: String!) { deployment(id: $id) { status deploymentStopped } }", { id });
+    const { deployment } = await api.query<{ deployment: { status: string; deploymentStopped: boolean; meta: { image?: string } | null } }>(
+      "query($id: String!) { deployment(id: $id) { status deploymentStopped meta } }",
+      { id },
+    );
     if (ENDED.has(deployment.status)) throw new DeployFailed(`${service} deployment ${id} ended ${deployment.status}`);
     if (deployment.status === "SUCCESS" && (until === "running" || deployment.deploymentStopped)) {
+      const running = deployment.meta?.image;
+      if (running !== image) throw new DeployFailed(`${service} deployment ${id} runs ${running ?? "an unknown image"}, not ${image}`);
       log(`${service}: ${until === "exited" ? "finished" : "running"}`);
       return id;
     }

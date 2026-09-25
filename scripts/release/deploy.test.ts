@@ -2,11 +2,12 @@ import { expect, test } from "vitest";
 import { deploy, type DeployOptions } from "./deploy.ts";
 import { railway } from "./railway.ts";
 
-type Deployment = { status: string; deploymentStopped: boolean };
+type Deployment = { status: string; deploymentStopped: boolean; image?: string };
 
 function fakeRailway(opts: { project: string; environment: string; services: Record<string, string>; deployments: Record<string, Deployment[]>; active?: string[][] }) {
   const calls: Array<{ op: string; variables: Record<string, unknown>; token: string | null }> = [];
   const deployed = new Map<string, string>();
+  const source = new Map<unknown, unknown>();
   let active = opts.active ?? [];
   const fakeFetch = (async (_url: string | URL, init?: RequestInit) => {
     const { query, variables } = JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> };
@@ -15,15 +16,20 @@ function fakeRailway(opts: { project: string; environment: string; services: Rec
     const reply = (data: unknown) => new Response(JSON.stringify({ data }), { status: 200 });
     if (op === "projectToken") return reply({ projectToken: { projectId: opts.project, environmentId: opts.environment } });
     if (op === "project(") return reply({ project: { services: { edges: Object.entries(opts.services).map(([name, id]) => ({ node: { id, name } })) } } });
-    if (op === "serviceInstanceUpdate") return reply({ serviceInstanceUpdate: true });
+    if (op === "serviceInstanceUpdate") {
+      source.set(variables.svc, (variables.input as { source: { image: string } }).source.image);
+      return reply({ serviceInstanceUpdate: true });
+    }
     if (op === "serviceInstanceDeployV2") {
       const name = Object.entries(opts.services).find(([, id]) => id === variables.svc)![0];
       deployed.set(`dep-${name}`, name);
       return reply({ serviceInstanceDeployV2: `dep-${name}` });
     }
     if (op === "deployment(") {
-      const queue = opts.deployments[deployed.get(String(variables.id))!]!;
-      return reply({ deployment: queue.length > 1 ? queue.shift() : queue[0] });
+      const name = deployed.get(String(variables.id))!;
+      const queue = opts.deployments[name]!;
+      const { image, ...deployment } = (queue.length > 1 ? queue.shift() : queue[0])!;
+      return reply({ deployment: { ...deployment, meta: { image: image ?? source.get(opts.services[name]) } } });
     }
     const ids = active.length > 1 ? active.shift()! : active[0] ?? [];
     return reply({ serviceInstance: { activeDeployments: ids.map((id) => ({ id })) } });
@@ -86,4 +92,13 @@ test("a token for a project without the expected services is refused before anyt
   const workers = fakeRailway({ project: "p2", environment: "e2", services: { runner: "s-runner" }, deployments: {} });
   await expect(deploy(options(core, workers))).rejects.toThrow(/no service named migrate/);
   expect([...core.calls, ...workers.calls].some((c) => c.op === "serviceInstanceUpdate")).toBe(false);
+});
+
+test("a deployment that runs some other image than the one released fails the release", async () => {
+  const core = fakeRailway({ project: "p", environment: "e", services: { migrate: "s-migrate", "control-plane": "s-cp" }, deployments: {
+    migrate: [{ status: "SUCCESS", deploymentStopped: true, image: "ghcr.io/x/migrate:latest" }], "control-plane": [up],
+  } });
+  const workers = fakeRailway({ project: "p2", environment: "e2", services: { runner: "s-runner" }, deployments: { runner: [up] }, active: [["dep-runner"]] });
+  await expect(deploy(options(core, workers))).rejects.toThrow("migrate deployment dep-migrate runs ghcr.io/x/migrate:latest, not ghcr.io/x/migrate@sha256:1");
+  expect(core.calls.some((c) => c.op === "serviceInstanceUpdate" && c.variables.svc === "s-cp")).toBe(false);
 });
