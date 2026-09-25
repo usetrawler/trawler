@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>People played by AI use your real product in a real browser.<br>
-  A second agent replays every defect, blind, before it reaches you.</b>
+  A second agent replays every defect, blind, before it counts.</b>
 </p>
 
 <p align="center">
@@ -36,13 +36,13 @@ Nothing a person reports reaches the top of your report on their word alone. Eve
 
 ## How it works
 
-**01 · Paste a URL.** Trawler reads your product's page and, in about half a minute, proposes up to four people and six goals. Edit anything — or just start.
+**01 · Paste a URL.** Trawler reads your product's page and, in about half a minute, proposes up to four people and six goals. Edit the people and goals — or just start.
 
 **02 · Meet your users.** The people take their turns in your real product: clicking, typing and navigating as they see fit, working through every goal, and reporting defects and friction with the steps that led there. No scripts, no recorded flows to maintain.
 
 **03 · Believe the second agent.** Every defect is replayed blind — a fresh agent in a new browser gets the steps, never the claim — and a judge answers *confirmed*, *refuted* or *inconclusive*.
 
-**04 · Act on what was confirmed.** The report opens with the defects a fresh agent reproduced, each with its steps, what the person saw and what the replay saw. The run was estimated before it started, and it stops spending at the cap you set.
+**04 · Act on what was confirmed.** The report opens with the defects a fresh agent reproduced, each with its steps, what the person saw and what the replay saw.
 
 ```mermaid
 flowchart TB
@@ -68,12 +68,12 @@ It is not a scripted test suite, a load test or a security scan. The people deci
 | --- | --- |
 | **Credentials** | Test account passwords are typed by Trawler, not the model, and only into a real password field on an allowed origin. Every password and secret a run knows about is masked as `•••` in what the model reads and what the run records. |
 | **Reach** | A browser limited to your product's own origins — every other request is stopped before it is sent — and a handful of tools: no shell, no file system, no uploads, no JavaScript in the page. |
-| **Spend** | Estimated before you start and hard-capped during the run: $2 by default, $50 at most. |
-| **Your key** | Runs in the app are billed to your workspace's own key — OpenRouter, OpenAI, Anthropic, Google or any OpenAI-compatible service. Trawler adds nothing on top, and setting up a project costs you nothing. |
+| **Spend** | Estimated before you start and capped during the run: $2 by default, $50 at most, though the last call can take it slightly past. A model with no known price, such as one on an OpenAI-compatible service, gets no estimate, and its run stops after 3 million tokens. |
+| **Your key** | Runs in the app are billed to your workspace's own key — OpenRouter, OpenAI, Anthropic, Google or any OpenAI-compatible service. Trawler adds nothing on top, and setting up a project in the app costs you nothing. |
 | **Isolation** | The model key and passwords are encrypted at rest, runners never hold the model key, and the database itself keeps each workspace's rows from every other. |
 | **Execution** | Hosted at app.usetrawler.com, or entirely on your own machine with the runner in this repository. |
 
-The details, including what masking cannot hide, are in [Security and data](https://usetrawler.com/docs/reference/security-and-data/).
+The details are in [Security and data](https://usetrawler.com/docs/reference/security-and-data/), including what masking cannot hide, and in [Models, estimates and the cap](https://usetrawler.com/docs/models/models-and-cost/).
 
 ## Use it in the app
 
@@ -82,8 +82,8 @@ The details, including what masking cannot hide, are in [Security and data](http
 
 1. **Sign in** at [app.usetrawler.com](https://app.usetrawler.com) with **Continue with GitHub** or **Continue with Google** — there are no passwords. Your first sign-in creates your workspace, unless you were invited to one.
 2. **Paste your product's address** — the page a new user would open first — and, if you like, a few words to focus on, such as *the new team-invite flow*. Choose **Analyse product**.
-3. **Review the plan.** The people under **These people will try it** and the goals under **What they want to get done** are yours to rename, rewrite, add to or trim. If your product needs sign-in, add a test account and choose it under **Signs in as**.
-4. **Start.** The first time, an owner or admin of the workspace pastes an API key from your model provider. Pick a model (one is filled in for you), read the estimate, set the **Hard cap**, tick the box confirming that you may test this product and that it holds no real people's data, and choose **Start run**.
+3. **Review the plan.** The people under **These people will try it** and the goals under **What they want to get done** are yours to rename, rewrite, add to or trim. If your product needs sign-in, add a test account and choose it under **Signs in as**. Choose **Save plan** to keep your changes.
+4. **Start.** The first time, an owner or admin of the workspace pastes an API key from your model provider. Pick a model (one is filled in for you), read the estimate, set the **Hard cap**, tick the box confirming that you may test this product and that it is not a production system with real people's data, and choose **Start run**.
 5. **Follow the run:** cost against the cap, goals reached and a card for each person. Close the tab if you like — the run keeps going.
 6. **Read the report.** **Confirmed** comes first: the defects a fresh agent reproduced and the judge agreed with.
 
@@ -175,13 +175,23 @@ Replay: carried out every step. After "Send invite" a red banner reads "Permissi
 | `--replay-steps <n>` | `40` | Steps for each replay |
 | `--headed` | | Show the browser instead of running it hidden |
 
-`setup` also takes `--docs <url>`, `--model <id>`, `--out <file>` and `--force`. The runner exits `0` when the run finished and at least one person's session did not fail, `1` when every session failed or something else went wrong, and `2` on a usage mistake, an invalid project file or a missing `OPENROUTER_API_KEY`. Model calls go from your machine to OpenRouter, asking the providers behind it not to keep or train on the data; nothing goes to Trawler.
+`setup` also takes `--docs <url>`, `--model <id>`, `--out <file>` and `--force`. The runner exits `0` when the run finished and at least one person's session did not fail, `1` when every session failed or something else went wrong, and `2` on a usage mistake, a project file that is not valid YAML or not a valid project, or a missing `OPENROUTER_API_KEY`. Model calls go from your machine to OpenRouter, asking the providers behind it not to keep or train on the data; nothing goes to Trawler.
 
 Every field and option: [The local runner](https://usetrawler.com/docs/runner/local-runner/).
 
 ## Not built yet
 
-So you don't go looking: comparing a run with an earlier one, people using the product together, screenshots on findings, deleting a project or a run, handing runs from the app to a runner inside your own network, and reaching staging behind basic auth or a secret header from the app — the local runner covers private addresses and protected staging today. Hosted runs stay in a private beta until Trawler can verify that you control the product you point it at. The runner is not published as a package yet; you run it from a checkout.
+So you don't go looking:
+
+- comparing a run with an earlier one;
+- people using the product together;
+- screenshots on findings;
+- inviting people to a workspace, or switching between workspaces;
+- deleting a project, a run or the model key;
+- handing runs from the app to a runner inside your own network;
+- reaching staging behind basic auth or a secret header from the app — the local runner covers private addresses and protected staging today.
+
+Hosted runs stay in a private beta until Trawler can verify that you control the product you point it at. The runner is not published as a package yet; you run it from a checkout.
 
 ## Inside this repository
 
