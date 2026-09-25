@@ -257,3 +257,48 @@ describe("review round 1", () => {
     await drain();
   });
 });
+
+describe("review round 2", () => {
+  test("a long persona key and finding id still get their replay", async () => {
+    await drain();
+    const longConfig = ProjectConfigSchema.parse({ ...config, personas: [{ id: "p".repeat(60), name: "P", brief: "b" }], accounts: [] });
+    const longProject = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", longConfig, keys));
+    await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", longProject, keys, options));
+    const role = (await claimJob(t.db, keys))!;
+    seq = 0;
+    await ingestEvents(t.db, role.token, [ev({ type: "finding", jobId: role.jobId, finding: { ...defect, id: "f".repeat(100) } })]);
+    await completeJob(t.db, role.token, { usage: usage(0), stoppedBy: "finish" });
+    const replay = (await claimJob(t.db, keys))!;
+    expect(replay).toMatchObject({ kind: "replay", finding: { id: `${"p".repeat(60)}:${"f".repeat(100)}` } });
+    await drain();
+  });
+
+  test("an expired lease in a cancelled run plans nothing new", async () => {
+    await drain();
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const ana = (await claimJob(t.db, keys))!;
+    seq = 0;
+    await ingestEvents(t.db, ana.token, [ev({ type: "finding", jobId: ana.jobId, finding: defect })]);
+    await completeJob(t.db, ana.token, { usage: usage(0), stoppedBy: "finish" });
+    const lee = (await claimJob(t.db, keys))!;
+    await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id));
+    await sql`update jobs set lease_until = now() - interval '1 minute' where id = ${lee.jobId}`.execute(t.db);
+    await claimJob(t.db, keys);
+    const summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
+    expect(summary!.jobs.map((j) => j.status)).not.toContain("queued");
+    await drain();
+  });
+
+  test("a runner that reports after its lease expired still gets its cost counted", async () => {
+    await drain();
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const late = (await claimJob(t.db, keys))!;
+    await sql`update jobs set lease_until = now() - interval '1 minute' where id = ${late.jobId}`.execute(t.db);
+    await claimJob(t.db, keys);
+    await completeJob(t.db, late.token, { usage: usage(0.5), stoppedBy: "finish" });
+    const summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
+    expect(summary!.costUsd).toBeCloseTo(0.5, 6);
+    expect(summary!.jobs.find((j) => j.id === late.jobId)?.status).toBe("failed");
+    await drain();
+  });
+});

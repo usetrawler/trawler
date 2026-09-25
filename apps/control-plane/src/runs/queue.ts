@@ -64,8 +64,8 @@ async function reapExpiredLeases(db: Database): Promise<void> {
       .skipLocked()
       .execute();
     for (const job of expired) {
-      await tx.updateTable("jobs").set({ status: "failed", error: "the runner stopped answering", token_hash: null, lease_until: null, finished_at: new Date() }).where("id", "=", job.id).execute();
-      await planNext(tx, job, { usage: { model: "", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "error" });
+      await tx.updateTable("jobs").set({ status: "failed", error: "the runner stopped answering", lease_until: null, finished_at: new Date() }).where("id", "=", job.id).execute();
+      if (!(await stopIfOverBudget(tx, job.run_id))) await planNext(tx, job, { usage: { model: "", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "error" });
     }
   });
 }
@@ -91,6 +91,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
     const token = randomBytes(32).toString("base64url");
     await tx.updateTable("jobs").set({ status: "leased", token_hash: hashToken(token), lease_until: sql<Date>`now() + make_interval(mins => ${LEASE_MINUTES})`, started_at: new Date() }).where("id", "=", picked.id).execute();
     await tx.updateTable("runs").set({ status: "running", started_at: sql<Date>`coalesce(started_at, now())` }).where("id", "=", picked.run_id).execute();
+    await sql`savepoint prepare_assignment`.execute(tx);
     try {
       const snapshot = picked.config_snapshot as unknown as ConfigSnapshot;
       const current = await loadProjectConfig(tx, picked.org_id, picked.project_id, keys);
@@ -113,9 +114,10 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
         },
       };
     } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      await tx.updateTable("jobs").set({ status: "failed", error: `the job could not be prepared: ${reason}`.slice(0, 2000), token_hash: null, lease_until: null, finished_at: new Date() }).where("id", "=", picked.id).execute();
-      await planNext(tx, picked, { usage: { model: "", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "error" });
+      await sql`rollback to savepoint prepare_assignment`.execute(tx);
+      console.error("job could not be prepared", { jobId: picked.id, message: err instanceof Error ? err.message : String(err) });
+      await tx.updateTable("jobs").set({ status: "failed", error: "the job could not be prepared from the project; it may have changed since the run started", token_hash: null, lease_until: null, finished_at: new Date() }).where("id", "=", picked.id).execute();
+      if (!(await stopIfOverBudget(tx, picked.run_id))) await planNext(tx, picked, { usage: { model: "", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "error" });
       return { quarantined: true };
     }
   });
@@ -141,12 +143,12 @@ async function findingFor(tx: Tx, runId: string, key: string) {
   const row = await tx.selectFrom("findings").selectAll().where("run_id", "=", runId).where("key", "=", key).executeTakeFirstOrThrow();
   return {
     personaKey: row.persona_key,
-    finding: FindingSchema.parse({ id: row.key, kind: row.kind, goal: row.goal, title: row.title, observed: row.observed, reproduction: row.reproduction, severity: row.severity }),
+    finding: { ...FindingSchema.parse({ id: "stored", kind: row.kind, goal: row.goal, title: row.title, observed: row.observed, reproduction: row.reproduction, severity: row.severity }), id: row.key },
     replay: row.replay ? ReplayObservationSchema.parse(row.replay) : undefined,
   };
 }
 
-async function jobForToken(tx: Tx, token: string) {
+async function jobForToken(tx: Tx, token: string, options: { allowExpired?: boolean } = {}) {
   const job = await tx
     .selectFrom("jobs")
     .selectAll()
@@ -154,7 +156,7 @@ async function jobForToken(tx: Tx, token: string) {
     .where("token_hash", "=", hashToken(token))
     .forUpdate()
     .executeTakeFirst();
-  if (!job || job.expired) throw new InvalidJobToken();
+  if (!job || (job.expired && !options.allowExpired)) throw new InvalidJobToken();
   return job;
 }
 
@@ -179,7 +181,7 @@ export async function ingestEvents(db: Database, token: string, events: RunEvent
     const job = await jobForToken(tx, token);
     if (job.status !== "leased") return { cancel: true };
     if (valid.some((e) => e.jobId !== job.id)) throw new Error("events belong to another job");
-    const run = await tx.selectFrom("runs").select("status").where("id", "=", job.run_id).executeTakeFirstOrThrow();
+    const run = await tx.selectFrom("runs").select("status").where("id", "=", job.run_id).forUpdate().executeTakeFirstOrThrow();
     if (!ACTIVE.includes(run.status)) return { cancel: true };
     for (const e of valid) {
       const inserted = await tx
@@ -220,9 +222,12 @@ const JobResultSchema = z.object({ usage: JobUsageSchema, stoppedBy: JobStopReas
 export async function completeJob(db: Database, token: string, input: JobResult): Promise<void> {
   const result = JobResultSchema.parse(input);
   await asSystem(db, async (tx) => {
-    const job = await jobForToken(tx, token);
-    if (job.status !== "leased") return;
+    const job = await jobForToken(tx, token, { allowExpired: true });
     await addCost(tx, job.run_id, job.id, result.usage.costUsd - Number(job.counted_cost));
+    if (job.status !== "leased") {
+      await stopIfOverBudget(tx, job.run_id);
+      return;
+    }
     const failed = result.stoppedBy === "error";
     await tx
       .updateTable("jobs")
