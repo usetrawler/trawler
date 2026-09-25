@@ -62,6 +62,10 @@ beforeAll(async () => {
         return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password" oninput="this.value = this.value.slice(0, 12); alert('Checked')"><button type="submit">Save</button></form>`);
       case "/short-on-change":
         return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password" onchange="this.value = this.value.slice(0, 12)"><button type="submit">Save</button></form>`);
+      case "/js-pin":
+        return html(`<input aria-label="PIN" type="password" oninput="this.value = this.value.slice(0, 6)">`);
+      case "/js-pin-locked":
+        return html(`<input aria-label="PIN" type="password" oninput="this.value = this.value.slice(0, 6); this.disabled = true">`);
       case "/echo-password": {
         let body = "";
         req.on("data", (chunk) => (body += chunk));
@@ -564,6 +568,18 @@ describe("password fields", () => {
       expect(shown).toContain("Your password is •••");
       expect(shown).not.toContain(password.slice(0, 12));
     }, { scrubber });
+  }, 60_000);
+
+  test("a field whose script keeps too little of a password to hide is cleared, and says so when it cannot be", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/js-pin`);
+      let snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "PIN"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("failed: the field kept too little of the password to hide it, so it was cleared");
+      expect(await snapshot(b)).not.toContain("Kx7mPq");
+      await navigate(b, `${origin}/js-pin-locked`);
+      snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "PIN"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("failed: the field kept too little of the password to hide it, and it could not be cleared");
+    });
   }, 60_000);
 
   test("typing into ordinary fields still works", async () => {
