@@ -223,7 +223,7 @@ export async function leasedJobFor(tx: Tx, token: string, jobId: string) {
   const job = await jobForToken(tx, token, { expectedJobId: jobId });
   if (job.status !== "leased") throw new JobOver("the job is over");
   const run = await tx.selectFrom("runs").select("status").where("id", "=", job.run_id).executeTakeFirstOrThrow();
-  if (!ACTIVE.includes(run.status) && !job.requested_by) throw new JobOver("the run is no longer active");
+  if (!ACTIVE.includes(run.status)) throw new JobOver("the run is no longer active");
   return job;
 }
 

@@ -295,8 +295,11 @@ test("a cleanup stops after a few failures instead of trying every expired file 
   await fill(job, "org-b", 25, "60 days");
   let attempts = 0;
   const down: ArtifactStore = { ...store, remove: async () => { attempts++; throw new Error("the bucket is unavailable"); } };
-  vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const logged: string[] = [];
+  vi.spyOn(console, "error").mockImplementation((line: unknown) => void logged.push(String(line)));
   expect(await removeExpiredArtifacts(t.db, down, { batch: 4 })).toBe(0);
   expect(attempts).toBe(MAX_FAILURES_PER_RUN);
+  await vi.waitFor(() => expect(logged).toHaveLength(1));
+  expect(JSON.parse(logged[0]!)).toMatchObject({ msg: "expired artifacts could not be deleted", failed: MAX_FAILURES_PER_RUN });
   expect(await removeExpiredArtifacts(t.db, store)).toBe(25);
 });
