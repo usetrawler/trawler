@@ -2,18 +2,18 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 import type { ProjectLine } from "../projects/overview.ts";
 
-type Member = { userId: string; email: string; orgId: string };
+type Member = { userId: string; email: string; orgId: string; orgName: string; role: string };
 const state = vi.hoisted(() => ({ member: null as Member | null, projects: [] as ProjectLine[], askedFor: [] as string[] }));
 
-vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
+vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({ redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); } }));
-vi.mock("../server/auth.ts", () => ({ getAuth: () => ({ api: { getFullOrganization: async () => ({ name: "Acme workspace" }) } }), signedInMember: async () => state.member }));
+vi.mock("../server/auth.ts", () => ({ signedInMember: async (headers: Headers) => (headers.get("cookie") === "session=ana" ? state.member : null) }));
 vi.mock("../server/db.ts", () => ({ getDb: () => ({}) }));
 vi.mock("../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.askedFor.push(`withOrg:${orgId}`); return work({}); } }));
 vi.mock("../projects/overview.ts", () => ({ workspaceProjects: async (_tx: unknown, orgId: string) => { state.askedFor.push(`projects:${orgId}`); return state.projects; } }));
 
 const { default: Home } = await import("./page.tsx");
-const memberOf = (orgId: string): Member => ({ userId: "u1", email: "ana@acme.test", orgId });
+const memberOf = (orgId: string): Member => ({ userId: "u1", email: "ana@acme.test", orgId, orgName: "Acme workspace", role: "member" });
 
 beforeEach(() => {
   state.member = null;

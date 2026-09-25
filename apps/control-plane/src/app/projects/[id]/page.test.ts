@@ -1,17 +1,16 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
-const state = vi.hoisted(() => ({ member: null as { userId: string; email: string; orgId: string } | null, runs: 0, counted: [] as Array<[string, string]>, tenants: [] as string[] }));
+const state = vi.hoisted(() => ({ member: null as { userId: string; email: string; orgId: string; orgName: string; role: string } | null, runs: 0, counted: [] as Array<[string, string]>, tenants: [] as string[] }));
 
-vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
+vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({
   redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); },
   notFound: () => { throw Object.assign(new Error("not found"), { notFound: true }); },
 }));
 vi.mock("../../../server/auth.ts", () => ({
-  getAuth: () => ({ api: { getFullOrganization: async () => ({ name: "Acme workspace" }) } }),
-  signedInMember: async () => state.member,
-  canManageBilling: async () => false,
+  signedInMember: async (headers: Headers) => (headers.get("cookie") === "session=ana" ? state.member : null),
+  canManageBilling: () => false,
 }));
 vi.mock("../../../server/db.ts", () => ({ getDb: () => ({}) }));
 vi.mock("../../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
@@ -30,7 +29,7 @@ const ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const render = async () => renderToStaticMarkup(await ProjectPage({ params: Promise.resolve({ id: ID }) }));
 
 beforeEach(() => {
-  state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-1" };
+  state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-1", orgName: "Acme workspace", role: "member" };
   state.runs = 0;
   state.counted = [];
   state.tenants = [];

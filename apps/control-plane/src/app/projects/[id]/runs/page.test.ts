@@ -4,14 +4,13 @@ import { beforeEach, expect, test, vi } from "vitest";
 type Page = { before?: number };
 const state = vi.hoisted(() => ({ signedIn: true, found: true, tenants: [] as string[], asked: [] as Array<{ orgId: string; projectId: string; page: Page }> }));
 
-vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
+vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({
   redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); },
   notFound: () => { throw Object.assign(new Error("not found"), { notFound: true }); },
 }));
 vi.mock("../../../../server/auth.ts", () => ({
-  getAuth: () => ({ api: { getFullOrganization: async () => ({ name: "Acme workspace" }) } }),
-  signedInMember: async () => (state.signedIn ? { userId: "u1", email: "ana@acme.test", orgId: "org-1" } : null),
+  signedInMember: async (headers: Headers) => (state.signedIn && headers.get("cookie") === "session=ana" ? { userId: "u1", email: "ana@acme.test", orgId: "org-1", orgName: "Acme workspace", role: "member" } : null),
 }));
 vi.mock("../../../../server/db.ts", () => ({ getDb: () => ({}) }));
 vi.mock("../../../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));

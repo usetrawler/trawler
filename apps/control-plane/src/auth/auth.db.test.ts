@@ -156,29 +156,41 @@ const cookieFor = (token: string) =>
   new Headers({ "content-type": "application/json", origin: "http://localhost:3000", cookie: `better-auth.session_token=${encodeURIComponent(`${token}.${createHmac("sha256", SECRET).update(token).digest("base64")}`)}` });
 const activeOf = async (sessionId: string) => (await sql<{ active: string | null }>`select "activeOrganizationId" as active from session where id = ${sessionId}`.execute(t.db)).rows;
 
-test("a member keeps the workspace their session is in", async () => {
+test("a member keeps the workspace their session is in, with its name and their role", async () => {
   const session = sessionOf((await signIn("stays@acme.test")).session);
-  expect(await auth.workspaceOf(session)).toBe(session.activeOrganizationId);
+  expect(await auth.workspaceOf(session)).toEqual({ orgId: session.activeOrganizationId, orgName: "stays-org", role: "owner" });
   expect(await activeOf(session.id)).toEqual([{ active: session.activeOrganizationId }]);
 });
 
-test("a member removed from the workspace their session is in moves to the oldest workspace they still belong to", async () => {
-  const host = sessionOf((await signIn("host@acme.test")).session);
-  const older = sessionOf((await signIn("older@acme.test")).session);
-  const { user, session } = await signIn("guest@acme.test");
-  const guest = sessionOf(session);
-  await sql`insert into member (id, "organizationId", "userId", role, "createdAt") values ('m-guest-host', ${host.activeOrganizationId}, ${user.id}, 'member', now()), ('m-guest-older', ${older.activeOrganizationId}, ${user.id}, 'member', now() - interval '1 day')`.execute(t.db);
-  await sql`update session set "activeOrganizationId" = ${host.activeOrganizationId} where id = ${guest.id}`.execute(t.db);
-  await sql`delete from member where id = 'm-guest-host'`.execute(t.db);
-  expect(await auth.workspaceOf({ ...guest, activeOrganizationId: host.activeOrganizationId })).toBe(older.activeOrganizationId);
-  expect(await activeOf(guest.id)).toEqual([{ active: older.activeOrganizationId }]);
+test("a member who switched to a newer workspace keeps it, though they have belonged to an older one longer", async () => {
+  const host = sessionOf((await signIn("newer@acme.test")).session);
+  const { user, session } = await signIn("switcher@acme.test");
+  const switcher = sessionOf(session);
+  await sql`insert into member (id, "organizationId", "userId", role, "createdAt") values ('m-switcher-newer', ${host.activeOrganizationId}, ${user.id}, 'member', now() + interval '1 minute')`.execute(t.db);
+  await sql`update session set "activeOrganizationId" = ${host.activeOrganizationId} where id = ${switcher.id}`.execute(t.db);
+  expect(await auth.workspaceOf({ ...switcher, activeOrganizationId: host.activeOrganizationId })).toEqual({ orgId: host.activeOrganizationId, orgName: "newer-org", role: "member" });
+  expect(await activeOf(switcher.id)).toEqual([{ active: host.activeOrganizationId }]);
 });
 
-test("a session that names no workspace gets the oldest one its person belongs to", async () => {
+test("a member removed from the workspace a session is in is signed out of that session, and only that one", async () => {
+  const host = sessionOf((await signIn("host@acme.test")).session);
+  const { user, session } = await signIn("guest@acme.test");
+  const own = sessionOf(session);
+  const inHost = sessionOf(await (await auth.$context).internalAdapter.createSession(user.id, false));
+  await sql`insert into member (id, "organizationId", "userId", role, "createdAt") values ('m-guest-host', ${host.activeOrganizationId}, ${user.id}, 'member', now())`.execute(t.db);
+  await sql`update session set "activeOrganizationId" = ${host.activeOrganizationId} where id = ${inHost.id}`.execute(t.db);
+  await sql`delete from member where id = 'm-guest-host'`.execute(t.db);
+  expect(await auth.workspaceOf({ ...inHost, activeOrganizationId: host.activeOrganizationId })).toBeNull();
+  expect(await activeOf(inHost.id)).toEqual([]);
+  expect(await activeOf(own.id)).toEqual([{ active: own.activeOrganizationId }]);
+  expect(await auth.workspaceOf(own)).toMatchObject({ orgId: own.activeOrganizationId });
+});
+
+test("a session that names no workspace is signed out", async () => {
   const session = sessionOf((await signIn("unset@acme.test")).session);
   await sql`update session set "activeOrganizationId" = null where id = ${session.id}`.execute(t.db);
-  expect(await auth.workspaceOf({ ...session, activeOrganizationId: null })).toBe(session.activeOrganizationId);
-  expect(await activeOf(session.id)).toEqual([{ active: session.activeOrganizationId }]);
+  expect(await auth.workspaceOf({ ...session, activeOrganizationId: null })).toBeNull();
+  expect(await activeOf(session.id)).toEqual([]);
 });
 
 test("a member removed from their only workspace loses that session, so their next request signs in again", async () => {

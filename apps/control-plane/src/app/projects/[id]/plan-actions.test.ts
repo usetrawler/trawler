@@ -1,10 +1,10 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
-type Member = { userId: string; email: string; orgId: string };
+type Member = { userId: string; email: string; orgId: string; orgName: string; role: string };
 const state = vi.hoisted(() => ({ member: null as Member | null, tenants: [] as string[] }));
 
-vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
-vi.mock("../../../server/auth.ts", () => ({ signedInMember: async () => state.member }));
+vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
+vi.mock("../../../server/auth.ts", () => ({ signedInMember: async (headers: Headers) => (headers.get("cookie") === "session=ana" ? state.member : null) }));
 vi.mock("../../../server/db.ts", () => ({ getDb: () => ({}), getKeyring: () => ({}) }));
 vi.mock("../../../server/log.ts", () => ({ logError: async () => {}, scrubberWith: () => ({}) }));
 vi.mock("../../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
@@ -34,7 +34,7 @@ test("a session that no longer belongs to any workspace cannot change the plan o
 });
 
 test("the plan and its test accounts change in the workspace the membership check returns", async () => {
-  state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-2" };
+  state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-2", orgName: "Acme workspace", role: "member" };
   expect(await savePlanAction(PROJECT, PLAN)).toEqual({ ok: true });
   expect(await addAccountAction(PROJECT, ACCOUNT)).toEqual({ ok: true, ref: "a1", accounts: [] });
   expect(await removeAccountAction(PROJECT, "a1")).toEqual({ ok: true, accounts: [] });

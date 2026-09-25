@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { keyLooksValid, modelKey, modelKeyHint, setModelKey, type KeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
 import { openRouterPrices, priceFor, type Price } from "../../../llm/prices.ts";
-import { ProjectNotFound } from "../../../projects/projects.ts";
+import { projectExists, ProjectNotFound } from "../../../projects/projects.ts";
 import { checkModelCall, customUrlProblem, detectProvider, endpointFor, listModels, PREFERRED_MODELS, PROVIDER_LABEL, PROVIDERS, priceKey, type Endpoint, type Provider } from "../../../llm/providers.ts";
 import { DEFAULT_RUN } from "../../../runs/models.ts";
 import { startRun } from "../../../runs/runs.ts";
@@ -28,6 +28,7 @@ export interface ModelOption {
 export type ModelList = { ok: true; provider: Provider; models: ModelOption[]; suggested: string } | { ok: false; error: string };
 
 const MODEL_ID = /^[A-Za-z0-9._:\/@-]{1,200}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 interface KeyInput {
   key?: string;
@@ -66,18 +67,14 @@ function withinListingLimit(userId: string, now = Date.now()): boolean {
   return true;
 }
 
-async function signedIn() {
-  const requestHeaders = await headers();
-  return { member: await signedInMember(requestHeaders), requestHeaders };
-}
 
 export async function modelsForKeyAction(input: KeyInput): Promise<ModelList> {
-  const { member, requestHeaders } = await signedIn();
+  const member = await signedInMember(await headers());
   if (!member) return { ok: false, error: "Sign in again." };
   const { orgId } = member;
   const refusal = betaRefusal(member.email);
   if (refusal) return { ok: false, error: refusal };
-  if ((input.key ?? "").trim() && !(await canManageBilling(requestHeaders))) return { ok: false, error: "Only an owner or admin of this workspace can change its model key." };
+  if ((input.key ?? "").trim() && !canManageBilling(member)) return { ok: false, error: "Only an owner or admin of this workspace can change its model key." };
   if (!withinListingLimit(member.userId)) return { ok: false, error: "Too many model lookups. Wait a few minutes, or type a model name." };
   const resolved = await endpointFrom(orgId, input);
   if ("error" in resolved) return { ok: false, error: resolved.error };
@@ -104,16 +101,17 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   if (form.get("authorised") !== "on") return { error: "Confirm that you may test this product." };
   if (!MODEL_ID.test(modelId)) return { error: "Choose a model or type its exact name." };
   if (!Number.isFinite(budgetUsd) || budgetUsd < 0.1 || budgetUsd > 50) return { error: "Set a cap between $0.10 and $50." };
-  const { member, requestHeaders } = await signedIn();
+  const member = await signedInMember(await headers());
   if (!member) redirect("/sign-in");
   const { orgId } = member;
   const refusal = betaRefusal(member.email);
   if (refusal) return { error: refusal };
+  if (!UUID.test(projectId) || !(await withOrg(getDb(), orgId, (tx) => projectExists(tx, orgId, projectId)))) return { error: "The run could not start. Try again." };
 
   const resolved = await endpointFrom(orgId, { key: String(form.get("apiKey") ?? ""), provider: String(form.get("provider") ?? ""), baseUrl: String(form.get("baseUrl") ?? "") });
   if ("error" in resolved) return { error: resolved.error };
   const { endpoint, fresh } = resolved;
-  if (fresh && !(await canManageBilling(requestHeaders))) return { error: "Only an owner or admin of this workspace can change its model key." };
+  if (fresh && !canManageBilling(member)) return { error: "Only an owner or admin of this workspace can change its model key." };
   const label = PROVIDER_LABEL[endpoint.provider];
   const check = await checkModelCall(endpoint, modelId);
   if (!check.ok) {

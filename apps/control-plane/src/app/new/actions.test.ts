@@ -1,11 +1,11 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
-type Member = { userId: string; email: string; orgId: string };
+type Member = { userId: string; email: string; orgId: string; orgName: string; role: string };
 const state = vi.hoisted(() => ({ member: null as Member | null, proposedFor: [] as string[] }));
 
-vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
+vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({ redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); } }));
-vi.mock("../../server/auth.ts", () => ({ signedInMember: async () => state.member }));
+vi.mock("../../server/auth.ts", () => ({ signedInMember: async (headers: Headers) => (headers.get("cookie") === "session=ana" ? state.member : null) }));
 vi.mock("../../server/env.ts", () => ({ readEnv: () => ({ setup: { model: "deepseek/deepseek-v4.1-flash", apiKey: "sk-or-v1-unused" } }) }));
 vi.mock("../../server/db.ts", () => ({ getDb: () => ({}), getKeyring: () => ({}) }));
 vi.mock("../../server/log.ts", () => ({ logError: async () => {}, writeLog: async () => {} }));
@@ -33,7 +33,7 @@ test("a session that no longer belongs to any workspace is sent to sign in, and 
 });
 
 test("a project is set up in the workspace the membership check returns", async () => {
-  state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-2" };
+  state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-2", orgName: "Acme workspace", role: "member" };
   await expect(startSetup({}, form())).rejects.toMatchObject({ to: "/projects/p1" });
   expect(state.proposedFor).toEqual(["org-2"]);
 });

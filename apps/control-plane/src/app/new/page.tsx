@@ -1,18 +1,16 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AppShell } from "../../components/app-shell.tsx";
-import { getAuth, signedInMember } from "../../server/auth.ts";
+import { signedInMember } from "../../server/auth.ts";
 import { NewProjectForm } from "./new-project-form.tsx";
 
 export const dynamic = "force-dynamic";
 
 export default async function NewProjectPage() {
-  const requestHeaders = await headers();
-  const member = await signedInMember(requestHeaders);
+  const member = await signedInMember(await headers());
   if (!member) redirect("/sign-in");
-  const organization = await getAuth().api.getFullOrganization({ headers: requestHeaders });
   return (
-    <AppShell organization={organization?.name ?? "Workspace"} email={member.email} step={1} current="new">
+    <AppShell organization={member.orgName} email={member.email} step={1} current="new">
       <div className="flex flex-col gap-8">
         <div className="flex flex-col gap-4">
           <p className="font-mono text-xs tracking-[0.2em] text-action uppercase">01 / Product</p>

@@ -1,10 +1,10 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
-type Member = { userId: string; email: string; orgId: string };
+type Member = { userId: string; email: string; orgId: string; orgName: string; role: string };
 const state = vi.hoisted(() => ({ member: null as Member | null, tenants: [] as string[], judgedBy: [] as string[] }));
 
-vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
-vi.mock("../../../server/auth.ts", () => ({ signedInMember: async () => state.member }));
+vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
+vi.mock("../../../server/auth.ts", () => ({ signedInMember: async (headers: Headers) => (headers.get("cookie") === "session=ana" ? state.member : null) }));
 vi.mock("../../../server/beta.ts", () => ({ betaRefusal: () => null }));
 vi.mock("../../../server/db.ts", () => ({ getDb: () => ({}), getKeyring: () => ({}) }));
 vi.mock("../../../server/log.ts", () => ({ logError: async () => {} }));
@@ -31,7 +31,7 @@ test("a session that no longer belongs to any workspace can neither stop a run n
 });
 
 test("a run is stopped and judged again in the workspace the membership check returns, for the member who asked", async () => {
-  state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-2" };
+  state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-2", orgName: "Acme workspace", role: "member" };
   expect(await cancelRunAction(RUN)).toBe(true);
   expect(await judgeAgainAction(RUN, "f1")).toEqual({});
   expect(state.tenants).toEqual(["org-2", "org-2"]);

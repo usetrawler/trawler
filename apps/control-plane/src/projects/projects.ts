@@ -82,6 +82,10 @@ export async function loadProjectConfig(tx: Tx, orgId: string, projectId: string
   });
 }
 
+export async function projectExists(tx: Tx, orgId: string, projectId: string): Promise<boolean> {
+  return !!(await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).executeTakeFirst());
+}
+
 export async function listProjects(tx: Tx, orgId: string) {
   return tx.selectFrom("projects").select(["id", "name", "target_url", "created_at"]).where("org_id", "=", orgId).orderBy("created_at", "desc").orderBy("id").execute();
 }

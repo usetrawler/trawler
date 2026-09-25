@@ -1,20 +1,19 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
-const state = vi.hoisted(() => ({ member: null as { userId: string; email: string; orgId: string } | null }));
+const state = vi.hoisted(() => ({ member: null as { userId: string; email: string; orgId: string; orgName: string; role: string } | null }));
 
-vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
+vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({ redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); } }));
 vi.mock("../../server/auth.ts", () => ({
-  getAuth: () => ({ api: { getFullOrganization: async () => ({ name: "Acme workspace" }) } }),
-  signedInMember: async () => state.member,
+  signedInMember: async (headers: Headers) => (headers.get("cookie") === "session=ana" ? state.member : null),
 }));
 vi.mock("./new-project-form.tsx", () => ({ NewProjectForm: () => null }));
 
 const { default: NewProjectPage } = await import("./page.tsx");
 
 beforeEach(() => {
-  state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-1" };
+  state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-1", orgName: "Acme workspace", role: "member" };
 });
 
 test("a visitor who is not signed in, or no longer belongs to any workspace, is sent to sign in", async () => {

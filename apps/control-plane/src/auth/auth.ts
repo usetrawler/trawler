@@ -81,14 +81,17 @@ export function createAuth(options: AuthOptions) {
       return onboard(storeFor(tx), user);
     });
   };
-  const workspaceOf = async (session: { id: string; userId: string; activeOrganizationId?: string | null }): Promise<string | null> => {
-    const active = session.activeOrganizationId;
-    if (active && (await db.selectFrom("member").select("id").where("organizationId", "=", active).where("userId", "=", session.userId).executeTakeFirst())) return active;
-    const [remaining] = await storeFor(db).organizationsOf(session.userId);
-    if (remaining) {
-      await db.updateTable("session").set({ activeOrganizationId: remaining }).where("id", "=", session.id).execute();
-      return remaining;
-    }
+  const workspaceOf = async (session: { id: string; userId: string; activeOrganizationId?: string | null }): Promise<{ orgId: string; orgName: string; role: string } | null> => {
+    const membership = session.activeOrganizationId
+      ? await db
+          .selectFrom("member")
+          .innerJoin("organization", "organization.id", "member.organizationId")
+          .select(["organization.id as orgId", "organization.name as orgName", "member.role"])
+          .where("member.organizationId", "=", session.activeOrganizationId)
+          .where("member.userId", "=", session.userId)
+          .executeTakeFirst()
+      : undefined;
+    if (membership) return membership;
     await db.deleteFrom("session").where("id", "=", session.id).execute();
     return null;
   };
