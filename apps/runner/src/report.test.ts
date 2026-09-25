@@ -98,6 +98,18 @@ describe("the hosted runner", () => {
     expect(events().map((e) => e.exception.values[0]!.value).sort()).toEqual(["the next page crashed after typing •••", "the page crashed after typing •••"]);
     expect(sent.join("\n")).not.toContain(JOB_PASSWORD);
   });
+
+  test("keeps the secrets of the last two jobs only, so a long-running runner does not scan every job it ever ran", async () => {
+    const scrubberFor = (secret: string) => {
+      const scrubber = new SecretScrubber();
+      scrubber.add(secret);
+      return scrubber;
+    };
+    for (const secret of ["first-job-password", "second-job-password", "third-job-password"]) reporting.maskWith(scrubberFor(secret));
+    Sentry.captureException(new Error("typed first-job-password, second-job-password and third-job-password"));
+    await Sentry.flush(2000);
+    expect(events().map((e) => e.exception.values[0]!.value)).toEqual(["typed first-job-password, ••• and •••"]);
+  });
 });
 
 test("the same failure of different jobs is one issue, a different failure another", () => {
