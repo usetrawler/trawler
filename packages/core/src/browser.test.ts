@@ -74,6 +74,8 @@ beforeAll(async () => {
         return html(`<p>Forgot password? Change your password below.</p><input aria-label="Password" type="password" value="password" disabled><input aria-label="Search" type="text">`);
       case "/cut-submit":
         return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password" oninput="this.value = this.value.slice(0, 6); this.form.submit()"></form>`);
+      case "/encode":
+        return html(`<input aria-label="Password" type="password"><button onclick="const p = document.querySelector('input'); p.value = btoa(p.value)">Encode</button>`);
       case "/echo-password": {
         let body = "";
         req.on("data", (chunk) => (body += chunk));
@@ -632,6 +634,18 @@ describe("password fields", () => {
       await navigate(b, `${origin}/cut-submit`);
       const snap = await snapshot(b);
       expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toMatch(/^failed: /);
+    });
+  }, 60_000);
+
+  test("a password the page rewrites inside its own field is still hidden", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/encode`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), PASSWORD, "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Encode"), element: "Encode" }, ctx);
+      const shown = await snapshot(b);
+      expect(shown).not.toContain(Buffer.from(PASSWORD).toString("base64"));
+      expect(shown).toContain("•••");
     });
   }, 60_000);
 

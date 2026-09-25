@@ -214,6 +214,7 @@ export async function openBrowser(opts: {
     });
     let filled: ElementHandle[] = [];
     const lastValues = new WeakMap<ElementHandle, string>();
+    const valuesBeforeTyping = new WeakMap<ElementHandle, string>();
     const liveFilled = async () => {
       const alive = await Promise.all(filled.map((h) => within(h.evaluate(() => true).catch(() => false), HANDLE_READ_MS, true)));
       filled = filled.filter((_, i) => alive[i]);
@@ -229,11 +230,14 @@ export async function openBrowser(opts: {
       opts.scrubber.add(value);
     };
     const scrubWithFilledValues = async <T>(result: T): Promise<T> => {
+      const live = new SecretScrubber();
       for (const h of await liveFilled()) {
         const value = await readValue(h);
-        if (value.length >= MIN_SECRET_LENGTH && [...typedPasswords].some((typed) => keptFrom(value, typed) || keptFrom(typed, value))) keepSecret(value);
+        if (value.length < MIN_SECRET_LENGTH || value === valuesBeforeTyping.get(h)) continue;
+        live.add(value);
+        if ([...typedPasswords].some((typed) => keptFrom(value, typed) || keptFrom(typed, value))) keepSecret(value);
       }
-      return opts.scrubber.scrub(result);
+      return live.scrub(opts.scrubber.scrub(result));
     };
     const focusCheck = async () => {
       const held = await liveFilled();
@@ -312,6 +316,7 @@ export async function openBrowser(opts: {
           if (limit !== undefined && limit < text.length) keepSecret(text.slice(0, limit));
           const field = await findMarked(mark);
           if (!field) return "failed: the password field could not be found again, so the password was not typed";
+          valuesBeforeTyping.set(field, await within(field.evaluate((el: any) => String(el.value ?? "")).catch(() => ""), HANDLE_READ_MS, ""));
           filled = [...filled, field].slice(-MAX_HELD_FIELDS);
         }
         const out = (await type({ target: ref, element: kind === "password" ? "password field" : "username field", text }, internalCall)) as McpResult;
