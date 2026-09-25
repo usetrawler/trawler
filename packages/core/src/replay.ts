@@ -5,7 +5,7 @@ import { browserQueue, runAgentLoop } from "./agent-loop.ts";
 import { type Budget, failureMessage, stoppedByRun, tallyStep } from "./llm.ts";
 import { judgePrompt, replayPrompt } from "./prompts.ts";
 import type { SecretScrubber } from "./secrets.ts";
-import { newSessionState, sessionTools, type FillField } from "./session-tools.ts";
+import { madeUpEmail, newSessionState, ownPasswordTool, sessionTools, type FillField } from "./session-tools.ts";
 
 const NO_REPORT: ReplayObservation = { completed: false, observed: "the replay session wrote no report", blockedAt: null };
 const NUDGE = "Every turn must call a tool; plain text does nothing. Carry on with the steps, and call report_replay when you are done or blocked.";
@@ -48,12 +48,13 @@ export async function runReplay(opts: {
   const jobId = `replay:${opts.finding.id}`;
   const emit = (e: RunEventInput) => opts.emit(opts.scrubber.scrub(e));
   const stepCount = opts.finding.reproduction.length;
-  const queue = browserQueue(opts.browserTools, opts.fillField);
+  const queue = browserQueue(opts.browserTools);
+  const state = newSessionState([]);
   const { sign_in } = sessionTools({
-    state: newSessionState([]),
+    state,
     accounts: opts.project.accounts.filter((a) => a.ref === opts.accountRef),
     emit, jobId,
-    fillField: queue.fillField,
+    fillField: opts.fillField, inBrowser: queue.run,
     scrubber: opts.scrubber,
     newId: () => "unused",
   });
@@ -73,13 +74,13 @@ export async function runReplay(opts: {
       return "reported";
     }),
   });
-  const instructions = replayPrompt({ targetUrl: opts.project.targetUrl, steps: opts.finding.reproduction, accountRef: opts.accountRef });
+  const instructions = replayPrompt({ targetUrl: opts.project.targetUrl, steps: opts.finding.reproduction, accountRef: opts.accountRef, signUpEmail: opts.accountRef ? undefined : madeUpEmail("replay") });
   const usage = emptyUsage(opts.modelId);
 
   emit({ type: "job_started", jobId, kind: "replay" });
   const outcome = await runAgentLoop({
     model: opts.model,
-    tools: { ...queue.tools, sign_in, report_replay },
+    tools: { ...queue.tools, sign_in, report_replay, ...(opts.accountRef ? {} : ownPasswordTool({ state, fillField: opts.fillField, inBrowser: queue.run, scrubber: opts.scrubber })) },
     instructions: () => `${instructions}\n\nTurn ${usage.steps + 1} of ${opts.maxSteps}.`,
     nudge: NUDGE,
     scrubber: opts.scrubber,

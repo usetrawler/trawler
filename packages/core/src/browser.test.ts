@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { BROWSER_TOOLS, openBrowser, type Browser } from "./browser.ts";
 import { SecretScrubber } from "./secrets.ts";
+import { newSessionState, ownPasswordTool, type FillField } from "./session-tools.ts";
 
 const ctx = { toolCallId: "t", messages: [], context: {} };
 const PASSWORD = "hunter22-secret";
@@ -17,6 +18,7 @@ let origin = "";
 let foreignOrigin = "";
 const seen: Record<string, IncomingMessage["headers"]> = {};
 const foreignHits: string[] = [];
+const signups: Array<{ email: string | null; password: string | null; confirm: string | null }> = [];
 
 function listen(s: Server): Promise<string> {
   return new Promise((r) => s.listen(0, "127.0.0.1", () => {
@@ -52,6 +54,57 @@ beforeAll(async () => {
         return html(`<h1>Login</h1><img src="https://blocked.example/pixel.png"><img src="https://blocked.example/other.png"><input aria-label="Email" type="text"><input aria-label="Password" type="password"><p>Welcome back</p><a href="/two">Next page</a>`);
       case "/two":
         return html(`<h1>Second page</h1>`);
+      case "/short":
+        return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password" maxlength="12"><button type="submit">Save</button></form>`);
+      case "/strip":
+        return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password" oninput="this.value = this.value.replace(/[^A-Za-z0-9]/g, '')"><button type="submit">Save</button></form>`);
+      case "/alert-short":
+        return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password" oninput="this.value = this.value.slice(0, 12); alert('Checked')"><button type="submit">Save</button></form>`);
+      case "/short-on-change":
+        return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password" onchange="this.value = this.value.slice(0, 12)"><button type="submit">Save</button></form>`);
+      case "/js-pin":
+        return html(`<input aria-label="PIN" type="password" oninput="this.value = this.value.slice(0, 6)">`);
+      case "/js-pin-locked":
+        return html(`<input aria-label="PIN" type="password" oninput="this.value = this.value.slice(0, 6); this.disabled = true">`);
+      case "/strip-show":
+        return html(`<input aria-label="Password" type="password" oninput="this.value = this.value.replace(/[^A-Za-z0-9]/g, '')"><button onclick="const o=document.querySelector('input');const n=document.createElement('input');n.type='text';n.setAttribute('aria-label','Password');n.value=o.value;o.replaceWith(n)">Show password</button>`);
+      case "/strip-autoshow":
+        return html(`<input aria-label="Password" type="password" oninput="this.value = this.value.replace(/[^A-Za-z0-9]/g, ''); setTimeout(() => { const n = document.createElement('input'); n.type = 'text'; n.setAttribute('aria-label', 'Password'); n.value = this.value; this.replaceWith(n); n.focus(); }, 300)">`);
+      case "/placeholder":
+        return html(`<p>Forgot password? Change your password below.</p><input aria-label="Password" type="password" value="password" disabled><input aria-label="Search" type="text">`);
+      case "/closing-frame":
+        return html(`<iframe src="/closing-frame-field"></iframe>`);
+      case "/closing-frame-field":
+        return html(`<input aria-label="Password" type="password" oninput="parent.document.querySelector('iframe').remove()">`);
+      case "/encode":
+        return html(`<input aria-label="Password" type="password"><button onclick="const p = document.querySelector('input'); p.value = btoa(p.value)">Encode</button>`);
+      case "/copy-away":
+        return html(`<input aria-label="Password" type="password" maxlength="12" oninput="document.getElementById('copy').textContent = 'You typed ' + this.value; this.value = ''; alert('Saved')"><p id="copy"></p>`);
+      case "/empties":
+        return html(`<input aria-label="Password" type="password" oninput="this.value = ''">`);
+      case "/reset-to-placeholder":
+        return html(`<input aria-label="Password" type="password"><button onclick="document.querySelector('input').value = 'password'">Reset</button>`);
+      case "/space-out":
+        return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password"><button type="button" onclick="const p = document.querySelector('input'); p.value = p.value.split('').join(' ')">Space out</button><button type="submit">Save</button></form>`);
+      case "/echo-password": {
+        let body = "";
+        req.on("data", (chunk) => (body += chunk));
+        req.on("end", () => html(`<h1>Saved</h1><p>Your password is ${new URLSearchParams(body).get("password")}</p>`));
+        return;
+      }
+      case "/pin":
+        return html(`<input aria-label="PIN" type="password" maxlength="6"><button onclick="document.getElementById('echo').textContent = 'Your PIN is ' + document.querySelector('input').value">Echo</button><p id="echo"></p>`);
+      case "/signup": {
+        if (req.method !== "POST") return html(`<form method="post" action="/signup"><input aria-label="Email" name="email" type="email"><input aria-label="Password" name="password" type="password"><input aria-label="Confirm password" name="confirm" type="password"><button type="submit">Create account</button></form>`);
+        let body = "";
+        req.on("data", (chunk) => (body += chunk));
+        req.on("end", () => {
+          const form = new URLSearchParams(body);
+          signups.push({ email: form.get("email"), password: form.get("password"), confirm: form.get("confirm") });
+          html(`<h1>Welcome</h1><p>Signed up with the password ${form.get("password")}</p>`);
+        });
+        return;
+      }
       case "/echo":
         return html(`<p>Your password is ${PASSWORD}</p>`);
       case "/frame":
@@ -453,7 +506,200 @@ describe("password fields", () => {
       const snap = await snapshot(b);
       const out = (await b.tools.browser_type!.execute!({ target: refOf(snap, "Password"), text: "guess", element: "password" }, ctx)) as { isError?: boolean; content: Array<{ text: string }> };
       expect(out.isError).toBe(true);
-      expect(out.content[0]!.text).toMatch(/only be filled with sign_in/);
+      expect(out.content[0]!.text).toMatch(/only be filled with sign_in or type_own_password/);
+    });
+  }, 60_000);
+
+  test("a made-up password reaches a sign-up form's password and confirmation, and never the model", async () => {
+    signups.length = 0;
+    const scrubber = new SecretScrubber();
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/signup`);
+      const snap = await snapshot(b);
+      let password = "";
+      const fillField: FillField = (ref, text, kind) => ((password = text), b.fillField(ref, text, kind));
+      const { type_own_password } = ownPasswordTool({ state: newSessionState([]), fillField, inBrowser: (action) => action(), scrubber });
+      await b.tools.browser_type!.execute!({ target: refOf(snap, "Email"), text: "ama@acme.test", element: "email" }, ctx);
+      expect(await type_own_password.execute!({ fields: [refOf(snap, "Password"), refOf(snap, "Confirm password")] }, ctx)).toMatch(/^e\d+: typed the password\ne\d+: typed the password$/);
+      const guess = (await b.tools.browser_type!.execute!({ target: refOf(snap, "Confirm password"), text: "guess", element: "confirm" }, ctx)) as { isError?: boolean; content: Array<{ text: string }> };
+      expect(guess.isError).toBe(true);
+      expect(guess.content[0]!.text).toMatch(/only be filled with sign_in or type_own_password/);
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Create account"), element: "Create account" }, ctx);
+      const after = await snapshot(b);
+      expect(after).toContain("Signed up with the password •••");
+      expect(after).not.toContain(password);
+      expect(signups).toEqual([{ email: "ama@acme.test", password, confirm: password }]);
+      expect(password).toHaveLength(16);
+    }, { scrubber });
+  }, 60_000);
+
+  for (const [page, kept] of [["/short", "Kx7mPq2Rz9Lw"], ["/strip", "Kx7mPq2Rz9LwAa7"]] as const) {
+    test(`a password field that keeps something other than what was typed (${page}) still never shows it`, async () => {
+      await withBrowser(async (b) => {
+        await navigate(b, `${origin}${page}`);
+        const snap = await snapshot(b);
+        expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("typed the password");
+        const edit = (await b.tools.browser_type!.execute!({ target: refOf(snap, "Password"), text: "x", element: "password" }, ctx)) as { isError?: boolean };
+        expect(edit.isError).toBe(true);
+        await b.tools.browser_click!.execute!({ target: refOf(snap, "Save"), element: "Save" }, ctx);
+        const shown = await snapshot(b);
+        expect(shown).toContain("Your password is •••");
+        expect(shown).not.toContain(kept);
+      });
+    }, 60_000);
+  }
+
+  test("a password field that takes too few characters to hide a password gets nothing typed into it", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/pin`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "PIN"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("failed: the field takes at most 6 characters, too few to keep a password hidden, so nothing was typed");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Echo"), element: "Echo" }, ctx);
+      const shown = await snapshot(b);
+      expect(shown).toContain("Your PIN is");
+      expect(shown).not.toContain("Kx7mPq");
+    });
+  }, 60_000);
+
+  test("a password a field shortens behind an alert is hidden once the alert is answered, and after the form is sent", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/alert-short`);
+      const snap = await snapshot(b);
+      await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password");
+      await b.tools.browser_handle_dialog!.execute!({ accept: true }, ctx);
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Save"), element: "Save" }, ctx);
+      const shown = await snapshot(b);
+      expect(shown).toContain("Saved");
+      expect(shown).not.toContain("Kx7mPq2Rz9Lw");
+    });
+  }, 60_000);
+
+  test("a made-up password a field shortens only as the form is sent is still hidden on the next page", async () => {
+    const scrubber = new SecretScrubber();
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/short-on-change`);
+      const snap = await snapshot(b);
+      let password = "";
+      const fillField: FillField = (ref, text, kind) => ((password = text), b.fillField(ref, text, kind));
+      const { type_own_password } = ownPasswordTool({ state: newSessionState([]), fillField, inBrowser: (action) => action(), scrubber });
+      await type_own_password.execute!({ fields: [refOf(snap, "Password")] }, ctx);
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Save"), element: "Save" }, ctx);
+      const shown = await snapshot(b);
+      expect(shown).toContain("Your password is •••");
+      expect(shown).not.toContain(password.slice(0, 12));
+    }, { scrubber });
+  }, 60_000);
+
+  test("a field whose script keeps too little of a password to hide is cleared, and says so when it cannot be", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/js-pin`);
+      let snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "PIN"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("failed: the field kept too little of the password to hide it, so it was cleared");
+      expect(await snapshot(b)).not.toContain("Kx7mPq");
+      await navigate(b, `${origin}/js-pin-locked`);
+      snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "PIN"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("failed: the field kept too little of the password to hide it, and it could not be cleared");
+    });
+  }, 60_000);
+
+  test("a rewritten password stays guarded when a show-password button swaps in a plain field holding it", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/strip-show`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Show password"), element: "show password" }, ctx);
+      const shown = await snapshot(b);
+      expect(shown).not.toContain("Kx7mPq2Rz9Lw");
+      await b.tools.browser_click!.execute!({ target: refOf(shown, "Password"), element: "password" }, ctx);
+      const key = (await b.tools.browser_press_key!.execute!({ key: "Backspace" }, ctx)) as { isError?: boolean };
+      expect(key.isError).toBe(true);
+    });
+  }, 60_000);
+
+  test("a rewritten password is guarded from the moment it is typed, before the page swaps the field for a plain one", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/strip-autoshow`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("typed the password");
+      await new Promise((r) => setTimeout(r, 600));
+      const key = (await b.tools.browser_press_key!.execute!({ key: "Backspace" }, ctx)) as { isError?: boolean };
+      expect(key.isError).toBe(true);
+    });
+  }, 60_000);
+
+  test("a placeholder a password field shows is not taken for a password: the page's words stay readable and other fields typeable", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/placeholder`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toMatch(/^failed: /);
+      expect(await snapshot(b)).toContain("Forgot password? Change your password below.");
+      const search = (await b.tools.browser_type!.execute!({ target: refOf(snap, "Search"), text: "password reset", element: "search" }, ctx)) as { isError?: boolean };
+      expect(search.isError).toBeFalsy();
+      expect(await snapshot(b)).toContain("Forgot password? Change your password below.");
+    });
+  }, 60_000);
+
+  test("a password field that goes away right after typing is reported as not known to be kept", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/closing-frame`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("failed: the page moved on before the field could be checked, so it is not known what the field kept");
+    });
+  }, 60_000);
+
+  test("a word the page puts into a password field after typing is hidden only while the field holds it", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/reset-to-placeholder`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Reset"), element: "Reset" }, ctx);
+      await navigate(b, `${origin}/placeholder`);
+      expect(await snapshot(b)).toContain("Forgot password? Change your password below.");
+    });
+  }, 60_000);
+
+  test("a password the page spreads out inside its field stays hidden after the form is sent", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/space-out`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Space out"), element: "Space out" }, ctx);
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Save"), element: "Save" }, ctx);
+      const shown = await snapshot(b);
+      expect(shown).toContain("Your password is •••");
+      expect(shown).not.toContain("K x 7 m");
+    });
+  }, 60_000);
+
+  test("a password the page rewrites inside its own field is still hidden", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/encode`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), PASSWORD, "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Encode"), element: "Encode" }, ctx);
+      const shown = await snapshot(b);
+      expect(shown).not.toContain(Buffer.from(PASSWORD).toString("base64"));
+      expect(shown).toContain("•••");
+    });
+  }, 60_000);
+
+  test("a password a shorter maximum cuts is hidden even when the field hands it on and empties before it can be read", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/copy-away`);
+      const snap = await snapshot(b);
+      await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password");
+      await b.tools.browser_handle_dialog!.execute!({ accept: true }, ctx);
+      const shown = await snapshot(b);
+      expect(shown).toContain("You typed •••");
+      expect(shown).not.toContain("Kx7mPq2Rz9Lw");
+    });
+  }, 60_000);
+
+  test("a field that throws away what was typed is reported as not keeping the password", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/empties`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("failed: the field did not keep the password");
     });
   }, 60_000);
 

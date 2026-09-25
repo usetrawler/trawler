@@ -351,6 +351,25 @@ test("a queued run never pairs its snapshot's username with a different account'
   await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "finish" });
 });
 
+test("a replay has no account when its person's account stopped being usable, like the session it replays", async () => {
+  await drain();
+  const own = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", own, keys, options));
+  await sql`update target_accounts set username = 'someone-else@acme.test' where project_id = ${own} and ref = 'ana'`.execute(t.db);
+  const session = (await claimJob(t.db, keys))!;
+  expect(session).toMatchObject({ kind: "role_session", personaKey: "ana" });
+  expect(session.config.personas.find((p) => p.id === "ana")!.accountRef).toBeUndefined();
+  seq = 0;
+  await ingestEvents(t.db, session.token, [ev({ type: "finding", jobId: session.jobId, finding: defect })]);
+  await completeJob(t.db, session.token, { usage: usage(0), stoppedBy: "finish" });
+  const lee = (await claimJob(t.db, keys))!;
+  await completeJob(t.db, lee.token, { usage: usage(0), stoppedBy: "finish" });
+  const replay = (await claimJob(t.db, keys))!;
+  expect(replay).toMatchObject({ kind: "replay", finding: { id: "ana:f1" } });
+  expect(replay.accountRef).toBeUndefined();
+  await drain();
+});
+
 describe("judge again", () => {
   const openRouterKey = { provider: "openrouter" as const, key: `sk-or-v1-${"a".repeat(40)}` };
   const summaryOf = (runId: string) => withOrg(t.db, "org-a", async (tx) => (await runSummary(tx, "org-a", runId))!);

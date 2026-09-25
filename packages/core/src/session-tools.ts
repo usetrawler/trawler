@@ -1,7 +1,8 @@
+import { randomBytes, randomInt } from "node:crypto";
 import { tool } from "ai";
 import { z } from "zod";
 import { FindingSchema, type Finding, type Goal, type GoalOutcome, type RunEventInput, type TargetAccount, MAX_GOAL_NOTE, MAX_NOTE } from "@usetrawler/protocol";
-import type { SecretScrubber } from "./secrets.ts";
+import { MIN_SECRET_LENGTH, type SecretScrubber } from "./secrets.ts";
 
 export interface SessionState {
   notes: string[];
@@ -13,6 +14,18 @@ export interface SessionState {
 
 export type FieldKind = "username" | "password";
 export type FillField = (ref: string, text: string, kind: FieldKind) => Promise<string>;
+export type InBrowser = <T>(action: () => Promise<T>) => Promise<T>;
+
+const CLOSED = "rejected: the session is already finished";
+const PASSWORD_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+
+export function madeUpPassword(): string {
+  return `${Array.from({ length: 12 }, () => PASSWORD_CHARS[randomInt(PASSWORD_CHARS.length)]).join("")}!Aa7`;
+}
+
+export function madeUpEmail(name: string): string {
+  return `${name.slice(0, 40)}.${randomBytes(4).toString("hex")}@example.com`;
+}
 
 export function newSessionState(goals: Goal[]): SessionState {
   return {
@@ -43,6 +56,7 @@ export function sessionTools(opts: {
   emit: (e: RunEventInput) => void;
   jobId: string;
   fillField: FillField;
+  inBrowser: InBrowser;
   scrubber: SecretScrubber;
   newId: () => string;
 }) {
@@ -52,14 +66,13 @@ export function sessionTools(opts: {
     typeof goal === "string" && goal.trim()
       ? `rejected: unknown goal ${goal}; use one of ${goalIds().join(", ")}`
       : `rejected: goal: missing; use one of ${goalIds().join(", ")}`;
-  const closed = "rejected: the session is already finished";
 
   return {
     note: tool({
       description: "Add a line to your scratchpad. The scratchpad stays in view for the whole session; old page snapshots do not.",
       inputSchema: z.object({ text: z.string().nullish() }),
       execute: async ({ text }) => {
-        if (state.finished !== null) return closed;
+        if (state.finished !== null) return CLOSED;
         if (!text?.trim()) return "rejected: text: the note is empty";
         const kept = Array.from(text).slice(0, MAX_NOTE).join("");
         emit({ type: "note", jobId, text: kept });
@@ -79,7 +92,7 @@ export function sessionTools(opts: {
         severity: z.string().nullish(),
       }),
       execute: async (input) => {
-        if (state.finished !== null) return closed;
+        if (state.finished !== null) return CLOSED;
         if (state.page !== "seen") return state.page === "unseen" ? "rejected: you have not looked at the product yet; open it and take a browser_snapshot, then report what it shows" : "rejected: your last browser action failed, so you are not looking at the page any more; take a browser_snapshot and report what it shows";
         const goal = lower(input.goal);
         if (typeof goal !== "string" || !state.goals.has(goal)) return unknownGoal(input.goal);
@@ -102,7 +115,7 @@ export function sessionTools(opts: {
       description: "Record where a goal ended up. goal and status are required; status: reached | failed; note: where you stopped or what you saw. A later call for the same goal replaces the earlier one.",
       inputSchema: z.object({ goal: z.string().nullish(), status: z.string().nullish(), note: z.string().nullish() }),
       execute: async (input) => {
-        if (state.finished !== null) return closed;
+        if (state.finished !== null) return CLOSED;
         const goal = lower(input.goal);
         const { status, note } = input;
         if (typeof goal !== "string" || !state.goals.has(goal)) return unknownGoal(input.goal);
@@ -118,23 +131,27 @@ export function sessionTools(opts: {
       description: "Type a stored account's username and password into two fields, by their snapshot refs. You never see the password.",
       inputSchema: z.object({ account: z.string(), usernameField: z.string(), passwordField: z.string() }),
       execute: async ({ account, usernameField, passwordField }) => {
-        if (state.finished !== null) return closed;
+        if (state.finished !== null) return CLOSED;
         const a = opts.accounts.find((x) => x.ref === account);
-        if (!a) return `rejected: unknown account ${account}; known: ${opts.accounts.map((x) => x.ref).join(", ") || "none"}`;
+        if (!a && opts.accounts.length === 0) return "rejected: you have no stored account; for an account you created, type its email yourself and fill its password with type_own_password";
+        if (!a) return `rejected: unknown account ${account}; known: ${opts.accounts.map((x) => x.ref).join(", ")}`;
         opts.scrubber.add(a.password);
-        try {
-          await opts.fillField(usernameField, a.username, "username");
-          return opts.scrubber.scrub(await opts.fillField(passwordField, a.password, "password"));
-        } catch (err) {
-          return opts.scrubber.scrub(`failed: ${err instanceof Error ? err.message : String(err)}`);
-        }
+        return opts.inBrowser(async () => {
+          try {
+            const username = await opts.fillField(usernameField, a.username, "username");
+            if (username.startsWith("failed:")) return opts.scrubber.scrub(`failed: the username was not typed, so the password was not typed either. ${username.slice("failed:".length).trim()}`);
+            return opts.scrubber.scrub(await opts.fillField(passwordField, a.password, "password"));
+          } catch (err) {
+            return opts.scrubber.scrub(`failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        });
       },
     }),
     finish: tool({
       description: "End the session with a short summary once every goal has a status (reached or failed).",
       inputSchema: z.object({ summary: z.string().nullish() }),
       execute: async ({ summary }) => {
-        if (state.finished !== null) return closed;
+        if (state.finished !== null) return CLOSED;
         if (!summary?.trim()) return "rejected: summary: write a short summary";
         const open = [...state.goals.values()].filter((g) => g.status === "not_attempted").map((g) => g.goal);
         if (open.length) return `rejected: give these goals a status first (goal_status reached or failed): ${open.join(", ")}`;
@@ -146,3 +163,30 @@ export function sessionTools(opts: {
 }
 
 export type SessionTools = ReturnType<typeof sessionTools>;
+
+export function ownPasswordTool(opts: { state: SessionState; fillField: FillField; inBrowser: InBrowser; scrubber: SecretScrubber }) {
+  const password = madeUpPassword();
+  for (let length = MIN_SECRET_LENGTH; length <= password.length; length++) opts.scrubber.add(password.slice(0, length));
+  return {
+    type_own_password: tool({
+      description: "Type your own password into password fields, by their snapshot refs: when you sign up, the password field and any field that asks for it again; when you sign in to the account you created, the password field. The password is made up for you and stays the same all session. You never see it.",
+      inputSchema: z.object({ fields: z.union([z.array(z.string()), z.string()]).nullish() }),
+      execute: async ({ fields }) => {
+        if (opts.state.finished !== null) return CLOSED;
+        const refs = [...new Set((typeof fields === "string" ? fields.split(/[\s,]+/) : fields ?? []).map((f) => f.trim()).filter(Boolean))];
+        if (refs.length === 0) return "rejected: fields: give the refs of the password fields";
+        return opts.inBrowser(async () => {
+          const typed: string[] = [];
+          for (const ref of refs) {
+            try {
+              typed.push(`${ref}: ${await opts.fillField(ref, password, "password")}`);
+            } catch (err) {
+              typed.push(`${ref}: failed: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
+          return opts.scrubber.scrub(typed.join("\n"));
+        });
+      },
+    }),
+  };
+}

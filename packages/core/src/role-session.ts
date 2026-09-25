@@ -4,7 +4,7 @@ import { browserQueue, runAgentLoop } from "./agent-loop.ts";
 import type { Budget } from "./llm.ts";
 import { rolePrompt, sessionStatus } from "./prompts.ts";
 import type { SecretScrubber } from "./secrets.ts";
-import { newSessionState, sessionTools, type FillField } from "./session-tools.ts";
+import { madeUpEmail, newSessionState, ownPasswordTool, sessionTools, type FillField } from "./session-tools.ts";
 
 const NUDGE = "Every turn must call a tool; plain text does nothing. Continue with the goals, and call finish once every goal has a status.";
 
@@ -25,20 +25,22 @@ export async function runRoleSession(opts: {
   const jobId = `role:${opts.persona.id}`;
   const emit = (e: RunEventInput) => opts.emit(opts.scrubber.scrub(e));
   const state = newSessionState(opts.project.goals);
-  const queue = browserQueue(opts.browserTools, opts.fillField, (ok) => (state.page = ok ? "seen" : "stale"));
+  const queue = browserQueue(opts.browserTools, (ok) => (state.page = ok ? "seen" : "stale"));
   const tools = {
     ...queue.tools,
     ...sessionTools({
       state,
       accounts: opts.project.accounts.filter((a) => a.ref === opts.persona.accountRef),
       emit, jobId,
-      fillField: queue.fillField,
+      fillField: opts.fillField, inBrowser: queue.run,
       scrubber: opts.scrubber, newId: opts.newFindingId,
     }),
+    ...(opts.persona.accountRef ? {} : ownPasswordTool({ state, fillField: opts.fillField, inBrowser: queue.run, scrubber: opts.scrubber })),
   };
   const base = rolePrompt({
     persona: opts.persona, targetUrl: opts.project.targetUrl, docsUrl: opts.project.docsUrl,
     goals: opts.project.goals, accountRef: opts.persona.accountRef,
+    signUpEmail: opts.persona.accountRef ? undefined : madeUpEmail(opts.persona.id),
   });
   const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
 

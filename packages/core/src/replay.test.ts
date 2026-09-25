@@ -122,6 +122,46 @@ describe("runReplay", () => {
     expect(filled).toEqual([]);
   });
 
+  test("a replay with no account fills password fields with a made-up password it never sees, even when the page shows it, and signs up with its own address", async () => {
+    const typed: string[] = [];
+    const echoing = { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => ({ content: [{ type: "text", text: `Account created with the password ${typed[0] ?? "not set"}` }] }) }) };
+    const model = scriptedModel([toolCall("type_own_password", { fields: ["e3", "e4"] }), toolCall("browser_snapshot", {}), report({ completed: true, observed: "Account created, then Internal Server Error", blockedAt: null })]);
+    const { promise, filled } = replay(model, { accountRef: undefined, browserTools: echoing, fillField: async (ref, text) => (typed.push(text), filled.push(`${ref}:${text}`), `fill('${text}') into ${ref}`) });
+    await promise;
+    const password = typed[0]!;
+    expect(filled).toEqual([`e3:${password}`, `e4:${password}`]);
+    expect(password).not.toBe("hunter22-secret");
+    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt[0])).toMatch(/If a step has you type a password, fill the password fields with type_own_password instead; you will never see the password\. Wherever the steps use the email address they signed up with, use replay\.[0-9a-f]{8}@example\.com instead, since that one may be taken already\./);
+    const last = JSON.stringify(model.doGenerateCalls[2]!.prompt);
+    expect(last).toContain("fill('•••') into e3");
+    expect(last).toContain("Account created with the password •••");
+    expect(JSON.stringify(model.doGenerateCalls.map((c) => c.prompt))).not.toContain(password);
+  });
+
+  test("a replay types its password into every field as one browser action: a click in the same reply waits for it", async () => {
+    const log: string[] = [];
+    const click = tool({ inputSchema: z.object({}), execute: async () => (log.push("click"), "clicked") });
+    const slowFill = async (ref: string) => (await new Promise((r) => setTimeout(r, 10)), log.push(`fill ${ref}`), "typed");
+    const model = scriptedModel([[toolCall("type_own_password", { fields: ["e3", "e4"] }), toolCall("browser_click", {})], report({ completed: true, observed: "Signed up", blockedAt: null })]);
+    await replay(model, { accountRef: undefined, browserTools: { ...browserTools, browser_click: click }, fillField: slowFill }).promise;
+    expect(log).toEqual(["fill e3", "fill e4", "click"]);
+  });
+
+  test("signing in during a replay is one browser action too", async () => {
+    const log: string[] = [];
+    const click = tool({ inputSchema: z.object({}), execute: async () => (log.push("click"), "clicked") });
+    const slowFill = async (ref: string) => (await new Promise((r) => setTimeout(r, 10)), log.push(`fill ${ref}`), "typed");
+    const model = scriptedModel([[toolCall("sign_in", { account: "solo", usernameField: "e1", passwordField: "e2" }), toolCall("browser_click", {})], report({ completed: true, observed: "Signed in", blockedAt: null })]);
+    await replay(model, { browserTools: { ...browserTools, browser_click: click }, fillField: slowFill }).promise;
+    expect(log).toEqual(["fill e1", "fill e2", "click"]);
+  });
+
+  test("a replay with the account the steps were written for is not offered a made-up password", async () => {
+    const model = scriptedModel([report({ completed: true, observed: "x", blockedAt: null })]);
+    await replay(model).promise;
+    expect(model.doGenerateCalls[0]!.tools!.map((t) => t.name)).not.toContain("type_own_password");
+  });
+
   test("masks secrets in the report and in every event", async () => {
     const model = scriptedModel([report({ completed: true, observed: "The error page printed hunter22-secret", blockedAt: null })]);
     const { promise, events } = replay(model);

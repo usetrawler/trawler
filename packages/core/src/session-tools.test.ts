@@ -2,7 +2,7 @@ import { generateText, isStepCount } from "ai";
 import { describe, expect, test, vi } from "vitest";
 import type { RunEventInput } from "@usetrawler/protocol";
 import { SecretScrubber } from "./secrets.ts";
-import { newSessionState, sessionTools } from "./session-tools.ts";
+import { madeUpEmail, madeUpPassword, newSessionState, ownPasswordTool, sessionTools } from "./session-tools.ts";
 import { scriptedModel, text, toolCall } from "./testing.ts";
 
 const goals = [{ id: "sign-up", instruction: "Create an account." }, { id: "invoice", instruction: "Send an invoice." }];
@@ -17,7 +17,7 @@ function setup() {
   const scrubber = new SecretScrubber();
   const fillField = vi.fn(async (ref: string, value: string) => `await page.getByRef('${ref}').fill('${value}');`);
   let n = 0;
-  const tools = sessionTools({ state, accounts, emit: (e) => events.push(e), jobId: "role:solo", fillField, scrubber, newId: () => `f${++n}` });
+  const tools = sessionTools({ state, accounts, emit: (e) => events.push(e), jobId: "role:solo", fillField, inBrowser: (action) => action(), scrubber, newId: () => `f${++n}` });
   return { events, state, tools, fillField, scrubber };
 }
 
@@ -100,7 +100,7 @@ describe("submit_finding", () => {
   test("keeps nothing when emitting fails, so a retry does not duplicate", async () => {
     const state = newSessionState(goals);
     state.page = "seen";
-    const tools = sessionTools({ state, accounts, emit: () => { throw new Error("sink down"); }, jobId: "j", fillField: async () => "", scrubber: new SecretScrubber(), newId: () => "f1" });
+    const tools = sessionTools({ state, accounts, emit: () => { throw new Error("sink down"); }, jobId: "j", fillField: async () => "", inBrowser: (action) => action(), scrubber: new SecretScrubber(), newId: () => "f1" });
     await expect(tools.submit_finding.execute!(finding, ctx)).rejects.toThrow("sink down");
     expect(state.findings).toHaveLength(0);
   });
@@ -157,7 +157,7 @@ describe("note, goal_status and finish", () => {
   });
   test("goal_status keeps nothing when emitting fails", async () => {
     const state = newSessionState(goals);
-    const tools = sessionTools({ state, accounts, emit: () => { throw new Error("sink down"); }, jobId: "j", fillField: async () => "", scrubber: new SecretScrubber(), newId: () => "f1" });
+    const tools = sessionTools({ state, accounts, emit: () => { throw new Error("sink down"); }, jobId: "j", fillField: async () => "", inBrowser: (action) => action(), scrubber: new SecretScrubber(), newId: () => "f1" });
     await expect(tools.goal_status.execute!({ goal: "sign-up", status: "reached", note: "" }, ctx)).rejects.toThrow("sink down");
     expect(state.goals.get("sign-up")?.status).toBe("not_attempted");
   });
@@ -216,6 +216,18 @@ describe("sign_in", () => {
     });
     await expect(tools.sign_in.execute!({ account: "solo", usernameField: "e3", passwordField: "e4" }, ctx)).resolves.toBe("failed: could not fill '•••' into e4");
   });
+  test("a username that could not be typed stops the sign-in before the password, and says why", async () => {
+    const { tools, fillField } = setup();
+    fillField.mockImplementationOnce(async () => "failed: Ref e9 not found in the current page snapshot");
+    expect(await tools.sign_in.execute!({ account: "solo", usernameField: "e9", passwordField: "e4" }, ctx)).toBe("failed: the username was not typed, so the password was not typed either. Ref e9 not found in the current page snapshot");
+    expect(fillField).toHaveBeenCalledTimes(1);
+  });
+  test("a person with no stored account is pointed at type_own_password", async () => {
+    const { fillField } = setup();
+    const tools = sessionTools({ state: newSessionState(goals), accounts: [], emit: () => {}, jobId: "role:ama", fillField, inBrowser: (action) => action(), scrubber: new SecretScrubber(), newId: () => "f1" });
+    expect(await tools.sign_in.execute!({ account: "ama", usernameField: "e3", passwordField: "e4" }, ctx)).toBe("rejected: you have no stored account; for an account you created, type its email yourself and fill its password with type_own_password");
+    expect(fillField).not.toHaveBeenCalled();
+  });
   test("unknown account is an error the model can read", async () => {
     const { tools, fillField } = setup();
     expect(await tools.sign_in.execute!({ account: "ghost", usernameField: "e3", passwordField: "e4" }, ctx)).toBe("rejected: unknown account ghost; known: solo");
@@ -223,7 +235,86 @@ describe("sign_in", () => {
   });
 });
 
+describe("type_own_password", () => {
+  function own() {
+    const { state, fillField, scrubber } = setup();
+    return { state, fillField, scrubber, typeOwnPassword: ownPasswordTool({ state, fillField, inBrowser: (action) => action(), scrubber }).type_own_password };
+  }
+
+  test("types one made-up password into every field it is given, the same every time, and never returns it", async () => {
+    const { typeOwnPassword, fillField, scrubber } = own();
+    const out = await typeOwnPassword.execute!({ fields: ["e5", "e6"] }, ctx);
+    const password = fillField.mock.calls[0]![1];
+    expect(fillField.mock.calls).toEqual([["e5", password, "password"], ["e6", password, "password"]]);
+    expect(out).toBe("e5: await page.getByRef('e5').fill('•••');\ne6: await page.getByRef('e6').fill('•••');");
+    await typeOwnPassword.execute!({ fields: "e9" }, ctx);
+    expect(fillField).toHaveBeenLastCalledWith("e9", password, "password");
+    expect(scrubber.scrub(`typed ${password}`)).toBe("typed •••");
+  });
+
+  test("any start of the made-up password long enough to hide is hidden too, for a field or a server that shortens it", async () => {
+    const { typeOwnPassword, fillField, scrubber } = own();
+    await typeOwnPassword.execute!({ fields: ["e5"] }, ctx);
+    const password = fillField.mock.calls[0]![1];
+    for (const length of [8, 12, 15]) expect(scrubber.scrub(`kept ${password.slice(0, length)}`)).toBe("kept •••");
+  });
+
+  test("every session makes up its own password, long and mixed enough for common password rules", async () => {
+    const first = own();
+    const second = own();
+    await first.typeOwnPassword.execute!({ fields: ["e5"] }, ctx);
+    await second.typeOwnPassword.execute!({ fields: ["e5"] }, ctx);
+    expect(first.fillField.mock.calls[0]![1]).not.toBe(second.fillField.mock.calls[0]![1]);
+    for (const password of [first.fillField.mock.calls[0]![1], madeUpPassword()]) expect(password).toMatch(/^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z\d]).{16}$/);
+  });
+
+  test("every made-up address is a new one", () => {
+    expect(madeUpEmail("ama")).not.toBe(madeUpEmail("ama"));
+  });
+
+  test("a made-up address stays within the 64 characters an address may have before the @", () => {
+    expect(madeUpEmail("a".repeat(60))).toMatch(/^a{40}\.[0-9a-f]{8}@example\.com$/);
+  });
+
+  test("refs sent as one string are split, and a ref given twice is typed once", async () => {
+    const { typeOwnPassword, fillField } = own();
+    await typeOwnPassword.execute!({ fields: "e5, e6 e5" }, ctx);
+    expect(fillField.mock.calls.map((c) => c[0])).toEqual(["e5", "e6"]);
+  });
+
+  test("asks for the fields when none are given, and types nothing", async () => {
+    const { typeOwnPassword, fillField } = own();
+    for (const fields of [[], [" "], undefined, null]) expect(await typeOwnPassword.execute!({ fields }, ctx)).toBe("rejected: fields: give the refs of the password fields");
+    expect(fillField).not.toHaveBeenCalled();
+  });
+
+  test("a failure message cannot leak the password, and the other fields are still typed", async () => {
+    const { typeOwnPassword, fillField } = own();
+    fillField.mockImplementationOnce(async (_ref, value) => {
+      throw new Error(`could not fill '${value}' into e5`);
+    });
+    expect(await typeOwnPassword.execute!({ fields: ["e5", "e6"] }, ctx)).toBe("e5: failed: could not fill '•••' into e5\ne6: await page.getByRef('e6').fill('•••');");
+  });
+
+  test("after finish, it types nothing", async () => {
+    const { typeOwnPassword, fillField, state } = own();
+    state.finished = "done";
+    expect(await typeOwnPassword.execute!({ fields: ["e5"] }, ctx)).toBe("rejected: the session is already finished");
+    expect(fillField).not.toHaveBeenCalled();
+  });
+});
+
 describe("through the agent loop", () => {
+  test("type_own_password takes its refs as a list or as one string, and a call without them gets an answer, not a schema error", async () => {
+    const { state, fillField, scrubber } = setup();
+    const model = scriptedModel([toolCall("type_own_password", { fields: "e4, e5" }), toolCall("type_own_password", { fields: ["e6"] }), toolCall("type_own_password", {}), text("ok")]);
+    await generateText({ model, tools: ownPasswordTool({ state, fillField, inBrowser: (action) => action(), scrubber }), prompt: "go", stopWhen: isStepCount(5) });
+    expect(fillField.mock.calls.map((c) => c[0])).toEqual(["e4", "e5", "e6"]);
+    const prompts = model.doGenerateCalls.map((c) => JSON.stringify(c.prompt));
+    expect(prompts[3]).toContain("rejected: fields: give the refs of the password fields");
+    expect(prompts.join("")).not.toContain("InvalidToolInputError");
+  });
+
   test("a malformed finding comes back as a readable rejection and nothing is stored", async () => {
     const { tools, state } = setup();
     const model = scriptedModel([toolCall("submit_finding", { ...finding, severity: "critical", reproduction: "Submit" }), text("ok")]);
