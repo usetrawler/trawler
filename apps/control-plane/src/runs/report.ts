@@ -2,6 +2,7 @@ import type { RunSummary } from "./runs.ts";
 
 export type StageState = "waiting" | "active" | "done" | "skipped";
 export type PersonaState = "waiting" | "exploring" | "reached" | "missed" | "finished" | "failed" | "cancelled";
+export type JudgeAgainState = "judge_again" | "judging" | "after_run";
 
 const OPEN = new Set(["queued", "leased"]);
 const LIVE = new Set(["queued", "running"]);
@@ -23,8 +24,14 @@ function stage(jobs: Job[], runLive: boolean): StageState {
 function notJudgedReason(f: Finding, runLive: boolean): string {
   const replay = f.replay as { completed: boolean; blockedAt: number | null } | null;
   if (replay && !replay.completed && replay.blockedAt === null) return "The fresh agent could not follow the steps far enough to report.";
+  if (replay) return runLive ? "Waiting for the judge." : "The run ended before it was judged.";
   if (runLive) return "Waiting for its replay.";
   return "The run ended before it was replayed.";
+}
+
+function judgeFailure(job: Job): string {
+  const detail = job.error ?? "no reason was recorded";
+  return job.stopped_by === "error" ? `Model error: ${detail}` : `Failed: ${detail}`;
 }
 
 export function runView(s: RunSummary) {
@@ -64,18 +71,28 @@ export function runView(s: RunSummary) {
 
   const name = new Map(s.personas.map((p) => [p.id, p.name]));
   const withPersona = (f: Finding) => ({ ...f, personaName: name.get(f.personaKey) ?? f.personaKey, goalText: goalText.get(f.goal) ?? f.goal, reproduction: f.reproduction as string[] });
+  const lastJudge = (f: Finding) => s.jobs.filter((j) => j.kind === "judge" && j.finding_key === f.key).at(-1);
+  const judgingAgain = (f: Finding) => !live && OPEN.has(lastJudge(f)?.status ?? "");
+  const judgeFailed = (f: Finding) => lastJudge(f)?.status === "failed";
   const defects = s.findings.filter((f) => f.kind === "defect");
+  const unsettled = defects.filter((f) => judgeFailed(f) || judgingAgain(f));
+  const settled = defects.filter((f) => !unsettled.includes(f));
   const report = {
-    confirmed: defects.filter((f) => f.verdict === "confirmed").map(withPersona),
-    inconclusive: defects.filter((f) => f.verdict === "inconclusive").map(withPersona),
-    refuted: defects.filter((f) => f.verdict === "refuted").map(withPersona),
-    notJudged: defects.filter((f) => !f.verdict).map((f) => ({ ...withPersona(f), reason: notJudgedReason(f, live) })),
+    confirmed: settled.filter((f) => f.verdict === "confirmed").map(withPersona),
+    inconclusive: settled.filter((f) => f.verdict === "inconclusive").map(withPersona),
+    refuted: settled.filter((f) => f.verdict === "refuted").map(withPersona),
+    couldNotJudge: unsettled.map((f) => ({
+      ...withPersona(f),
+      reason: judgingAgain(f) ? "Judging again…" : judgeFailure(lastJudge(f)!),
+      action: (judgingAgain(f) ? "judging" : live ? "after_run" : "judge_again") as JudgeAgainState,
+    })),
+    notJudged: settled.filter((f) => !f.verdict).map((f) => ({ ...withPersona(f), reason: notJudgedReason(f, live) })),
     friction: s.findings.filter((f) => f.kind === "friction").map(withPersona),
   };
 
   const goalsReached = s.goals.filter((g) => g.status === "reached").length;
   const goalsTotal = s.personas.length * s.goalTexts.length;
-  return { live, stages, personas, report, goalsReached, goalsTotal, headline: headline(s.status, report.confirmed.length, defects.length) };
+  return { live, rejudging: defects.some(judgingAgain), stages, personas, report, goalsReached, goalsTotal, headline: headline(s.status, report.confirmed.length, defects.length) };
 }
 
 function headline(status: string, confirmed: number, defects: number): string {

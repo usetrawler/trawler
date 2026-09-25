@@ -9,6 +9,7 @@ import { checkModelCall, customUrlProblem, detectProvider, endpointFor, listMode
 import { DEFAULT_RUN } from "../../../runs/models.ts";
 import { startRun } from "../../../runs/runs.ts";
 import { canManageBilling, getAuth } from "../../../server/auth.ts";
+import { betaRefusal } from "../../../server/beta.ts";
 import { getDb, getKeyring } from "../../../server/db.ts";
 import { readEnv } from "../../../server/env.ts";
 
@@ -61,11 +62,6 @@ function withinListingLimit(userId: string, now = Date.now()): boolean {
   if (recent.length >= LISTINGS_PER_WINDOW) return false;
   listings.set(userId, [...recent, now]);
   return true;
-}
-
-function betaRefusal(email: string): string | null {
-  const beta = readEnv().betaEmails;
-  return beta && !beta.includes(email.toLowerCase()) ? "Hosted runs are in private beta. Write to contact@usetrawler.com to get access." : null;
 }
 
 async function activeOrg() {

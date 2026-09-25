@@ -77,3 +77,62 @@ test("reaching one of several goals is not reported as reaching the goal", () =>
   }));
   expect(view.personas[0]!.state).toBe("finished");
 });
+
+const replayed = { replay: { completed: true, observed: "Internal Server Error", blockedAt: null } };
+const judged = (status: string, extra: Partial<RunSummary["jobs"][number]> = {}) => job("judge", status, { finding_key: "ana:f1", ...extra });
+
+test("a defect whose judge failed is shown as could not be judged with the model's error, not as inconclusive", () => {
+  const view = runView(summary({
+    status: "succeeded",
+    jobs: [job("role_session", "succeeded", { persona_key: "ana" }), job("replay", "succeeded"), judged("failed", { stopped_by: "error", error: "No output generated." })],
+    findings: [finding("ana:f1", "ana", { ...replayed, verdict: "inconclusive" })],
+  }));
+  expect(view.report.inconclusive).toEqual([]);
+  expect(view.report.notJudged).toEqual([]);
+  expect(view.report.couldNotJudge).toEqual([expect.objectContaining({ key: "ana:f1", reason: "Model error: No output generated.", action: "judge_again" })]);
+  expect(view.rejudging).toBe(false);
+});
+
+test("a judge that lost its runner is not blamed on the model", () => {
+  const view = runView(summary({
+    status: "succeeded",
+    jobs: [judged("failed", { stopped_by: null, error: "the runner stopped answering" })],
+    findings: [finding("ana:f1", "ana", replayed)],
+  }));
+  expect(view.report.couldNotJudge.map((f) => f.reason)).toEqual(["Failed: the runner stopped answering"]);
+});
+
+test("while the run is live a failed judge waits for the run to end before it can be judged again", () => {
+  const view = runView(summary({ jobs: [judged("failed", { stopped_by: "error", error: "No output generated." }), job("replay", "queued")], findings: [finding("ana:f1", "ana", replayed)] }));
+  expect(view.report.couldNotJudge.map((f) => f.action)).toEqual(["after_run"]);
+});
+
+test("a defect being judged again says so and keeps the finished run's page updating", () => {
+  const view = runView(summary({
+    status: "succeeded",
+    jobs: [judged("failed", { stopped_by: "error", error: "No output generated." }), judged("queued")],
+    findings: [finding("ana:f1", "ana", replayed)],
+  }));
+  expect(view.live).toBe(false);
+  expect(view.rejudging).toBe(true);
+  expect(view.report.couldNotJudge).toEqual([expect.objectContaining({ key: "ana:f1", action: "judging" })]);
+});
+
+test("a defect judged again takes its new verdict", () => {
+  const view = runView(summary({
+    status: "succeeded",
+    jobs: [judged("failed", { stopped_by: "error", error: "No output generated." }), judged("succeeded", { stopped_by: "done" })],
+    findings: [finding("ana:f1", "ana", { ...replayed, verdict: "confirmed" })],
+  }));
+  expect(view.report.confirmed.map((f) => f.key)).toEqual(["ana:f1"]);
+  expect(view.report.couldNotJudge).toEqual([]);
+  expect(view.rejudging).toBe(false);
+  expect(view.headline).toBe("1 defect confirmed by replay.");
+});
+
+test("a defect that was replayed but never judged is not said to be unreplayed", () => {
+  const ended = runView(summary({ status: "stopped_budget", jobs: [job("replay", "succeeded"), judged("cancelled")], findings: [finding("ana:f1", "ana", replayed)] }));
+  expect(ended.report.notJudged.map((f) => f.reason)).toEqual(["The run ended before it was judged."]);
+  const live = runView(summary({ jobs: [job("replay", "succeeded"), judged("queued")], findings: [finding("ana:f1", "ana", replayed)] }));
+  expect(live.report.notJudged.map((f) => f.reason)).toEqual(["Waiting for the judge."]);
+});
