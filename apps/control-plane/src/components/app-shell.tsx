@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { BrandMark } from "./brand-mark.tsx";
 
 const STEPS = ["Product", "Plan", "Run"] as const;
 
@@ -7,7 +8,7 @@ export function AppShell({ organization, email, step, children }: { organization
     <div className="min-h-dvh">
       <header className="flex items-center justify-between gap-4 border-b border-line px-4 py-3 md:px-8">
         <a href="/new" className="flex items-center gap-2 text-lg font-bold tracking-tight">
-          <span aria-hidden className="inline-block h-3 w-3 rotate-45 bg-action" />
+          <BrandMark />
           trawler
         </a>
         <div className="flex min-w-0 items-center gap-3 text-sm">
