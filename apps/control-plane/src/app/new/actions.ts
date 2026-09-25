@@ -5,7 +5,7 @@ import { createModel } from "@usetrawler/core/setup";
 import { getAuth } from "../../server/auth.ts";
 import { getDb, getKeyring } from "../../server/db.ts";
 import { readEnv } from "../../server/env.ts";
-import { logError } from "../../server/log.ts";
+import { logError, writeLog } from "../../server/log.ts";
 import { FetchRefused, safeFetchText, type RefusalReason } from "../../setup/safe-fetch.ts";
 import { proposeFromUrl, SetupLimited } from "../../setup/propose.ts";
 
@@ -56,7 +56,9 @@ export async function startSetup(_previous: SetupState, form: FormData): Promise
       { orgId, url: normalise(url), focus },
     );
   } catch (err) {
-    await logError("setup failed", { orgId, err, reason: err instanceof FetchRefused ? err.reason : undefined });
+    if (err instanceof FetchRefused) await writeLog("info", "setup refused the address", { orgId, reason: err.reason });
+    else if (err instanceof SetupLimited) await writeLog("info", "setup is rate limited", { orgId });
+    else await logError("setup failed", { orgId, err });
     return { error: friendly(err), url, focus };
   }
   redirect(`/projects/${projectId}`);
