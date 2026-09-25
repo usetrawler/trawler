@@ -116,6 +116,11 @@ test("only the model's own failures are called model errors", () => {
   }
 });
 
+test("a judge the provider refused the key for says so, and can be judged again", () => {
+  const view = finished({ jobs: [judged("failed", { stopped_by: "error", error: "the provider refused the workspace key; replace it on the plan page" })], findings: [finding("ana:f1", "ana", replayed)] });
+  expect(view.report.couldNotJudge).toEqual([expect.objectContaining({ reason: "Failed: the provider refused the workspace key; replace it on the plan page", action: "judge_again" })]);
+});
+
 test("a judge stopped by the proxy or the cap says why, and offers judging again only while the cap has room", () => {
   const refused = finished({ jobs: [judged("succeeded", { stopped_by: "budget", error: "the provider account behind the workspace key is out of credits" })], findings: [finding("ana:f1", "ana", replayed)] });
   expect(refused.report.couldNotJudge).toEqual([expect.objectContaining({ reason: "Stopped: the provider account behind the workspace key is out of credits", action: "judge_again" })]);

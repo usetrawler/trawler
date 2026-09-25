@@ -1,4 +1,4 @@
-import { tool } from "ai";
+import { APICallError, tool } from "ai";
 import { z } from "zod";
 import { describe, expect, test } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
@@ -327,6 +327,15 @@ describe("runRoleSession", () => {
     expect(result.stoppedBy).toBe("budget");
     expect(result.error).toBeUndefined();
     expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "budget" });
+  });
+
+  test("a Stop that answers a retried model call still ends the session as stopped by the budget", async () => {
+    const busy = new APICallError({ message: "one model call at a time per job", url: "https://cp.test/api/llm/v1/chat/completions", requestBodyValues: {}, statusCode: 429, responseHeaders: { "retry-after-ms": "1" } });
+    const model = scriptedModel([look, busy, proxyRefusal("the run is no longer active", JOB_STOPPED)]);
+    const { result } = await run(model).promise;
+    expect(model.doGenerateCalls).toHaveLength(3);
+    expect(result.stoppedBy).toBe("budget");
+    expect(result.error).toBeUndefined();
   });
 
   test("the returned result is scrubbed too", async () => {

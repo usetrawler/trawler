@@ -1,4 +1,4 @@
-import { generateText, streamText } from "ai";
+import { generateText, RetryError, streamText } from "ai";
 import { expect, test } from "vitest";
 import { JOB_STOPPED } from "@usetrawler/protocol";
 import { Budget, createModel, refusedForBudget, stepCost } from "./llm.ts";
@@ -154,10 +154,12 @@ test("tallyStep adds one step's tokens and cost to the usage and the budget", as
   expect(budget.spent).toBeCloseTo(0.25, 10);
 });
 
-async function refusal(status: number, error: Record<string, unknown>) {
-  const model = createModel({ modelId: "m", apiKey: "k", baseURL: "https://cp.test/api/llm/v1", fetch: async () => new Response(JSON.stringify({ error }), { status, headers: { "content-type": "application/json" } }) });
+async function refusal(status: number, error: Record<string, unknown>, before: Response[] = []) {
+  const model = createModel({ modelId: "m", apiKey: "k", baseURL: "https://cp.test/api/llm/v1", fetch: async () => before.shift() ?? new Response(JSON.stringify({ error }), { status, headers: { "content-type": "application/json" } }) });
   return generateText({ model, prompt: "hello" }).then(() => expect.unreachable("the call was refused"), (err: unknown) => err);
 }
+
+const busy = () => new Response(JSON.stringify({ error: { code: 429, message: "one model call at a time per job" } }), { status: 429, headers: { "content-type": "application/json", "retry-after-ms": "1" } });
 
 test("only a 402 the proxy marks as the job being stopped counts as the budget running out", async () => {
   expect(refusedForBudget(await refusal(402, { code: 402, message: "the run has spent its budget", type: JOB_STOPPED }))).toBe(true);
@@ -167,4 +169,11 @@ test("only a 402 the proxy marks as the job being stopped counts as the budget r
   expect((keyRefused as Error).message).toBe("the provider refused the workspace key; replace it on the plan page");
   expect(refusedForBudget(await refusal(402, { code: 402, message: "Insufficient credits. Add more using https://openrouter.ai/settings/credits" }))).toBe(false);
   expect(refusedForBudget(await refusal(400, { code: 400, message: "bad request", type: JOB_STOPPED }))).toBe(false);
+});
+
+test("a refusal that comes back on a retried call keeps its meaning", async () => {
+  const stopped = await refusal(402, { code: 402, message: "the run is no longer active", type: JOB_STOPPED }, [busy()]);
+  expect(RetryError.isInstance(stopped)).toBe(true);
+  expect(refusedForBudget(stopped)).toBe(true);
+  expect(refusedForBudget(await refusal(402, { code: 402, message: "the provider refused the workspace key; replace it on the plan page" }, [busy()]))).toBe(false);
 });

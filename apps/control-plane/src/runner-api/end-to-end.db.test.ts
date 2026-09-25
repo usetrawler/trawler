@@ -176,6 +176,36 @@ test("a run whose cost only the proxy can see is stopped at the cap by the proxy
   expect(runView(summary).headline).toBe("Stopped at the cap. No defects found.");
 });
 
+test("the proxy marks the 402s that mean the run stopped the job, and only those", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-m', 'M', 'm', now())`.execute(t.db);
+  await withOrg(t.db, "org-m", (tx) => setModelKey(tx, "org-m", { provider: "openrouter", key: ORG_KEY }, "u", keys));
+  const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "mo", name: "Mo", brief: "b" }], goals: [{ id: "g", instruction: "x" }] });
+  const project = await withOrg(t.db, "org-m", (tx) => createProject(tx, "org-m", config, keys));
+  const run = await withOrg(t.db, "org-m", (tx) => startRun(tx, "org-m", project, keys, { budgetUsd: 0.01, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 10, replaySteps: 10, createdBy: "u", price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } }));
+  const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "1" } }), deps)).json();
+  expect(job.runId).toBe(run.id);
+  const refusal = async () => {
+    const res = await handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${job.token}`, "content-type": "application/json" }, body: JSON.stringify({ model: "m/agent", messages: [{ role: "user", content: "hi" }] }) }), { db: t.db, keys, openRouterUrl: openRouterBase, retryBaseMs: 1 });
+    expect(res.status).toBe(402);
+    return ((await res.json()) as { error: unknown }).error;
+  };
+
+  replies = [upstreamError(401, "User not found.")];
+  expect(await refusal()).toEqual({ code: 402, message: "the provider refused the workspace key; replace it on the plan page" });
+  replies = [upstreamError(402, "Insufficient credits.")];
+  expect(await refusal()).toEqual({ code: 402, message: "the provider account behind the workspace key is out of credits" });
+  await withOrg(t.db, "org-m", (tx) => setModelKey(tx, "org-m", { provider: "openai", key: "sk-proj-" + "m".repeat(40) }, "u", keys));
+  expect(await refusal()).toEqual({ code: 402, message: "the workspace key changed to another provider or endpoint; start a new run" });
+  await withOrg(t.db, "org-m", (tx) => setModelKey(tx, "org-m", { provider: "openrouter", key: ORG_KEY }, "u", keys));
+
+  await sql`update runs set cost_usd = budget_usd - 0.000001 where id = ${run.id}`.execute(t.db);
+  expect(await refusal()).toEqual({ code: 402, message: "the run has spent its budget", type: "job_stopped" });
+  await sql`update runs set status = 'cancelled' where id = ${run.id}`.execute(t.db);
+  expect(await refusal()).toEqual({ code: 402, message: "the run is no longer active", type: "job_stopped" });
+  await sql`update jobs set status = 'succeeded' where id = ${job.jobId}`.execute(t.db);
+  expect(await refusal()).toEqual({ code: 402, message: "the job is over", type: "job_stopped" });
+});
+
 test("the proxy refuses a stranger, a model the run did not choose, and streaming", async () => {
   const call = (token: string, body: unknown) => handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) }), { db: t.db, keys, openRouterUrl: openRouterBase });
   expect((await call("x".repeat(43), { model: "m/agent", messages: [] })).status).toBe(401);

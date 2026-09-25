@@ -1,5 +1,5 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { APICallError, wrapLanguageModel, type LanguageModelMiddleware } from "ai";
+import { APICallError, RetryError, wrapLanguageModel, type LanguageModelMiddleware } from "ai";
 import { JOB_STOPPED, type JobUsage } from "@usetrawler/protocol";
 
 type OpenRouterOptions = { provider?: Record<string, unknown> } & Record<string, unknown>;
@@ -75,5 +75,6 @@ export function tallyStep(
 }
 
 export function refusedForBudget(err: unknown): boolean {
-  return APICallError.isInstance(err) && err.statusCode === 402 && (err.data as { error?: { type?: unknown } } | undefined)?.error?.type === JOB_STOPPED;
+  const last = RetryError.isInstance(err) ? err.lastError : err;
+  return APICallError.isInstance(last) && last.statusCode === 402 && (last.data as { error?: { type?: unknown } } | undefined)?.error?.type === JOB_STOPPED;
 }
