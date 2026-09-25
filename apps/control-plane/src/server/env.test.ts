@@ -35,3 +35,8 @@ test("the OpenRouter address can point at a fake only outside production", () =>
   expect(readEnv({ ...base, TRAWLER_OPENROUTER_URL: "http://localhost:4600/api/v1/" }).openRouterUrl).toBe("http://localhost:4600/api/v1");
   expect(() => readEnv({ ...base, NODE_ENV: "production", BETTER_AUTH_URL: "https://app.usetrawler.com", TRAWLER_OPENROUTER_URL: "http://evil.test" })).toThrow(/outside production/);
 });
+
+test("hosted runs can be limited to a list of emails", () => {
+  expect(readEnv(base).betaEmails).toBeUndefined();
+  expect(readEnv({ ...base, TRAWLER_BETA_EMAILS: " Ana@Acme.test, bo@acme.test ,," }).betaEmails).toEqual(["ana@acme.test", "bo@acme.test"]);
+});
