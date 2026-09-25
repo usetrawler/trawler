@@ -41,6 +41,12 @@ export interface JobResult {
   observation?: ReplayObservation;
 }
 
+export class ForeignEvents extends Error {
+  constructor() {
+    super("events belong to another job");
+  }
+}
+
 const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 
 function configFor(snapshot: ConfigSnapshot, current: ProjectConfig): ProjectConfig {
@@ -149,7 +155,7 @@ async function findingFor(tx: Tx, runId: string, key: string) {
   };
 }
 
-async function jobForToken(tx: Tx, token: string, options: { allowExpired?: boolean } = {}) {
+async function jobForToken(tx: Tx, token: string, options: { allowExpired?: boolean; expectedJobId?: string } = {}) {
   const job = await tx
     .selectFrom("jobs")
     .selectAll()
@@ -157,7 +163,7 @@ async function jobForToken(tx: Tx, token: string, options: { allowExpired?: bool
     .where("token_hash", "=", hashToken(token))
     .forUpdate()
     .executeTakeFirst();
-  if (!job || (job.expired && !options.allowExpired)) throw new InvalidJobToken();
+  if (!job || (job.expired && !options.allowExpired) || (options.expectedJobId !== undefined && job.id !== options.expectedJobId)) throw new InvalidJobToken();
   return job;
 }
 
@@ -176,12 +182,12 @@ async function stopIfOverBudget(tx: Tx, runId: string): Promise<boolean> {
   return true;
 }
 
-export async function ingestEvents(db: Database, token: string, events: RunEvent[]): Promise<{ cancel: boolean }> {
+export async function ingestEvents(db: Database, token: string, events: RunEvent[], expectedJobId?: string): Promise<{ cancel: boolean }> {
   return asSystem(db, async (tx) => {
     const valid = z.array(RunEventSchema).max(500).parse(events);
-    const job = await jobForToken(tx, token);
+    const job = await jobForToken(tx, token, { expectedJobId });
     if (job.status !== "leased") return { cancel: true };
-    if (valid.some((e) => e.jobId !== job.id)) throw new Error("events belong to another job");
+    if (valid.some((e) => e.jobId !== job.id)) throw new ForeignEvents();
     const run = await tx.selectFrom("runs").select("status").where("id", "=", job.run_id).forUpdate().executeTakeFirstOrThrow();
     if (!ACTIVE.includes(run.status)) return { cancel: true };
     for (const e of valid) {
@@ -220,10 +226,10 @@ const noReport = (o?: ReplayObservation) => !o || (!o.completed && o.blockedAt =
 
 const JobResultSchema = z.object({ usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().max(2000).optional(), observation: ReplayObservationSchema.optional() });
 
-export async function completeJob(db: Database, token: string, input: JobResult): Promise<void> {
+export async function completeJob(db: Database, token: string, input: JobResult, expectedJobId?: string): Promise<void> {
   const result = JobResultSchema.parse(input);
   await asSystem(db, async (tx) => {
-    const job = await jobForToken(tx, token, { allowExpired: true });
+    const job = await jobForToken(tx, token, { allowExpired: true, expectedJobId });
     if (job.status !== "leased") {
       const reapedRecently = job.status === "failed" && job.finished_at !== null && Date.now() - job.finished_at.getTime() < LATE_REPORT_MS;
       if (reapedRecently) await addCost(tx, job.run_id, job.id, result.usage.costUsd - Number(job.counted_cost));

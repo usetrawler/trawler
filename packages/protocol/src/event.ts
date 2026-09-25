@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { FindingSchema, GoalOutcomeSchema, StopReasonSchema, VerdictSchema } from "./finding.ts";
+import { FindingSchema, GoalOutcomeSchema, MAX_NOTE, MAX_URL, StopReasonSchema, VerdictSchema } from "./finding.ts";
 
 export const JobUsageSchema = z.object({
   model: z.string().max(200),
@@ -18,11 +18,11 @@ const base = { seq: z.number().int().positive().max(2_147_483_647), at: z.iso.da
 export const RunEventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("job_started"), kind: z.enum(["role_session", "replay", "judge", "setup"]) }),
   z.object({ ...base, type: z.literal("step"), step: z.number().int().positive(), tool: z.string().max(100).nullable(), costUsd: z.number().nonnegative().max(1000) }),
-  z.object({ ...base, type: z.literal("note"), text: z.string() }),
+  z.object({ ...base, type: z.literal("note"), text: z.string().max(MAX_NOTE) }),
   z.object({ ...base, type: z.literal("finding"), finding: FindingSchema }),
   z.object({ ...base, type: z.literal("goal_status"), outcome: GoalOutcomeSchema }),
-  z.object({ ...base, type: z.literal("blocked_request"), url: z.string() }),
-  z.object({ ...base, type: z.literal("verdict"), findingId: z.string().min(1), verdict: VerdictSchema, observed: z.string() }),
+  z.object({ ...base, type: z.literal("blocked_request"), url: z.string().max(MAX_URL) }),
+  z.object({ ...base, type: z.literal("verdict"), findingId: z.string().min(1), verdict: VerdictSchema, observed: z.string().max(8000) }),
   z.object({ ...base, type: z.literal("job_finished"), usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().max(2000).optional() }),
 ]);
 export type RunEvent = z.infer<typeof RunEventSchema>;

@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { FindingSchema, type Finding, type Goal, type GoalOutcome, type RunEventInput, type TargetAccount } from "@usetrawler/protocol";
+import { FindingSchema, type Finding, type Goal, type GoalOutcome, type RunEventInput, type TargetAccount, MAX_GOAL_NOTE, MAX_NOTE } from "@usetrawler/protocol";
 import type { SecretScrubber } from "./secrets.ts";
 
 export interface SessionState {
@@ -59,8 +59,9 @@ export function sessionTools(opts: {
       execute: async ({ text }) => {
         if (state.finished !== null) return closed;
         if (!text?.trim()) return "rejected: text: the note is empty";
-        emit({ type: "note", jobId, text });
-        state.notes.push(text);
+        const kept = text.slice(0, MAX_NOTE);
+        emit({ type: "note", jobId, text: kept });
+        state.notes.push(kept);
         return "noted";
       },
     }),
@@ -104,7 +105,7 @@ export function sessionTools(opts: {
         if (typeof goal !== "string" || !state.goals.has(goal)) return unknownGoal(input.goal);
         const normalised = lower(status);
         if (normalised !== "reached" && normalised !== "failed") return `rejected: status: use reached or failed`;
-        const outcome = { goal, status: normalised, note: note ?? "" } as const;
+        const outcome = { goal, status: normalised, note: (note ?? "").slice(0, MAX_GOAL_NOTE) } as const;
         emit({ type: "goal_status", jobId, outcome });
         state.goals.set(goal, outcome);
         return "recorded";
