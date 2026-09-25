@@ -21,13 +21,13 @@ const USAGE = `Usage:
 
   trawler-runner work --control-plane https://app.usetrawler.com [--once]
 
-Set OPENROUTER_API_KEY in the environment; work also needs TRAWLER_RUNNER_TOKEN.`;
+Set OPENROUTER_API_KEY for setup and run. work needs only TRAWLER_RUNNER_TOKEN: its model calls go through the control plane.`;
 
 export interface CliDeps {
   env: Record<string, string | undefined>;
   out: (line: string) => void;
   err: (line: string) => void;
-  model: (modelId: string, apiKey: string) => LanguageModel;
+  model: (modelId: string, apiKey: string, baseURL?: string) => LanguageModel;
   fetchText: (url: string) => Promise<string>;
   openBrowser: (opts: Parameters<OpenBrowser>[0] & { project: ReturnType<typeof ProjectConfigSchema.parse>; outputDir: string; headless: boolean }) => ReturnType<OpenBrowser>;
   runsRoot: string;
@@ -57,7 +57,7 @@ export const defaultDeps: CliDeps = {
   env: process.env,
   out: (line) => console.log(line),
   err: (line) => console.error(line),
-  model: (modelId, apiKey) => createModel({ modelId, apiKey }),
+  model: (modelId, apiKey, baseURL) => createModel({ modelId, apiKey, baseURL }),
   fetchText: fetchPage,
   openBrowser: ({ project, outputDir, headless, onBlocked, scrubber }) =>
     openBrowser({
@@ -118,7 +118,7 @@ async function setup(args: string[], deps: CliDeps, apiKey: () => string): Promi
   return 0;
 }
 
-async function work(args: string[], deps: CliDeps, apiKey: () => string): Promise<number> {
+async function work(args: string[], deps: CliDeps): Promise<number> {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { "control-plane": { type: "string" }, once: { type: "boolean" }, help: { type: "boolean", short: "h" } } });
   if (values.help) return help(deps);
   if (positionals.length > 0) throw new UsageError(`work takes no positional arguments, got ${positionals.join(" ")}`);
@@ -128,11 +128,10 @@ async function work(args: string[], deps: CliDeps, apiKey: () => string): Promis
   if (protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(hostname)) throw new UsageError("work sends the runner token, so --control-plane must use https unless it is on this machine");
   const runnerToken = deps.env.TRAWLER_RUNNER_TOKEN?.trim();
   if (!runnerToken) throw new UsageError("TRAWLER_RUNNER_TOKEN is not set");
-  const key = apiKey();
   const workerDeps: WorkerDeps = {
     controlPlane,
     runnerToken,
-    model: (modelId) => deps.model(modelId, key),
+    model: (modelId, jobToken) => deps.model(modelId, jobToken, new URL("/api/llm/v1", controlPlane).toString()),
     openBrowser: async (project, { onBlocked, scrubber }) => {
       const outputDir = mkdtempSync(join(tmpdir(), "trawler-work-"));
       const removeOutput = () => rmSync(outputDir, { recursive: true, force: true });
@@ -146,7 +145,7 @@ async function work(args: string[], deps: CliDeps, apiKey: () => string): Promis
     },
     log: deps.err,
     fetch: deps.fetchImpl,
-    secrets: [key, runnerToken],
+    secrets: [runnerToken],
   };
   if (values.once) {
     await workOnce(workerDeps);
@@ -213,7 +212,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
   try {
     if (command === "setup") return await setup(rest, deps, apiKey);
     if (command === "run") return await run(rest, deps, apiKey);
-    if (command === "work") return await work(rest, deps, apiKey);
+    if (command === "work") return await work(rest, deps);
     if (command === "--help" || command === "-h" || command === "help") return help(deps);
     throw new UsageError(command ? `unknown command ${command}` : "no command given");
   } catch (err) {

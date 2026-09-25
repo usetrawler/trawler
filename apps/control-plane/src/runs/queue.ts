@@ -9,7 +9,6 @@ import { loadProjectConfig } from "../projects/projects.ts";
 import type { ConfigSnapshot } from "./runs.ts";
 
 const LEASE_MINUTES = 10;
-const LATE_REPORT_MS = 60 * 60 * 1000;
 const ACTIVE = ["queued", "running"];
 
 export class InvalidJobToken extends Error {
@@ -157,6 +156,7 @@ export async function claimJob(db: Database, keys: Keyring): Promise<JobAssignme
 
 export async function releaseJob(db: Database, job: { jobId: string; runId: string; token: string }): Promise<void> {
   await asSystem(db, async (tx) => {
+    await tx.selectFrom("jobs").select("id").where("id", "=", job.jobId).forUpdate().executeTakeFirst();
     const run = await tx.selectFrom("runs").select("status").where("id", "=", job.runId).forUpdate().executeTakeFirstOrThrow();
     const release = ACTIVE.includes(run.status) ? { status: "queued", started_at: null } : { status: "cancelled", finished_at: new Date() };
     const released = await tx
@@ -224,8 +224,7 @@ export async function ingestEvents(db: Database, token: string, events: RunEvent
         .returning("id")
         .executeTakeFirst();
       if (!inserted) continue;
-      if (e.type === "step") await addCost(tx, job.run_id, job.id, e.costUsd);
-      else if (e.type === "finding" && job.kind === "role_session") {
+      if (e.type === "finding" && job.kind === "role_session") {
         const f = { ...e.finding, id: `${job.persona_key}:${e.finding.id}` };
         await tx
           .insertInto("findings")
@@ -248,6 +247,42 @@ export async function ingestEvents(db: Database, token: string, events: RunEvent
   });
 }
 
+export interface LlmCall {
+  orgId: string;
+  runId: string;
+  jobId: string;
+  models: string[];
+  remainingUsd: number;
+}
+
+export class LlmRefused extends Error {}
+
+export async function llmCallFor(db: Database, token: string): Promise<LlmCall> {
+  return asSystem(db, async (tx) => {
+    const job = await jobForToken(tx, token);
+    if (job.status !== "leased") throw new LlmRefused("the job is over");
+    const run = await tx.selectFrom("runs").select(["status", "cost_usd", "budget_usd", "agent_model", "judge_model"]).where("id", "=", job.run_id).executeTakeFirstOrThrow();
+    if (!ACTIVE.includes(run.status)) throw new LlmRefused("the run is no longer active");
+    const remainingUsd = Number(run.budget_usd) - Number(run.cost_usd);
+    if (remainingUsd <= 0) throw new LlmRefused("the run has spent its budget");
+    await tx.updateTable("jobs").set({ lease_until: sql<Date>`now() + make_interval(mins => ${LEASE_MINUTES})` }).where("id", "=", job.id).execute();
+    return { orgId: job.org_id, runId: job.run_id, jobId: job.id, models: [...new Set([run.agent_model, run.judge_model])], remainingUsd };
+  });
+}
+
+export async function recordLlmUsage(db: Database, call: LlmCall, usage: { model: string; inputTokens: number; outputTokens: number; costUsd: number }): Promise<void> {
+  await asSystem(db, async (tx) => {
+    await tx.selectFrom("jobs").select("id").where("id", "=", call.jobId).forUpdate().executeTakeFirstOrThrow();
+    await tx.selectFrom("runs").select("id").where("id", "=", call.runId).forUpdate().executeTakeFirstOrThrow();
+    await tx.insertInto("llm_usage").values({
+      org_id: call.orgId, run_id: call.runId, job_id: call.jobId, model: usage.model.slice(0, 200),
+      input_tokens: Math.max(0, Math.round(usage.inputTokens)), output_tokens: Math.max(0, Math.round(usage.outputTokens)), cost_usd: Math.max(0, usage.costUsd).toFixed(6),
+    }).execute();
+    await addCost(tx, call.runId, call.jobId, usage.costUsd);
+    await stopIfOverBudget(tx, call.runId);
+  });
+}
+
 const noReport = (o?: ReplayObservation) => !o || (!o.completed && o.blockedAt === null);
 
 const JobResultSchema = z.object({ usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().max(2000).optional(), observation: ReplayObservationSchema.optional() });
@@ -256,15 +291,7 @@ export async function completeJob(db: Database, token: string, input: JobResult,
   const result = storable(JobResultSchema.parse(input));
   await asSystem(db, async (tx) => {
     const job = await jobForToken(tx, token, { allowExpired: true, expectedJobId });
-    if (job.status !== "leased") {
-      const reapedRecently = job.status === "failed" && job.usage === null && job.finished_at !== null && Date.now() - job.finished_at.getTime() < LATE_REPORT_MS;
-      if (reapedRecently) {
-        await addCost(tx, job.run_id, job.id, result.usage.costUsd - Number(job.counted_cost));
-        await tx.updateTable("jobs").set({ usage: JSON.stringify(result.usage) }).where("id", "=", job.id).execute();
-      }
-      return;
-    }
-    await addCost(tx, job.run_id, job.id, result.usage.costUsd - Number(job.counted_cost));
+    if (job.status !== "leased") return;
     const failed = result.stoppedBy === "error";
     await tx
       .updateTable("jobs")

@@ -1,5 +1,5 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { wrapLanguageModel, type LanguageModelMiddleware } from "ai";
+import { APICallError, wrapLanguageModel, type LanguageModelMiddleware } from "ai";
 import type { JobUsage } from "@usetrawler/protocol";
 
 type OpenRouterOptions = { provider?: Record<string, unknown> } & Record<string, unknown>;
@@ -72,4 +72,8 @@ export function tallyStep(
   usage.inputTokens += step.usage.inputTokens ?? 0;
   usage.outputTokens += step.usage.outputTokens ?? 0;
   return cost;
+}
+
+export function refusedForBudget(err: unknown): boolean {
+  return APICallError.isInstance(err) && err.statusCode === 402;
 }

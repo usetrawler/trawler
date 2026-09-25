@@ -121,6 +121,18 @@ export interface Jobs {
   usage: Json | null;
 }
 
+export interface LlmUsage {
+  cost_usd: Numeric;
+  created_at: Generated<Timestamp>;
+  id: Generated<Int8>;
+  input_tokens: number;
+  job_id: string;
+  model: string;
+  org_id: string;
+  output_tokens: number;
+  run_id: string;
+}
+
 export interface Member {
   createdAt: Timestamp;
   id: string;
@@ -272,6 +284,7 @@ export interface DB {
   goals: Goals;
   invitation: Invitation;
   jobs: Jobs;
+  llm_usage: LlmUsage;
   member: Member;
   model_catalog: ModelCatalog;
   organization: Organization;

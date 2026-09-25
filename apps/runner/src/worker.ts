@@ -9,7 +9,7 @@ import {
 export interface WorkerDeps {
   controlPlane: string;
   runnerToken: string;
-  model: (modelId: string) => LanguageModel;
+  model: (modelId: string, jobToken: string) => LanguageModel;
   openBrowser: (config: ProjectConfig, opts: { onBlocked: (url: string) => void; scrubber: SecretScrubber }) => Promise<Browser>;
   log: (line: string) => void;
   fetch?: typeof fetch;
@@ -153,7 +153,7 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
     let n = 0;
     const { result, usage } = await withBrowser(deps, config, scrubber, events, job.jobId, (b) =>
       runRoleSession({
-        model: deps.model(job.agentModel), modelId: job.agentModel, persona, project: config, browserTools: b.tools, fillField: b.fillField,
+        model: deps.model(job.agentModel, job.token), modelId: job.agentModel, persona, project: config, browserTools: b.tools, fillField: b.fillField,
         scrubber, budget, maxSteps: job.maxSteps, emit: events.emit, newFindingId: () => `f${++n}`,
       }),
     );
@@ -164,14 +164,14 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
   if (job.kind === "replay") {
     const { observation, usage } = await withBrowser(deps, config, scrubber, events, job.jobId, (b) =>
       runReplay({
-        model: deps.model(job.agentModel), modelId: job.agentModel, finding, project: config, accountRef: job.accountRef,
+        model: deps.model(job.agentModel, job.token), modelId: job.agentModel, finding, project: config, accountRef: job.accountRef,
         browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: job.maxSteps, emit: events.emit,
       }),
     );
     return { usage, stoppedBy: events.finished?.stoppedBy ?? "error", observation, ...(events.finished?.error ? { error: clip(events.finished.error) } : {}) };
   }
   if (!job.observation) throw new Error("the judge job has no observation");
-  const { usage } = await judge({ model: deps.model(job.judgeModel), modelId: job.judgeModel, finding, observation: job.observation, scrubber, budget, emit: events.emit });
+  const { usage } = await judge({ model: deps.model(job.judgeModel, job.token), modelId: job.judgeModel, finding, observation: job.observation, scrubber, budget, emit: events.emit });
   return { usage, stoppedBy: events.finished?.stoppedBy ?? "done", ...(events.finished?.error ? { error: clip(events.finished.error) } : {}) };
 }
 
@@ -218,7 +218,7 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
   }
   if (!job) return "done";
   deps.log(`${job.kind} ${job.jobId} started`);
-  const scrubber = runnerScrubber(deps, job.config);
+  const scrubber = runnerScrubber({ ...deps, secrets: [...(deps.secrets ?? []), job.token] }, job.config);
   const budget = new Budget(Math.max(job.budgetUsd, 1e-6));
   if (job.budgetUsd <= 0) budget.add(1e-6);
   const events = new JobEvents(deps, job, () => budget.add(budget.limitUsd));
