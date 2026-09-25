@@ -119,6 +119,15 @@ test("a defect being judged again counts as confirmed only once its judge has fi
   expect(await counts()).toEqual({ history: 2, runPage: 2 });
 });
 
+test("a defect confirmed by its first judge counts at once, while that judge is still reporting, as on the run page", async () => {
+  const project = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", { ...config, name: "First judge" }, keys));
+  const run = await seedRun("org-a", project, hoursAgo(2), { status: "running", cost: 0.1 }, [{ kind: "defect", verdict: "confirmed" }], 0, 0);
+  await asSystem(t.db, (tx) => tx.insertInto("jobs").values({ org_id: "org-a", run_id: run.id, kind: "judge", position: 10, finding_key: "ana:f0", status: "leased" }).execute());
+  const history = (await withOrg(t.db, "org-a", (tx) => projectRuns(tx, "org-a", project)))!.runs[0]!.confirmed;
+  const runPage = runView((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!).report.confirmed.length;
+  expect({ history, runPage }).toEqual({ history: 1, runPage: 1 });
+});
+
 test("a run keeps the number of goals it was started with after the plan changes", async () => {
   const other = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", { ...config, name: "Changing" }, keys));
   await seedRun("org-a", other, hoursAgo(5), { status: "succeeded", cost: 0.2 }, [], 1, 0);

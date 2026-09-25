@@ -4,15 +4,13 @@ import { authClient } from "../auth-client.ts";
 
 const LABELS = { github: "Continue with GitHub", google: "Continue with Google", dev: "Continue with the development account" } as const;
 
-export const signInWith = (provider: keyof typeof LABELS) => authClient.signIn.social({ provider, callbackURL: "/", errorCallbackURL: "/sign-in" });
-
 export function SignInButtons({ providers }: { providers: Array<keyof typeof LABELS> }) {
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const go = async (provider: keyof typeof LABELS) => {
     setPending(provider);
     setError(null);
-    const result = await signInWith(provider);
+    const result = await authClient.signIn.social({ provider, callbackURL: "/", errorCallbackURL: "/sign-in" });
     if (result.error) {
       setError(result.error.message ?? "Sign-in failed. Try again.");
       setPending(null);
