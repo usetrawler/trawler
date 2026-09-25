@@ -14,7 +14,8 @@ export interface RunnerApiDeps {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "no-store" } });
-const problem = (status: number, message: string) => json({ error: message }, status);
+const problem = (status: number, message: string, issues?: Array<{ path: PropertyKey[]; message: string }>) =>
+  json({ error: message, ...(issues ? { issues: issues.slice(0, 5).map((i) => ({ path: i.path.map(String).join("."), message: i.message })) } : {}) }, status);
 
 function protocolProblem(req: Request): Response | null {
   const version = req.headers.get(PROTOCOL_HEADER);
@@ -97,7 +98,7 @@ export async function handleEvents(req: Request, jobId: string, deps: RunnerApiD
   const read = await readBody(req);
   if ("tooLarge" in read) return problem(413, "the request is too large");
   const parsed = EventBatchSchema.safeParse(read.value);
-  if (!parsed.success) return problem(400, "invalid event batch");
+  if (!parsed.success) return problem(400, "invalid event batch", parsed.error.issues);
   try {
     return json(await ingestEvents(deps.db, token, parsed.data.events, jobId));
   } catch (err) {
@@ -115,7 +116,7 @@ export async function handleComplete(req: Request, jobId: string, deps: RunnerAp
   const read = await readBody(req);
   if ("tooLarge" in read) return problem(413, "the request is too large");
   const parsed = JobCompletionSchema.safeParse(read.value);
-  if (!parsed.success) return problem(400, "invalid completion");
+  if (!parsed.success) return problem(400, "invalid completion", parsed.error.issues);
   try {
     await completeJob(deps.db, token, parsed.data, jobId);
     return json({ ok: true });
