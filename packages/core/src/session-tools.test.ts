@@ -2,7 +2,7 @@ import { generateText, isStepCount } from "ai";
 import { describe, expect, test, vi } from "vitest";
 import type { RunEventInput } from "@usetrawler/protocol";
 import { SecretScrubber } from "./secrets.ts";
-import { madeUpPassword, newSessionState, ownPasswordTool, sessionTools } from "./session-tools.ts";
+import { madeUpEmail, madeUpPassword, newSessionState, ownPasswordTool, sessionTools } from "./session-tools.ts";
 import { scriptedModel, text, toolCall } from "./testing.ts";
 
 const goals = [{ id: "sign-up", instruction: "Create an account." }, { id: "invoice", instruction: "Send an invoice." }];
@@ -246,6 +246,13 @@ describe("type_own_password", () => {
     expect(scrubber.scrub(`typed ${password}`)).toBe("typed •••");
   });
 
+  test("any start of the made-up password long enough to hide is hidden too, for a field or a server that shortens it", async () => {
+    const { typeOwnPassword, fillField, scrubber } = own();
+    await typeOwnPassword.execute!({ fields: ["e5"] }, ctx);
+    const password = fillField.mock.calls[0]![1];
+    for (const length of [8, 12, 15]) expect(scrubber.scrub(`kept ${password.slice(0, length)}`)).toBe("kept •••");
+  });
+
   test("every session makes up its own password, long and mixed enough for common password rules", async () => {
     const first = own();
     const second = own();
@@ -253,6 +260,10 @@ describe("type_own_password", () => {
     await second.typeOwnPassword.execute!({ fields: ["e5"] }, ctx);
     expect(first.fillField.mock.calls[0]![1]).not.toBe(second.fillField.mock.calls[0]![1]);
     for (const password of [first.fillField.mock.calls[0]![1], madeUpPassword()]) expect(password).toMatch(/^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z\d]).{16}$/);
+  });
+
+  test("a made-up address stays within the 64 characters an address may have before the @", () => {
+    expect(madeUpEmail("a".repeat(60))).toMatch(/^a{40}\.[0-9a-f]{8}@example\.com$/);
   });
 
   test("refs sent as one string are split, and a ref given twice is typed once", async () => {

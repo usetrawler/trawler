@@ -58,6 +58,10 @@ beforeAll(async () => {
         return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password" maxlength="12"><button type="submit">Save</button></form>`);
       case "/strip":
         return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password" oninput="this.value = this.value.replace(/[^A-Za-z0-9]/g, '')"><button type="submit">Save</button></form>`);
+      case "/alert-short":
+        return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password" oninput="this.value = this.value.slice(0, 12); alert('Checked')"><button type="submit">Save</button></form>`);
+      case "/short-on-change":
+        return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password" onchange="this.value = this.value.slice(0, 12)"><button type="submit">Save</button></form>`);
       case "/echo-password": {
         let body = "";
         req.on("data", (chunk) => (body += chunk));
@@ -521,16 +525,45 @@ describe("password fields", () => {
     }, 60_000);
   }
 
-  test("a password field too short to hide what it keeps is cleared, and the fill fails", async () => {
+  test("a password field that takes too few characters to hide a password gets nothing typed into it", async () => {
     await withBrowser(async (b) => {
       await navigate(b, `${origin}/pin`);
       const snap = await snapshot(b);
-      expect(await b.fillField(refOf(snap, "PIN"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("failed: the field keeps too little of the password to keep it hidden, so it was cleared");
+      expect(await b.fillField(refOf(snap, "PIN"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("failed: the field takes at most 6 characters, too few to keep a password hidden, so nothing was typed");
       await b.tools.browser_click!.execute!({ target: refOf(snap, "Echo"), element: "Echo" }, ctx);
       const shown = await snapshot(b);
       expect(shown).toContain("Your PIN is");
       expect(shown).not.toContain("Kx7mPq");
     });
+  }, 60_000);
+
+  test("a password a field shortens behind an alert is hidden once the alert is answered, and after the form is sent", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/alert-short`);
+      const snap = await snapshot(b);
+      await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password");
+      await b.tools.browser_handle_dialog!.execute!({ accept: true }, ctx);
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Save"), element: "Save" }, ctx);
+      const shown = await snapshot(b);
+      expect(shown).toContain("Saved");
+      expect(shown).not.toContain("Kx7mPq2Rz9Lw");
+    });
+  }, 60_000);
+
+  test("a made-up password a field shortens only as the form is sent is still hidden on the next page", async () => {
+    const scrubber = new SecretScrubber();
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/short-on-change`);
+      const snap = await snapshot(b);
+      let password = "";
+      const fillField: FillField = (ref, text, kind) => ((password = text), b.fillField(ref, text, kind));
+      const { type_own_password } = ownPasswordTool({ state: newSessionState([]), fillField, inBrowser: (action) => action(), scrubber });
+      await type_own_password.execute!({ fields: [refOf(snap, "Password")] }, ctx);
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Save"), element: "Save" }, ctx);
+      const shown = await snapshot(b);
+      expect(shown).toContain("Your password is •••");
+      expect(shown).not.toContain(password.slice(0, 12));
+    }, { scrubber });
   }, 60_000);
 
   test("typing into ordinary fields still works", async () => {

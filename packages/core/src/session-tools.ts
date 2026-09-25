@@ -2,7 +2,7 @@ import { randomBytes, randomInt } from "node:crypto";
 import { tool } from "ai";
 import { z } from "zod";
 import { FindingSchema, type Finding, type Goal, type GoalOutcome, type RunEventInput, type TargetAccount, MAX_GOAL_NOTE, MAX_NOTE } from "@usetrawler/protocol";
-import type { SecretScrubber } from "./secrets.ts";
+import { MIN_SECRET_LENGTH, type SecretScrubber } from "./secrets.ts";
 
 export interface SessionState {
   notes: string[];
@@ -24,7 +24,7 @@ export function madeUpPassword(): string {
 }
 
 export function madeUpEmail(name: string): string {
-  return `${name}.${randomBytes(4).toString("hex")}@example.com`;
+  return `${name.slice(0, 40)}.${randomBytes(4).toString("hex")}@example.com`;
 }
 
 export function newSessionState(goals: Goal[]): SessionState {
@@ -165,7 +165,7 @@ export type SessionTools = ReturnType<typeof sessionTools>;
 
 export function ownPasswordTool(opts: { state: SessionState; fillField: FillField; inBrowser: InBrowser; scrubber: SecretScrubber }) {
   const password = madeUpPassword();
-  opts.scrubber.add(password);
+  for (let length = MIN_SECRET_LENGTH; length <= password.length; length++) opts.scrubber.add(password.slice(0, length));
   return {
     type_own_password: tool({
       description: "Type your own password into password fields, by their snapshot refs: when you sign up, the password field and any field that asks for it again; when you sign in to the account you created, the password field. The password is made up for you and stays the same all session. You never see it.",

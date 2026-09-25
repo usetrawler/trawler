@@ -357,7 +357,7 @@ describe("runRoleSession", () => {
     const password = typed[0]![1];
     expect(typed).toEqual([["e4", password, "password"], ["e5", password, "password"]]);
     expect(model.doGenerateCalls[0]!.tools!.map((t) => t.name)).toContain("type_own_password");
-    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt[0])).toMatch(/You have no account\. If the product lets people sign up, sign up the way a new user would, with the email address ama\.[0-9a-f]{8}@example\.com: it is yours, and no mail sent to it arrives\. Fill password fields only with type_own_password: it types a password made up for you, the same one all session, so use it again to sign in to the account you created\. You will never see it\./);
+    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt[0])).toMatch(/You have no account\. If the product lets people sign up, sign up the way a new user would, with the email address ama\.[0-9a-f]{8}@example\.com: it is yours, and no mail sent to it arrives\. If the product refuses that address or asks you to confirm it by email, that is a limit of the address, not a defect: note it and move on\. Fill password fields only with type_own_password: it types a password made up for you, the same one all session, so use it again to sign in to the account you created\. You will never see it\./);
     const later = JSON.stringify(model.doGenerateCalls[3]!.prompt);
     expect(later).toContain("fill('•••') into e4");
     expect(later).toContain("Welcome! Your password is •••");

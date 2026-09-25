@@ -131,7 +131,7 @@ describe("runReplay", () => {
     const password = typed[0]!;
     expect(filled).toEqual([`e3:${password}`, `e4:${password}`]);
     expect(password).not.toBe("hunter22-secret");
-    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt[0])).toMatch(/If a step has you type a password, fill the password fields with type_own_password instead; you will never see the password\. If a step signs up with an email address, use replay\.[0-9a-f]{8}@example\.com in its place, since that one may be taken already\./);
+    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt[0])).toMatch(/If a step has you type a password, fill the password fields with type_own_password instead; you will never see the password\. Wherever the steps use the email address they signed up with, use replay\.[0-9a-f]{8}@example\.com instead, since that one may be taken already\./);
     const last = JSON.stringify(model.doGenerateCalls[2]!.prompt);
     expect(last).toContain("fill('•••') into e3");
     expect(last).toContain("Account created with the password •••");
