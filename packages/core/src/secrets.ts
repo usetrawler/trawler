@@ -19,7 +19,7 @@ function forms(s: string): string[] {
   const percent = [encodeURIComponent(s), encodeURI(s), new URLSearchParams({ x: s }).toString().slice(2)];
   const lowerPercent = percent.map((p) => p.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase()));
   const html = ["&#39;", "&#x27;", "&apos;"].map((a) => htmlEscaped(s, a));
-  return [s, jsonEscaped(s), jsonEscaped(jsonEscaped(s)), jsSingleQuoted(s), ...html, ...percent, ...lowerPercent];
+  return [s, jsonEscaped(s), jsonEscaped(jsonEscaped(s)), jsSingleQuoted(s), inspect(s).slice(1, -1), ...html, ...percent, ...lowerPercent];
 }
 
 function variants(secret: string): string[] {

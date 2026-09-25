@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
 import { SecretScrubber, scrubConsole } from "./secrets.ts";
 
 const TOKEN = "t".repeat(40);
+const QUOTED = `pa'ss"wo\\rd-2026`;
 const LEVELS = ["log", "info", "warn", "error", "debug"] as const;
 const original = { ...console };
 let written: Array<[string, unknown[]]> = [];
@@ -10,6 +11,7 @@ beforeAll(() => {
   for (const level of LEVELS) console[level] = (...args: unknown[]) => void written.push([level, args]);
   const scrubber = new SecretScrubber();
   scrubber.add(TOKEN);
+  scrubber.add(QUOTED);
   scrubConsole(scrubber);
 });
 
@@ -42,6 +44,14 @@ test("an error is written as Node writes it, with the stack of where it was thro
 test("format strings and nesting are as deep as Node prints them, not deeper", () => {
   console.log("%s saw", "ana@example.com", { nested: { deeper: { deepest: { token: TOKEN } } } });
   expect(written).toEqual([["log", ["ana@example.com saw { nested: { deeper: { deepest: [Object] } } }"]]]);
+});
+
+test("a secret with both quote marks and a backslash is masked where Node prints it inside an object or an error's own property", () => {
+  console.log({ password: QUOTED });
+  console.error(Object.assign(new Error("insert failed"), { detail: `Key (password)=(${QUOTED}) already exists.` }));
+  expect(written[0]).toEqual(["log", ["{ password: `•••` }"]]);
+  expect(String(written[1]![1][0])).toContain("detail: `Key (password)=(•••) already exists.`");
+  expect(JSON.stringify(written)).not.toContain("pa'ss");
 });
 
 test("console.dir and console.dirxml, which Node writes without console.log, are masked too", () => {
