@@ -16,15 +16,15 @@ function fakeRailway(reply: (body: Body) => { status?: number; body: unknown }) 
 
 test("reads one variable of a named service in the token's own project and environment", async () => {
   const fake = fakeRailway(({ query }) => {
-    if (query.includes("projectToken")) return { body: { data: { projectToken: { projectId: "p-core", environmentId: "e-staging", environment: { name: "staging" } } } } };
+    if (query.includes("projectToken")) return { body: { data: { projectToken: { projectId: "p-core", environmentId: "e-production", environment: { name: "production" } } } } };
     if (query.includes("services")) return { body: { data: { project: { services: { edges: [{ node: { id: "s-cp", name: "control-plane" } }] } } } } };
     return { body: { data: { variables: { TRAWLER_SMOKE_TOKEN: "smoke-token" } } } };
   });
   const api = railway("core-token", fake.fetch);
   const at = await target(api);
-  expect(at.environmentName).toBe("staging");
+  expect(at.environmentName).toBe("production");
   expect(await serviceVariable(api, at, "control-plane", "TRAWLER_SMOKE_TOKEN")).toBe("smoke-token");
-  expect(fake.seen.at(-1)!.body.variables).toEqual({ proj: "p-core", env: "e-staging", svc: "s-cp" });
+  expect(fake.seen.at(-1)!.body.variables).toEqual({ proj: "p-core", env: "e-production", svc: "s-cp" });
   expect(fake.seen.every((c) => c.token === "core-token")).toBe(true);
 });
 

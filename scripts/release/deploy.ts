@@ -133,7 +133,6 @@ async function soleDeployment(o: DeployOptions, api: Railway, at: Target, servic
 export async function deployedCommit(base: string, call: typeof fetch = fetch): Promise<string | null> {
   try {
     const res = await call(`${base}/healthz`, { headers: { "cache-control": "no-store" } });
-    if (!res.ok) return null;
     return ((await res.json()) as { commit?: string | null }).commit ?? null;
   } catch {
     return null;
