@@ -29,7 +29,7 @@ function notJudgedReason(f: Finding, runLive: boolean): string {
   return "The run ended before it was replayed.";
 }
 
-const RUNNER_FAULT = /^(the|this) runner\b|^the judge job\b/;
+const MODEL_FAULT = /^(the model\b|the provider's content filter\b|No output generated|No object generated)/;
 
 export function gaveNoVerdict(job: { status: string; stopped_by: string | null; requested: boolean }, verdict: string | null): boolean {
   if (verdict === "confirmed" || verdict === "refuted") return false;
@@ -37,13 +37,14 @@ export function gaveNoVerdict(job: { status: string; stopped_by: string | null; 
   return job.status === "succeeded" && job.stopped_by === "budget" && (verdict === null || !job.requested);
 }
 
-function whyNotJudged(job: Job, runStatus: string): string {
+function whyNotJudged(job: Job, runStatus: string, capSpent: boolean): string {
   if (job.status === "failed") {
     const detail = job.error ?? "no reason was recorded";
-    return job.stopped_by === "error" && !RUNNER_FAULT.test(detail) ? `Model error: ${detail}` : `Failed: ${detail}`;
+    return job.stopped_by === "error" && MODEL_FAULT.test(detail) ? `Model error: ${detail}` : `Failed: ${detail}`;
   }
-  if (job.error) return `Stopped: ${job.error}`;
-  return runStatus === "cancelled" ? "You stopped the run before the judge answered." : "The run's cap ran out before the judge answered.";
+  if (capSpent) return "The run's cap ran out before the judge answered.";
+  if (runStatus === "cancelled" && !job.requested) return "You stopped the run before the judge answered.";
+  return job.error ? `Stopped: ${job.error}` : "The model call was refused before the judge answered.";
 }
 
 export function runView(s: RunSummary) {
@@ -97,7 +98,7 @@ export function runView(s: RunSummary) {
     refuted: settled.filter((f) => f.verdict === "refuted").map(withPersona),
     couldNotJudge: unsettled.map((f) => ({
       ...withPersona(f),
-      reason: judgingAgain(f) ? "Judging again…" : whyNotJudged(lastJudge(f)!, s.status),
+      reason: judgingAgain(f) ? "Judging again…" : whyNotJudged(lastJudge(f)!, s.status, capSpent),
       action: (judgingAgain(f) ? "judging" : live ? "after_run" : capSpent ? "cap_spent" : "judge_again") as JudgeAgainState,
     })),
     notJudged: settled.filter((f) => !f.verdict).map((f) => ({ ...withPersona(f), reason: notJudgedReason(f, live) })),

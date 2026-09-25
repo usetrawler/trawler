@@ -94,16 +94,22 @@ test("a defect whose judge failed is shown as could not be judged with the model
   expect(view.rejudging).toBe(false);
 });
 
-test("a failed judge job never hides a verdict the judge did give", () => {
-  const view = finished({ jobs: [judged("failed", { stopped_by: null, error: "the runner stopped answering" })], findings: [finding("ana:f1", "ana", { ...replayed, verdict: "confirmed" })] });
-  expect(view.report.confirmed.map((f) => f.key)).toEqual(["ana:f1"]);
-  expect(view.report.couldNotJudge).toEqual([]);
+test("a failed judge job never hides a confirmed or refuted verdict the judge did give", () => {
+  for (const verdict of ["confirmed", "refuted"] as const) {
+    const view = finished({ jobs: [judged("failed", { stopped_by: null, error: "the runner stopped answering" })], findings: [finding("ana:f1", "ana", { ...replayed, verdict })] });
+    expect(view.report[verdict].map((f) => f.key)).toEqual(["ana:f1"]);
+    expect(view.report.couldNotJudge).toEqual([]);
+  }
 });
 
-test("a runner failure is not blamed on the model", () => {
+test("only the model's own failures are called model errors", () => {
   for (const [extra, reason] of [
+    [{ stopped_by: "error", error: "the model gave no verdict (2 tries)" }, "Model error: the model gave no verdict (2 tries)"],
+    [{ stopped_by: "error", error: "No output generated." }, "Model error: No output generated."],
     [{ stopped_by: null, error: "the runner stopped answering" }, "Failed: the runner stopped answering"],
     [{ stopped_by: "error", error: "the runner could not report events: HTTP 503 from /api/jobs/x/events" }, "Failed: the runner could not report events: HTTP 503 from /api/jobs/x/events"],
+    [{ stopped_by: "error", error: "the job has no finding" }, "Failed: the job has no finding"],
+    [{ stopped_by: "error", error: "invalid or expired job token" }, "Failed: invalid or expired job token"],
   ] as const) {
     const view = finished({ jobs: [judged("failed", extra)], findings: [finding("ana:f1", "ana", replayed)] });
     expect(view.report.couldNotJudge.map((f) => f.reason)).toEqual([reason]);
@@ -115,8 +121,17 @@ test("a judge stopped by the proxy or the cap says why, and offers judging again
   expect(refused.report.couldNotJudge).toEqual([expect.objectContaining({ reason: "Stopped: the provider account behind the workspace key is out of credits", action: "judge_again" })]);
   const capped = finished({ status: "stopped_budget", costUsd: 2.01, jobs: [judged("succeeded", { stopped_by: "budget" })], findings: [finding("ana:f1", "ana", replayed)] });
   expect(capped.report.couldNotJudge).toEqual([expect.objectContaining({ reason: "The run's cap ran out before the judge answered.", action: "cap_spent" })]);
-  const stopped = finished({ status: "cancelled", jobs: [judged("succeeded", { stopped_by: "budget" })], findings: [finding("ana:f1", "ana", replayed)] });
+  const stopped = finished({ status: "cancelled", jobs: [judged("succeeded", { stopped_by: "budget", error: "the run is no longer active" })], findings: [finding("ana:f1", "ana", replayed)] });
   expect(stopped.report.couldNotJudge.map((f) => f.reason)).toEqual(["You stopped the run before the judge answered."]);
+  const spent = finished({ status: "stopped_budget", costUsd: 2, jobs: [judged("succeeded", { stopped_by: "budget", error: "the run has spent its budget" })], findings: [finding("ana:f1", "ana", replayed)] });
+  expect(spent.report.couldNotJudge.map((f) => f.reason)).toEqual(["The run's cap ran out before the judge answered."]);
+});
+
+test("a judge stopped without a recorded reason does not claim the cap ran out while it has room", () => {
+  const legacy = finished({ costUsd: 0.3, jobs: [judged("succeeded", { stopped_by: "budget" })], findings: [finding("ana:f1", "ana", { ...replayed, verdict: "inconclusive" })] });
+  expect(legacy.report.couldNotJudge.map((f) => [f.reason, f.action])).toEqual([["The model call was refused before the judge answered.", "judge_again"]]);
+  const again = finished({ status: "cancelled", jobs: [judged("failed", modelError), judged("succeeded", { stopped_by: "budget", requested: true })], findings: [finding("ana:f1", "ana", replayed)] });
+  expect(again.report.couldNotJudge.map((f) => f.reason)).toEqual(["The model call was refused before the judge answered."]);
 });
 
 test("judging again is not offered once the run's cap is spent", () => {
