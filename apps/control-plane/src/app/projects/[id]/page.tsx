@@ -5,7 +5,7 @@ import { PlanWorkspace } from "./plan-workspace.tsx";
 import { openRouterKeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
 import { projectForEditing } from "../../../projects/projects.ts";
-import { getAuth } from "../../../server/auth.ts";
+import { canManageBilling, getAuth } from "../../../server/auth.ts";
 import { refreshPricesInBackground, runModels } from "../../../runs/catalog.ts";
 import { getDb } from "../../../server/db.ts";
 
@@ -42,6 +42,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           initialAccounts={project.accounts.map((a) => ({ ref: a.ref, username: a.username, hint: a.password_hint }))}
           models={models}
           keyHint={keyHint}
+          canManageKey={await canManageBilling(requestHeaders)}
         />
       </div>
     </AppShell>

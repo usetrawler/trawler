@@ -77,8 +77,8 @@ function Accounts({ projectId, accounts, onChange }: { projectId: string; accoun
   );
 }
 
-export function PlanWorkspace({ projectId, initialPersonas, initialGoals, initialAccounts, models, keyHint }: {
-  projectId: string; initialPersonas: Persona[]; initialGoals: Goal[]; initialAccounts: AccountView[]; models: RunModel[]; keyHint: string | null;
+export function PlanWorkspace({ projectId, initialPersonas, initialGoals, initialAccounts, models, keyHint, canManageKey }: {
+  projectId: string; initialPersonas: Persona[]; initialGoals: Goal[]; initialAccounts: AccountView[]; models: RunModel[]; keyHint: string | null; canManageKey: boolean;
 }) {
   const [saved, setSaved] = useState({ personas: initialPersonas, goals: initialGoals });
   const [personas, setPersonas] = useState(initialPersonas);
@@ -175,7 +175,7 @@ export function PlanWorkspace({ projectId, initialPersonas, initialGoals, initia
         </div>
       )}
 
-      <StartRun projectId={projectId} personas={saved.personas.length} models={models} keyHint={keyHint} blocked={dirty ? "Save or discard your changes to the plan first." : undefined} />
+      <StartRun projectId={projectId} personas={saved.personas.length} models={models} keyHint={keyHint} canManageKey={canManageKey} blocked={dirty ? "Save or discard your changes to the plan first." : undefined} />
     </div>
   );
 }

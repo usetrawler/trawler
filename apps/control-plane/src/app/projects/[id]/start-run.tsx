@@ -14,17 +14,22 @@ function Submit({ blocked, pending }: { blocked?: string; pending: boolean }) {
   );
 }
 
-export function StartRun({ projectId, personas, models, keyHint, blocked }: { projectId: string; personas: number; models: RunModel[]; keyHint: string | null; blocked?: string }) {
+export function StartRun({ projectId, personas, models, keyHint: savedHint, canManageKey, blocked }: {
+  projectId: string; personas: number; models: RunModel[]; keyHint: string | null; canManageKey: boolean; blocked?: string;
+}) {
   const [state, action, pending] = useActionState<StartState, FormData>(startRunAction, {});
   const [modelId, setModelId] = useState(models[0]?.id ?? "");
   const [cap, setCap] = useState(DEFAULT_RUN.budgetUsd);
   const [replacingKey, setReplacingKey] = useState(false);
   const [authorised, setAuthorised] = useState(false);
+  const keyHint = state.keyHint ?? savedHint;
+  const noKey = !keyHint && !canManageKey ? "Ask an owner of this workspace to add an OpenRouter key." : undefined;
   const model = models.find((m) => m.id === modelId) ?? models[0];
   if (!model) return <p className="border border-line bg-panel p-5 text-sm text-muted">No models are available right now.</p>;
   const estimate = estimateUsd(model, personas);
   return (
     <form
+      action={action}
       onSubmit={(e) => {
         e.preventDefault();
         const data = new FormData(e.currentTarget);
@@ -57,15 +62,18 @@ export function StartRun({ projectId, personas, models, keyHint, blocked }: { pr
         <p className="text-sm">
           <span className="text-muted">Pays with your OpenRouter key </span>
           <span className="font-mono">{keyHint}</span>
-          <button type="button" onClick={() => setReplacingKey(true)} className="ml-3 text-muted underline underline-offset-4 hover:text-ink">Replace</button>
+          {canManageKey && <button type="button" onClick={() => setReplacingKey(true)} className="ml-3 text-muted underline underline-offset-4 hover:text-ink">Replace</button>}
         </p>
-      ) : (
+      ) : noKey ? null : (
         <label className="flex flex-col gap-2">
           <span className="text-sm text-muted">
             Your OpenRouter key. Runs are billed to it directly; Trawler adds nothing. Create one at{" "}
             <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noreferrer" className="underline underline-offset-4 hover:text-ink">openrouter.ai/settings/keys</a>. It is stored encrypted and only its last characters are shown.
           </span>
-          <input name="openrouterKey" type="password" autoComplete="off" spellCheck={false} required={!keyHint} placeholder="sk-or-v1-…" className="h-12 border border-line bg-soft px-4 font-mono text-sm outline-none focus:border-ink" />
+          <span className="flex gap-2">
+            <input name="openrouterKey" type="password" autoComplete="off" spellCheck={false} required={!keyHint} placeholder="sk-or-v1-…" className="h-12 min-w-0 flex-1 border border-line bg-soft px-4 font-mono text-sm outline-none focus:border-ink" />
+            {keyHint && <button type="button" onClick={() => setReplacingKey(false)} className="h-12 px-3 text-sm text-muted hover:text-ink">Keep {keyHint}</button>}
+          </span>
         </label>
       )}
       <label className="flex items-start gap-3 text-sm">
@@ -74,8 +82,8 @@ export function StartRun({ projectId, personas, models, keyHint, blocked }: { pr
       </label>
       {state.error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{state.error}</p>}
       <div className="flex flex-wrap items-center justify-end gap-3">
-        {blocked && <p id="start-blocked" className="text-sm text-muted">{blocked}</p>}
-        <Submit blocked={blocked} pending={pending} />
+        {(blocked ?? noKey) && <p id="start-blocked" className="text-sm text-muted">{blocked ?? noKey}</p>}
+        <Submit blocked={blocked ?? noKey} pending={pending} />
       </div>
     </form>
   );
