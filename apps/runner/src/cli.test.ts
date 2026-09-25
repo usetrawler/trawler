@@ -195,3 +195,9 @@ test("setup passes a focus through to the proposal", async () => {
   expect(await runCli(["setup", "https://a.test/", "-o", join(mkdtempSync(join(tmpdir(), "cfg-")), "p.yaml"), "--focus", "the invite flow"], d)).toBe(0);
   expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toContain("the invite flow");
 });
+
+test("work refuses to send the runner token over plain http to another machine", async () => {
+  const { d, err } = deps({ env: { OPENROUTER_API_KEY: "k", TRAWLER_RUNNER_TOKEN: "t".repeat(40) } });
+  expect(await runCli(["work", "--control-plane", "http://cp.example.com"], d)).toBe(2);
+  expect(err.join("\n")).toMatch(/https/);
+});

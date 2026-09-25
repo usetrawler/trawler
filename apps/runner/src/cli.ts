@@ -1,4 +1,5 @@
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import type { LanguageModel } from "ai";
@@ -7,6 +8,7 @@ import { Budget, createModel, openBrowser, proposeProject, SecretScrubber } from
 import { ProjectConfigSchema, type RunEventInput } from "@usetrawler/protocol";
 import { localRun, type OpenBrowser } from "./local-run.ts";
 import { RunDir, renderReport } from "./run-dir.ts";
+import { workLoop, workOnce, type WorkerDeps } from "./worker.ts";
 
 export const DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
 const SETUP_BUDGET_USD = 0.25;
@@ -17,7 +19,9 @@ const USAGE = `Usage:
   trawler-runner setup <url> [--docs <url>] [--focus <text>] [--model <id>] [--out project.yaml] [--force]
   trawler-runner run --config project.yaml [--model <id>] [--judge-model <id>] [--budget <usd>] [--max-steps <n>] [--replay-steps <n>] [--headed]
 
-Set OPENROUTER_API_KEY in the environment.`;
+  trawler-runner work --control-plane https://app.usetrawler.com [--once]
+
+Set OPENROUTER_API_KEY in the environment; work also needs TRAWLER_RUNNER_TOKEN.`;
 
 export interface CliDeps {
   env: Record<string, string | undefined>;
@@ -27,6 +31,7 @@ export interface CliDeps {
   fetchText: (url: string) => Promise<string>;
   openBrowser: (opts: Parameters<OpenBrowser>[0] & { project: ReturnType<typeof ProjectConfigSchema.parse>; outputDir: string; headless: boolean }) => ReturnType<OpenBrowser>;
   runsRoot: string;
+  fetchImpl?: typeof fetch;
 }
 
 class UsageError extends Error {}
@@ -113,6 +118,47 @@ async function setup(args: string[], deps: CliDeps, apiKey: () => string): Promi
   return 0;
 }
 
+async function work(args: string[], deps: CliDeps, apiKey: () => string): Promise<number> {
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { "control-plane": { type: "string" }, once: { type: "boolean" }, help: { type: "boolean", short: "h" } } });
+  if (values.help) return help(deps);
+  if (positionals.length > 0) throw new UsageError(`work takes no positional arguments, got ${positionals.join(" ")}`);
+  const controlPlane = values["control-plane"];
+  if (!controlPlane || !URL.canParse(controlPlane) || !/^https?:$/.test(new URL(controlPlane).protocol)) throw new UsageError("work needs --control-plane <http(s) address>");
+  const { protocol, hostname } = new URL(controlPlane);
+  if (protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(hostname)) throw new UsageError("work sends the runner token, so --control-plane must use https unless it is on this machine");
+  const runnerToken = deps.env.TRAWLER_RUNNER_TOKEN?.trim();
+  if (!runnerToken) throw new UsageError("TRAWLER_RUNNER_TOKEN is not set");
+  const key = apiKey();
+  const workerDeps: WorkerDeps = {
+    controlPlane,
+    runnerToken,
+    model: (modelId) => deps.model(modelId, key),
+    openBrowser: async (project, { onBlocked, scrubber }) => {
+      const outputDir = mkdtempSync(join(tmpdir(), "trawler-work-"));
+      const removeOutput = () => rmSync(outputDir, { recursive: true, force: true });
+      try {
+        const browser = await deps.openBrowser({ project, outputDir, headless: true, onBlocked, scrubber });
+        return { tools: browser.tools, fillField: (ref, text, kind) => browser.fillField(ref, text, kind), close: () => browser.close().finally(removeOutput) };
+      } catch (err) {
+        removeOutput();
+        throw err;
+      }
+    },
+    log: deps.err,
+    fetch: deps.fetchImpl,
+    secrets: [key, runnerToken],
+  };
+  if (values.once) {
+    await workOnce(workerDeps);
+    return 0;
+  }
+  const stop = new AbortController();
+  for (const signal of ["SIGTERM", "SIGINT"] as const) process.once(signal, () => stop.abort());
+  deps.err(`working for ${new URL(controlPlane).origin}`);
+  await workLoop(workerDeps, stop.signal);
+  return 0;
+}
+
 async function run(args: string[], deps: CliDeps, apiKey: () => string): Promise<number> {
   const { values, positionals } = parseArgs({
     args,
@@ -167,6 +213,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
   try {
     if (command === "setup") return await setup(rest, deps, apiKey);
     if (command === "run") return await run(rest, deps, apiKey);
+    if (command === "work") return await work(rest, deps, apiKey);
     if (command === "--help" || command === "-h" || command === "help") return help(deps);
     throw new UsageError(command ? `unknown command ${command}` : "no command given");
   } catch (err) {
