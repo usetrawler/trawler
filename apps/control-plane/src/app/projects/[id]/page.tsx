@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { AppShell } from "../../../components/app-shell.tsx";
-import { StartRun } from "./start-run.tsx";
+import { PlanWorkspace } from "./plan-workspace.tsx";
 import { withOrg } from "../../../db/tenancy.ts";
 import { projectForEditing } from "../../../projects/projects.ts";
 import { getAuth } from "../../../server/auth.ts";
@@ -34,29 +34,13 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           <p className="text-lg text-muted">{project.description}</p>
           {project.focus && <p className="text-sm">Focus: <span className="text-muted">{project.focus}</span></p>}
         </div>
-        <section className="flex flex-col gap-3">
-          <h2 className="font-mono text-xs tracking-[0.2em] text-muted uppercase">These people will try it</h2>
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {project.personas.map((p) => (
-              <li key={p.key} className="flex flex-col gap-2 border border-line bg-panel p-4">
-                <p className="font-bold">{p.name}</p>
-                <p className="text-sm text-muted">{p.brief}</p>
-              </li>
-            ))}
-          </ul>
-        </section>
-        <section className="flex flex-col gap-3">
-          <h2 className="font-mono text-xs tracking-[0.2em] text-muted uppercase">What they want to get done</h2>
-          <ol className="flex flex-col gap-2">
-            {project.goals.map((g, i) => (
-              <li key={g.key} className="flex gap-3 border-b border-line pb-2">
-                <span className="font-mono text-xs text-muted">{String(i + 1).padStart(2, "0")}</span>
-                <span>{g.instruction}</span>
-              </li>
-            ))}
-          </ol>
-        </section>
-        <StartRun projectId={project.id} personas={project.personas.length} models={models} />
+        <PlanWorkspace
+          projectId={project.id}
+          initialPersonas={project.personas.map((p) => ({ id: p.key, name: p.name, brief: p.brief, ...(p.account_ref ? { accountRef: p.account_ref } : {}) }))}
+          initialGoals={project.goals.map((g) => ({ id: g.key, instruction: g.instruction }))}
+          initialAccounts={project.accounts.map((a) => ({ ref: a.ref, username: a.username, hint: a.password_hint }))}
+          models={models}
+        />
       </div>
     </AppShell>
   );

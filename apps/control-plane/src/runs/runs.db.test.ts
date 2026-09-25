@@ -319,3 +319,14 @@ test("a finished job's token cannot raise the run's cost afterwards", async () =
   expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.costUsd).toBeCloseTo(0.1, 6);
   await drain();
 });
+
+test("a queued run never pairs its snapshot's username with a different account's password", async () => {
+  await drain();
+  const own = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", own, keys, options));
+  await sql`update target_accounts set username = 'someone-else@acme.test' where project_id = ${own} and ref = 'ana'`.execute(t.db);
+  const job = (await claimJob(t.db, keys))!;
+  expect(job.config.accounts).toEqual([]);
+  expect(job.config.personas.find((p) => p.id === "ana")!.accountRef).toBeUndefined();
+  await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "finish" });
+});

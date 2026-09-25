@@ -57,11 +57,13 @@ export function storable<T>(value: T): T {
 }
 
 function configFor(snapshot: ConfigSnapshot, current: ProjectConfig): ProjectConfig {
-  const passwords = new Map(current.accounts.map((a) => [a.ref, a.password]));
+  const passwords = new Map(current.accounts.map((a) => [`${a.ref}\n${a.username}`, a.password]));
+  const key = (a: { ref: string; username: string }) => `${a.ref}\n${a.username}`;
+  const usable = new Set(snapshot.accounts.filter((a) => passwords.has(key(a))).map((a) => a.ref));
   return {
     ...snapshot,
-    personas: snapshot.personas.map((p) => (p.accountRef && !passwords.has(p.accountRef) ? { id: p.id, name: p.name, brief: p.brief } : p)),
-    accounts: snapshot.accounts.filter((a) => passwords.has(a.ref)).map((a) => ({ ...a, password: passwords.get(a.ref)! })),
+    personas: snapshot.personas.map((p) => (p.accountRef && !usable.has(p.accountRef) ? { id: p.id, name: p.name, brief: p.brief } : p)),
+    accounts: snapshot.accounts.filter((a) => usable.has(a.ref)).map((a) => ({ ...a, password: passwords.get(key(a))! })),
     httpCredentials: snapshot.httpCredentials && current.httpCredentials?.username === snapshot.httpCredentials.username ? current.httpCredentials : undefined,
     secretHeaders: Object.fromEntries(snapshot.secretHeaders.filter((h) => h in current.secretHeaders).map((h) => [h, current.secretHeaders[h]!])),
   };
