@@ -2,7 +2,7 @@ import { generateText, isStepCount } from "ai";
 import { describe, expect, test, vi } from "vitest";
 import type { RunEventInput } from "@usetrawler/protocol";
 import { SecretScrubber } from "./secrets.ts";
-import { newSessionState, sessionTools } from "./session-tools.ts";
+import { madeUpPassword, newSessionState, ownPasswordTool, sessionTools } from "./session-tools.ts";
 import { scriptedModel, text, toolCall } from "./testing.ts";
 
 const goals = [{ id: "sign-up", instruction: "Create an account." }, { id: "invoice", instruction: "Send an invoice." }];
@@ -219,6 +219,54 @@ describe("sign_in", () => {
   test("unknown account is an error the model can read", async () => {
     const { tools, fillField } = setup();
     expect(await tools.sign_in.execute!({ account: "ghost", usernameField: "e3", passwordField: "e4" }, ctx)).toBe("rejected: unknown account ghost; known: solo");
+    expect(fillField).not.toHaveBeenCalled();
+  });
+});
+
+describe("type_own_password", () => {
+  function own() {
+    const { state, fillField, scrubber } = setup();
+    return { state, fillField, scrubber, typeOwnPassword: ownPasswordTool({ state, fillField, scrubber }).type_own_password };
+  }
+
+  test("types one made-up password into every field it is given, the same every time, and never returns it", async () => {
+    const { typeOwnPassword, fillField, scrubber } = own();
+    const out = await typeOwnPassword.execute!({ fields: ["e5", "e6"] }, ctx);
+    const password = fillField.mock.calls[0]![1];
+    expect(fillField.mock.calls).toEqual([["e5", password, "password"], ["e6", password, "password"]]);
+    expect(out).toBe("e5: await page.getByRef('e5').fill('•••');\ne6: await page.getByRef('e6').fill('•••');");
+    await typeOwnPassword.execute!({ fields: "e9" }, ctx);
+    expect(fillField).toHaveBeenLastCalledWith("e9", password, "password");
+    expect(scrubber.scrub(`typed ${password}`)).toBe("typed •••");
+  });
+
+  test("every session makes up its own password, long and mixed enough for common password rules", async () => {
+    const first = own();
+    const second = own();
+    await first.typeOwnPassword.execute!({ fields: ["e5"] }, ctx);
+    await second.typeOwnPassword.execute!({ fields: ["e5"] }, ctx);
+    expect(first.fillField.mock.calls[0]![1]).not.toBe(second.fillField.mock.calls[0]![1]);
+    for (const password of [first.fillField.mock.calls[0]![1], madeUpPassword()]) expect(password).toMatch(/^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z\d]).{16}$/);
+  });
+
+  test("asks for the fields when none are given, and types nothing", async () => {
+    const { typeOwnPassword, fillField } = own();
+    for (const fields of [[], [" "], undefined, null]) expect(await typeOwnPassword.execute!({ fields }, ctx)).toBe("rejected: fields: give the refs of the password fields");
+    expect(fillField).not.toHaveBeenCalled();
+  });
+
+  test("a failure message cannot leak the password, and the other fields are still typed", async () => {
+    const { typeOwnPassword, fillField } = own();
+    fillField.mockImplementationOnce(async (_ref, value) => {
+      throw new Error(`could not fill '${value}' into e5`);
+    });
+    expect(await typeOwnPassword.execute!({ fields: ["e5", "e6"] }, ctx)).toBe("e5: failed: could not fill '•••' into e5\ne6: await page.getByRef('e6').fill('•••');");
+  });
+
+  test("after finish, it types nothing", async () => {
+    const { typeOwnPassword, fillField, state } = own();
+    state.finished = "done";
+    expect(await typeOwnPassword.execute!({ fields: ["e5"] }, ctx)).toBe("rejected: the session is already finished");
     expect(fillField).not.toHaveBeenCalled();
   });
 });

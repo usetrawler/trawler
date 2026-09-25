@@ -262,7 +262,7 @@ export async function openBrowser(opts: {
           }
           if (EDITS_FIELDS.has(name) && typeof safeInput.target === "string") {
             const field = (await probe({ element: "field", target: safeInput.target, function: fieldState })) as Partial<FieldState> | undefined;
-            if (field?.marked === true || (typeof field?.value === "string" && holdsSecret(field.value))) return refused("Password fields can only be filled with sign_in.");
+            if (field?.marked === true || (typeof field?.value === "string" && holdsSecret(field.value))) return refused("Password fields can only be filled with sign_in or type_own_password.");
           }
           if (name === "browser_navigate") {
             const url = typeof safeInput.url === "string" ? safeInput.url : "";

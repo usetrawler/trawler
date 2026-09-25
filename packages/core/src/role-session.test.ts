@@ -345,6 +345,31 @@ describe("runRoleSession", () => {
     expect(result).toMatchObject({ stoppedBy: "error", error: "the provider refused the workspace key; replace it on the plan page" });
   });
 
+  test("a person without an account is told to sign up with type_own_password, and never sees the password it types", async () => {
+    const typed: Array<[string, string, string]> = [];
+    const model = scriptedModel([look, toolCall("type_own_password", { fields: ["e4", "e5"] }), look]);
+    const { promise, events } = run(model, {
+      persona: { id: "ama", name: "Ama", brief: "Brand new." },
+      fillField: async (ref, text, kind) => (typed.push([ref, text, kind]), `fill('${text}') into ${ref}`),
+    });
+    await promise;
+    const password = typed[0]![1];
+    expect(typed).toEqual([["e4", password, "password"], ["e5", password, "password"]]);
+    expect(model.doGenerateCalls[0]!.tools!.map((t) => t.name)).toContain("type_own_password");
+    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt[0])).toMatch(/You have no account\. If the product lets people sign up, sign up the way a new user would\. Fill password fields only with type_own_password/);
+    expect(JSON.stringify(model.doGenerateCalls[2]!.prompt)).toContain("fill('•••') into e4");
+    expect(JSON.stringify(model.doGenerateCalls.map((c) => c.prompt))).not.toContain(password);
+    expect(JSON.stringify(events)).not.toContain(password);
+  });
+
+  test("a person with an account signs in with it and is not offered a made-up password", async () => {
+    const model = scriptedModel([look]);
+    await run(model).promise;
+    const tools = model.doGenerateCalls[0]!.tools!.map((t) => t.name);
+    expect(tools).toContain("sign_in");
+    expect(tools).not.toContain("type_own_password");
+  });
+
   test("the returned result is scrubbed too", async () => {
     const model = scriptedModel([
       look,

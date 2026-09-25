@@ -5,7 +5,7 @@ export function rolePrompt(p: { persona: Persona; targetUrl: string; docsUrl?: s
   const goalLines = p.goals.map((g, i) => `${i + 1}. [${g.id}] ${g.instruction}`).join("\n");
   const signIn = p.accountRef
     ? `You have an account "${p.accountRef}". To sign in, take a snapshot, then call sign_in with the account and the refs of the username and password fields. You will never see the password.`
-    : "You have no account. If the product lets people sign up, sign up the way a new user would.";
+    : "You have no account. If the product lets people sign up, sign up the way a new user would. Fill password fields only with type_own_password: it types a password made up for you, the same one all session, so use it again to sign in to the account you created. You will never see it.";
   const docs = p.docsUrl ? ` Its documentation is at ${p.docsUrl}; read it if and when you would, in character.` : "";
   return `You are ${p.persona.name}. ${p.persona.brief}
 
@@ -42,7 +42,7 @@ export function replayPrompt(p: { targetUrl: string; steps: string[]; accountRef
   const steps = p.steps.map((s, i) => `${i + 1}. ${s}`).join("\n");
   const signIn = p.accountRef
     ? `If a step needs you signed in, take a snapshot and call sign_in with account "${p.accountRef}" and the refs of the username and password fields. You will never see the password.`
-    : "You have no account.";
+    : "You have no account. If a step has you type a password, fill the password fields with type_own_password instead; you will never see the password.";
   return `You are checking a web application at ${p.targetUrl}, on a fresh copy of it. ${signIn}
 
 Follow these steps exactly, in order:

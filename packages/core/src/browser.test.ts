@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { BROWSER_TOOLS, openBrowser, type Browser } from "./browser.ts";
 import { SecretScrubber } from "./secrets.ts";
+import { newSessionState, ownPasswordTool, type FillField } from "./session-tools.ts";
 
 const ctx = { toolCallId: "t", messages: [], context: {} };
 const PASSWORD = "hunter22-secret";
@@ -17,6 +18,7 @@ let origin = "";
 let foreignOrigin = "";
 const seen: Record<string, IncomingMessage["headers"]> = {};
 const foreignHits: string[] = [];
+const signups: Array<{ email: string | null; password: string | null; confirm: string | null }> = [];
 
 function listen(s: Server): Promise<string> {
   return new Promise((r) => s.listen(0, "127.0.0.1", () => {
@@ -52,6 +54,17 @@ beforeAll(async () => {
         return html(`<h1>Login</h1><img src="https://blocked.example/pixel.png"><img src="https://blocked.example/other.png"><input aria-label="Email" type="text"><input aria-label="Password" type="password"><p>Welcome back</p><a href="/two">Next page</a>`);
       case "/two":
         return html(`<h1>Second page</h1>`);
+      case "/signup": {
+        if (req.method !== "POST") return html(`<form method="post" action="/signup"><input aria-label="Email" name="email" type="email"><input aria-label="Password" name="password" type="password"><input aria-label="Confirm password" name="confirm" type="password"><button type="submit">Create account</button></form>`);
+        let body = "";
+        req.on("data", (chunk) => (body += chunk));
+        req.on("end", () => {
+          const form = new URLSearchParams(body);
+          signups.push({ email: form.get("email"), password: form.get("password"), confirm: form.get("confirm") });
+          html(`<h1>Welcome</h1><p>Signed up with the password ${form.get("password")}</p>`);
+        });
+        return;
+      }
       case "/echo":
         return html(`<p>Your password is ${PASSWORD}</p>`);
       case "/frame":
@@ -453,8 +466,30 @@ describe("password fields", () => {
       const snap = await snapshot(b);
       const out = (await b.tools.browser_type!.execute!({ target: refOf(snap, "Password"), text: "guess", element: "password" }, ctx)) as { isError?: boolean; content: Array<{ text: string }> };
       expect(out.isError).toBe(true);
-      expect(out.content[0]!.text).toMatch(/only be filled with sign_in/);
+      expect(out.content[0]!.text).toMatch(/only be filled with sign_in or type_own_password/);
     });
+  }, 60_000);
+
+  test("a made-up password reaches a sign-up form's password and confirmation, and never the model", async () => {
+    const scrubber = new SecretScrubber();
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/signup`);
+      const snap = await snapshot(b);
+      let password = "";
+      const fillField: FillField = (ref, text, kind) => ((password = text), b.fillField(ref, text, kind));
+      const { type_own_password } = ownPasswordTool({ state: newSessionState([]), fillField, scrubber });
+      await b.tools.browser_type!.execute!({ target: refOf(snap, "Email"), text: "ama@acme.test", element: "email" }, ctx);
+      expect(await type_own_password.execute!({ fields: [refOf(snap, "Password"), refOf(snap, "Confirm password")] }, ctx)).toMatch(/^e\d+: typed the password\ne\d+: typed the password$/);
+      const guess = (await b.tools.browser_type!.execute!({ target: refOf(snap, "Confirm password"), text: "guess", element: "confirm" }, ctx)) as { isError?: boolean; content: Array<{ text: string }> };
+      expect(guess.isError).toBe(true);
+      expect(guess.content[0]!.text).toMatch(/only be filled with sign_in or type_own_password/);
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Create account"), element: "Create account" }, ctx);
+      const after = await snapshot(b);
+      expect(after).toContain("Signed up with the password •••");
+      expect(after).not.toContain(password);
+      expect(signups).toEqual([{ email: "ama@acme.test", password, confirm: password }]);
+      expect(password).toHaveLength(16);
+    }, { scrubber });
   }, 60_000);
 
   test("typing into ordinary fields still works", async () => {

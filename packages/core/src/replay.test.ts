@@ -122,6 +122,23 @@ describe("runReplay", () => {
     expect(filled).toEqual([]);
   });
 
+  test("a replay with no account fills password fields with a made-up password it never sees", async () => {
+    const model = scriptedModel([toolCall("type_own_password", { fields: ["e3", "e4"] }), report({ completed: true, observed: "Account created, then Internal Server Error", blockedAt: null })]);
+    const { promise, filled } = replay(model, { accountRef: undefined });
+    await promise;
+    const password = filled[0]!.split(":")[1]!;
+    expect(filled).toEqual([`e3:${password}`, `e4:${password}`]);
+    expect(password).not.toBe("hunter22-secret");
+    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt[0])).toContain("If a step has you type a password, fill the password fields with type_own_password instead");
+    expect(JSON.stringify(model.doGenerateCalls.map((c) => c.prompt))).not.toContain(password);
+  });
+
+  test("a replay with the account the steps were written for is not offered a made-up password", async () => {
+    const model = scriptedModel([report({ completed: true, observed: "x", blockedAt: null })]);
+    await replay(model).promise;
+    expect(model.doGenerateCalls[0]!.tools!.map((t) => t.name)).not.toContain("type_own_password");
+  });
+
   test("masks secrets in the report and in every event", async () => {
     const model = scriptedModel([report({ completed: true, observed: "The error page printed hunter22-secret", blockedAt: null })]);
     const { promise, events } = replay(model);

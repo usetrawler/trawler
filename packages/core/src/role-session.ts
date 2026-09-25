@@ -4,7 +4,7 @@ import { browserQueue, runAgentLoop } from "./agent-loop.ts";
 import type { Budget } from "./llm.ts";
 import { rolePrompt, sessionStatus } from "./prompts.ts";
 import type { SecretScrubber } from "./secrets.ts";
-import { newSessionState, sessionTools, type FillField } from "./session-tools.ts";
+import { newSessionState, ownPasswordTool, sessionTools, type FillField } from "./session-tools.ts";
 
 const NUDGE = "Every turn must call a tool; plain text does nothing. Continue with the goals, and call finish once every goal has a status.";
 
@@ -35,6 +35,7 @@ export async function runRoleSession(opts: {
       fillField: queue.fillField,
       scrubber: opts.scrubber, newId: opts.newFindingId,
     }),
+    ...(opts.persona.accountRef ? {} : ownPasswordTool({ state, fillField: queue.fillField, scrubber: opts.scrubber })),
   };
   const base = rolePrompt({
     persona: opts.persona, targetUrl: opts.project.targetUrl, docsUrl: opts.project.docsUrl,
