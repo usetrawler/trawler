@@ -138,7 +138,8 @@ export function sessionTools(opts: {
         opts.scrubber.add(a.password);
         return opts.inBrowser(async () => {
           try {
-            await opts.fillField(usernameField, a.username, "username");
+            const username = await opts.fillField(usernameField, a.username, "username");
+            if (username.startsWith("failed:")) return opts.scrubber.scrub(`failed: the username was not typed, so the password was not typed either. ${username.slice("failed:".length).trim()}`);
             return opts.scrubber.scrub(await opts.fillField(passwordField, a.password, "password"));
           } catch (err) {
             return opts.scrubber.scrub(`failed: ${err instanceof Error ? err.message : String(err)}`);

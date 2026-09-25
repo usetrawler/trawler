@@ -216,6 +216,12 @@ describe("sign_in", () => {
     });
     await expect(tools.sign_in.execute!({ account: "solo", usernameField: "e3", passwordField: "e4" }, ctx)).resolves.toBe("failed: could not fill '•••' into e4");
   });
+  test("a username that could not be typed stops the sign-in before the password, and says why", async () => {
+    const { tools, fillField } = setup();
+    fillField.mockImplementationOnce(async () => "failed: Ref e9 not found in the current page snapshot");
+    expect(await tools.sign_in.execute!({ account: "solo", usernameField: "e9", passwordField: "e4" }, ctx)).toBe("failed: the username was not typed, so the password was not typed either. Ref e9 not found in the current page snapshot");
+    expect(fillField).toHaveBeenCalledTimes(1);
+  });
   test("a person with no stored account is pointed at type_own_password", async () => {
     const { fillField } = setup();
     const tools = sessionTools({ state: newSessionState(goals), accounts: [], emit: () => {}, jobId: "role:ama", fillField, inBrowser: (action) => action(), scrubber: new SecretScrubber(), newId: () => "f1" });
