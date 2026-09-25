@@ -68,6 +68,8 @@ beforeAll(async () => {
         return html(`<input aria-label="PIN" type="password" oninput="this.value = this.value.slice(0, 6); this.disabled = true">`);
       case "/strip-show":
         return html(`<input aria-label="Password" type="password" oninput="this.value = this.value.replace(/[^A-Za-z0-9]/g, '')"><button onclick="const o=document.querySelector('input');const n=document.createElement('input');n.type='text';n.setAttribute('aria-label','Password');n.value=o.value;o.replaceWith(n)">Show password</button>`);
+      case "/strip-autoshow":
+        return html(`<input aria-label="Password" type="password" oninput="this.value = this.value.replace(/[^A-Za-z0-9]/g, ''); setTimeout(() => { const n = document.createElement('input'); n.type = 'text'; n.setAttribute('aria-label', 'Password'); n.value = this.value; this.replaceWith(n); n.focus(); }, 300)">`);
       case "/echo-password": {
         let body = "";
         req.on("data", (chunk) => (body += chunk));
@@ -593,6 +595,17 @@ describe("password fields", () => {
       const shown = await snapshot(b);
       expect(shown).not.toContain("Kx7mPq2Rz9Lw");
       await b.tools.browser_click!.execute!({ target: refOf(shown, "Password"), element: "password" }, ctx);
+      const key = (await b.tools.browser_press_key!.execute!({ key: "Backspace" }, ctx)) as { isError?: boolean };
+      expect(key.isError).toBe(true);
+    });
+  }, 60_000);
+
+  test("a rewritten password is guarded from the moment it is typed, before the page swaps the field for a plain one", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/strip-autoshow`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("typed the password");
+      await new Promise((r) => setTimeout(r, 600));
       const key = (await b.tools.browser_press_key!.execute!({ key: "Backspace" }, ctx)) as { isError?: boolean };
       expect(key.isError).toBe(true);
     });
