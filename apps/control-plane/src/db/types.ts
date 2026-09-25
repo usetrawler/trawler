@@ -119,6 +119,18 @@ export interface Member {
   userId: string;
 }
 
+export interface ModelCatalog {
+  completion_usd_per_mtok: Numeric;
+  enabled: Generated<boolean>;
+  id: string;
+  label: string;
+  note: string | null;
+  position: number;
+  prices_refreshed_at: Timestamp | null;
+  prompt_usd_per_mtok: Numeric;
+  recommended: Generated<boolean>;
+}
+
 export interface Organization {
   createdAt: Timestamp;
   id: string;
@@ -250,6 +262,7 @@ export interface DB {
   invitation: Invitation;
   jobs: Jobs;
   member: Member;
+  model_catalog: ModelCatalog;
   organization: Organization;
   personas: Personas;
   projects: Projects;
