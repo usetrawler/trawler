@@ -71,19 +71,19 @@ describe("a whole run", () => {
     await completeJob(t.db, second.token, { usage: usage(0), stoppedBy: "finish" });
 
     const replay = (await claimJob(t.db, keys))!;
-    expect(replay).toMatchObject({ kind: "replay", finding: { id: "f1", title: "Broken save" }, accountRef: "ana", maxSteps: 20 });
+    expect(replay).toMatchObject({ kind: "replay", finding: { id: "ana:f1", title: "Broken save" }, accountRef: "ana", maxSteps: 20 });
     await completeJob(t.db, replay.token, { usage: usage(0.02), stoppedBy: "report", observation: { completed: true, observed: "Internal Server Error", blockedAt: null } });
 
     const judge = (await claimJob(t.db, keys))!;
-    expect(judge).toMatchObject({ kind: "judge", finding: { id: "f1" }, observation: { completed: true }, judgeModel: "m/judge" });
+    expect(judge).toMatchObject({ kind: "judge", finding: { id: "ana:f1" }, observation: { completed: true }, judgeModel: "m/judge" });
     seq = 0;
-    await ingestEvents(t.db, judge.token, [ev({ type: "verdict", jobId: judge.jobId, findingId: "f1", verdict: "confirmed", observed: "Internal Server Error" })]);
+    await ingestEvents(t.db, judge.token, [ev({ type: "verdict", jobId: judge.jobId, findingId: "ana:f1", verdict: "confirmed", observed: "Internal Server Error" })]);
     await completeJob(t.db, judge.token, { usage: usage(0.001), stoppedBy: "done" });
 
     expect(await claimJob(t.db, keys)).toBeNull();
     const summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
     expect(summary).toMatchObject({ status: "succeeded", costUsd: 0.031 });
-    expect(summary!.findings).toEqual([expect.objectContaining({ key: "f1", personaKey: "ana", verdict: "confirmed", replay: { completed: true, observed: "Internal Server Error", blockedAt: null } })]);
+    expect(summary!.findings).toEqual([expect.objectContaining({ key: "ana:f1", personaKey: "ana", verdict: "confirmed", replay: { completed: true, observed: "Internal Server Error", blockedAt: null } })]);
     expect(summary!.goals).toEqual([{ personaKey: "ana", goal: "g", status: "failed", note: "500" }]);
   });
 
@@ -178,6 +178,82 @@ describe("safety", () => {
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
     const { rows } = await sql<{ snap: unknown }>`select config_snapshot as snap from runs where id = ${run.id}`.execute(t.db);
     expect(JSON.stringify(rows[0]!.snap)).not.toContain("hunter22-secret");
+    await drain();
+  });
+});
+
+describe("review round 1", () => {
+  test("two personas may use the same finding id; both findings survive", async () => {
+    await drain();
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    for (const title of ["Ana bug", "Lee bug"]) {
+      const job = (await claimJob(t.db, keys))!;
+      seq = 0;
+      await ingestEvents(t.db, job.token, [ev({ type: "finding", jobId: job.jobId, finding: { ...defect, title } })]);
+      await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "finish" });
+    }
+    const summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
+    expect(summary!.findings.map((f) => [f.key, f.title])).toEqual([["ana:f1", "Ana bug"], ["lee:f1", "Lee bug"]]);
+    await drain();
+  });
+
+  test("the database refuses a second leased job in one run", async () => {
+    await drain();
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    await claimJob(t.db, keys);
+    await expect(sql`update jobs set status = 'leased' where run_id = ${run.id} and status = 'queued'`.execute(t.db)).rejects.toThrow(/duplicate key|unique/);
+    await drain();
+  });
+
+  test("an expired lease no longer works and the run moves on", async () => {
+    await drain();
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const stale = (await claimJob(t.db, keys))!;
+    await sql`update jobs set lease_until = now() - interval '1 minute' where id = ${stale.jobId}`.execute(t.db);
+    await expect(ingestEvents(t.db, stale.token, [])).rejects.toBeInstanceOf(InvalidJobToken);
+    const next = (await claimJob(t.db, keys))!;
+    expect(next).toMatchObject({ runId: run.id, personaKey: "lee" });
+    const { rows } = await sql<{ status: string; error: string }>`select status, error from jobs where id = ${stale.jobId}`.execute(t.db);
+    expect(rows[0]).toMatchObject({ status: "failed" });
+    await drain();
+  });
+
+  test("invalid events are refused as a whole and never poison later batches", async () => {
+    await drain();
+    await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const job = (await claimJob(t.db, keys))!;
+    seq = 0;
+    const bad = [ev({ type: "finding", jobId: job.jobId, finding: { ...defect, id: "x".repeat(101) } })];
+    await expect(ingestEvents(t.db, job.token, bad)).rejects.toThrow();
+    await expect(ingestEvents(t.db, job.token, [ev({ type: "step", jobId: job.jobId, step: 1, tool: null, costUsd: 1e9 })])).rejects.toThrow();
+    await expect(ingestEvents(t.db, job.token, [ev({ type: "finding", jobId: job.jobId, finding: { ...defect, reproduction: ["only one"] } })])).rejects.toThrow();
+    expect(await ingestEvents(t.db, job.token, [ev({ type: "note", jobId: job.jobId, text: "fine" })])).toEqual({ cancel: false });
+    await drain();
+  });
+
+  test("a job that cannot be prepared fails instead of blocking everyone's queue", async () => {
+    await drain();
+    await sql`insert into organization (id, name, slug, "createdAt") values ('org-z', 'z', 'z', now())`.execute(t.db);
+    const zProject = await withOrg(t.db, "org-z", (tx) => createProject(tx, "org-z", config, keys));
+    const broken = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    await sql`update runs set config_snapshot = '{"broken": true}' where id = ${broken.id}`.execute(t.db);
+    const healthy = await withOrg(t.db, "org-z", (tx) => startRun(tx, "org-z", zProject, keys, options));
+    const claimed = await claimJob(t.db, keys);
+    const again = claimed ?? (await claimJob(t.db, keys));
+    expect(again?.runId).toBe(healthy.id);
+    const { rows } = await sql<{ status: string }>`select status from jobs where run_id = ${broken.id} order by position limit 1`.execute(t.db);
+    expect(rows[0]!.status).toBe("failed");
+    await drain();
+  });
+
+  test("events after a cancel are not projected", async () => {
+    await drain();
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const job = (await claimJob(t.db, keys))!;
+    await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id));
+    seq = 0;
+    expect(await ingestEvents(t.db, job.token, [ev({ type: "finding", jobId: job.jobId, finding: defect })])).toEqual({ cancel: true });
+    expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.findings).toEqual([]);
     await drain();
   });
 });

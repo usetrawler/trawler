@@ -2,12 +2,12 @@ import { z } from "zod";
 
 export const FindingSchema = z
   .object({
-    id: z.string().min(1),
+    id: z.string().min(1).max(100),
     kind: z.enum(["defect", "friction"]),
-    goal: z.string().min(1),
-    title: z.string().trim().min(1),
-    observed: z.string().trim().min(1),
-    reproduction: z.array(z.string().trim().min(1)).min(1),
+    goal: z.string().min(1).max(100),
+    title: z.string().trim().min(1).max(300),
+    observed: z.string().trim().min(1).max(4000),
+    reproduction: z.array(z.string().trim().min(1).max(1000)).min(1).max(30),
     severity: z.enum(["low", "medium", "high"]),
   })
   .refine((f) => f.kind !== "defect" || f.reproduction.length >= 2, {

@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "kysely";
-import { FindingSchema, ReplayObservationSchema, type Finding, type JobStopReason, type JobUsage, type ProjectConfig, type ReplayObservation, type RunEvent } from "@usetrawler/protocol";
+import { z } from "zod";
+import { FindingSchema, JobUsageSchema, JobStopReasonSchema, ReplayObservationSchema, RunEventSchema, type Finding, type JobStopReason, type JobUsage, type ProjectConfig, type ReplayObservation, type RunEvent } from "@usetrawler/protocol";
 import type { Database } from "../db/index.ts";
 import { asSystem, type Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -45,13 +46,33 @@ function configFor(snapshot: ConfigSnapshot, current: ProjectConfig): ProjectCon
   const passwords = new Map(current.accounts.map((a) => [a.ref, a.password]));
   return {
     ...snapshot,
+    personas: snapshot.personas.map((p) => (p.accountRef && !passwords.has(p.accountRef) ? { id: p.id, name: p.name, brief: p.brief } : p)),
     accounts: snapshot.accounts.filter((a) => passwords.has(a.ref)).map((a) => ({ ...a, password: passwords.get(a.ref)! })),
     httpCredentials: snapshot.httpCredentials && current.httpCredentials?.username === snapshot.httpCredentials.username ? current.httpCredentials : undefined,
     secretHeaders: Object.fromEntries(snapshot.secretHeaders.filter((h) => h in current.secretHeaders).map((h) => [h, current.secretHeaders[h]!])),
   };
 }
 
-export async function claimJob(db: Database, keys: Keyring): Promise<JobAssignment | null> {
+async function reapExpiredLeases(db: Database): Promise<void> {
+  await asSystem(db, async (tx) => {
+    const expired = await tx
+      .selectFrom("jobs")
+      .select(["id", "run_id", "org_id", "kind", "finding_key"])
+      .where("status", "=", "leased")
+      .where("lease_until", "<", sql<Date>`now()`)
+      .forUpdate()
+      .skipLocked()
+      .execute();
+    for (const job of expired) {
+      await tx.updateTable("jobs").set({ status: "failed", error: "the runner stopped answering", token_hash: null, lease_until: null, finished_at: new Date() }).where("id", "=", job.id).execute();
+      await planNext(tx, job, { usage: { model: "", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "error" });
+    }
+  });
+}
+
+type ClaimOutcome = { assignment: JobAssignment } | { quarantined: true } | null;
+
+async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
   return asSystem(db, async (tx) => {
     const picked = await tx
       .selectFrom("jobs as j")
@@ -70,25 +91,50 @@ export async function claimJob(db: Database, keys: Keyring): Promise<JobAssignme
     const token = randomBytes(32).toString("base64url");
     await tx.updateTable("jobs").set({ status: "leased", token_hash: hashToken(token), lease_until: sql<Date>`now() + make_interval(mins => ${LEASE_MINUTES})`, started_at: new Date() }).where("id", "=", picked.id).execute();
     await tx.updateTable("runs").set({ status: "running", started_at: sql<Date>`coalesce(started_at, now())` }).where("id", "=", picked.run_id).execute();
-    const snapshot = picked.config_snapshot as unknown as ConfigSnapshot;
-    const current = await loadProjectConfig(tx, picked.org_id, picked.project_id, keys);
-    const finding = picked.finding_key ? await findingFor(tx, picked.run_id, picked.finding_key) : undefined;
-    return {
-      jobId: picked.id,
-      runId: picked.run_id,
-      token,
-      kind: picked.kind as JobAssignment["kind"],
-      config: configFor(snapshot, current),
-      personaKey: picked.persona_key ?? undefined,
-      accountRef: finding ? snapshot.personas.find((p) => p.id === finding.personaKey)?.accountRef : undefined,
-      finding: finding?.finding,
-      observation: finding?.replay,
-      maxSteps: picked.kind === "role_session" ? picked.max_steps : picked.replay_steps,
-      budgetUsd: Math.max(0, Number(picked.budget_usd) - Number(picked.cost_usd)),
-      agentModel: picked.agent_model,
-      judgeModel: picked.judge_model,
-    };
+    try {
+      const snapshot = picked.config_snapshot as unknown as ConfigSnapshot;
+      const current = await loadProjectConfig(tx, picked.org_id, picked.project_id, keys);
+      const finding = picked.finding_key ? await findingFor(tx, picked.run_id, picked.finding_key) : undefined;
+      return {
+        assignment: {
+          jobId: picked.id,
+          runId: picked.run_id,
+          token,
+          kind: picked.kind as JobAssignment["kind"],
+          config: configFor(snapshot, current),
+          personaKey: picked.persona_key ?? undefined,
+          accountRef: finding ? snapshot.personas.find((p) => p.id === finding.personaKey)?.accountRef : undefined,
+          finding: finding?.finding,
+          observation: finding?.replay,
+          maxSteps: picked.kind === "role_session" ? picked.max_steps : picked.replay_steps,
+          budgetUsd: Math.max(0, Number(picked.budget_usd) - Number(picked.cost_usd)),
+          agentModel: picked.agent_model,
+          judgeModel: picked.judge_model,
+        },
+      };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      await tx.updateTable("jobs").set({ status: "failed", error: `the job could not be prepared: ${reason}`.slice(0, 2000), token_hash: null, lease_until: null, finished_at: new Date() }).where("id", "=", picked.id).execute();
+      await planNext(tx, picked, { usage: { model: "", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "error" });
+      return { quarantined: true };
+    }
   });
+}
+
+export async function claimJob(db: Database, keys: Keyring): Promise<JobAssignment | null> {
+  await reapExpiredLeases(db);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    let outcome: ClaimOutcome;
+    try {
+      outcome = await claimOnce(db, keys);
+    } catch (err) {
+      if ((err as { code?: string }).code === "23505") continue;
+      throw err;
+    }
+    if (!outcome) return null;
+    if ("assignment" in outcome) return outcome.assignment;
+  }
+  return null;
 }
 
 async function findingFor(tx: Tx, runId: string, key: string) {
@@ -101,8 +147,14 @@ async function findingFor(tx: Tx, runId: string, key: string) {
 }
 
 async function jobForToken(tx: Tx, token: string) {
-  const job = await tx.selectFrom("jobs").selectAll().where("token_hash", "=", hashToken(token)).forUpdate().executeTakeFirst();
-  if (!job) throw new InvalidJobToken();
+  const job = await tx
+    .selectFrom("jobs")
+    .selectAll()
+    .select(sql<boolean>`status = 'leased' and lease_until < now()`.as("expired"))
+    .where("token_hash", "=", hashToken(token))
+    .forUpdate()
+    .executeTakeFirst();
+  if (!job || job.expired) throw new InvalidJobToken();
   return job;
 }
 
@@ -123,10 +175,13 @@ async function stopIfOverBudget(tx: Tx, runId: string): Promise<boolean> {
 
 export async function ingestEvents(db: Database, token: string, events: RunEvent[]): Promise<{ cancel: boolean }> {
   return asSystem(db, async (tx) => {
+    const valid = z.array(RunEventSchema).max(500).parse(events);
     const job = await jobForToken(tx, token);
     if (job.status !== "leased") return { cancel: true };
-    if (events.some((e) => e.jobId !== job.id)) throw new Error("events belong to another job");
-    for (const e of events) {
+    if (valid.some((e) => e.jobId !== job.id)) throw new Error("events belong to another job");
+    const run = await tx.selectFrom("runs").select("status").where("id", "=", job.run_id).executeTakeFirstOrThrow();
+    if (!ACTIVE.includes(run.status)) return { cancel: true };
+    for (const e of valid) {
       const inserted = await tx
         .insertInto("run_events")
         .values({ org_id: job.org_id, run_id: job.run_id, job_id: job.id, seq: e.seq, type: e.type, at: new Date(e.at), payload: JSON.stringify(e) })
@@ -136,7 +191,7 @@ export async function ingestEvents(db: Database, token: string, events: RunEvent
       if (!inserted) continue;
       if (e.type === "step") await addCost(tx, job.run_id, job.id, e.costUsd);
       else if (e.type === "finding" && job.kind === "role_session") {
-        const f = e.finding;
+        const f = { ...e.finding, id: `${job.persona_key}:${e.finding.id}` };
         await tx
           .insertInto("findings")
           .values({ org_id: job.org_id, run_id: job.run_id, job_id: job.id, key: f.id, persona_key: job.persona_key!, kind: f.kind, goal: f.goal, title: f.title, observed: f.observed, reproduction: JSON.stringify(f.reproduction), severity: f.severity })
@@ -160,7 +215,10 @@ export async function ingestEvents(db: Database, token: string, events: RunEvent
 
 const noReport = (o?: ReplayObservation) => !o || (!o.completed && o.blockedAt === null);
 
-export async function completeJob(db: Database, token: string, result: JobResult): Promise<void> {
+const JobResultSchema = z.object({ usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().max(2000).optional(), observation: ReplayObservationSchema.optional() });
+
+export async function completeJob(db: Database, token: string, input: JobResult): Promise<void> {
+  const result = JobResultSchema.parse(input);
   await asSystem(db, async (tx) => {
     const job = await jobForToken(tx, token);
     if (job.status !== "leased") return;

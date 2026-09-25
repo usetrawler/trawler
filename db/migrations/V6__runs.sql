@@ -20,6 +20,7 @@ CREATE TABLE runs (
   UNIQUE (org_id, number)
 );
 CREATE INDEX runs_project_idx ON runs (project_id, created_at DESC);
+CREATE INDEX runs_active_idx ON runs (created_at) WHERE status IN ('queued', 'running');
 CALL make_tenant_table('runs');
 
 CREATE TABLE jobs (
@@ -46,7 +47,9 @@ CREATE TABLE jobs (
   CHECK ((kind = 'role_session') = (persona_key IS NOT NULL)),
   CHECK ((kind = 'role_session') = (finding_key IS NULL))
 );
-CREATE INDEX jobs_queue_idx ON jobs (created_at) WHERE status = 'queued';
+CREATE INDEX jobs_queue_idx ON jobs (run_id, position) WHERE status = 'queued';
+CREATE UNIQUE INDEX jobs_one_leased_per_run ON jobs (run_id) WHERE status = 'leased';
+CREATE INDEX jobs_leases_idx ON jobs (lease_until) WHERE status = 'leased';
 CREATE UNIQUE INDEX jobs_token_idx ON jobs (token_hash) WHERE token_hash IS NOT NULL;
 CALL make_tenant_table('jobs');
 
@@ -71,7 +74,7 @@ CREATE TABLE findings (
   org_id text NOT NULL,
   run_id uuid NOT NULL,
   job_id uuid NOT NULL,
-  key text NOT NULL CHECK (length(key) BETWEEN 1 AND 100),
+  key text NOT NULL CHECK (length(key) BETWEEN 1 AND 200),
   persona_key text NOT NULL,
   kind text NOT NULL CHECK (kind IN ('defect', 'friction')),
   goal text NOT NULL,
