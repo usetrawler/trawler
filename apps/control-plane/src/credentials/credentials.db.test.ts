@@ -4,7 +4,7 @@ import { afterAll, beforeAll, expect, test } from "vitest";
 import { withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
-import { modelKey, modelKeyHint, setModelKey } from "./credentials.ts";
+import { modelKey, modelKeyDetails, modelKeyHint, removeModelKey, setModelKey } from "./credentials.ts";
 
 const t = await testDb();
 afterAll(() => t.drop());
@@ -42,4 +42,27 @@ test("another organisation neither sees nor can decrypt the key, and a key store
   const legacy = keys.encrypt(OPENROUTER, ["org-a", "credentials", "openrouter", "key"]);
   await sql`update credentials set kind = 'openrouter', secret = ${legacy} where org_id = 'org-a'`.execute(t.db);
   expect(await withOrg(t.db, "org-a", (tx) => modelKey(tx, "org-a", keys))).toMatchObject({ provider: "openrouter", key: OPENROUTER });
+});
+
+test("the key's details say who added it and when, and another workspace can neither read nor remove it", async () => {
+  for (const org of ["org-c", "org-d"]) await sql`insert into organization (id, name, slug, "createdAt") values (${org}, ${org}, ${org}, now())`.execute(t.db);
+  const before = Date.now() - 1000;
+  await withOrg(t.db, "org-c", (tx) => setModelKey(tx, "org-c", { provider: "openrouter", key: OPENROUTER }, "user-c", keys));
+  const details = await withOrg(t.db, "org-c", (tx) => modelKeyDetails(tx, "org-c"));
+  expect(details).toMatchObject({ provider: "openrouter", hint: expect.stringMatching(/1234$/), baseUrl: null, addedBy: "user-c" });
+  expect(details!.addedAt.getTime()).toBeGreaterThan(before);
+  expect(await withOrg(t.db, "org-d", (tx) => modelKeyDetails(tx, "org-d"))).toBeNull();
+  expect(await withOrg(t.db, "org-d", (tx) => modelKeyDetails(tx, "org-c"))).toBeNull();
+  expect(await withOrg(t.db, "org-d", (tx) => removeModelKey(tx, "org-c"))).toBe(false);
+  expect(await withOrg(t.db, "org-c", (tx) => modelKeyDetails(tx, "org-c"))).toMatchObject({ addedBy: "user-c" });
+});
+
+test("replacing the key records who replaced it, and removing it leaves the workspace without one", async () => {
+  await withOrg(t.db, "org-c", (tx) => setModelKey(tx, "org-c", { provider: "openrouter", key: OPENROUTER }, "user-c", keys));
+  await withOrg(t.db, "org-c", (tx) => setModelKey(tx, "org-c", { provider: "anthropic", key: ANTHROPIC }, "user-e", keys));
+  expect(await withOrg(t.db, "org-c", (tx) => modelKeyDetails(tx, "org-c"))).toMatchObject({ provider: "anthropic", addedBy: "user-e" });
+  expect(await withOrg(t.db, "org-c", (tx) => removeModelKey(tx, "org-c"))).toBe(true);
+  expect(await withOrg(t.db, "org-c", (tx) => modelKey(tx, "org-c", keys))).toBeNull();
+  expect(await withOrg(t.db, "org-c", (tx) => modelKeyHint(tx, "org-c"))).toBeNull();
+  expect(await withOrg(t.db, "org-c", (tx) => removeModelKey(tx, "org-c"))).toBe(false);
 });

@@ -38,6 +38,21 @@ export async function modelKeyHint(tx: Tx, orgId: string): Promise<KeyHint | nul
   return row ? { provider: row.kind as Provider, hint: row.hint, baseUrl: row.base_url } : null;
 }
 
+export interface KeyDetails extends KeyHint {
+  addedBy: string;
+  addedAt: Date;
+}
+
+export async function modelKeyDetails(tx: Tx, orgId: string): Promise<KeyDetails | null> {
+  const row = await tx.selectFrom("credentials").select(["kind", "hint", "base_url", "created_by", "created_at"]).where("org_id", "=", orgId).executeTakeFirst();
+  return row ? { provider: row.kind as Provider, hint: row.hint, baseUrl: row.base_url, addedBy: row.created_by, addedAt: row.created_at } : null;
+}
+
+export async function removeModelKey(tx: Tx, orgId: string): Promise<boolean> {
+  const { numDeletedRows } = await tx.deleteFrom("credentials").where("org_id", "=", orgId).executeTakeFirst();
+  return numDeletedRows > 0n;
+}
+
 export async function modelKey(tx: Tx, orgId: string, keys: Keyring): Promise<StoredKey | null> {
   const row = await tx.selectFrom("credentials").select(["kind", "secret", "base_url"]).where("org_id", "=", orgId).executeTakeFirst();
   if (!row) return null;
