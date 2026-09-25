@@ -2,11 +2,10 @@ import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { AppShell } from "../../../components/app-shell.tsx";
 import { PlanWorkspace } from "./plan-workspace.tsx";
-import { openRouterKeyHint } from "../../../credentials/credentials.ts";
+import { modelKeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
 import { projectForEditing } from "../../../projects/projects.ts";
 import { canManageBilling, getAuth } from "../../../server/auth.ts";
-import { refreshPricesInBackground, runModels } from "../../../runs/catalog.ts";
 import { getDb } from "../../../server/db.ts";
 
 export const dynamic = "force-dynamic";
@@ -21,11 +20,9 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   if (!session) redirect("/sign-in");
   const orgId = session.session.activeOrganizationId;
   if (!orgId || !UUID.test(id)) notFound();
-  const [project, keyHint] = await withOrg(getDb(), orgId, (tx) => Promise.all([projectForEditing(tx, orgId, id), openRouterKeyHint(tx, orgId)]));
+  const [project, keyHint] = await withOrg(getDb(), orgId, (tx) => Promise.all([projectForEditing(tx, orgId, id), modelKeyHint(tx, orgId)]));
   if (!project) notFound();
   const organization = await auth.api.getFullOrganization({ headers: requestHeaders });
-  const models = await runModels(getDb());
-  refreshPricesInBackground(getDb());
   return (
     <AppShell organization={organization?.name ?? "Workspace"} email={session.user.email} step={2}>
       <div className="flex flex-col gap-10">
@@ -40,7 +37,6 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           initialPersonas={project.personas.map((p) => ({ id: p.key, name: p.name, brief: p.brief, ...(p.account_ref ? { accountRef: p.account_ref } : {}) }))}
           initialGoals={project.goals.map((g) => ({ id: g.key, instruction: g.instruction }))}
           initialAccounts={project.accounts.map((a) => ({ ref: a.ref, username: a.username, hint: a.password_hint }))}
-          models={models}
           keyHint={keyHint}
           canManageKey={await canManageBilling(requestHeaders)}
         />

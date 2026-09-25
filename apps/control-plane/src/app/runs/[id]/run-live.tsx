@@ -142,10 +142,17 @@ export function RunLive({ initial }: { initial: Data }) {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <Stat label={view.live ? "Live cost" : "Cost"} value={usd(run.costUsd)}>
-          <div className="h-1 bg-soft"><div className="h-1 bg-action" style={{ width: `${share}%` }} /></div>
-          <p className="text-xs text-muted">of {usd(run.budgetUsd)} cap</p>
-        </Stat>
+        {run.tokenCap ? (
+          <Stat label={view.live ? "Tokens so far" : "Tokens"} value={`${(run.tokensUsed / 1_000_000).toFixed(2)}M`}>
+            <div className="h-1 bg-soft"><div className="h-1 bg-action" style={{ width: `${Math.min(100, (run.tokensUsed / run.tokenCap) * 100)}%` }} /></div>
+            <p className="text-xs text-muted">of {(run.tokenCap / 1_000_000).toFixed(1)}M cap · price unknown</p>
+          </Stat>
+        ) : (
+          <Stat label={view.live ? "Live cost" : "Cost"} value={usd(run.costUsd)}>
+            <div className="h-1 bg-soft"><div className="h-1 bg-action" style={{ width: `${share}%` }} /></div>
+            <p className="text-xs text-muted">of {usd(run.budgetUsd)} cap</p>
+          </Stat>
+        )}
         <Stat label="Goals reached" value={`${view.goalsReached} / ${view.goalsTotal}`} />
         <Stat label="Confirmed defects" value={String(report.confirmed.length)} />
       </div>

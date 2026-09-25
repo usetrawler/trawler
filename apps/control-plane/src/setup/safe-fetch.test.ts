@@ -1,6 +1,6 @@
 import http, { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { blockedAddresses, FetchRefused, safeFetchText } from "./safe-fetch.ts";
+import { blockedAddresses, FetchRefused, safeFetchText, guardedFetch } from "./safe-fetch.ts";
 
 let server: Server;
 let base = "";
@@ -111,4 +111,11 @@ test("allowing loopback for tests still blocks the rest of the IPv4-compatible r
   expect(list.check("::7f00:1", "ipv6")).toBe(true);
   expect(list.check("::a00:1", "ipv6")).toBe(true);
   expect(blockedAddresses().check("::1", "ipv6")).toBe(true);
+});
+
+test("the guarded fetch used for custom model endpoints refuses private and plain-http addresses and does not follow redirects", async () => {
+  const guarded = guardedFetch();
+  for (const url of ["https://127.0.0.1/v1/models", "https://localhost/v1/models", "https://169.254.169.254/latest", "https://[::1]/v1", "https://10.0.0.5/v1", "http://api.example.com/v1"]) {
+    await expect(guarded(url)).rejects.toBeInstanceOf(FetchRefused);
+  }
 });

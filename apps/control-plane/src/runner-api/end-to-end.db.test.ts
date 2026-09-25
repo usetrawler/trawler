@@ -8,7 +8,8 @@ import { workOnce } from "../../../runner/src/worker.ts";
 import { withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
-import { setOpenRouterKey } from "../credentials/credentials.ts";
+import { setModelKey } from "../credentials/credentials.ts";
+import { resetPriceCache } from "../llm/prices.ts";
 import { handleChatCompletions } from "../llm-proxy/proxy.ts";
 import { createProject } from "../projects/projects.ts";
 import { runSummary, startRun } from "../runs/runs.ts";
@@ -50,6 +51,10 @@ beforeAll(async () => {
   openRouter = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const c of req) chunks.push(c as Buffer);
+    if (req.url === "/api/v1/models") {
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ data: [{ id: "deepseek/deepseek-v4.1-flash", pricing: { prompt: "0.0000003", completion: "0.0000012" } }] }));
+    }
     seen.push({ auth: req.headers.authorization, body: JSON.parse(Buffer.concat(chunks).toString()) });
     const reply = replies.shift();
     if (reply && typeof reply === "object" && "delayMs" in reply) await new Promise((r) => setTimeout(r, (reply as { delayMs: number }).delayMs));
@@ -59,7 +64,8 @@ beforeAll(async () => {
   await new Promise<void>((r) => openRouter.listen(0, "127.0.0.1", r));
   openRouterBase = `http://127.0.0.1:${(openRouter.address() as { port: number }).port}/api/v1`;
   await sql`insert into organization (id, name, slug, "createdAt") values ('org-a', 'A', 'a', now())`.execute(t.db);
-  await withOrg(t.db, "org-a", (tx) => setOpenRouterKey(tx, "org-a", ORG_KEY, "u", keys));
+  await withOrg(t.db, "org-a", (tx) => setModelKey(tx, "org-a", { provider: "openrouter", key: ORG_KEY }, "u", keys));
+  resetPriceCache();
 });
 afterAll(() => new Promise<void>((r) => server.close(() => openRouter.close(() => r()))));
 
@@ -138,7 +144,7 @@ test("the proxy bounds a call by what is left of the cap, prices calls OpenRoute
   const model = "deepseek/deepseek-v4.1-flash";
   const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "bo", name: "Bo", brief: "b" }], goals: [{ id: "g", instruction: "x" }] });
   const project = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
-  const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { budgetUsd: 0.01, agentModel: model, judgeModel: model, maxSteps: 10, replaySteps: 10, createdBy: "u" }));
+  const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { budgetUsd: 0.01, agentModel: model, judgeModel: model, maxSteps: 10, replaySteps: 10, createdBy: "u", price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } }));
   const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "1" } }), deps)).json();
   expect(job.runId).toBe(run.id);
   const call = (body: Record<string, unknown> = {}) => handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${job.token}`, "content-type": "application/json" }, body: JSON.stringify({ model, messages: [{ role: "user", content: "hi" }], ...body }) }), { db: t.db, keys, openRouterUrl: openRouterBase, retryBaseMs: 1 });
@@ -160,4 +166,30 @@ test("the proxy bounds a call by what is left of the cap, prices calls OpenRoute
   await new Promise((r) => setTimeout(r, 50));
   expect((await call()).status).toBe(429);
   expect((await first).status).toBe(200);
+});
+
+test("a run on a direct provider goes to that provider without OpenRouter extras, and an unpriced model stops at its token cap", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-o', 'O', 'o', now())`.execute(t.db);
+  await withOrg(t.db, "org-o", (tx) => setModelKey(tx, "org-o", { provider: "openai", key: "sk-proj-" + "p".repeat(40) }, "u", keys));
+  const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "oz", name: "Oz", brief: "b" }], goals: [{ id: "g", instruction: "x" }] });
+  const project = await withOrg(t.db, "org-o", (tx) => createProject(tx, "org-o", config, keys));
+  const run = await withOrg(t.db, "org-o", (tx) => startRun(tx, "org-o", project, keys, { budgetUsd: 5, agentModel: "gpt-5-mini", judgeModel: "gpt-5-mini", maxSteps: 10, replaySteps: 10, createdBy: "u", provider: "openai", tokenCap: 2000 }));
+  const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "1" } }), deps)).json();
+  expect(job.runId).toBe(run.id);
+  const toOpenAi: string[] = [];
+  const routed: typeof fetch = (url, init) => {
+    const target = String(url);
+    if (target.startsWith("https://api.openai.com/v1")) toOpenAi.push(target);
+    return fetch(target.replace("https://api.openai.com/v1", openRouterBase), init);
+  };
+  const call = () => handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${job.token}`, "content-type": "application/json" }, body: JSON.stringify({ model: "gpt-5-mini", messages: [{ role: "user", content: "hi" }], reasoning: { effort: "high" } }) }), { db: t.db, keys, openRouterUrl: openRouterBase, fetch: routed, retryBaseMs: 1 });
+  seen.length = 0;
+  replies = [{ ...textReply("ok"), usage: { prompt_tokens: 1500, completion_tokens: 600 } }];
+  expect((await call()).status).toBe(200);
+  expect(toOpenAi).toEqual(["https://api.openai.com/v1/chat/completions"]);
+  expect(seen[0]!.auth).toBe("Bearer sk-proj-" + "p".repeat(40));
+  expect(seen[0]!.body).toEqual({ model: "gpt-5-mini", messages: [{ role: "user", content: "hi" }], max_tokens: 2000 });
+  const summary = await withOrg(t.db, "org-o", (tx) => runSummary(tx, "org-o", run.id));
+  expect(summary).toMatchObject({ status: "stopped_budget", costUsd: 0, tokensUsed: 2100, tokenCap: 2000, provider: "openai" });
+  expect((await call()).status).toBe(402);
 });

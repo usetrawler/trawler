@@ -1,39 +1,52 @@
 import type { Tx } from "../db/tenancy.ts";
 import { last4, type Keyring } from "../lib/secrets.ts";
+import { customUrlProblem, PROVIDERS, type Provider } from "../llm/providers.ts";
 
-const KIND = "openrouter";
-const context = (orgId: string) => [orgId, "credentials", KIND, "key"];
-const KEY = /^[A-Za-z0-9._-]{20,300}$/;
+const context = (orgId: string) => [orgId, "credentials", "llm", "key"];
+const legacyContext = (orgId: string) => [orgId, "credentials", "openrouter", "key"];
+const KEY = /^[A-Za-z0-9._-]{20,400}$/;
 
-export type KeyCheck = "ok" | "invalid" | "unavailable";
+export const keyLooksValid = (key: string) => KEY.test(key);
 
-export async function checkOpenRouterKey(key: string, opts: { baseUrl: string; fetch?: typeof fetch }): Promise<KeyCheck> {
-  if (!KEY.test(key)) return "invalid";
-  try {
-    const res = await (opts.fetch ?? fetch)(`${opts.baseUrl}/key`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(10_000) });
-    if (res.status === 401 || res.status === 403) return "invalid";
-    return res.ok ? "ok" : "unavailable";
-  } catch {
-    return "unavailable";
-  }
+export interface StoredKey {
+  provider: Provider;
+  key: string;
+  baseUrl: string | null;
 }
 
-export async function setOpenRouterKey(tx: Tx, orgId: string, key: string, userId: string, keys: Keyring): Promise<void> {
-  if (!KEY.test(key)) throw new Error("that does not look like an OpenRouter key");
-  const values = { secret: keys.encrypt(key, context(orgId)), hint: last4(key), created_by: userId, created_at: new Date() };
+export interface KeyHint {
+  provider: Provider;
+  hint: string;
+  baseUrl: string | null;
+}
+
+export async function setModelKey(tx: Tx, orgId: string, input: { provider: Provider; key: string; baseUrl?: string | null }, userId: string, keys: Keyring): Promise<void> {
+  if (!PROVIDERS.includes(input.provider)) throw new Error("unknown provider");
+  if (!KEY.test(input.key)) throw new Error("that does not look like an API key");
+  const baseUrl = input.provider === "custom" ? input.baseUrl ?? "" : null;
+  if (baseUrl !== null && customUrlProblem(baseUrl)) throw new Error(customUrlProblem(baseUrl)!);
+  const values = { kind: input.provider, base_url: baseUrl, secret: keys.encrypt(input.key, context(orgId)), hint: last4(input.key), created_by: userId, created_at: new Date() };
   await tx
     .insertInto("credentials")
-    .values({ org_id: orgId, kind: KIND, ...values })
-    .onConflict((oc) => oc.columns(["org_id", "kind"]).doUpdateSet(values))
+    .values({ org_id: orgId, ...values })
+    .onConflict((oc) => oc.column("org_id").doUpdateSet(values))
     .execute();
 }
 
-export async function openRouterKeyHint(tx: Tx, orgId: string): Promise<string | null> {
-  const row = await tx.selectFrom("credentials").select("hint").where("org_id", "=", orgId).where("kind", "=", KIND).executeTakeFirst();
-  return row?.hint ?? null;
+export async function modelKeyHint(tx: Tx, orgId: string): Promise<KeyHint | null> {
+  const row = await tx.selectFrom("credentials").select(["kind", "hint", "base_url"]).where("org_id", "=", orgId).executeTakeFirst();
+  return row ? { provider: row.kind as Provider, hint: row.hint, baseUrl: row.base_url } : null;
 }
 
-export async function openRouterKey(tx: Tx, orgId: string, keys: Keyring): Promise<string | null> {
-  const row = await tx.selectFrom("credentials").select("secret").where("org_id", "=", orgId).where("kind", "=", KIND).executeTakeFirst();
-  return row ? keys.decrypt(row.secret, context(orgId)) : null;
+export async function modelKey(tx: Tx, orgId: string, keys: Keyring): Promise<StoredKey | null> {
+  const row = await tx.selectFrom("credentials").select(["kind", "secret", "base_url"]).where("org_id", "=", orgId).executeTakeFirst();
+  if (!row) return null;
+  let key: string;
+  try {
+    key = keys.decrypt(row.secret, context(orgId));
+  } catch (err) {
+    if (row.kind !== "openrouter") throw err;
+    key = keys.decrypt(row.secret, legacyContext(orgId));
+  }
+  return { provider: row.kind as Provider, key, baseUrl: row.base_url };
 }
