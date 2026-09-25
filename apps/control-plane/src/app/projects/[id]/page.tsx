@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { AppShell } from "../../../components/app-shell.tsx";
+import { StartRun } from "./start-run.tsx";
 import { withOrg } from "../../../db/tenancy.ts";
 import { projectForEditing } from "../../../projects/projects.ts";
 import { getAuth } from "../../../server/auth.ts";
@@ -52,7 +53,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
             ))}
           </ol>
         </section>
-        <p className="border-t border-line pt-6 text-sm text-muted">Editing the plan and starting a run arrive with the next changes.</p>
+        <StartRun projectId={project.id} personas={project.personas.length} />
       </div>
     </AppShell>
   );

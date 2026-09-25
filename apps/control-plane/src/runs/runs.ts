@@ -1,5 +1,5 @@
 import { sql } from "kysely";
-import type { ProjectConfig } from "@usetrawler/protocol";
+import type { ProjectConfig, RunEvent } from "@usetrawler/protocol";
 import type { Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
 import { loadProjectConfig } from "../projects/projects.ts";
@@ -52,15 +52,26 @@ export async function cancelRun(tx: Tx, orgId: string, runId: string): Promise<v
 export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const run = await tx
     .selectFrom("runs")
-    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id"])
+    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot"])
     .where("id", "=", runId)
     .where("org_id", "=", orgId)
     .executeTakeFirst();
   if (!run) return null;
-  const [jobs, findings, goals] = await Promise.all([
+  const snapshot = run.config_snapshot as unknown as ConfigSnapshot;
+  const goalText = new Map(snapshot.goals.map((g) => [g.id, g.instruction]));
+  const [jobs, findings, goals, activity] = await Promise.all([
     tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error"]).where("run_id", "=", runId).orderBy("position").execute(),
     tx.selectFrom("findings").select(["key", "persona_key", "kind", "goal", "title", "observed", "reproduction", "severity", "replay", "verdict"]).where("run_id", "=", runId).orderBy("created_at").orderBy("key").execute(),
     tx.selectFrom("goal_outcomes").select(["persona_key", "goal", "status", "note"]).where("run_id", "=", runId).orderBy("persona_key").orderBy("goal").execute(),
+    tx
+      .selectFrom("run_events as e")
+      .innerJoin("jobs as j", "j.id", "e.job_id")
+      .select(["e.id", "e.type", "e.at", "e.payload", "j.persona_key", "j.kind"])
+      .where("e.run_id", "=", runId)
+      .where("e.type", "in", ["note", "finding", "goal_status", "verdict"])
+      .orderBy("e.id", "desc")
+      .limit(8)
+      .execute(),
   ]);
   return {
     id: run.id, number: run.number, status: run.status, projectId: run.project_id,
@@ -69,5 +80,19 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
     jobs,
     findings: findings.map((f) => ({ key: f.key, personaKey: f.persona_key, kind: f.kind, goal: f.goal, title: f.title, observed: f.observed, reproduction: f.reproduction, severity: f.severity, replay: f.replay, verdict: f.verdict })),
     goals: goals.map((g) => ({ personaKey: g.persona_key, goal: g.goal, status: g.status, note: g.note })),
+    target: snapshot.targetUrl,
+    personas: snapshot.personas.map((p) => ({ id: p.id, name: p.name })),
+    goalTexts: snapshot.goals.map((g) => ({ id: g.id, instruction: g.instruction })),
+    activity: activity.map((a) => ({ id: String(a.id), at: a.at, personaKey: a.persona_key, kind: a.kind, text: activityText(a.payload as unknown as RunEvent, goalText) })),
   };
+}
+
+export type RunSummary = NonNullable<Awaited<ReturnType<typeof runSummary>>>;
+
+function activityText(e: RunEvent, goalText: Map<string, string>): string {
+  if (e.type === "note") return e.text;
+  if (e.type === "finding") return `${e.finding.kind === "defect" ? "Reported a defect" : "Noted friction"}: ${e.finding.title}`;
+  if (e.type === "goal_status") return `Goal ${e.outcome.status === "reached" ? "reached" : "not reached"}: ${goalText.get(e.outcome.goal) ?? e.outcome.goal}`;
+  if (e.type === "verdict") return `Judge: ${e.verdict}`;
+  return e.type;
 }
