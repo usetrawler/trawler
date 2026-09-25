@@ -12,9 +12,10 @@ test("whatever a library writes to the console passes the scrubber first: text, 
   console.error = (...args: unknown[]) => void written.push(args);
   scrubConsole(envScrubber({ TRAWLER_RUNNER_TOKEN: TOKEN }));
   const failure = new Error(`request failed for ${TOKEN}`);
-  console.error("⨯", failure, { authorization: `Bearer ${TOKEN}` }, 42);
-  const [mark, error, object, number] = written[0]!;
+  console.error("⨯", failure, { authorization: `Bearer ${TOKEN}` }, 42, `retrying with ${TOKEN}`);
+  const [mark, error, object, number, text] = written[0]!;
   expect(mark).toBe("⨯");
+  expect(text).toBe("retrying with •••");
   expect((error as Error).message).toBe("request failed for •••");
   expect((error as Error).stack).toContain("request failed for •••");
   expect((error as Error).stack).toContain("console.test.ts");

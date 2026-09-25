@@ -102,7 +102,7 @@ test("a logged error reaches Sentry with its ids as tags, the Railway environmen
   expect(sent[0]).not.toContain(SECRET);
 });
 
-test("an error captured anywhere else and a breadcrumb are masked by the SDK hooks alone", async () => {
+test("an error captured anywhere else, and the breadcrumbs sent with it, are masked by beforeSend alone", async () => {
   Sentry.addBreadcrumb({ category: "console", message: `connecting with ${"r".repeat(40)}` });
   Sentry.captureException(new Error(`uncaught near ${SECRET}`));
   await Sentry.flush(1000);

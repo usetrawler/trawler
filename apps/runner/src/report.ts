@@ -48,7 +48,6 @@ export async function startReporting(env: Env, secrets: string[], overrides: Par
     enableRuntimeChannelInjection: false,
     dataCollection: DATA_COLLECTION,
     beforeSend: (event) => scrubber.scrub(event),
-    beforeBreadcrumb: (breadcrumb) => scrubber.scrub(breadcrumb),
     beforeSendTransaction: () => null,
     ...overrides,
   });

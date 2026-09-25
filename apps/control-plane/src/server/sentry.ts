@@ -16,7 +16,6 @@ export function serverSentryOptions(env: Env = process.env): NodeOptions | undef
     tracePropagationTargets: [],
     enableRuntimeChannelInjection: false,
     beforeSend: (event) => scrubber.scrub(event),
-    beforeBreadcrumb: (breadcrumb) => scrubber.scrub(breadcrumb),
     beforeSendTransaction: () => null,
   };
 }
