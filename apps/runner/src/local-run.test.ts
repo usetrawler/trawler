@@ -9,6 +9,8 @@ import { scriptedModel, text, toolCall } from "../../../packages/core/src/testin
 import { localRun, type OpenBrowser } from "./local-run.ts";
 import { RunDir } from "./run-dir.ts";
 
+const seeing = { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => "page" }) };
+const look = toolCall("browser_snapshot", {});
 const project = ProjectConfigSchema.parse({
   name: "Acme", targetUrl: "https://a.test",
   personas: [{ id: "p1", name: "A", brief: "b", accountRef: "acct" }, { id: "p2", name: "B", brief: "b" }],
@@ -64,6 +66,7 @@ test("roles, then a replay and a judge per defect, each in its own browser", asy
 test("the replay signs in with the account of the persona that found the defect", async () => {
   const signIn = toolCall("sign_in", { account: "acct", usernameField: "e1", passwordField: "e2" });
   const agent = scriptedModel([
+    look,
     toolCall("submit_finding", { kind: "defect", goal: "g", title: "Broken", observed: "o", reproduction: ["a", "b"], severity: "high" }),
     ...finished("p1"),
     ...finished("p2"),
@@ -105,7 +108,7 @@ test("a job that throws does not end the run; its role is recorded as an error",
   let n = 0;
   const open: OpenBrowser = async () => {
     if (n++ === 0) throw new Error("browserType.launch: Timeout exceeded with hunter22-secret");
-    return { tools: {}, fillField: async () => "typed", close: async () => {} };
+    return { tools: seeing, fillField: async () => "typed", close: async () => {} };
   };
   const summary = await localRun({
     project, agentModel: agent, agentModelId: "a", judgeModel: agent, judgeModelId: "a", budgetUsd: 5, maxSteps: 10, replaySteps: 10,
@@ -118,6 +121,7 @@ test("a job that throws does not end the run; its role is recorded as an error",
 
 test("a defect is left unjudged when the budget is gone after its replay or the replay wrote no report", async () => {
   const agent = scriptedModel([
+    look,
     toolCall("submit_finding", { kind: "defect", goal: "g", title: "One", observed: "o", reproduction: ["a", "b"], severity: "high" }),
     toolCall("submit_finding", { kind: "defect", goal: "g", title: "Two", observed: "o", reproduction: ["a", "b"], severity: "high" }),
     ...finished("p1"),
@@ -127,7 +131,7 @@ test("a defect is left unjudged when the budget is gone after its replay or the 
   ], 0.001);
   const judgeModel = scriptedModel([text(JSON.stringify({ verdict: "confirmed" }))]);
   const summary = await localRun({
-    project, agentModel: agent, agentModelId: "a", judgeModel, judgeModelId: "j", budgetUsd: 0.0095, maxSteps: 10, replaySteps: 10,
+    project, agentModel: agent, agentModelId: "a", judgeModel, judgeModelId: "j", budgetUsd: 0.0105, maxSteps: 10, replaySteps: 10,
     emit: () => {}, openBrowser: fakeBrowsers().open,
   });
   expect(summary.replays.f1?.completed).toBe(false);
@@ -139,6 +143,7 @@ test("a defect is left unjudged when the budget is gone after its replay or the 
 
 test("failed jobs are recorded as events and replay failures leave a trace", async () => {
   const agent = scriptedModel([
+    look,
     toolCall("submit_finding", { kind: "defect", goal: "g", title: "Broken", observed: "o", reproduction: ["a", "b"], severity: "high" }),
     ...finished("p1"),
   ]);
@@ -146,7 +151,7 @@ test("failed jobs are recorded as events and replay failures leave a trace", asy
   const open: OpenBrowser = async () => {
     n++;
     if (n === 2 || n === 3) throw new Error("no chromium hunter22-secret");
-    return { tools: {}, fillField: async () => "typed", close: async () => {} };
+    return { tools: seeing, fillField: async () => "typed", close: async () => {} };
   };
   const events: RunEventInput[] = [];
   const summary = await localRun({

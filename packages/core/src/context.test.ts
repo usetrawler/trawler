@@ -13,6 +13,7 @@ function outputOf(m: ModelMessage | undefined) {
 }
 
 const big = "x".repeat(5000);
+const READ: ModelMessage = { role: "assistant", content: "Looked at the results." };
 const opts = { keepLargeResults: 1, largeResultChars: 2000 };
 
 test("keeps only the latest large result verbatim", () => {
@@ -22,9 +23,10 @@ test("keeps only the latest large result verbatim", () => {
     result("1", "browser_snapshot", big),
     result("2", "browser_snapshot", big),
     result("3", "browser_snapshot", big),
+    READ,
   ];
-  const values = pruneMessages(msgs, opts).slice(2).map((m) => outputOf(m).value);
-  expect(values).toEqual(["[browser_snapshot result elided: 5000 chars]", "[browser_snapshot result elided: 5000 chars]", big]);
+  const values = pruneMessages(msgs, opts).slice(2, 5).map((m) => outputOf(m).value);
+  expect(values).toEqual(["[browser_snapshot result elided: 5000 chars; take a new snapshot to see the page again]", "[browser_snapshot result elided: 5000 chars; take a new snapshot to see the page again]", big]);
 });
 
 test("small results and non-tool messages are untouched while older results are elided", () => {
@@ -49,16 +51,16 @@ test("small results and non-tool messages are untouched while older results are 
 
 test("an elided error stays an error", () => {
   const err: ModelMessage = { role: "tool", content: [{ type: "tool-result", toolCallId: "1", toolName: "browser_click", output: { type: "error-text", value: big } }] };
-  const out = pruneMessages([err, result("2", "browser_snapshot", big)], opts);
-  expect(outputOf(out[0])).toEqual({ type: "error-text", value: "[browser_click result elided: 5000 chars]" });
+  const out = pruneMessages([err, result("2", "browser_snapshot", big), READ], opts);
+  expect(outputOf(out[0])).toEqual({ type: "error-text", value: "[browser_click result elided: 5000 chars; take a new snapshot to see the page again]" });
   const tiny = { keepLargeResults: 1, largeResultChars: 10 };
-  const once = pruneMessages([err, result("2", "browser_snapshot", big)], tiny);
+  const once = pruneMessages([err, result("2", "browser_snapshot", big), READ], tiny);
   expect(pruneMessages(once, tiny)).toEqual(once);
 });
 
 test("an elided error-json becomes an error-text marker", () => {
   const err: ModelMessage = { role: "tool", content: [{ type: "tool-result", toolCallId: "1", toolName: "browser_click", output: { type: "error-json", value: { message: big } } }] };
-  const out = pruneMessages([err, result("2", "browser_snapshot", big)], opts);
+  const out = pruneMessages([err, result("2", "browser_snapshot", big), READ], opts);
   expect(outputOf(out[0]).type).toBe("error-text");
 });
 
@@ -81,15 +83,24 @@ test("stays idempotent when the threshold is below the length of an elision mark
 test("measures json and content outputs by their serialized size", () => {
   const json: ModelMessage = { role: "tool", content: [{ type: "tool-result", toolCallId: "1", toolName: "browser_navigate", output: { type: "json", value: { content: [{ type: "text", text: big }] } } }] };
   const content: ModelMessage = { role: "tool", content: [{ type: "tool-result", toolCallId: "2", toolName: "browser_click", output: { type: "content", value: [{ type: "text", text: big }] } }] };
-  const out = pruneMessages([json, content, result("3", "browser_snapshot", big)], opts);
-  expect(outputOf(out[0]).value).toBe(`[browser_navigate result elided: ${JSON.stringify({ content: [{ type: "text", text: big }] }).length} chars]`);
-  expect(outputOf(out[1]).value).toBe(`[browser_click result elided: ${JSON.stringify([{ type: "text", text: big }]).length} chars]`);
+  const out = pruneMessages([json, content, result("3", "browser_snapshot", big), READ], opts);
+  expect(outputOf(out[0]).value).toBe(`[browser_navigate result elided: ${JSON.stringify({ content: [{ type: "text", text: big }] }).length} chars; take a new snapshot to see the page again]`);
+  expect(outputOf(out[1]).value).toBe(`[browser_click result elided: ${JSON.stringify([{ type: "text", text: big }]).length} chars; take a new snapshot to see the page again]`);
 });
 
 test("keeps the last N when asked for more than one", () => {
-  const msgs = [1, 2, 3, 4].map((n) => result(String(n), "browser_snapshot", big));
-  const kept = pruneMessages(msgs, { keepLargeResults: 2, largeResultChars: 2000 }).filter((m) => outputOf(m).value === big);
+  const msgs = [...[1, 2, 3, 4].map((n) => result(String(n), "browser_snapshot", big)), READ];
+  const kept = pruneMessages(msgs, { keepLargeResults: 2, largeResultChars: 2000 }).filter((m) => m.role === "tool" && outputOf(m).value === big);
   expect(kept).toHaveLength(2);
+});
+
+test("results the model has not read yet are never elided, however many arrived in one turn", () => {
+  const turn: ModelMessage = { role: "assistant", content: [1, 2, 3].map((n) => ({ type: "tool-call" as const, toolCallId: String(n), toolName: "browser_snapshot", input: {} })) };
+  const older = result("0", "browser_snapshot", big);
+  const msgs: ModelMessage[] = [older, READ, turn, result("1", "browser_navigate", big), result("2", "browser_snapshot", big), result("3", "browser_click", big)];
+  const out = pruneMessages(msgs, opts);
+  expect(outputOf(out[0]).value).toMatch(/elided/);
+  expect(out.slice(3).map((m) => outputOf(m).value)).toEqual([big, big, big]);
 });
 
 test("in a real agent loop the model sees one full snapshot, the latest", async () => {
