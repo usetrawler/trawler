@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { deploy, deployedCommit, type DeployOptions } from "./deploy.ts";
+import { deploy, deployedCommit, gitAncestry, type DeployOptions } from "./deploy.ts";
 import { railway } from "./railway.ts";
 
 type Deployment = { status: string; deploymentStopped: boolean; image?: string; instances?: string[] };
@@ -14,6 +14,7 @@ interface FakeProject {
   active?: string[][];
   keepsRepo?: boolean;
   lagReads?: number;
+  staleImage?: string;
   buildsRepo?: boolean;
   noImageMeta?: boolean;
   failPolls?: number;
@@ -21,7 +22,8 @@ interface FakeProject {
 
 function fakeRailway(opts: FakeProject) {
   const calls: Array<{ op: string; variables: Record<string, unknown>; token: string | null }> = [];
-  const source = new Map<string, Source>(Object.values(opts.services).map((id) => [id, { image: null, repo: "usetrawler/trawler" }]));
+  const initial: Source = opts.staleImage ? { image: opts.staleImage, repo: null } : { image: null, repo: "usetrawler/trawler" };
+  const source = new Map<string, Source>(Object.values(opts.services).map((id) => [id, { ...initial }]));
   const deployedFrom = new Map<string, Source>();
   const nameOf = (id: unknown) => Object.entries(opts.services).find(([, sid]) => sid === id)![0];
   const pending = new Map<string, Source>();
@@ -251,12 +253,18 @@ test("the commit an environment runs is read from its health check, and unknown 
   expect(await deployedCommit("https://staging.test", broken)).toBeNull();
 });
 
-test("a switch Railway applies a moment later is waited for before deploying", async () => {
-  const core = fakeRailway({ project: "p", environment: "e", services: coreServices, deployments: { migrate: [exited], "control-plane": [up] }, lagReads: 2 });
-  const workers = fakeRailway({ project: "p2", environment: "e2", services: { runner: "s-runner" }, deployments: { runner: [up] }, active: [["dep-runner"]] });
-  await deploy(options(core, workers));
-  const firstDeploy = core.calls.findIndex((c) => c.op === "serviceInstanceDeployV2");
-  expect(core.calls.slice(0, firstDeploy).filter((c) => c.op === "serviceInstance")).toHaveLength(3);
+test("a switch Railway applies a moment later is waited for before deploying, from the repository or from the last release's image", async () => {
+  for (const staleImage of [undefined, "ghcr.io/x/migrate@sha256:0"]) {
+    const core = fakeRailway({ project: "p", environment: "e", services: coreServices, deployments: { migrate: [exited], "control-plane": [up] }, lagReads: 2, staleImage });
+    const workers = fakeRailway({ project: "p2", environment: "e2", services: { runner: "s-runner" }, deployments: { runner: [up] }, active: [["dep-runner"]], staleImage });
+    await deploy(options(core, workers));
+    const firstDeploy = core.calls.findIndex((c) => c.op === "serviceInstanceDeployV2");
+    expect(core.calls.slice(0, firstDeploy).filter((c) => c.op === "serviceInstance")).toHaveLength(3);
+  }
+});
+
+test("git's answer is read as older, not older, or unknown", () => {
+  expect([0, 1, 128, null].map(gitAncestry)).toEqual([true, false, undefined, undefined]);
 });
 
 test("a deployment Railway builds from the repository after all is cancelled at once", async () => {

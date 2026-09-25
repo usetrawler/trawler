@@ -141,6 +141,10 @@ async function soleDeployment(o: DeployOptions, api: Railway, at: Target, servic
   log(`${service}: the previous deployment is gone`);
 }
 
+export function gitAncestry(status: number | null): boolean | undefined {
+  return status === 0 ? true : status === 1 ? false : undefined;
+}
+
 export async function deployedCommit(base: string, call: typeof fetch = fetch): Promise<string | null> {
   try {
     const res = await call(`${base}/healthz`, { headers: { "cache-control": "no-store" } });
@@ -186,10 +190,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     commit: env.RELEASE_COMMIT!,
     images: { migrate: env.IMAGE_MIGRATE!, controlPlane: env.IMAGE_CONTROL_PLANE!, runner: env.IMAGE_RUNNER! },
     deployed: () => deployedCommit(env.RELEASE_URL!),
-    isAncestor: (older, newer) => {
-      const { status } = spawnSync("git", ["merge-base", "--is-ancestor", older, newer]);
-      return status === 0 ? true : status === 1 ? false : undefined;
-    },
+    isAncestor: (older, newer) => gitAncestry(spawnSync("git", ["merge-base", "--is-ancestor", older, newer]).status),
   }).catch((err: unknown) => {
     console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);

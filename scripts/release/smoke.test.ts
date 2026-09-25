@@ -115,7 +115,10 @@ test("a smoke token given directly is trimmed and used without asking Railway, u
 });
 
 test("the smoke token read from the control plane is trimmed like the server trims it, masked in GitHub Actions and never printed elsewhere", async () => {
-  const console = [vi.spyOn(globalThis.console, "log"), vi.spyOn(globalThis.console, "error"), vi.spyOn(process.stdout, "write"), vi.spyOn(process.stderr, "write")];
+  const console = [
+    ...(["log", "error", "warn", "info", "debug"] as const).map((level) => vi.spyOn(globalThis.console, level)),
+    vi.spyOn(process.stdout, "write"), vi.spyOn(process.stderr, "write"),
+  ];
   const printed: string[] = [];
   expect(await smokeToken({ RAILWAY_CORE_TOKEN: "core", GITHUB_ACTIONS: "true" }, fakeControlPlaneVariables(` ${TOKEN}\n`).fetch, (line) => printed.push(line))).toBe(TOKEN);
   expect(printed).toEqual([`::add-mask::${TOKEN}`]);
