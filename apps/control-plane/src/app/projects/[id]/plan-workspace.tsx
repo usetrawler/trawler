@@ -1,17 +1,16 @@
 "use client";
-import { useState, useTransition } from "react";
-import type { Goal, Persona } from "@usetrawler/protocol";
+import { useEffect, useState, useTransition } from "react";
+import { MAX_GOALS, MAX_PERSONAS, type Goal, type Persona } from "@usetrawler/protocol";
 import type { RunModel } from "../../../runs/models.ts";
 import { addAccountAction, removeAccountAction, savePlanAction, type AccountView } from "./plan-actions.ts";
 import { StartRun } from "./start-run.tsx";
 
-const field = "w-full border border-transparent bg-transparent px-2 py-1 -mx-2 outline-none hover:border-line focus:border-ink focus:bg-paper";
+const field = "w-full min-w-0 border border-dashed border-line/60 bg-transparent px-2 py-1 outline-none hover:border-line focus:border-solid focus:border-ink focus:bg-paper";
 
-function keyFor(text: string, taken: Set<string>, fallback: string): string {
-  const base = text.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || fallback;
-  let key = base;
-  for (let n = 2; taken.has(key); n++) key = `${base}-${n}`;
-  return key;
+function nextKey(prefix: string, taken: Set<string>): string {
+  let n = taken.size + 1;
+  while (taken.has(`${prefix}-${n}`)) n++;
+  return `${prefix}-${n}`;
 }
 
 function Heading({ children }: { children: React.ReactNode }) {
@@ -22,8 +21,8 @@ function AddButton({ onClick, children }: { onClick: () => void; children: React
   return <button type="button" onClick={onClick} className="self-start text-sm text-muted underline-offset-4 hover:text-ink hover:underline">+ {children}</button>;
 }
 
-function RemoveButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return <button type="button" aria-label={label} title={label} onClick={onClick} className="h-7 w-7 shrink-0 text-muted hover:text-bad">×</button>;
+function RemoveButton({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) {
+  return <button type="button" aria-label={label} title={label} onClick={onClick} disabled={disabled} className="h-9 w-9 shrink-0 text-muted hover:text-bad disabled:opacity-40">×</button>;
 }
 
 function Accounts({ projectId, accounts, onChange }: { projectId: string; accounts: AccountView[]; onChange: (accounts: AccountView[], removed?: string) => void }) {
@@ -44,10 +43,11 @@ function Accounts({ projectId, accounts, onChange }: { projectId: string; accoun
               <span className="truncate">{a.username}</span>
               <span className="flex items-center gap-3">
                 <span className="font-mono text-xs text-muted">password {a.hint}</span>
-                <RemoveButton label={`Remove ${a.username}`} onClick={() => start(async () => {
+                <RemoveButton label={`Remove ${a.username}`} disabled={pending} onClick={() => start(async () => {
                   const res = await removeAccountAction(projectId, a.ref);
-                  if (res.ok) onChange(res.accounts, a.ref);
-                  else setError(res.error);
+                  if (!res.ok) return setError(res.error);
+                  setError(null);
+                  onChange(res.accounts, a.ref);
                 })} />
               </span>
             </li>
@@ -88,12 +88,22 @@ export function PlanWorkspace({ projectId, initialPersonas, initialGoals, initia
   const [saving, startSaving] = useTransition();
   const dirty = JSON.stringify({ personas, goals }) !== JSON.stringify(saved);
 
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
   const updatePersona = (i: number, patch: Partial<Persona>) => setPersonas((list) => list.map((p, j) => (j === i ? { ...p, ...patch } : p)));
   const updateGoal = (i: number, instruction: string) => setGoals((list) => list.map((g, j) => (j === i ? { ...g, instruction } : g)));
   const save = () => startSaving(async () => {
     const plan = { personas, goals };
     const res = await savePlanAction(projectId, plan);
-    if (!res.ok) return setError(res.error);
+    if (!res.ok) {
+      if ("accounts" in res) setAccounts(res.accounts);
+      return setError(res.error);
+    }
     setError(null);
     setSaved(plan);
   });
@@ -106,7 +116,7 @@ export function PlanWorkspace({ projectId, initialPersonas, initialGoals, initia
           {personas.map((p, i) => (
             <li key={p.id} className="flex flex-col gap-2 border border-line bg-panel p-4">
               <div className="flex items-start gap-2">
-                <input aria-label="Name" value={p.name} maxLength={100} onChange={(e) => updatePersona(i, { name: e.target.value })} className={`${field} font-bold`} />
+                <input aria-label={`Name of person ${i + 1}`} value={p.name} maxLength={100} onChange={(e) => updatePersona(i, { name: e.target.value })} className={`${field} font-bold`} />
                 {personas.length > 1 && <RemoveButton label={`Remove ${p.name || "this person"}`} onClick={() => setPersonas((list) => list.filter((_, j) => j !== i))} />}
               </div>
               <textarea aria-label={`What ${p.name || "this person"} is like`} value={p.brief} maxLength={2000} rows={3} onChange={(e) => updatePersona(i, { brief: e.target.value })} className={`${field} resize-y text-sm text-muted`} />
@@ -122,8 +132,8 @@ export function PlanWorkspace({ projectId, initialPersonas, initialGoals, initia
             </li>
           ))}
         </ul>
-        {personas.length < 20 && (
-          <AddButton onClick={() => setPersonas((list) => [...list, { id: keyFor(`person ${list.length + 1}`, new Set(list.map((p) => p.id)), "person"), name: "", brief: "" }])}>Add a person</AddButton>
+        {personas.length < MAX_PERSONAS && (
+          <AddButton onClick={() => setPersonas((list) => [...list, { id: nextKey("person", new Set(list.map((p) => p.id))), name: "", brief: "" }])}>Add a person</AddButton>
         )}
       </section>
 
@@ -138,8 +148,8 @@ export function PlanWorkspace({ projectId, initialPersonas, initialGoals, initia
             </li>
           ))}
         </ol>
-        {goals.length < 20 && (
-          <AddButton onClick={() => setGoals((list) => [...list, { id: keyFor(`goal ${list.length + 1}`, new Set(list.map((g) => g.id)), "goal"), instruction: "" }])}>Add a goal</AddButton>
+        {goals.length < MAX_GOALS && (
+          <AddButton onClick={() => setGoals((list) => [...list, { id: nextKey("goal", new Set(list.map((g) => g.id))), instruction: "" }])}>Add a goal</AddButton>
         )}
       </section>
 

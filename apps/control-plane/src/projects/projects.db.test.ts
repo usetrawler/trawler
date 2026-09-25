@@ -5,7 +5,7 @@ import { ProjectConfigSchema } from "@usetrawler/protocol";
 import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring, last4 } from "../lib/secrets.ts";
-import { addAccount, createProject, listProjects, loadProjectConfig, projectForEditing, removeAccount, replacePlan } from "./projects.ts";
+import { AccountLimit, addAccount, createProject, listProjects, loadProjectConfig, projectForEditing, removeAccount, replacePlan, UnknownAccount } from "./projects.ts";
 import { ProjectConfigSchema as Schema } from "@usetrawler/protocol";
 
 const t = await testDb();
@@ -154,4 +154,12 @@ test("test accounts are added encrypted, reach the runner, and removing one deta
   expect(after.accounts.map((a) => a.ref)).toEqual([second]);
   expect(after.personas[0]!.accountRef).toBeUndefined();
   expect(await withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "three@shop.test", password: "third-pass-1" }, keys))).not.toBe(ref);
+});
+
+test("saving a plan that points at a removed account says so, and the account limit has its own error", async () => {
+  const simple = ProjectConfigSchema.parse({ name: "Shop", targetUrl: "https://shop.test/", personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "Buy." }] });
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", simple, keys));
+  await expect(withOrg(t.db, "org-a", (tx) => replacePlan(tx, "org-a", id, { personas: [{ id: "ana", name: "Ana", brief: "b", accountRef: "account-gone" }], goals: simple.goals }))).rejects.toBeInstanceOf(UnknownAccount);
+  for (let i = 0; i < 20; i++) await withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: `u${i}@shop.test`, password: "password-123" }, keys));
+  await expect(withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "one-more@shop.test", password: "password-123" }, keys))).rejects.toBeInstanceOf(AccountLimit);
 });

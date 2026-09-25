@@ -9,7 +9,7 @@ const usd = (n: number) => `$${n.toFixed(2)}`;
 function Submit({ blocked }: { blocked?: string }) {
   const { pending } = useFormStatus();
   return (
-    <button type="submit" disabled={pending || Boolean(blocked)} className="flex h-12 items-center justify-between gap-6 bg-action px-5 font-mono text-sm tracking-[0.12em] text-[#17191c] uppercase transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50">
+    <button type="submit" disabled={pending || Boolean(blocked)} aria-describedby={blocked ? "start-blocked" : undefined} className="flex h-12 items-center justify-between gap-6 bg-action px-5 font-mono text-sm tracking-[0.12em] text-[#17191c] uppercase transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50">
       {pending ? "Starting…" : "Start run"}
       <span aria-hidden>→</span>
     </button>
@@ -53,7 +53,7 @@ export function StartRun({ projectId, personas, models, blocked }: { projectId: 
       </label>
       {state.error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{state.error}</p>}
       <div className="flex flex-wrap items-center justify-end gap-3">
-        {blocked && <p className="text-sm text-muted">{blocked}</p>}
+        {blocked && <p id="start-blocked" className="text-sm text-muted">{blocked}</p>}
         <Submit blocked={blocked} />
       </div>
     </form>
