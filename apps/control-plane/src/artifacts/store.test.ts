@@ -1,3 +1,4 @@
+import { createServer as createHttpServer } from "node:http";
 import { createServer, type Socket } from "node:net";
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import { s3Store } from "./store.ts";
@@ -46,6 +47,22 @@ test("a bucket call is tried three times, whatever AWS_MAX_ATTEMPTS says, so a f
   const store = s3Store(silentBucket(), { requestMs: 100 });
   await expect(store.put("k", new Uint8Array([1]), "image/png")).rejects.toThrow();
   expect(sockets).toHaveLength(3);
+});
+
+test("removing a file the bucket no longer has succeeds, as S3 answers, while a missing bucket is still an error", async () => {
+  const missing = createHttpServer((req, res) => {
+    const code = req.url?.includes("/gone/") ? "NoSuchBucket" : "NoSuchKey";
+    res.writeHead(404, { "content-type": "application/xml" });
+    res.end(`<?xml version="1.0" encoding="UTF-8"?><Error><Code>${code}</Code><Message>not here</Message></Error>`);
+  });
+  await new Promise<void>((resolve) => missing.listen(0, "127.0.0.1", resolve));
+  try {
+    const at = `http://127.0.0.1:${(missing.address() as { port: number }).port}`;
+    await expect(s3Store({ ...silentBucket(), endpoint: at }).remove("orgs/o/runs/r/a.png")).resolves.toBeUndefined();
+    await expect(s3Store({ ...silentBucket(), endpoint: at, bucket: "gone" }).remove("orgs/o/runs/r/a.png")).rejects.toMatchObject({ name: "NoSuchBucket" });
+  } finally {
+    await new Promise<void>((resolve) => missing.close(() => resolve()));
+  }
 });
 
 test("by default a bucket that never answers gets thirty seconds before the call gives up on it", async () => {

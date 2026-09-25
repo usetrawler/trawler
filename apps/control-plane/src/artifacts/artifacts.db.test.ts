@@ -98,6 +98,22 @@ async function fill(job: JobAssignment, org: string, count: number, age = "0 day
 
 const MIB = 1024 * 1024;
 
+function heldBucket(): { slow: ArtifactStore; entered: Promise<void>; arrive: () => void } {
+  let enter = () => {};
+  let arrive = () => {};
+  const entered = new Promise<void>((resolve) => (enter = resolve));
+  const arrived = new Promise<void>((resolve) => (arrive = resolve));
+  const slow: ArtifactStore = {
+    ...store,
+    put: async (key, bytes, type) => {
+      enter();
+      await arrived;
+      await store.put(key, bytes, type);
+    },
+  };
+  return { slow, entered, arrive };
+}
+
 test("a job stores a screenshot with its own token: the file under the workspace and run, and a row that links it to the finding", async () => {
   const job = await leasedJob();
   const id = await stored(job, PNG, { query: "kind=screenshot&finding=f1" });
@@ -264,21 +280,12 @@ test("a file whose row was removed while the bucket took it is removed from the 
 test("a file still on its way to the bucket counts toward the cap but has no link, and a row left on its way past the grace period is cleaned up", async () => {
   const job = await leasedJob();
   await fill(job, "org-a", MAX_ARTIFACTS_PER_JOB - 1);
-  let arrive = () => {};
-  const arrived = new Promise<void>((resolve) => (arrive = resolve));
-  const slow: ArtifactStore = {
-    ...store,
-    put: async (key, bytes, type) => {
-      await arrived;
-      await store.put(key, bytes, type);
-    },
-  };
+  const { slow, entered, arrive } = heldBucket();
   const answer = handleArtifactUpload(upload(job, PNG), job.jobId, { ...deps, artifacts: slow });
-  const row = await vi.waitFor(async () => {
-    const rows = await sql<{ id: string }>`select id from artifacts where job_id = ${job.jobId} and stored_at is null`.execute(t.db);
-    expect(rows.rows).toHaveLength(1);
-    return rows.rows[0]!;
-  });
+  await entered;
+  const pending = await sql<{ id: string }>`select id from artifacts where job_id = ${job.jobId} and stored_at is null`.execute(t.db);
+  expect(pending.rows).toHaveLength(1);
+  const row = pending.rows[0]!;
   expect(await artifactLink(t.db, store, "org-a", row.id)).toBeNull();
   expect((await handleArtifactUpload(upload(job, PNG), job.jobId, deps)).status).toBe(409);
   arrive();
@@ -296,6 +303,25 @@ test("a file still on its way to the bucket counts toward the cap but has no lin
   expect(await rowsOf(stuck.jobId)).toBe(0);
 });
 
+test("a job handed back while its file is on the way to the bucket keeps that file discarded once it lands, and the cleanup removes it", async () => {
+  const job = await leasedJob();
+  const { slow, entered, arrive } = heldBucket();
+  const answer = handleArtifactUpload(upload(job, PNG), job.jobId, { ...deps, artifacts: slow });
+  await entered;
+  await releaseJobForShutdown(t.db, job.token, job.jobId);
+  arrive();
+  expect((await answer).status).toBe(201);
+  const rows = await sql<{ id: string; storage_key: string; stored_at: Date | null; discarded_at: Date | null }>`select id, storage_key, stored_at, discarded_at from artifacts where job_id = ${job.jobId}`.execute(t.db);
+  expect(rows.rows).toHaveLength(1);
+  const row = rows.rows[0]!;
+  expect(row.stored_at).not.toBeNull();
+  expect(row.discarded_at).not.toBeNull();
+  expect(await artifactLink(t.db, store, "org-a", row.id)).toBeNull();
+  await sql`update artifacts set discarded_at = now() - interval '11 minutes' where id = ${row.id}`.execute(t.db);
+  expect(await removeExpiredArtifacts(t.db, store)).toBe(1);
+  expect(await objectKeys()).not.toContain(row.storage_key);
+});
+
 test("the database refuses a row whose key is not its own, also for a type the key rule does not know, or a size over the limit", async () => {
   const job = await leasedJob();
   const ID = "11111111-1111-4111-8111-111111111111";
@@ -307,6 +333,7 @@ test("the database refuses a row whose key is not its own, also for a type the k
   await expect(insert(t.db, `orgs/org-a/runs/${job.runId}/../../org-b/${ID}.png`)).rejects.toThrow(/artifacts_key_is_its_own/);
   await expect(insert(t.db, own.replace(".png", ".jpg"))).rejects.toThrow(/artifacts_key_is_its_own/);
   await expect(insert(t.db, own, MAX_ARTIFACT_BYTES + 1)).rejects.toThrow(/artifacts_size_bytes_check/);
+  await expect(insert(t.db, own, 0)).rejects.toThrow(/artifacts_size_bytes_check/);
 
   let unknownType = "";
   await t.db.transaction().execute(async (tx) => {
@@ -422,5 +449,6 @@ test("a cleanup stops after a few failures instead of trying every expired file 
   expect(attempts).toBe(MAX_FAILURES_PER_RUN);
   await vi.waitFor(() => expect(logged).toHaveLength(1));
   expect(JSON.parse(logged[0]!)).toMatchObject({ msg: "expired artifacts could not be deleted", failed: MAX_FAILURES_PER_RUN });
-  expect(await removeExpiredArtifacts(t.db, store)).toBe(25);
+  await removeExpiredArtifacts(t.db, store);
+  expect(await rowsOf(job.jobId)).toBe(0);
 });

@@ -37,7 +37,9 @@ export function s3Store(storage: ArtifactStorage, timeouts: { connectionMs?: num
       return getSignedUrl(client, new GetObjectCommand({ Bucket: storage.bucket, Key: key }), { expiresIn: LINK_SECONDS });
     },
     async remove(key) {
-      await client.send(new DeleteObjectCommand({ Bucket: storage.bucket, Key: key }));
+      await client.send(new DeleteObjectCommand({ Bucket: storage.bucket, Key: key })).catch((err: unknown) => {
+        if ((err as { name?: string }).name !== "NoSuchKey") throw err;
+      });
     },
   };
 }
