@@ -14,15 +14,17 @@ let stored: Record<string, string>;
 let attributes: Record<string, string>;
 let systemDark: boolean;
 let blocked: boolean;
+let refusesWrites: boolean;
 
 beforeEach(() => {
   stored = {};
   attributes = {};
   systemDark = false;
   blocked = false;
+  refusesWrites = false;
   const localStorage = {
     getItem: (key: string) => stored[key] ?? null,
-    setItem: (key: string, value: string) => { stored[key] = value; },
+    setItem: (key: string, value: string) => { if (refusesWrites) throw new Error("QuotaExceededError"); stored[key] = value; },
     removeItem: (key: string) => { delete stored[key]; },
   };
   vi.stubGlobal("window", {
@@ -70,6 +72,13 @@ test("choosing a theme applies it at once and remembers it; choosing the system'
 
 test("with storage blocked the theme still changes for the page", () => {
   blocked = true;
+  choose("dark");
+  expect(attributes).toEqual({ "data-theme": "dark" });
+  expect(stored).toEqual({});
+});
+
+test("with storage refusing to write, as in a private window, the theme still changes for the page", () => {
+  refusesWrites = true;
   choose("dark");
   expect(attributes).toEqual({ "data-theme": "dark" });
   expect(stored).toEqual({});
