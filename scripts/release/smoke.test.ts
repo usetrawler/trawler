@@ -97,7 +97,7 @@ function fakeControlPlaneVariables(token: string | undefined) {
   const fakeFetch = (async (_url: string | URL, init?: RequestInit) => {
     calls++;
     const { query } = JSON.parse(String(init?.body)) as { query: string };
-    const data = query.includes("projectToken") ? { projectToken: { projectId: "p", environmentId: "e" } }
+    const data = query.includes("projectToken") ? { projectToken: { projectId: "p", environmentId: "e", environment: { name: "staging" } } }
       : query.includes("services") ? { project: { services: { edges: [{ node: { id: "s-cp", name: "control-plane" } }] } } }
       : { variables: token === undefined ? {} : { TRAWLER_SMOKE_TOKEN: token } };
     return new Response(JSON.stringify({ data }), { status: 200 });
@@ -122,5 +122,5 @@ test("the smoke token read from the control plane is trimmed like the server tri
 
 test("without a way to get the smoke token the check says what to set", async () => {
   await expect(smokeToken({}, fakeControlPlaneVariables(TOKEN).fetch, () => {})).rejects.toThrow(/set TRAWLER_SMOKE_TOKEN, or RAILWAY_CORE_TOKEN/);
-  await expect(smokeToken({ RAILWAY_CORE_TOKEN: "core" }, fakeControlPlaneVariables(undefined).fetch, () => {})).rejects.toThrow(/has no TRAWLER_SMOKE_TOKEN/);
+  await expect(smokeToken({ RAILWAY_CORE_TOKEN: "core" }, fakeControlPlaneVariables(undefined).fetch, () => {})).rejects.toThrow("the control plane behind RAILWAY_CORE_TOKEN has no TRAWLER_SMOKE_TOKEN Railway will show; a sealed variable is never shown, so pass TRAWLER_SMOKE_TOKEN to the job instead");
 });

@@ -26,18 +26,23 @@ export function railway(projectToken: string, call: typeof fetch = fetch): Railw
 export interface Target {
   projectId: string;
   environmentId: string;
+  environmentName: string;
   service(name: string): string;
 }
 
 export async function target(api: Railway): Promise<Target> {
-  const { projectToken } = await api.query<{ projectToken: { projectId: string; environmentId: string } }>("query { projectToken { projectId environmentId } }");
+  const { projectToken } = await api.query<{ projectToken: { projectId: string; environmentId: string; environment: { name: string } } }>(
+    "query { projectToken { projectId environmentId environment { name } } }",
+  );
   const { project } = await api.query<{ project: { services: { edges: Array<{ node: { id: string; name: string } }> } } }>(
     "query($id: String!) { project(id: $id) { services { edges { node { id name } } } } }",
     { id: projectToken.projectId },
   );
   const services = new Map(project.services.edges.map((e) => [e.node.name, e.node.id]));
   return {
-    ...projectToken,
+    projectId: projectToken.projectId,
+    environmentId: projectToken.environmentId,
+    environmentName: projectToken.environment.name,
     service(name) {
       const id = services.get(name);
       if (!id) throw new RailwayError(`no service named ${name} in the project behind this token`);

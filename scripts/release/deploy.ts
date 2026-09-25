@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { railway, target, type Railway, type Target } from "./railway.ts";
 
@@ -10,7 +11,11 @@ export interface Images {
 export interface DeployOptions {
   core: Railway;
   workers: Railway;
+  environment: string;
+  commit: string;
   images: Images;
+  deployed: () => Promise<string | null>;
+  isAncestor: (older: string, newer: string) => boolean;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   log?: (line: string) => void;
@@ -23,7 +28,7 @@ export class DeployFailed extends Error {}
 interface Deployment {
   status: string;
   deploymentStopped: boolean;
-  meta: { image?: string } | null;
+  meta: { image?: string; commitHash?: string } | null;
   instances: Array<{ status: string }>;
 }
 
@@ -35,62 +40,113 @@ function clock(o: DeployOptions) {
     now: o.now ?? Date.now,
     log: o.log ?? console.log,
     pollMs: o.pollMs ?? 5_000,
-    timeoutMs: o.timeoutMs ?? 20 * 60_000,
+    timeoutMs: o.timeoutMs ?? 10 * 60_000,
   };
 }
 
-async function release(o: DeployOptions, api: Railway, at: Target, service: string, serviceId: string, image: string, until: "running" | "exited"): Promise<string> {
+async function poll<T>(o: DeployOptions, what: string, read: () => Promise<T>, done: (value: T) => boolean, stuck: (value: T | undefined) => string): Promise<T> {
   const { sleep, now, log, pollMs, timeoutMs } = clock(o);
-  await api.query("mutation($env: String!, $svc: String!, $input: ServiceInstanceUpdateInput!) { serviceInstanceUpdate(environmentId: $env, serviceId: $svc, input: $input) }", {
-    env: at.environmentId, svc: serviceId, input: { source: { image } },
+  const deadline = now() + timeoutMs;
+  let last: T | undefined;
+  while (true) {
+    try {
+      last = await read();
+      if (done(last)) return last;
+    } catch (err) {
+      if (err instanceof DeployFailed) throw err;
+      log(`${what}: Railway did not answer (${err instanceof Error ? err.message : String(err)}), asking again`);
+    }
+    if (now() >= deadline) throw new DeployFailed(stuck(last));
+    await sleep(pollMs);
+  }
+}
+
+async function switchSource(api: Railway, at: Target, service: string, serviceId: string, image: string): Promise<void> {
+  await api.query("mutation($env: String!, $patch: EnvironmentConfig!) { environmentPatchCommit(environmentId: $env, patch: $patch, commitMessage: \"release\", skipDeploys: true) }", {
+    env: at.environmentId, patch: { services: { [serviceId]: { source: { image, repo: null, branch: null } } } },
   });
+  const { serviceInstance } = await api.query<{ serviceInstance: { source: { image: string | null; repo: string | null } | null } }>(
+    "query($env: String!, $svc: String!) { serviceInstance(environmentId: $env, serviceId: $svc) { source { image repo } } }",
+    { env: at.environmentId, svc: serviceId },
+  );
+  const source = serviceInstance.source;
+  if (source?.repo) throw new DeployFailed(`Railway did not switch ${service} to ${image}; it still builds from ${source.repo}`);
+  if (source?.image !== image) throw new DeployFailed(`Railway did not switch ${service} to ${image}; its image is ${source?.image ?? "not set"}`);
+}
+
+async function release(o: DeployOptions, api: Railway, at: Target, service: string, serviceId: string, image: string, until: "running" | "exited"): Promise<string> {
+  const { log } = clock(o);
+  await switchSource(api, at, service, serviceId, image);
   const { serviceInstanceDeployV2: id } = await api.query<{ serviceInstanceDeployV2: string }>(
     "mutation($env: String!, $svc: String!) { serviceInstanceDeployV2(environmentId: $env, serviceId: $svc) }",
     { env: at.environmentId, svc: serviceId },
   );
   log(`${service}: deploying ${image} as ${id}`);
-  const deadline = now() + timeoutMs;
-  while (true) {
-    const { deployment } = await api.query<{ deployment: Deployment }>(
-      "query($id: String!) { deployment(id: $id) { status deploymentStopped meta instances { status } } }",
-      { id },
-    );
+  const expected = until === "exited" ? { stopped: true, instance: "EXITED" } : { stopped: false, instance: "RUNNING" };
+  const read = async () => {
+    const { deployment } = await api.query<{ deployment: Deployment }>("query($id: String!) { deployment(id: $id) { status deploymentStopped meta instances { status } } }", { id });
+    const wrong = deployment.meta?.commitHash !== undefined ? `a build of ${deployment.meta.commitHash}` : deployment.meta?.image !== undefined && deployment.meta.image !== image ? deployment.meta.image : undefined;
+    if (wrong) {
+      await api.query("mutation($id: String!) { deploymentCancel(id: $id) }", { id }).catch(() => undefined);
+      throw new DeployFailed(`${service} deployment ${id} runs ${wrong}, not ${image}`);
+    }
     const instances = deployment.instances.map((i) => i.status);
     if (ENDED.has(deployment.status)) throw new DeployFailed(`${service} deployment ${id} ended ${deployment.status}`);
     if (instances.includes("CRASHED")) throw new DeployFailed(`${service} deployment ${id} crashed`);
-    const expected = until === "exited" ? { stopped: true, instance: "EXITED" } : { stopped: false, instance: "RUNNING" };
-    const settled = deployment.deploymentStopped === expected.stopped && instances.length > 0 && instances.every((status) => status === expected.instance);
-    if (deployment.status === "SUCCESS" && settled) {
-      const running = deployment.meta?.image;
-      if (running !== image) throw new DeployFailed(`${service} deployment ${id} runs ${running ?? "an unknown image"}, not ${image}`);
-      log(`${service}: ${until === "exited" ? "finished" : "running"}`);
-      return id;
+    if (until === "running" && deployment.status === "SUCCESS" && deployment.deploymentStopped && instances.length > 0 && instances.every((s) => s === "EXITED")) {
+      throw new DeployFailed(`${service} deployment ${id} exited instead of running`);
     }
-    if (now() >= deadline) throw new DeployFailed(`${service} deployment ${id} is still ${deployment.status}${instances.length ? ` (${instances.join(", ")})` : ""}`);
-    await sleep(pollMs);
-  }
+    return { ...deployment, states: instances };
+  };
+  const deployment = await poll(
+    o,
+    service,
+    read,
+    (d) => d.status === "SUCCESS" && d.deploymentStopped === expected.stopped && d.states.length > 0 && d.states.every((s) => s === expected.instance),
+    (d) => `${service} deployment ${id} is still ${d?.status ?? "unknown"}${d?.states.length ? ` (${d.states.join(", ")})` : ""}`,
+  );
+  if (deployment.meta?.image !== image) throw new DeployFailed(`${service} deployment ${id} runs ${deployment.meta?.image ?? "an unknown image"}, not ${image}`);
+  log(`${service}: ${until === "exited" ? "finished" : "running"}`);
+  return id;
 }
 
 async function soleDeployment(o: DeployOptions, api: Railway, at: Target, service: string, serviceId: string, id: string): Promise<void> {
-  const { sleep, now, log, pollMs, timeoutMs } = clock(o);
-  const deadline = now() + timeoutMs;
-  while (true) {
-    const { serviceInstance } = await api.query<{ serviceInstance: { activeDeployments: Array<{ id: string }> } }>(
-      "query($env: String!, $svc: String!) { serviceInstance(environmentId: $env, serviceId: $svc) { activeDeployments { id } } }",
-      { env: at.environmentId, svc: serviceId },
-    );
-    const ids = serviceInstance.activeDeployments.map((d) => d.id);
-    if (ids.length === 1 && ids[0] === id) {
-      log(`${service}: the previous deployment is gone`);
-      return;
-    }
-    if (now() >= deadline) throw new DeployFailed(`${service} still has an older deployment running next to ${id}`);
-    await sleep(pollMs);
+  const { log } = clock(o);
+  await poll(
+    o,
+    service,
+    async () => {
+      const { serviceInstance } = await api.query<{ serviceInstance: { activeDeployments: Array<{ id: string }> } }>(
+        "query($env: String!, $svc: String!) { serviceInstance(environmentId: $env, serviceId: $svc) { activeDeployments { id } } }",
+        { env: at.environmentId, svc: serviceId },
+      );
+      const ids = serviceInstance.activeDeployments.map((d) => d.id);
+      if (!ids.includes(id)) throw new DeployFailed(`${service} deployment ${id} is no longer active`);
+      return ids;
+    },
+    (ids) => ids.length === 1,
+    () => `${service} still has an older deployment running next to ${id}`,
+  );
+  log(`${service}: the previous deployment is gone`);
+}
+
+export async function deployedCommit(base: string, call: typeof fetch = fetch): Promise<string | null> {
+  try {
+    const res = await call(`${base}/healthz`, { headers: { "cache-control": "no-store" } });
+    if (!res.ok) return null;
+    return ((await res.json()) as { commit?: string | null }).commit ?? null;
+  } catch {
+    return null;
   }
 }
 
 export async function deploy(o: DeployOptions): Promise<void> {
   const [core, workers] = await Promise.all([target(o.core), target(o.workers)]);
+  for (const [token, at] of [["RAILWAY_CORE_TOKEN", core], ["RAILWAY_WORKERS_TOKEN", workers]] as const) {
+    if (at.environmentName !== o.environment) throw new DeployFailed(`${token} belongs to the Railway environment ${at.environmentName}, not ${o.environment}`);
+  }
+  const running = await o.deployed();
+  if (running && running !== o.commit && o.isAncestor(o.commit, running)) throw new DeployFailed(`${o.environment} already runs ${running}, which is newer than ${o.commit}`);
   const migrate = core.service("migrate");
   const controlPlane = core.service("control-plane");
   const runner = workers.service("runner");
@@ -104,7 +160,7 @@ export async function deploy(o: DeployOptions): Promise<void> {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const env = process.env;
-  const missing = ["RAILWAY_CORE_TOKEN", "RAILWAY_WORKERS_TOKEN", "IMAGE_MIGRATE", "IMAGE_CONTROL_PLANE", "IMAGE_RUNNER"].filter((k) => !env[k]);
+  const missing = ["RELEASE_ENVIRONMENT", "RELEASE_URL", "RELEASE_COMMIT", "RAILWAY_CORE_TOKEN", "RAILWAY_WORKERS_TOKEN", "IMAGE_MIGRATE", "IMAGE_CONTROL_PLANE", "IMAGE_RUNNER"].filter((k) => !env[k]);
   if (missing.length) {
     console.error(`missing environment variables: ${missing.join(", ")}`);
     process.exit(2);
@@ -112,7 +168,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   deploy({
     core: railway(env.RAILWAY_CORE_TOKEN!),
     workers: railway(env.RAILWAY_WORKERS_TOKEN!),
+    environment: env.RELEASE_ENVIRONMENT!,
+    commit: env.RELEASE_COMMIT!,
     images: { migrate: env.IMAGE_MIGRATE!, controlPlane: env.IMAGE_CONTROL_PLANE!, runner: env.IMAGE_RUNNER! },
+    deployed: () => deployedCommit(env.RELEASE_URL!),
+    isAncestor: (older, newer) => spawnSync("git", ["merge-base", "--is-ancestor", older, newer]).status === 0,
   }).catch((err: unknown) => {
     console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);

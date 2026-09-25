@@ -1,4 +1,5 @@
 name: release
+run-name: release ${{ github.event.workflow_run.head_sha }}
 on:
   workflow_run:
     workflows: [ci]
@@ -8,7 +9,11 @@ permissions:
   contents: read
 jobs:
   images:
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    if: >-
+      github.repository == 'usetrawler/trawler' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_sha == github.sha
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -74,22 +79,26 @@ jobs:
     environment: staging
     concurrency: { group: staging, cancel-in-progress: false }
     env:
-      COMMIT: ${{ needs.images.outputs.commit }}
-      RAILWAY_CORE_TOKEN: ${{ secrets.RAILWAY_CORE_TOKEN }}
+      RELEASE_COMMIT: ${{ needs.images.outputs.commit }}
+      RELEASE_URL: https://staging.usetrawler.com
     steps:
       - uses: actions/checkout@v5
-        with: { ref: "${{ needs.images.outputs.commit }}" }
+        with: { ref: "${{ needs.images.outputs.commit }}", fetch-depth: 0 }
       - uses: actions/setup-node@v5
         with: { node-version: 24 }
       - name: deploy the images to staging
         run: node scripts/release/deploy.ts
         env:
+          RELEASE_ENVIRONMENT: staging
+          RAILWAY_CORE_TOKEN: ${{ secrets.RAILWAY_CORE_TOKEN }}
           RAILWAY_WORKERS_TOKEN: ${{ secrets.RAILWAY_WORKERS_TOKEN }}
           IMAGE_MIGRATE: ${{ needs.images.outputs.migrate }}
           IMAGE_CONTROL_PLANE: ${{ needs.images.outputs.control-plane }}
           IMAGE_RUNNER: ${{ needs.images.outputs.runner }}
       - name: smoke-check staging
-        run: node scripts/release/smoke.ts https://staging.usetrawler.com "$COMMIT"
+        run: node scripts/release/smoke.ts "$RELEASE_URL" "$RELEASE_COMMIT"
+        env:
+          RAILWAY_CORE_TOKEN: ${{ secrets.RAILWAY_CORE_TOKEN }}
 
   production:
     needs: [images, staging]
@@ -99,12 +108,15 @@ jobs:
     concurrency: { group: production, cancel-in-progress: false }
     steps:
       - uses: actions/checkout@v5
-        with: { ref: "${{ needs.images.outputs.commit }}" }
+        with: { ref: "${{ needs.images.outputs.commit }}", fetch-depth: 0 }
       - uses: actions/setup-node@v5
         with: { node-version: 24 }
       - name: deploy the images staging approved to production
         run: node scripts/release/deploy.ts
         env:
+          RELEASE_ENVIRONMENT: production
+          RELEASE_URL: https://app.usetrawler.com
+          RELEASE_COMMIT: ${{ needs.images.outputs.commit }}
           RAILWAY_CORE_TOKEN: ${{ secrets.RAILWAY_CORE_TOKEN }}
           RAILWAY_WORKERS_TOKEN: ${{ secrets.RAILWAY_WORKERS_TOKEN }}
           IMAGE_MIGRATE: ${{ needs.images.outputs.migrate }}
