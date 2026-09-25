@@ -31,7 +31,7 @@ test("a workspace without a project goes straight to a new project", async () =>
   expect(state.askedFor).toEqual(["withOrg:org-1", "projects:org-1"]);
 });
 
-test("an account without a workspace goes to a new project, which explains what to do", async () => {
+test("an account without a workspace goes to a new project", async () => {
   state.session = signedIn(null);
   await expect(Home()).rejects.toMatchObject({ to: "/new" });
   expect(state.askedFor).toEqual([]);

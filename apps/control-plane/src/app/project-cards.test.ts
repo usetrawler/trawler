@@ -16,8 +16,9 @@ const html = renderToStaticMarkup(createElement(ProjectCards, { projects }));
 const card = (name: string) => html.split("<li ").find((c) => c.includes(`>${name}</a>`)) ?? "";
 
 test("every project of the workspace is listed with its host", () => {
-  expect(card("Acme")).toContain("app.acme.test");
-  expect(card("Globex")).toContain("globex.test");
+  expect(card("Acme")).toContain(">app.acme.test</p>");
+  expect(card("Acme")).not.toContain("https://app.acme.test/start");
+  expect(card("Globex")).toContain(">globex.test</p>");
   expect(html.indexOf(">Acme<")).toBeLessThan(html.indexOf(">Globex<"));
 });
 
