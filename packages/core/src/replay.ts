@@ -99,6 +99,13 @@ export async function runReplay(opts: {
 
 const Answer = z.object({ verdict: VerdictSchema });
 
+function noVerdict(finishReason: string): string {
+  const tries = `(${JUDGE_REPLIES} tries)`;
+  if (finishReason === "length") return `the model ran out of room before it gave a verdict ${tries}`;
+  if (finishReason === "content-filter") return `the provider's content filter stopped the model before it gave a verdict ${tries}`;
+  return `the model gave no verdict ${tries}`;
+}
+
 function verdictInText(reply: string): Verdict | null {
   const body = reply.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/, "$1");
   try {
@@ -149,14 +156,11 @@ export async function judge(opts: {
       if (verdict === null && opts.budget.exceeded) stoppedBy = "budget";
       else if (verdict === null) {
         stoppedBy = "error";
-        error = `the model gave no verdict in ${JUDGE_REPLIES} replies; the last ended with finish reason "${finishReason}"`;
+        error = noVerdict(finishReason);
       }
     } catch (err) {
-      if (refusedForBudget(err)) stoppedBy = "budget";
-      else {
-        stoppedBy = "error";
-        error = opts.scrubber.scrub(err instanceof Error ? err.message : String(err));
-      }
+      stoppedBy = refusedForBudget(err) ? "budget" : "error";
+      error = opts.scrubber.scrub(err instanceof Error ? err.message : String(err));
     }
   }
   if (verdict) emit({ type: "verdict", jobId, findingId: opts.finding.id, verdict, observed: opts.observation.observed });

@@ -54,7 +54,7 @@ function describe(f: Located, replay?: ReplayObservation, replayError?: string, 
     : !replay.completed && replay.blockedAt === null
       ? "\n\nReplay: wrote no report."
       : `\n\nReplay: ${replay.completed ? "carried out every step" : `could not carry out step ${replay.blockedAt}`}. ${oneLine(replay.observed)}`;
-  const judged = judgeError ? `\n\nJudge: could not be judged (model error). ${oneLine(judgeError)}` : "";
+  const judged = judgeError ? `\n\nJudge: could not be judged. ${oneLine(judgeError)}` : "";
   return `### ${oneLine(f.title)}\n${f.kind}, ${f.severity}, ${oneLine(f.persona)} / ${oneLine(f.goal)}\n\n${oneLine(f.observed)}\n\n${steps}${replayed}${judged}\n`;
 }
 

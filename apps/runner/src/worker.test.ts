@@ -110,6 +110,14 @@ test("a replay reports its observation, a judge its verdict", async () => {
   expect(judged.seen.completions).toEqual([expect.objectContaining({ stoppedBy: "done" })]);
 });
 
+test("a judge that gives no verdict completes as an error and reports no verdict", async () => {
+  const finding = { id: "ana:f1", kind: "defect", goal: "g", title: "Broken", observed: "500", reproduction: ["Open /", "Click Save"], severity: "high" };
+  const judged = await fakeControlPlane({ ...baseJob, kind: "judge", finding, observation: { completed: true, observed: "Internal Server Error", blockedAt: null } });
+  await workOnce(deps(judged.url, scriptedModel([text("not sure"), text("still not sure")])));
+  expect(judged.seen.events.map((e) => e.type)).toEqual(["job_started", "job_finished"]);
+  expect(judged.seen.completions).toEqual([expect.objectContaining({ stoppedBy: "error", error: "the model gave no verdict (2 tries)" })]);
+});
+
 test("a browser that will not start completes the job as an error", async () => {
   const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" });
   await workOnce(deps(url, scriptedModel([]), { openBrowser: async () => { throw new Error("no chromium"); } }));

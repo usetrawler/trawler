@@ -155,7 +155,7 @@ test("a defect whose judge never gives a verdict is left unjudged with the judge
     emit: () => {}, openBrowser: fakeBrowsers().open,
   });
   expect(summary.verdicts).toEqual({});
-  expect(summary.judgeErrors).toEqual({ f1: expect.stringMatching(/no verdict/) });
+  expect(summary.judgeErrors).toEqual({ f1: "the model gave no verdict (2 tries)" });
   expect(summary.jobs.map((j) => j.jobId)).toEqual(["role:p1", "role:p2", "replay:f1", "judge:f1"]);
 });
 

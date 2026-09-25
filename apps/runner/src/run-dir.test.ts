@@ -68,8 +68,8 @@ test("a replay without a report is described once", () => {
 test("a defect whose judge failed says so instead of passing for inconclusive", () => {
   const md = renderReport({
     ...summary, replayErrors: {}, replays: { ...summary.replays, f4: { completed: true, observed: "Crashed on save", blockedAt: null } },
-    judgeErrors: { f4: 'the model gave no verdict in 2 replies; the last ended with finish reason "length"' },
+    judgeErrors: { f4: "the model ran out of room before it gave a verdict (2 tries)" },
   });
-  expect(md).toMatch(/## Defects not judged[\s\S]*Never checked[\s\S]*Replay: carried out every step\. Crashed on save\n\nJudge: could not be judged \(model error\)\. the model gave no verdict in 2 replies/);
+  expect(md).toMatch(/## Defects not judged[\s\S]*Never checked[\s\S]*Replay: carried out every step\. Crashed on save\n\nJudge: could not be judged\. the model ran out of room before it gave a verdict \(2 tries\)/);
   expect(md).not.toContain("## Inconclusive defects");
 });

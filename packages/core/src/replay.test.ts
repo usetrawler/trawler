@@ -1,4 +1,4 @@
-import { tool } from "ai";
+import { APICallError, tool } from "ai";
 import { z } from "zod";
 import { describe, expect, test } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
@@ -244,7 +244,7 @@ describe("judge", () => {
   });
 
   test("takes a verdict the model wrote as JSON instead of calling the tool", async () => {
-    for (const reply of ['{"verdict":"refuted"}', '  {"verdict": "refuted"}\n', '```json\n{"verdict": "refuted"}\n```']) {
+    for (const reply of ['{"verdict":"refuted"}', '  {"verdict": "refuted"}\n', '```json\n{"verdict": "refuted"}\n```', '\n```json\n{"verdict": "refuted"}\n```\n']) {
       const model = scriptedModel([text(reply)]);
       const { verdict } = await judgeWith(model).promise;
       expect(verdict).toBe("refuted");
@@ -283,8 +283,8 @@ describe("judge", () => {
     expect(verdict).toBeNull();
     expect(model.doGenerateCalls).toHaveLength(2);
     expect(events.map((e) => e.type)).toEqual(["job_started", "job_finished"]);
-    expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "error", error: expect.stringMatching(/no verdict[\s\S]*length/) });
-    expect(error).toMatch(/no verdict[\s\S]*length/);
+    expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "error", error: "the model ran out of room before it gave a verdict (2 tries)" });
+    expect(error).toBe("the model ran out of room before it gave a verdict (2 tries)");
   });
 
   test("a model that answers without a verdict twice ends the judge with an error", async () => {
@@ -292,7 +292,7 @@ describe("judge", () => {
     const { promise, events } = judgeWith(model);
     expect((await promise).verdict).toBeNull();
     expect(events.map((e) => e.type)).toEqual(["job_started", "job_finished"]);
-    expect(events.at(-1)).toMatchObject({ stoppedBy: "error", error: expect.stringMatching(/no verdict/) });
+    expect(events.at(-1)).toMatchObject({ stoppedBy: "error", error: "the model gave no verdict (2 tries)" });
   });
 
   test("a failed model call ends the judge with an error and no verdict", async () => {
@@ -323,12 +323,15 @@ describe("judge", () => {
     expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "no_report" });
   });
 
-  test("a replay that ran out of budget gets no verdict", async () => {
-    const budget = new Budget(0.1);
-    budget.add(0.2);
-    const { observation } = await replay(scriptedModel([]), { budget }).promise;
-    const { verdict } = await judgeWith(scriptedModel([]), { observation, budget }).promise;
+  test("a model call the proxy refuses ends the judge with the proxy's reason", async () => {
+    const refusal = new APICallError({ message: "the provider account behind the workspace key is out of credits", url: "https://cp.test/api/llm/v1/chat/completions", requestBodyValues: {}, statusCode: 402 });
+    const model = new MockLanguageModelV4({ doGenerate: async () => { throw refusal; } });
+    const { promise, events } = judgeWith(model);
+    const { verdict, error } = await promise;
     expect(verdict).toBeNull();
+    expect(events.map((e) => e.type)).toEqual(["job_started", "job_finished"]);
+    expect(events.at(-1)).toMatchObject({ stoppedBy: "budget", error: "the provider account behind the workspace key is out of credits" });
+    expect(error).toBe("the provider account behind the workspace key is out of credits");
   });
 
   test("spends nothing and gives no verdict once the budget is gone", async () => {
