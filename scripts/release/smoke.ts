@@ -97,7 +97,8 @@ export async function smokeCheck(o: SmokeOptions): Promise<SmokeResult> {
 }
 
 export async function smokeToken(env: NodeJS.ProcessEnv, call: typeof fetch = fetch, print: (line: string) => void = console.log): Promise<string> {
-  if (env.TRAWLER_SMOKE_TOKEN) return env.TRAWLER_SMOKE_TOKEN;
+  const given = env.TRAWLER_SMOKE_TOKEN?.trim();
+  if (given) return given;
   if (!env.RAILWAY_CORE_TOKEN) throw new SmokeFailed("set TRAWLER_SMOKE_TOKEN, or RAILWAY_CORE_TOKEN to read it from the control plane");
   const api = railway(env.RAILWAY_CORE_TOKEN, call);
   const token = (await serviceVariable(api, await target(api), "control-plane", "TRAWLER_SMOKE_TOKEN"))?.trim();

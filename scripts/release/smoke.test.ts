@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { smokeCheck, smokeToken, type SmokeOptions } from "./smoke.ts";
 
 const BASE = "https://staging.test";
@@ -105,19 +105,24 @@ function fakeControlPlaneVariables(token: string | undefined) {
   return { fetch: fakeFetch, calls: () => calls };
 }
 
-test("a smoke token given directly is used without asking Railway", async () => {
+afterEach(() => vi.restoreAllMocks());
+
+test("a smoke token given directly is trimmed and used without asking Railway, unless it is blank", async () => {
   const railway = fakeControlPlaneVariables(TOKEN);
-  expect(await smokeToken({ TRAWLER_SMOKE_TOKEN: "given-" + "g".repeat(40), RAILWAY_CORE_TOKEN: "core" }, railway.fetch, () => {})).toBe("given-" + "g".repeat(40));
+  expect(await smokeToken({ TRAWLER_SMOKE_TOKEN: ` given-${"g".repeat(40)}\n`, RAILWAY_CORE_TOKEN: "core" }, railway.fetch, () => {})).toBe("given-" + "g".repeat(40));
   expect(railway.calls()).toBe(0);
+  expect(await smokeToken({ TRAWLER_SMOKE_TOKEN: "  ", RAILWAY_CORE_TOKEN: "core" }, railway.fetch, () => {})).toBe(TOKEN);
 });
 
 test("the smoke token read from the control plane is trimmed like the server trims it, masked in GitHub Actions and never printed elsewhere", async () => {
+  const console = [vi.spyOn(globalThis.console, "log"), vi.spyOn(globalThis.console, "error"), vi.spyOn(process.stdout, "write"), vi.spyOn(process.stderr, "write")];
   const printed: string[] = [];
   expect(await smokeToken({ RAILWAY_CORE_TOKEN: "core", GITHUB_ACTIONS: "true" }, fakeControlPlaneVariables(` ${TOKEN}\n`).fetch, (line) => printed.push(line))).toBe(TOKEN);
   expect(printed).toEqual([`::add-mask::${TOKEN}`]);
   printed.length = 0;
   expect(await smokeToken({ RAILWAY_CORE_TOKEN: "core" }, fakeControlPlaneVariables(TOKEN).fetch, (line) => printed.push(line))).toBe(TOKEN);
   expect(printed).toEqual([]);
+  expect(console.flatMap((spy) => spy.mock.calls.flat()).some((arg) => String(arg).includes(TOKEN))).toBe(false);
 });
 
 test("without a way to get the smoke token the check says what to set", async () => {

@@ -61,6 +61,7 @@ test("a run left over from an earlier check is cancelled, so the new one is not 
   const old = (await (await start()).json()).runId;
   expect((await claimJob(t.db, keys))!.runId).toBe(old);
   expect((await summaryOf(old))!.status).toBe("running");
+  expect(await (await status(old)).json()).toMatchObject({ status: "running", finished: false });
   const fresh = (await (await start()).json()).runId;
   expect(fresh).not.toBe(old);
   expect((await summaryOf(old))!.status).toBe("cancelled");

@@ -15,7 +15,7 @@ export interface DeployOptions {
   commit: string;
   images: Images;
   deployed: () => Promise<string | null>;
-  isAncestor: (older: string, newer: string) => boolean;
+  isAncestor: (older: string, newer: string) => boolean | undefined;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   log?: (line: string) => void;
@@ -28,7 +28,7 @@ export class DeployFailed extends Error {}
 interface Deployment {
   status: string;
   deploymentStopped: boolean;
-  meta: { image?: string; commitHash?: string } | null;
+  meta: { image?: string; commitHash?: string | null } | null;
   instances: Array<{ status: string }>;
 }
 
@@ -61,22 +61,30 @@ async function poll<T>(o: DeployOptions, what: string, read: () => Promise<T>, d
   }
 }
 
-async function switchSource(api: Railway, at: Target, service: string, serviceId: string, image: string): Promise<void> {
+type Source = { image: string | null; repo: string | null } | null;
+
+async function switchSource(o: DeployOptions, api: Railway, at: Target, service: string, serviceId: string, image: string): Promise<void> {
   await api.query("mutation($env: String!, $patch: EnvironmentConfig!) { environmentPatchCommit(environmentId: $env, patch: $patch, commitMessage: \"release\", skipDeploys: true) }", {
     env: at.environmentId, patch: { services: { [serviceId]: { source: { image, repo: null, branch: null } } } },
   });
-  const { serviceInstance } = await api.query<{ serviceInstance: { source: { image: string | null; repo: string | null } | null } }>(
-    "query($env: String!, $svc: String!) { serviceInstance(environmentId: $env, serviceId: $svc) { source { image repo } } }",
-    { env: at.environmentId, svc: serviceId },
+  await poll<Source>(
+    o,
+    service,
+    async () => {
+      const { serviceInstance } = await api.query<{ serviceInstance: { source: Source } }>(
+        "query($env: String!, $svc: String!) { serviceInstance(environmentId: $env, serviceId: $svc) { source { image repo } } }",
+        { env: at.environmentId, svc: serviceId },
+      );
+      return serviceInstance.source;
+    },
+    (source) => source?.image === image && !source.repo,
+    (source) => `Railway did not switch ${service} to ${image}; ${source?.repo ? `it still builds from ${source.repo}` : `its image is ${source?.image ?? "not set"}`}`,
   );
-  const source = serviceInstance.source;
-  if (source?.repo) throw new DeployFailed(`Railway did not switch ${service} to ${image}; it still builds from ${source.repo}`);
-  if (source?.image !== image) throw new DeployFailed(`Railway did not switch ${service} to ${image}; its image is ${source?.image ?? "not set"}`);
 }
 
 async function release(o: DeployOptions, api: Railway, at: Target, service: string, serviceId: string, image: string, until: "running" | "exited"): Promise<string> {
   const { log } = clock(o);
-  await switchSource(api, at, service, serviceId, image);
+  await switchSource(o, api, at, service, serviceId, image);
   const { serviceInstanceDeployV2: id } = await api.query<{ serviceInstanceDeployV2: string }>(
     "mutation($env: String!, $svc: String!) { serviceInstanceDeployV2(environmentId: $env, serviceId: $svc) }",
     { env: at.environmentId, svc: serviceId },
@@ -85,7 +93,7 @@ async function release(o: DeployOptions, api: Railway, at: Target, service: stri
   const expected = until === "exited" ? { stopped: true, instance: "EXITED" } : { stopped: false, instance: "RUNNING" };
   const read = async () => {
     const { deployment } = await api.query<{ deployment: Deployment }>("query($id: String!) { deployment(id: $id) { status deploymentStopped meta instances { status } } }", { id });
-    const wrong = deployment.meta?.commitHash !== undefined ? `a build of ${deployment.meta.commitHash}` : deployment.meta?.image !== undefined && deployment.meta.image !== image ? deployment.meta.image : undefined;
+    const wrong = deployment.meta?.commitHash ? `a build of ${deployment.meta.commitHash}` : deployment.meta?.image !== undefined && deployment.meta.image !== image ? deployment.meta.image : undefined;
     if (wrong) {
       await api.query("mutation($id: String!) { deploymentCancel(id: $id) }", { id }).catch(() => undefined);
       throw new DeployFailed(`${service} deployment ${id} runs ${wrong}, not ${image}`);
@@ -145,7 +153,11 @@ export async function deploy(o: DeployOptions): Promise<void> {
     if (at.environmentName !== o.environment) throw new DeployFailed(`${token} belongs to the Railway environment ${at.environmentName}, not ${o.environment}`);
   }
   const running = await o.deployed();
-  if (running && running !== o.commit && o.isAncestor(o.commit, running)) throw new DeployFailed(`${o.environment} already runs ${running}, which is newer than ${o.commit}`);
+  if (running && running !== o.commit) {
+    const older = o.isAncestor(o.commit, running);
+    if (older) throw new DeployFailed(`${o.environment} already runs ${running}, which is newer than ${o.commit}`);
+    if (older === undefined) clock(o).log(`${o.environment} runs ${running}, which git does not know; deploying ${o.commit} anyway`);
+  }
   const migrate = core.service("migrate");
   const controlPlane = core.service("control-plane");
   const runner = workers.service("runner");
@@ -171,7 +183,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     commit: env.RELEASE_COMMIT!,
     images: { migrate: env.IMAGE_MIGRATE!, controlPlane: env.IMAGE_CONTROL_PLANE!, runner: env.IMAGE_RUNNER! },
     deployed: () => deployedCommit(env.RELEASE_URL!),
-    isAncestor: (older, newer) => spawnSync("git", ["merge-base", "--is-ancestor", older, newer]).status === 0,
+    isAncestor: (older, newer) => {
+      const { status } = spawnSync("git", ["merge-base", "--is-ancestor", older, newer]);
+      return status === 0 ? true : status === 1 ? false : undefined;
+    },
   }).catch((err: unknown) => {
     console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
