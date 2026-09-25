@@ -5,7 +5,10 @@ export interface ServerEnv {
   github?: { clientId: string; clientSecret: string };
   google?: { clientId: string; clientSecret: string };
   devOidc?: { issuer: string; clientId: string; clientSecret: string };
+  setup?: { apiKey: string; model: string };
 }
+
+export const DEFAULT_SETUP_MODEL = "deepseek/deepseek-v4.1-flash";
 
 function pair(id: string | undefined, secret: string | undefined) {
   return id && secret ? { clientId: id, clientSecret: secret } : undefined;
@@ -25,5 +28,6 @@ export function readEnv(env: Record<string, string | undefined> = process.env): 
     github: pair(env.GITHUB_CLIENT_ID, env.GITHUB_CLIENT_SECRET),
     google: pair(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET),
     devOidc: devIssuer ? { issuer: devIssuer, clientId: "trawler-dev", clientSecret: "trawler-dev-secret" } : undefined,
+    setup: env.OPENROUTER_API_KEY ? { apiKey: env.OPENROUTER_API_KEY, model: env.TRAWLER_SETUP_MODEL ?? DEFAULT_SETUP_MODEL } : undefined,
   };
 }
