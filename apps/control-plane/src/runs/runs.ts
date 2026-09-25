@@ -6,6 +6,7 @@ import type { Keyring } from "../lib/secrets.ts";
 import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
 import { loadProjectConfig } from "../projects/projects.ts";
+import { gaveNoVerdict } from "./report.ts";
 
 export interface StartRunOptions {
   budgetUsd: number;
@@ -73,15 +74,23 @@ export async function judgeAgain(tx: Tx, orgId: string, runId: string, findingKe
     .where("org_id", "=", orgId)
     .forUpdate()
     .executeTakeFirst();
-  if (!run) throw new Error("run not found");
-  if (run.status === "queued" || run.status === "running") throw new CannotJudgeAgain("The run is still going; judge it again once the run has finished.");
-  const latest = await tx.selectFrom("jobs").select("status").where("run_id", "=", runId).where("kind", "=", "judge").where("finding_key", "=", findingKey).orderBy("position", "desc").executeTakeFirst();
+  if (!run) throw new CannotJudgeAgain("This run was not found.");
+  if (run.status === "queued" || run.status === "running") throw new CannotJudgeAgain("The run is still going. You can judge it again once it has finished.");
+  const latest = await tx
+    .selectFrom("jobs")
+    .select(["status", "stopped_by", sql<boolean>`requested_by is not null`.as("requested")])
+    .where("run_id", "=", runId)
+    .where("kind", "=", "judge")
+    .where("finding_key", "=", findingKey)
+    .orderBy("position", "desc")
+    .executeTakeFirst();
   if (latest?.status === "queued" || latest?.status === "leased") throw new CannotJudgeAgain("It is already being judged again.");
-  if (latest?.status !== "failed") throw new CannotJudgeAgain("Only a defect whose judge failed can be judged again.");
-  if (capSpent(run)) throw new CannotJudgeAgain("This run has spent its cap.");
+  const finding = await tx.selectFrom("findings").select("verdict").where("run_id", "=", runId).where("key", "=", findingKey).executeTakeFirst();
+  if (!latest || !finding || !gaveNoVerdict(latest, finding.verdict)) throw new CannotJudgeAgain("Only a defect whose judge gave no verdict can be judged again.");
+  if (capSpent(run)) throw new CannotJudgeAgain("This run has spent its cap, so it cannot be judged again.");
   const stored = await modelKey(tx, orgId, keys);
   if (!stored || stored.provider !== run.provider || (run.provider === "custom" && stored.baseUrl !== run.provider_base_url)) {
-    throw new CannotJudgeAgain("The workspace model key is gone or is for another provider now, so this run's judge model cannot be called.");
+    throw new CannotJudgeAgain("The workspace model key was removed or changed since this run, so this run's model cannot be called. Start a new run instead.");
   }
   const { next } = await tx.selectFrom("jobs").select(sql<number>`coalesce(max(position), -1) + 1`.as("next")).where("run_id", "=", runId).executeTakeFirstOrThrow();
   await tx.insertInto("jobs").values({ org_id: orgId, run_id: runId, kind: "judge", position: next, finding_key: findingKey, requested_by: requestedBy }).execute();
@@ -99,7 +108,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const snapshot = run.config_snapshot as unknown as ConfigSnapshot;
   const goalText = new Map(snapshot.goals.map((g) => [g.id, g.instruction]));
   const [jobs, findings, goals, activity] = await Promise.all([
-    tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error"]).where("run_id", "=", runId).orderBy("position").execute(),
+    tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error", sql<boolean>`requested_by is not null`.as("requested")]).where("run_id", "=", runId).orderBy("position").execute(),
     tx.selectFrom("findings").select(["key", "persona_key", "kind", "goal", "title", "observed", "reproduction", "severity", "replay", "verdict"]).where("run_id", "=", runId).orderBy("created_at").orderBy("key").execute(),
     tx.selectFrom("goal_outcomes").select(["persona_key", "goal", "status", "note"]).where("run_id", "=", runId).orderBy("persona_key").orderBy("goal").execute(),
     tx

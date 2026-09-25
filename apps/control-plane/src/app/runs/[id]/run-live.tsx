@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useId, useRef, useState, useTransition } from "react";
 import type { runView, StageState, PersonaState } from "../../../runs/report.ts";
 import type { RunSummary } from "../../../runs/runs.ts";
 import { cancelRunAction, judgeAgainAction } from "./actions.ts";
@@ -48,31 +48,53 @@ function CancelButton({ runId, onDone }: { runId: string; onDone: () => void }) 
   );
 }
 
-function JudgeAgainButton({ runId, findingKey, onDone }: { runId: string; findingKey: string; onDone: () => Promise<void> }) {
+function JudgeAgainButton({ runId, findingKey, judging, onDone }: { runId: string; findingKey: string; judging: boolean; onDone: () => Promise<void> }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  const judge = () => start(async () => {
-    const result = await judgeAgainAction(runId, findingKey).catch(() => ({ error: "The judge could not be started. Try again." }));
-    setError(result.error ?? null);
-    await onDone();
-  });
+  const hint = useId();
+  const busy = pending || judging;
+  const judge = () => {
+    if (busy) return;
+    setError(null);
+    start(async () => {
+      const result = await judgeAgainAction(runId, findingKey).catch(() => ({ error: "The judge could not be started. Try again." }));
+      setError(result.error ?? null);
+      await onDone();
+    });
+  };
   return (
     <div className="flex flex-wrap items-center gap-3 text-sm">
-      <button type="button" disabled={pending} onClick={judge} className="h-10 border border-line px-4 hover:border-ink disabled:opacity-60">
-        {pending ? "Starting…" : "Judge again"}
+      <button type="button" aria-disabled={busy} aria-describedby={hint} onClick={judge} className="h-10 border border-line px-4 hover:border-ink aria-disabled:opacity-60 aria-disabled:hover:border-line">
+        {judging ? "Judging again…" : pending ? "Starting…" : "Judge again"}
       </button>
-      <span className="text-muted">Runs only the judge on the stored replay, without a browser, for a few cents of this run's cap.</span>
+      <span id={hint} className="text-muted">Runs only the judge on the stored replay, without a browser. It is paid from this run's remaining cap.</span>
+      <span role="status" className="sr-only">{judging ? "Judging again. The report updates when the judge answers." : ""}</span>
       {error && <span role="alert" className="text-bad">{error}</span>}
     </div>
   );
 }
 
-function FindingCard({ f, note, action }: { f: ReportFinding; note?: string; action?: React.ReactNode }) {
+function judgedText(report: View["report"], key: string): string {
+  const sections: Array<[string, Array<{ key: string; title: string }>]> = [
+    ["confirmed", report.confirmed], ["refuted", report.refuted], ["inconclusive", report.inconclusive], ["could not be judged", report.couldNotJudge], ["not judged", report.notJudged],
+  ];
+  for (const [label, items] of sections) {
+    const found = items.find((f) => f.key === key);
+    if (found) return `${found.title}: ${label}.`;
+  }
+  return "";
+}
+
+function FindingCard({ f, note, action, focus, reasonInDetails }: { f: ReportFinding; note?: string; action?: React.ReactNode; focus?: boolean; reasonInDetails?: boolean }) {
   const replay = f.replay as { observed: string } | null;
+  const summary = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (focus) summary.current?.focus();
+  }, [focus]);
   return (
     <li className="border border-line bg-panel">
       <details>
-        <summary className="flex cursor-pointer list-none flex-col gap-1 p-4">
+        <summary ref={summary} className="flex cursor-pointer list-none flex-col gap-1 p-4">
           <span className="flex flex-wrap items-center gap-2 font-mono text-[11px] tracking-[0.15em] text-muted uppercase">
             <span className={f.severity === "high" ? "text-bad" : f.severity === "medium" ? "text-warn" : ""}>{f.severity}</span>· {f.personaName}
           </span>
@@ -87,6 +109,7 @@ function FindingCard({ f, note, action }: { f: ReportFinding; note?: string; act
           </div>
           <p><span className="text-muted">What happened: </span>{f.observed}</p>
           {replay?.observed && <p><span className="text-muted">What the replay saw: </span>{replay.observed}</p>}
+          {reasonInDetails && note && <p className="break-words"><span className="text-muted">Why it was not judged: </span>{note}</p>}
         </div>
       </details>
       {action && <div className="border-t border-line px-4 py-3">{action}</div>}
@@ -94,7 +117,7 @@ function FindingCard({ f, note, action }: { f: ReportFinding; note?: string; act
   );
 }
 
-function Section<T extends ReportFinding & { reason?: string }>({ title, hint, items, empty, note, action }: { title: string; hint: string; items: T[]; empty?: string; note?: boolean; action?: (f: T) => React.ReactNode }) {
+function Section<T extends ReportFinding & { reason?: string }>({ title, hint, items, empty, note, action, focusKey, reasonInDetails }: { title: string; hint: string; items: T[]; empty?: string; note?: boolean; action?: (f: T) => React.ReactNode; focusKey?: string | null; reasonInDetails?: boolean }) {
   if (items.length === 0 && !empty) return null;
   return (
     <section className="flex flex-col gap-3">
@@ -102,7 +125,7 @@ function Section<T extends ReportFinding & { reason?: string }>({ title, hint, i
         <h3 className="font-mono text-xs tracking-[0.2em] uppercase">{title} · {items.length}</h3>
         <p className="text-right text-xs text-muted">{hint}</p>
       </div>
-      {items.length === 0 ? <p className="text-sm text-muted">{empty}</p> : <ul className="flex flex-col gap-2">{items.map((f) => <FindingCard key={f.key} f={f} note={note ? f.reason : undefined} action={action?.(f)} />)}</ul>}
+      {items.length === 0 ? <p className="text-sm text-muted">{empty}</p> : <ul className="flex flex-col gap-2">{items.map((f) => <FindingCard key={f.key} f={f} note={note ? f.reason : undefined} action={action?.(f)} focus={f.key === focusKey} reasonInDetails={reasonInDetails} />)}</ul>}
     </section>
   );
 }
@@ -130,7 +153,7 @@ export function RunLive({ initial }: { initial: Data }) {
     }
   }, [run.id]);
 
-  const polling = view.live || view.rejudging;
+  const polling = view.live || view.rejudging || stale;
   useEffect(() => {
     if (!polling || gone) return;
     let timer: ReturnType<typeof setTimeout>;
@@ -146,6 +169,18 @@ export function RunLive({ initial }: { initial: Data }) {
     };
   }, [polling, gone, refresh]);
 
+  const judging = useRef(new Set<string>());
+  const [announcement, setAnnouncement] = useState("");
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  useEffect(() => {
+    const now = new Set(view.report.couldNotJudge.filter((f) => f.action === "judging").map((f) => f.key));
+    const finished = [...judging.current].filter((k) => !now.has(k));
+    judging.current = now;
+    if (finished.length === 0) return;
+    setAnnouncement(finished.map((k) => judgedText(view.report, k)).join(" "));
+    if (document.activeElement === document.body) setFocusKey(finished[0]!);
+  }, [view.report]);
+
   const host = URL.canParse(run.target) ? new URL(run.target).host : run.target;
   const share = Math.min(100, run.budgetUsd > 0 ? (run.costUsd / run.budgetUsd) * 100 : 0);
   const { report } = view;
@@ -159,7 +194,7 @@ export function RunLive({ initial }: { initial: Data }) {
         {view.live && <p className="text-muted">Defects count only after a fresh agent reproduces them. You can close this tab; the run keeps going.</p>}
         <p role="status" aria-live="polite" className="text-sm text-warn">
           {gone ? "This run is no longer available." : stale ? "Lost contact with Trawler. Retrying…" : ""}
-          <span className="sr-only">{STATUS_LABEL[run.status] ?? run.status}. {view.headline}</span>
+          <span className="sr-only">{STATUS_LABEL[run.status] ?? run.status}. {view.headline} {announcement}</span>
         </p>
       </div>
 
@@ -227,14 +262,14 @@ export function RunLive({ initial }: { initial: Data }) {
 
       <section className="flex flex-col gap-8">
         <h2 className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Report</h2>
-        <Section title="Confirmed" hint="A fresh agent reproduced it and the judge agreed" items={report.confirmed} empty={view.live ? "Nothing confirmed yet." : "No defect was confirmed."} />
-        <Section<UnjudgedFinding> title="Could not be judged" hint="The judge failed, not the evidence; the replay is kept" items={report.couldNotJudge} note action={(f) =>
-          f.action === "judge_again" ? <JudgeAgainButton runId={run.id} findingKey={f.key} onDone={refresh} />
-          : f.action === "after_run" ? <p className="text-sm text-muted">You can judge it again once the run has finished.</p>
-          : null} />
-        <Section title="Inconclusive" hint="The replay could not settle it" items={report.inconclusive} />
-        <Section title="Not judged" hint="Reported, but not replayed and judged to the end" items={report.notJudged} note />
-        <Section title="Refuted" hint="The replay did not see the problem" items={report.refuted} />
+        <Section title="Confirmed" hint="A fresh agent reproduced it and the judge agreed" items={report.confirmed} empty={view.live ? "Nothing confirmed yet." : "No defect was confirmed."} focusKey={focusKey} />
+        <Section<UnjudgedFinding> title="Could not be judged" hint="The judge ran but gave no verdict; the replay is kept" items={report.couldNotJudge} note reasonInDetails focusKey={focusKey} action={(f) =>
+          f.action === "judge_again" || f.action === "judging" ? <JudgeAgainButton runId={run.id} findingKey={f.key} judging={f.action === "judging"} onDone={refresh} />
+          : f.action === "after_run" ? <p className="text-sm text-muted">You can judge it again after the run, if its cap has room left.</p>
+          : <p className="text-sm text-muted">This run has spent its cap, so it cannot be judged again.</p>} />
+        <Section title="Inconclusive" hint="The replay could not settle it" items={report.inconclusive} focusKey={focusKey} />
+        <Section title="Not judged" hint="Reported, but not replayed and judged to the end" items={report.notJudged} note focusKey={focusKey} />
+        <Section title="Refuted" hint="The replay did not see the problem" items={report.refuted} focusKey={focusKey} />
         <Section title="Friction" hint="Not broken, but slowed someone down" items={report.friction} />
       </section>
 

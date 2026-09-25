@@ -239,7 +239,7 @@ export async function ingestEvents(db: Database, token: string, events: RunEvent
     if (job.status !== "leased") return { cancel: true };
     if (valid.some((e) => e.jobId !== job.id)) throw new ForeignEvents();
     const run = await tx.selectFrom("runs").select("status").where("id", "=", job.run_id).forUpdate().executeTakeFirstOrThrow();
-    const judgingAgain = job.requested_by !== null;
+    const judgingAgain = Boolean(job.requested_by);
     if (!ACTIVE.includes(run.status) && !judgingAgain) return { cancel: true };
     for (const e of valid) {
       const inserted = await tx
@@ -291,7 +291,7 @@ export async function llmCallFor(db: Database, token: string): Promise<LlmCall> 
     const job = await jobForToken(tx, token);
     if (job.status !== "leased") throw new LlmRefused("the job is over");
     const run = await tx.selectFrom("runs").select(["status", "cost_usd", "budget_usd", "agent_model", "judge_model", "provider", "provider_base_url", "prompt_usd_per_mtok", "completion_usd_per_mtok", "token_cap", "tokens_used"]).where("id", "=", job.run_id).executeTakeFirstOrThrow();
-    if (!ACTIVE.includes(run.status) && job.requested_by === null) throw new LlmRefused("the run is no longer active");
+    if (!ACTIVE.includes(run.status) && !job.requested_by) throw new LlmRefused("the run is no longer active");
     const remainingUsd = Number(run.budget_usd) - Number(run.cost_usd);
     const remainingTokens = run.token_cap === null ? null : Number(run.token_cap) - Number(run.tokens_used);
     if (remainingUsd <= 0 || (remainingTokens !== null && remainingTokens <= 0)) throw new LlmRefused("the run has spent its budget");

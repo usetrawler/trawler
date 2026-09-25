@@ -90,7 +90,7 @@ test("a run goes from start to a confirmed defect through the real runner API an
     toolReply("goal_status", { goal: "g", status: "failed", note: "error page" }),
     toolReply("finish", { summary: "done" }),
     toolReply("report_replay", { completed: true, observed: "An Internal Server Error page appeared", blockedAt: null }),
-    textReply(JSON.stringify({ verdict: "confirmed" })),
+    toolReply("report_verdict", { verdict: "confirmed" }),
   ];
   seen.length = 0;
   for (let i = 0; i < 3; i++) expect(await workOnce(worker())).toBe("done");
@@ -106,6 +106,7 @@ test("a run goes from start to a confirmed defect through the real runner API an
     expect(call.body).toMatchObject({ usage: { include: true }, provider: { data_collection: "deny" } });
   }
   expect(seen.map((c) => c.body.model)).toEqual(["m/agent", "m/agent", "m/agent", "m/agent", "m/agent", "m/judge"]);
+  expect(seen.at(-1)!.body).toMatchObject({ max_tokens: 8000, tools: [expect.objectContaining({ function: expect.objectContaining({ name: "report_verdict" }) })] });
   const { rows } = await sql<{ n: number; cost: string }>`select count(*)::int as n, sum(cost_usd) as cost from llm_usage where run_id = ${run.id}`.execute(t.db);
   expect(rows[0]).toEqual({ n: 6, cost: "0.006000" });
 });

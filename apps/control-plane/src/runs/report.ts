@@ -2,7 +2,7 @@ import type { RunSummary } from "./runs.ts";
 
 export type StageState = "waiting" | "active" | "done" | "skipped";
 export type PersonaState = "waiting" | "exploring" | "reached" | "missed" | "finished" | "failed" | "cancelled";
-export type JudgeAgainState = "judge_again" | "judging" | "after_run";
+export type JudgeAgainState = "judge_again" | "judging" | "after_run" | "cap_spent";
 
 const OPEN = new Set(["queued", "leased"]);
 const LIVE = new Set(["queued", "running"]);
@@ -29,17 +29,34 @@ function notJudgedReason(f: Finding, runLive: boolean): string {
   return "The run ended before it was replayed.";
 }
 
-function judgeFailure(job: Job): string {
-  const detail = job.error ?? "no reason was recorded";
-  return job.stopped_by === "error" ? `Model error: ${detail}` : `Failed: ${detail}`;
+const RUNNER_FAULT = /^(the|this) runner\b|^the judge job\b/;
+
+export function gaveNoVerdict(job: { status: string; stopped_by: string | null; requested: boolean }, verdict: string | null): boolean {
+  if (verdict === "confirmed" || verdict === "refuted") return false;
+  if (job.status === "failed") return true;
+  return job.status === "succeeded" && job.stopped_by === "budget" && (verdict === null || !job.requested);
+}
+
+function whyNotJudged(job: Job, runStatus: string): string {
+  if (job.status === "failed") {
+    const detail = job.error ?? "no reason was recorded";
+    return job.stopped_by === "error" && !RUNNER_FAULT.test(detail) ? `Model error: ${detail}` : `Failed: ${detail}`;
+  }
+  if (job.error) return `Stopped: ${job.error}`;
+  return runStatus === "cancelled" ? "You stopped the run before the judge answered." : "The run's cap ran out before the judge answered.";
 }
 
 export function runView(s: RunSummary) {
   const live = isLive(s.status);
   const byKind = (kind: string) => s.jobs.filter((j) => j.kind === kind);
+  const lastJudge = (f: Finding) => byKind("judge").filter((j) => j.finding_key === f.key).at(-1);
+  const judgingAgain = (f: Finding) => { const j = lastJudge(f); return !!j && j.requested && OPEN.has(j.status); };
+  const unjudged = (f: Finding) => { const j = lastJudge(f); return !!j && gaveNoVerdict(j, f.verdict); };
+  const defects = s.findings.filter((f) => f.kind === "defect");
+  const rejudging = defects.some(judgingAgain);
   const use = stage(byKind("role_session"), live);
   const replay = stage(byKind("replay"), live);
-  const judge = stage(byKind("judge"), live);
+  const judge = rejudging ? "active" : stage(byKind("judge"), live);
   const stages = [
     { label: "Use", detail: `${s.personas.length} ${s.personas.length === 1 ? "session" : "sessions"}`, state: use },
     { label: "Replay", detail: "a fresh agent follows each defect's steps", state: replay },
@@ -71,11 +88,8 @@ export function runView(s: RunSummary) {
 
   const name = new Map(s.personas.map((p) => [p.id, p.name]));
   const withPersona = (f: Finding) => ({ ...f, personaName: name.get(f.personaKey) ?? f.personaKey, goalText: goalText.get(f.goal) ?? f.goal, reproduction: f.reproduction as string[] });
-  const lastJudge = (f: Finding) => s.jobs.filter((j) => j.kind === "judge" && j.finding_key === f.key).at(-1);
-  const judgingAgain = (f: Finding) => !live && OPEN.has(lastJudge(f)?.status ?? "");
-  const judgeFailed = (f: Finding) => lastJudge(f)?.status === "failed";
-  const defects = s.findings.filter((f) => f.kind === "defect");
-  const unsettled = defects.filter((f) => judgeFailed(f) || judgingAgain(f));
+  const capSpent = s.costUsd >= s.budgetUsd || (s.tokenCap !== null && s.tokensUsed >= s.tokenCap);
+  const unsettled = defects.filter((f) => judgingAgain(f) || unjudged(f));
   const settled = defects.filter((f) => !unsettled.includes(f));
   const report = {
     confirmed: settled.filter((f) => f.verdict === "confirmed").map(withPersona),
@@ -83,8 +97,8 @@ export function runView(s: RunSummary) {
     refuted: settled.filter((f) => f.verdict === "refuted").map(withPersona),
     couldNotJudge: unsettled.map((f) => ({
       ...withPersona(f),
-      reason: judgingAgain(f) ? "Judging again…" : judgeFailure(lastJudge(f)!),
-      action: (judgingAgain(f) ? "judging" : live ? "after_run" : "judge_again") as JudgeAgainState,
+      reason: judgingAgain(f) ? "Judging again…" : whyNotJudged(lastJudge(f)!, s.status),
+      action: (judgingAgain(f) ? "judging" : live ? "after_run" : capSpent ? "cap_spent" : "judge_again") as JudgeAgainState,
     })),
     notJudged: settled.filter((f) => !f.verdict).map((f) => ({ ...withPersona(f), reason: notJudgedReason(f, live) })),
     friction: s.findings.filter((f) => f.kind === "friction").map(withPersona),
@@ -92,7 +106,7 @@ export function runView(s: RunSummary) {
 
   const goalsReached = s.goals.filter((g) => g.status === "reached").length;
   const goalsTotal = s.personas.length * s.goalTexts.length;
-  return { live, rejudging: defects.some(judgingAgain), stages, personas, report, goalsReached, goalsTotal, headline: headline(s.status, report.confirmed.length, defects.length) };
+  return { live, rejudging, stages, personas, report, goalsReached, goalsTotal, headline: headline(s.status, report.confirmed.length, defects.length) };
 }
 
 function headline(status: string, confirmed: number, defects: number): string {
