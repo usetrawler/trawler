@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { AppShell } from "../../components/app-shell.tsx";
 import { getAuth } from "../../server/auth.ts";
 import { NewProjectForm } from "./new-project-form.tsx";
-import { SignOutButton } from "./sign-out-button.tsx";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +21,6 @@ export default async function NewProjectPage() {
           <p className="max-w-xl text-lg text-muted">Paste a real product that runs in a browser: production, staging or a preview. We read the public page and propose who should try it and what they want to get done.</p>
         </div>
         <NewProjectForm />
-        <SignOutButton />
       </div>
     </AppShell>
   );

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { BrandMark } from "./brand-mark.tsx";
 import { DocsLink } from "./docs-link.tsx";
+import { SignOutButton } from "./sign-out-button.tsx";
 
 const STEPS = ["Product", "Plan", "Run"] as const;
 const NAV = [["projects", "/", "Projects"], ["new", "/new", "New project"]] as const;
@@ -18,7 +19,7 @@ export function AppShell({ organization, email, step, current, children }: { org
             <ul className="flex items-center gap-4">
               {NAV.map(([key, href, label]) => (
                 <li key={key}>
-                  <a href={href} aria-current={current === key ? "page" : undefined} className="-my-2 block py-2 font-mono text-xs tracking-[0.15em] text-muted uppercase hover:text-ink aria-[current=page]:text-ink">{label}</a>
+                  <a href={href} aria-current={current === key ? "page" : undefined} className="-my-2 block py-2 font-mono text-xs tracking-[0.15em] text-muted uppercase underline-offset-4 hover:text-ink aria-[current=page]:text-ink aria-[current=page]:underline">{label}</a>
                 </li>
               ))}
             </ul>
@@ -28,6 +29,7 @@ export function AppShell({ organization, email, step, current, children }: { org
           <DocsLink className="-my-2 mr-3 shrink-0 py-2 font-mono text-xs tracking-[0.15em] text-muted uppercase hover:text-ink">Docs</DocsLink>
           <span className="hidden truncate text-muted sm:inline">{email}</span>
           <span className="truncate font-mono text-xs tracking-[0.15em] uppercase">{organization}</span>
+          <SignOutButton className="-my-2 ml-3 shrink-0 py-2 font-mono text-xs tracking-[0.15em] text-muted uppercase hover:text-ink" />
         </div>
       </header>
       {step && (

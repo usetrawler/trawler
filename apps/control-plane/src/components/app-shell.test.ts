@@ -21,10 +21,15 @@ describe("AppShell", () => {
     expect(html).not.toContain("aria-current");
   });
 
-  it("marks the page the person is on", () => {
+  it("marks the page the person is on, with an underline as well as colour", () => {
     expect(link(render("projects"), "Projects")).toContain('aria-current="page"');
     expect(link(render("projects"), "New project")).not.toContain("aria-current");
     expect(link(render("new"), "New project")).toContain('aria-current="page"');
+    expect(link(render("new"), "New project")).toMatch(/class="[^"]*\baria-\[current=page\]:underline\b/);
+  });
+
+  it("offers Sign out on every page", () => {
+    expect(render()).toMatch(/<button type="button" class="[^"]*">Sign out<\/button>/);
   });
 
   it("links to the product docs in a new tab, and says so to a screen reader", () => {
