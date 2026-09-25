@@ -1,6 +1,6 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { APICallError, wrapLanguageModel, type LanguageModelMiddleware } from "ai";
-import type { JobUsage } from "@usetrawler/protocol";
+import { APICallError, RetryError, wrapLanguageModel, type LanguageModelMiddleware } from "ai";
+import { JOB_STOPPED, type JobUsage } from "@usetrawler/protocol";
 
 type OpenRouterOptions = { provider?: Record<string, unknown> } & Record<string, unknown>;
 
@@ -74,6 +74,16 @@ export function tallyStep(
   return cost;
 }
 
-export function refusedForBudget(err: unknown): boolean {
-  return APICallError.isInstance(err) && err.statusCode === 402;
+const lastAttempt = (err: unknown) => (RetryError.isInstance(err) ? err.lastError : err);
+
+export function stoppedByRun(err: unknown): boolean {
+  const last = lastAttempt(err);
+  return APICallError.isInstance(last) && last.statusCode === 402 && (last.data as { error?: { type?: unknown } } | undefined)?.error?.type === JOB_STOPPED;
+}
+
+export function failureMessage(err: unknown): string {
+  const last = lastAttempt(err);
+  const message = last instanceof Error ? last.message : String(last);
+  if (!message) return err instanceof Error ? err.message : String(err);
+  return RetryError.isInstance(err) && err.reason === "maxRetriesExceeded" ? `${message} (after ${err.errors.length} attempts)` : message;
 }

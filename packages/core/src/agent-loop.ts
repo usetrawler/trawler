@@ -1,7 +1,7 @@
 import { generateText, type LanguageModel, type ModelMessage, type StepResult, type ToolSet } from "ai";
 import type { JobUsage, StopReason } from "@usetrawler/protocol";
 import { pruneMessages } from "./context.ts";
-import { type Budget, refusedForBudget, tallyStep } from "./llm.ts";
+import { type Budget, failureMessage, stoppedByRun, tallyStep } from "./llm.ts";
 import type { SecretScrubber } from "./secrets.ts";
 import type { FillField } from "./session-tools.ts";
 
@@ -133,7 +133,7 @@ export async function runAgentLoop(opts: {
     if (opts.budget.exceeded) return { stoppedBy: "budget" };
     return { stoppedBy: "max_steps" };
   } catch (err) {
-    if (refusedForBudget(err)) return { stoppedBy: "budget" };
-    return { stoppedBy: "error", error: opts.scrubber.scrub(err instanceof Error ? err.message : String(err)) };
+    if (stoppedByRun(err)) return { stoppedBy: "budget" };
+    return { stoppedBy: "error", error: opts.scrubber.scrub(failureMessage(err)) };
   }
 }

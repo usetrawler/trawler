@@ -14,6 +14,7 @@ import { setModelKey } from "../credentials/credentials.ts";
 import { resetPriceCache } from "../llm/prices.ts";
 import { handleChatCompletions } from "../llm-proxy/proxy.ts";
 import { createProject } from "../projects/projects.ts";
+import { runView } from "../runs/report.ts";
 import { runSummary, startRun } from "../runs/runs.ts";
 import { handleClaim, handleComplete, handleEvents, handleRelease, type RunnerApiDeps } from "./handlers.ts";
 
@@ -37,6 +38,8 @@ const toolReply = (name: string, args: unknown) => ({
   usage,
 });
 const textReply = (content: string) => ({ id: "gen", object: "chat.completion", created: 1, model: "m/judge", choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content } }], usage });
+const upstreamError = (status: number, message: string) => ({ status, body: { error: { code: status, message } } });
+const viaFakeUpstream: typeof fetch = (url, init) => fetch(String(url).replace("https://api.openai.com/v1", openRouterBase), init);
 
 beforeAll(async () => {
   server = createServer(async (req, res) => {
@@ -44,7 +47,7 @@ beforeAll(async () => {
     for await (const c of req) chunks.push(c as Buffer);
     const request = new Request(`http://cp.test${req.url}`, { method: req.method, headers: req.headers as Record<string, string>, body: chunks.length ? Buffer.concat(chunks) : undefined });
     const match = /^\/api\/jobs\/([^/]+)\/(events|complete|release)$/.exec(req.url ?? "");
-    const response = req.url === "/api/llm/v1/chat/completions" ? await handleChatCompletions(request, { db: t.db, keys, openRouterUrl: openRouterBase, retryBaseMs: 1 }) : req.url === "/api/runner/claim" ? await handleClaim(request, deps) : match ? await (match[2] === "events" ? handleEvents : match[2] === "release" ? handleRelease : handleComplete)(request, match[1]!, deps) : new Response(null, { status: 404 });
+    const response = req.url === "/api/llm/v1/chat/completions" ? await handleChatCompletions(request, { db: t.db, keys, openRouterUrl: openRouterBase, fetch: viaFakeUpstream, retryBaseMs: 1 }) : req.url === "/api/runner/claim" ? await handleClaim(request, deps) : match ? await (match[2] === "events" ? handleEvents : match[2] === "release" ? handleRelease : handleComplete)(request, match[1]!, deps) : new Response(null, { status: 404 });
     res.writeHead(response.status, Object.fromEntries(response.headers));
     res.end(Buffer.from(await response.arrayBuffer()));
   });
@@ -60,6 +63,11 @@ beforeAll(async () => {
     seen.push({ auth: req.headers.authorization, body: JSON.parse(Buffer.concat(chunks).toString()) });
     const reply = replies.shift();
     if (reply && typeof reply === "object" && "delayMs" in reply) await new Promise((r) => setTimeout(r, (reply as { delayMs: number }).delayMs));
+    if (reply && typeof reply === "object" && "status" in reply) {
+      const { status, body } = reply as { status: number; body: unknown };
+      res.writeHead(status, { "content-type": "application/json" });
+      return res.end(JSON.stringify(body));
+    }
     res.writeHead(reply ? 200 : 500, { "content-type": "application/json" });
     res.end(JSON.stringify(reply ?? { error: { message: "no scripted reply" } }));
   });
@@ -123,6 +131,81 @@ test("a run that spends its cap mid-session is stopped by the proxy, and the job
   expect(summary).toMatchObject({ status: "stopped_budget" });
   expect(summary!.costUsd).toBeCloseTo(0.002, 6);
   expect(summary!.jobs[0]).toMatchObject({ status: "succeeded", stopped_by: "budget" });
+});
+
+test("a key the provider starts refusing mid-run fails each session with the proxy's reason, and the run ends Failed", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-k', 'K', 'k', now())`.execute(t.db);
+  await withOrg(t.db, "org-k", (tx) => setModelKey(tx, "org-k", { provider: "openrouter", key: ORG_KEY }, "u", keys));
+  const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "noor", name: "Noor", brief: "b" }, { id: "tao", name: "Tao", brief: "b" }], goals: [{ id: "g", instruction: "Look around." }] });
+  const project = await withOrg(t.db, "org-k", (tx) => createProject(tx, "org-k", config, keys));
+  const run = await withOrg(t.db, "org-k", (tx) => startRun(tx, "org-k", project, keys, { budgetUsd: 1, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 10, replaySteps: 10, createdBy: "u" }));
+  replies = [toolReply("note", { text: "looking" }), upstreamError(401, "User not found."), upstreamError(402, "Insufficient credits.")];
+  seen.length = 0;
+  expect(await workOnce(worker())).toBe("done");
+  expect(await workOnce(worker())).toBe("done");
+  expect(await workOnce(worker())).toBe("idle");
+  expect(seen).toHaveLength(3);
+  const summary = (await withOrg(t.db, "org-k", (tx) => runSummary(tx, "org-k", run.id)))!;
+  expect(summary.status).toBe("failed");
+  expect(summary.jobs.map((j) => ({ status: j.status, stopped_by: j.stopped_by, error: j.error }))).toEqual([
+    { status: "failed", stopped_by: "error", error: "the provider refused the workspace key; replace it on the plan page" },
+    { status: "failed", stopped_by: "error", error: "the provider account behind the workspace key is out of credits" },
+  ]);
+  const view = runView(summary);
+  expect(view.headline).toBe("This run could not finish.");
+  expect(view.personas.map((p) => ({ name: p.name, state: p.state, error: p.error }))).toEqual([
+    { name: "Noor", state: "failed", error: "the provider refused the workspace key; replace it on the plan page" },
+    { name: "Tao", state: "failed", error: "the provider account behind the workspace key is out of credits" },
+  ]);
+});
+
+test("a run whose cost only the proxy can see is stopped at the cap by the proxy, and the session ends as stopped by the budget", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-c', 'C', 'c', now())`.execute(t.db);
+  await withOrg(t.db, "org-c", (tx) => setModelKey(tx, "org-c", { provider: "openai", key: "sk-proj-" + "c".repeat(40) }, "u", keys));
+  const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "cy", name: "Cy", brief: "b" }], goals: [{ id: "g", instruction: "Look around." }] });
+  const project = await withOrg(t.db, "org-c", (tx) => createProject(tx, "org-c", config, keys));
+  const run = await withOrg(t.db, "org-c", (tx) => startRun(tx, "org-c", project, keys, { budgetUsd: 0.002, agentModel: "gpt-5-mini", judgeModel: "gpt-5-mini", maxSteps: 10, replaySteps: 10, createdBy: "u", provider: "openai", price: { promptUsdPerMtok: 1, completionUsdPerMtok: 1 } }));
+  replies = Array.from({ length: 5 }, () => ({ ...toolReply("note", { text: "looking" }), usage: { prompt_tokens: 1200, completion_tokens: 30, total_tokens: 1230 } }));
+  seen.length = 0;
+  expect(await workOnce({ ...worker(), flushMs: 60_000 })).toBe("done");
+  expect(seen).toHaveLength(2);
+  const summary = (await withOrg(t.db, "org-c", (tx) => runSummary(tx, "org-c", run.id)))!;
+  expect(summary.status).toBe("stopped_budget");
+  expect(summary.costUsd).toBeCloseTo(0.00246, 6);
+  expect(summary.jobs[0]).toMatchObject({ status: "succeeded", stopped_by: "budget", error: null, usage: expect.objectContaining({ steps: 2, costUsd: 0 }) });
+  expect(runView(summary).headline).toBe("Stopped at the cap. No defects found.");
+});
+
+test("the proxy marks the 402s that mean the run stopped the job, and only those", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-m', 'M', 'm', now())`.execute(t.db);
+  await withOrg(t.db, "org-m", (tx) => setModelKey(tx, "org-m", { provider: "openrouter", key: ORG_KEY }, "u", keys));
+  const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "mo", name: "Mo", brief: "b" }], goals: [{ id: "g", instruction: "x" }] });
+  const project = await withOrg(t.db, "org-m", (tx) => createProject(tx, "org-m", config, keys));
+  const run = await withOrg(t.db, "org-m", (tx) => startRun(tx, "org-m", project, keys, { budgetUsd: 0.01, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 10, replaySteps: 10, createdBy: "u", price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } }));
+  const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "1" } }), deps)).json();
+  expect(job.runId).toBe(run.id);
+  const refusal = async () => {
+    const res = await handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${job.token}`, "content-type": "application/json" }, body: JSON.stringify({ model: "m/agent", messages: [{ role: "user", content: "hi" }] }) }), { db: t.db, keys, openRouterUrl: openRouterBase, retryBaseMs: 1 });
+    expect(res.status).toBe(402);
+    return ((await res.json()) as { error: unknown }).error;
+  };
+
+  replies = [upstreamError(401, "User not found.")];
+  expect(await refusal()).toEqual({ code: 402, message: "the provider refused the workspace key; replace it on the plan page" });
+  replies = [upstreamError(402, "Insufficient credits.")];
+  expect(await refusal()).toEqual({ code: 402, message: "the provider account behind the workspace key is out of credits" });
+  await withOrg(t.db, "org-m", (tx) => setModelKey(tx, "org-m", { provider: "openai", key: "sk-proj-" + "m".repeat(40) }, "u", keys));
+  expect(await refusal()).toEqual({ code: 402, message: "the workspace key changed to another provider or endpoint; start a new run" });
+  await sql`delete from credentials where org_id = 'org-m'`.execute(t.db);
+  expect(await refusal()).toEqual({ code: 402, message: "the workspace has no model key" });
+  await withOrg(t.db, "org-m", (tx) => setModelKey(tx, "org-m", { provider: "openrouter", key: ORG_KEY }, "u", keys));
+
+  await sql`update runs set cost_usd = budget_usd - 0.000001 where id = ${run.id}`.execute(t.db);
+  expect(await refusal()).toEqual({ code: 402, message: "the run has spent its budget", type: "job_stopped" });
+  await sql`update runs set status = 'cancelled' where id = ${run.id}`.execute(t.db);
+  expect(await refusal()).toEqual({ code: 402, message: "the run is no longer active", type: "job_stopped" });
+  await sql`update jobs set status = 'succeeded' where id = ${job.jobId}`.execute(t.db);
+  expect(await refusal()).toEqual({ code: 402, message: "the job is over", type: "job_stopped" });
 });
 
 test("the proxy refuses a stranger, a model the run did not choose, and streaming", async () => {

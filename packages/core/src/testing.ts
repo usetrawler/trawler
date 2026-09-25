@@ -1,3 +1,4 @@
+import { APICallError } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 
 const usage = {
@@ -13,11 +14,16 @@ export function text(t: string) {
   return { type: "text" as const, text: t };
 }
 
+export function proxyRefusal(message: string, type: string | null = null) {
+  return new APICallError({ message, url: "https://cp.test/api/llm/v1/chat/completions", requestBodyValues: {}, statusCode: 402, data: { error: { code: 402, message, type } } });
+}
+
 type Part = ReturnType<typeof toolCall> | ReturnType<typeof text>;
 
-export function scriptedModel(responses: Array<Part | Part[]>, costPerStep = 0.001) {
+export function scriptedModel(responses: Array<Part | Part[] | Error>, costPerStep = 0.001) {
   let callNo = 0;
   const results = responses.map((response) => {
+    if (response instanceof Error) return response;
     const parts = Array.isArray(response) ? response : [response];
     return {
       content: parts.map((part) => (part.type === "tool-call" ? { ...part, toolCallId: `call-${++callNo}` } : part)),
@@ -32,6 +38,7 @@ export function scriptedModel(responses: Array<Part | Part[]>, costPerStep = 0.0
     doGenerate: async () => {
       const result = results[next++];
       if (!result) throw new Error(`scriptedModel has only ${results.length} responses; call ${next} has none`);
+      if (result instanceof Error) throw result;
       return result;
     },
   });

@@ -6,6 +6,7 @@ import { ProjectConfigSchema } from "./project.ts";
 export const PROTOCOL_VERSION = 1;
 export const PROTOCOL_HEADER = "x-trawler-protocol";
 export const MAX_EVENTS_PER_BATCH = 200;
+export const JOB_STOPPED = "job_stopped";
 
 export const JobKindSchema = z.enum(["role_session", "replay", "judge"]);
 export type JobKind = z.infer<typeof JobKindSchema>;

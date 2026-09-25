@@ -1,3 +1,4 @@
+import { JOB_STOPPED } from "@usetrawler/protocol";
 import type { Database } from "../db/index.ts";
 import { asSystem } from "../db/tenancy.ts";
 import { modelKey } from "../credentials/credentials.ts";
@@ -23,7 +24,8 @@ const FORWARDED = ["model", "messages", "tools", "tool_choice", "parallel_tool_c
 const OPENROUTER_ONLY = ["top_k", "reasoning", "include_reasoning"] as const;
 const inFlight = new Set<string>();
 
-const failure = (status: number, message: string) => Response.json({ error: { code: status, message } }, { status, headers: { "cache-control": "no-store" } });
+const failure = (status: number, message: string, type?: string) => Response.json({ error: { code: status, message, ...(type ? { type } : {}) } }, { status, headers: { "cache-control": "no-store" } });
+const jobStopped = (message: string) => failure(402, message, JOB_STOPPED);
 
 class UpstreamTimeout extends Error {}
 
@@ -81,7 +83,7 @@ export async function handleChatCompletions(req: Request, deps: ProxyDeps): Prom
     call = await llmCallFor(deps.db, token);
   } catch (err) {
     if (err instanceof InvalidJobToken) return failure(401, "invalid or expired job token");
-    if (err instanceof LlmRefused) return failure(402, err.message);
+    if (err instanceof LlmRefused) return jobStopped(err.message);
     throw err;
   }
   if (inFlight.has(call.jobId)) return failure(429, "one model call at a time per job");
@@ -107,7 +109,7 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
   const endpoint = endpointFor(stored.provider, stored.key, { openRouterUrl: deps.openRouterUrl, customUrl: stored.baseUrl });
   const price = call.price;
   const maxTokens = outputAllowance(price, request.max_tokens ?? request.max_completion_tokens, call);
-  if (maxTokens < 1) return failure(402, "the run has spent its budget");
+  if (maxTokens < 1) return jobStopped("the run has spent its budget");
 
   const openRouter = stored.provider === "openrouter";
   const fields = openRouter ? [...FORWARDED, ...OPENROUTER_ONLY] : FORWARDED;

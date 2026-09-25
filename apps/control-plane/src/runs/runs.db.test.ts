@@ -467,11 +467,11 @@ describe("judge again", () => {
     const run = await runWithFailedJudge();
     await again(run.id);
     const refusedJob = (await claimJob(t.db, keys))!;
-    await completeJob(t.db, refusedJob.token, { usage: usage(0), stoppedBy: "budget", error: "the provider account behind the workspace key is out of credits" });
+    await completeJob(t.db, refusedJob.token, { usage: usage(0), stoppedBy: "error", error: "the provider account behind the workspace key is out of credits" });
     const summary = await summaryOf(run.id);
     expect(summary.jobs.filter((j) => j.kind === "judge").map((j) => [j.status, j.stopped_by, j.error, j.requested])).toEqual([
       ["failed", "error", "No output generated.", false],
-      ["succeeded", "budget", "the provider account behind the workspace key is out of credits", true],
+      ["failed", "error", "the provider account behind the workspace key is out of credits", true],
     ]);
     await again(run.id);
     expect(await claimJob(t.db, keys)).toMatchObject({ runId: run.id, kind: "judge", finding: { id: "ana:f1" } });
