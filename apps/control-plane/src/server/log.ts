@@ -1,5 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
-import { MIN_SECRET_LENGTH, SecretScrubber } from "@usetrawler/core";
+import { MIN_SECRET_LENGTH, SecretScrubber } from "@usetrawler/core/secrets";
 
 type Env = Record<string, string | undefined>;
 
