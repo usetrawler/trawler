@@ -78,7 +78,10 @@ async function switchSource(o: DeployOptions, api: Railway, at: Target, service:
       return serviceInstance.source;
     },
     (source) => source?.image === image && !source.repo,
-    (source) => `Railway did not switch ${service} to ${image}; ${source?.repo ? `it still builds from ${source.repo}` : `its image is ${source?.image ?? "not set"}`}`,
+    (source) =>
+      source === undefined
+        ? `Railway did not answer while ${service} was switched to ${image}`
+        : `Railway did not switch ${service} to ${image}; ${source?.repo ? `it still builds from ${source.repo}` : `its image is ${source?.image ?? "not set"}`}`,
   );
 }
 

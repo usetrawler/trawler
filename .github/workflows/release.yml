@@ -75,7 +75,7 @@ jobs:
   staging:
     needs: images
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
     environment: staging
     concurrency: { group: staging, cancel-in-progress: false }
     env:
@@ -103,7 +103,7 @@ jobs:
   production:
     needs: [images, staging]
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     environment: production
     concurrency: { group: production, cancel-in-progress: false }
     steps:

@@ -55,7 +55,7 @@ function fakeRailway(opts: FakeProject) {
       const from = deployedFrom.get(String(variables.id))!;
       const queue = opts.deployments[String(variables.id).slice("dep-".length)]!;
       const { image, instances, ...deployment } = (queue.length > 1 ? queue.shift() : queue[0])!;
-      const meta = from.repo || opts.buildsRepo ? { commitHash: "0ld" } : opts.noImageMeta ? {} : { image: image ?? from.image };
+      const meta = from.repo || opts.buildsRepo ? { commitHash: "0ld" } : opts.noImageMeta ? { commitHash: null } : { image: image ?? from.image, commitHash: null };
       const settled = deployment.status === "SUCCESS" ? [deployment.deploymentStopped ? "EXITED" : "RUNNING"] : [];
       return reply({ deployment: { ...deployment, meta, instances: (instances ?? settled).map((status) => ({ status })) } });
     }
