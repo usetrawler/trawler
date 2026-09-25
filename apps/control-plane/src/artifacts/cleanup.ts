@@ -21,6 +21,7 @@ export async function removeExpiredArtifacts(db: Database, store: ArtifactStore,
         .where((eb) => eb.or([
           eb("created_at", "<", sql<Date>`now() - make_interval(days => ${RETENTION_DAYS})`),
           eb("discarded_at", "<", sql<Date>`now() - make_interval(mins => ${DISCARD_GRACE_MINUTES})`),
+          eb.and([eb("stored_at", "is", null), eb("created_at", "<", sql<Date>`now() - make_interval(mins => ${DISCARD_GRACE_MINUTES})`)]),
         ]))
         .orderBy("created_at")
         .limit(batch);

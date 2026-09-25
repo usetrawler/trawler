@@ -95,7 +95,7 @@ test("the cleanup started at boot removes expired artifacts with the configured 
   vi.clearAllTimers();
 });
 
-test("a half-configured bucket turns artifacts off, starts no cleanup, and says so once", async () => {
+test("a half-configured bucket turns artifacts off, starts no cleanup, and says so without repeating it on every call", async () => {
   vi.stubEnv("TRAWLER_ARTIFACTS_BUCKET", "trawler-artifacts");
   const { artifactStore, startArtifactCleanup } = await fresh();
   vi.useFakeTimers();

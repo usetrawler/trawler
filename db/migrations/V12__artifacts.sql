@@ -7,9 +7,11 @@ CREATE TABLE artifacts (
   kind text NOT NULL CHECK (kind IN ('screenshot')),
   content_type text NOT NULL CHECK (content_type IN ('image/png', 'image/jpeg', 'image/webp')),
   size_bytes integer NOT NULL CHECK (size_bytes BETWEEN 1 AND 5242880),
-  storage_key text NOT NULL UNIQUE CHECK (starts_with(storage_key, 'orgs/' || org_id || '/runs/' || run_id || '/')),
+  storage_key text NOT NULL UNIQUE,
   created_at timestamptz NOT NULL DEFAULT now(),
+  stored_at timestamptz,
   discarded_at timestamptz,
+  CHECK (storage_key = 'orgs/' || org_id || '/runs/' || run_id || '/' || id || '.' || CASE content_type WHEN 'image/png' THEN 'png' WHEN 'image/jpeg' THEN 'jpg' WHEN 'image/webp' THEN 'webp' END),
   FOREIGN KEY (run_id, org_id) REFERENCES runs (id, org_id) ON DELETE CASCADE,
   FOREIGN KEY (job_id, org_id) REFERENCES jobs (id, org_id) ON DELETE CASCADE
 );

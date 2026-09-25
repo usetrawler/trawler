@@ -55,6 +55,7 @@ export interface Artifacts {
   run_id: string;
   size_bytes: number;
   storage_key: string;
+  stored_at: Timestamp | null;
 }
 
 export interface Credentials {
