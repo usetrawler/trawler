@@ -9,7 +9,7 @@ const NAV = [["projects", "/", "Projects"], ["new", "/new", "New project"]] as c
 export function AppShell({ organization, email, step, current, children }: { organization: string; email: string; step?: 1 | 2 | 3; current?: "projects" | "new"; children: ReactNode }) {
   return (
     <div className="min-h-dvh">
-      <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-line px-4 py-3 md:px-8">
+      <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4 border-b border-line px-4 py-3 md:px-8">
         <div className="flex items-center gap-6">
           <a href="/" className="flex items-center gap-2 text-lg font-bold tracking-tight">
             <BrandMark />
