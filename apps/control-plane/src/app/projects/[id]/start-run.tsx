@@ -47,7 +47,7 @@ export function StartRun({ projectId, personas }: { projectId: string; personas:
         {cap > 0 && cap < estimate.high && <span className="text-sm text-warn">The cap is below the estimate, so the run may stop before everyone finishes.</span>}
       </label>
       <label className="flex items-start gap-3 text-sm">
-        <input type="checkbox" name="authorised" className="mt-1 accent-[var(--action)]" />
+        <input type="checkbox" name="authorised" required className="mt-1 accent-[var(--action)]" />
         <span>I am authorised to test this product. It is not a production system with real people&apos;s data.</span>
       </label>
       {state.error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{state.error}</p>}

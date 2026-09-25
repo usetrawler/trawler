@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import type { runView, StageState, PersonaState } from "../../../runs/report.ts";
 import type { RunSummary } from "../../../runs/runs.ts";
 import { cancelRunAction } from "./actions.ts";
@@ -10,14 +10,14 @@ type ReportFinding = View["report"]["confirmed"][number];
 
 const POLL_MS = 2000;
 const usd = (n: number) => `$${n.toFixed(2)}`;
-const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 || noun === "friction" ? "" : "s"}`;
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 const STATUS_LABEL: Record<string, string> = { queued: "Queued", running: "Live", succeeded: "Complete", stopped_budget: "Stopped at cap", cancelled: "Cancelled", failed: "Failed" };
-const STAGE_STYLE: Record<StageState, string> = { waiting: "text-muted", active: "text-action", done: "text-ok", skipped: "text-muted line-through" };
+const STAGE_STYLE: Record<StageState, string> = { waiting: "text-muted", active: "text-info", done: "text-ok", skipped: "text-muted italic" };
 const STAGE_LABEL: Record<StageState, string> = { waiting: "Waiting", active: "In progress", done: "Done", skipped: "Skipped" };
 const PERSONA_LABEL: Record<PersonaState, [string, string]> = {
-  waiting: ["Waiting", "text-muted"], exploring: ["Exploring", "text-action"], reached: ["Goal reached", "text-ok"], missed: ["Goal not reached", "text-warn"],
-  finished: ["Finished", "text-ink"], failed: ["Could not finish", "text-bad"], cancelled: ["Did not run", "text-muted"],
+  waiting: ["Waiting", "text-muted"], exploring: ["Exploring", "text-info"], reached: ["Goal reached", "text-ok"], missed: ["Goal not reached", "text-warn"],
+  finished: ["Finished", "text-ink"], failed: ["Could not finish", "text-bad"], cancelled: ["Stopped", "text-muted"],
 };
 
 function Stat({ label, value, children }: { label: string; value: string; children?: React.ReactNode }) {
@@ -32,15 +32,17 @@ function Stat({ label, value, children }: { label: string; value: string; childr
 
 function CancelButton({ runId, onDone }: { runId: string; onDone: () => void }) {
   const [asking, setAsking] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [pending, start] = useTransition();
   if (!asking) return <button type="button" onClick={() => setAsking(true)} className="h-10 border border-line px-4 text-sm hover:border-ink">Stop run</button>;
   return (
     <div className="flex flex-wrap items-center gap-3 text-sm">
       <span className="text-muted">Stop now? What was found so far is kept.</span>
-      <button type="button" disabled={pending} onClick={() => start(async () => { await cancelRunAction(runId); onDone(); })} className="h-10 border border-bad px-4 text-bad disabled:opacity-60">
+      <button type="button" disabled={pending} onClick={() => start(async () => { setFailed(!(await cancelRunAction(runId))); onDone(); })} className="h-10 border border-bad px-4 text-bad disabled:opacity-60">
         {pending ? "Stopping…" : "Stop"}
       </button>
       <button type="button" onClick={() => setAsking(false)} className="h-10 px-2 text-muted">Keep running</button>
+      {failed && <span role="alert" className="text-bad">The run could not be stopped. Try again.</span>}
     </div>
   );
 }
@@ -87,26 +89,42 @@ function Section({ title, hint, items, empty, note }: { title: string; hint: str
 export function RunLive({ initial }: { initial: Data }) {
   const [data, setData] = useState(initial);
   const [stale, setStale] = useState(false);
+  const [gone, setGone] = useState(false);
+  const latest = useRef(0);
   const { run, view } = data;
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
+    const request = ++latest.current;
     try {
       const res = await fetch(`/api/runs/${run.id}`, { cache: "no-store" });
+      if (res.status === 401) return window.location.assign("/sign-in");
+      if (res.status === 404) return setGone(true);
       if (!res.ok) throw new Error(String(res.status));
-      setData(await res.json());
+      const next = (await res.json()) as Data;
+      if (request !== latest.current) return;
+      setData(next);
       setStale(false);
     } catch {
-      setStale(true);
+      if (request === latest.current) setStale(true);
     }
-  };
+  }, [run.id]);
 
   useEffect(() => {
-    if (!view.live) return;
-    const timer = setInterval(refresh, POLL_MS);
-    return () => clearInterval(timer);
-  });
+    if (!view.live || gone) return;
+    let timer: ReturnType<typeof setTimeout>;
+    let stopped = false;
+    const tick = async () => {
+      if (!document.hidden) await refresh();
+      if (!stopped) timer = setTimeout(tick, POLL_MS);
+    };
+    timer = setTimeout(tick, POLL_MS);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [view.live, gone, refresh]);
 
-  const host = new URL(run.target).host;
+  const host = URL.canParse(run.target) ? new URL(run.target).host : run.target;
   const share = Math.min(100, run.budgetUsd > 0 ? (run.costUsd / run.budgetUsd) * 100 : 0);
   const { report } = view;
   return (
@@ -117,7 +135,10 @@ export function RunLive({ initial }: { initial: Data }) {
         </p>
         <h1 className="text-4xl leading-[0.95] font-bold tracking-tight md:text-5xl">{view.headline}</h1>
         {view.live && <p className="text-muted">Defects count only after a fresh agent reproduces them. You can close this tab; the run keeps going.</p>}
-        {stale && <p role="status" className="text-sm text-warn">Lost contact with Trawler. Retrying…</p>}
+        <p role="status" aria-live="polite" className="text-sm text-warn">
+          {gone ? "This run is no longer available." : stale ? "Lost contact with Trawler. Retrying…" : ""}
+          <span className="sr-only">{STATUS_LABEL[run.status] ?? run.status}. {view.headline}</span>
+        </p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
@@ -131,7 +152,7 @@ export function RunLive({ initial }: { initial: Data }) {
 
       <ol className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {view.stages.map((s, i) => (
-          <li key={s.label} className="flex flex-col gap-1 border-t-2 border-line pt-2" style={s.state === "active" ? { borderColor: "var(--action)" } : s.state === "done" ? { borderColor: "var(--ok)" } : undefined}>
+          <li key={s.label} className="flex flex-col gap-1 border-t-2 border-line pt-2" style={s.state === "active" ? { borderColor: "var(--info)" } : s.state === "done" ? { borderColor: "var(--ok)" } : undefined}>
             <span className="font-mono text-xs text-muted">{String(i + 1).padStart(2, "0")}</span>
             <span className="font-bold">{s.label}</span>
             <span className={`text-xs ${STAGE_STYLE[s.state]}`}>{STAGE_LABEL[s.state]}</span>
@@ -151,9 +172,12 @@ export function RunLive({ initial }: { initial: Data }) {
                   <p className={`font-mono text-[11px] tracking-[0.15em] uppercase ${tone}`}>{label}</p>
                 </div>
                 {p.goals.map((g) => (
-                  <p key={g.goal} className="text-sm"><span className={g.status === "reached" ? "text-ok" : "text-warn"}>{g.status === "reached" ? "✓" : "✕"}</span> {g.goal}{g.note && <span className="text-muted"> — {g.note}</span>}</p>
+                  <p key={g.id} className="text-sm">
+                    <span aria-label={g.status ?? "no outcome yet"} className={g.status === "reached" ? "text-ok" : g.status === "failed" ? "text-warn" : "text-muted"}>{g.status === "reached" ? "✓" : g.status === "failed" ? "✕" : "·"}</span> {g.goal}
+                    {g.note && <span className="text-muted"> — {g.note}</span>}
+                  </p>
                 ))}
-                {(p.defects > 0 || p.friction > 0) && <p className="text-xs text-muted">{plural(p.defects, "defect report")} · {plural(p.friction, "friction")}</p>}
+                {(p.defects > 0 || p.friction > 0) && <p className="text-xs text-muted">{plural(p.defects, "defect report", "defect reports")} · {plural(p.friction, "friction", "frictions")}</p>}
                 {p.state === "failed" && p.error && <p className="text-xs text-bad">{p.error}</p>}
               </li>
             );

@@ -11,8 +11,11 @@ type Finding = RunSummary["findings"][number];
 
 export const isLive = (status: string) => LIVE.has(status);
 
+const RAN = new Set(["succeeded", "failed"]);
+
 function stage(jobs: Job[], runLive: boolean): StageState {
-  if (jobs.length === 0) return runLive ? "waiting" : "skipped";
+  if (!runLive) return jobs.some((j) => RAN.has(j.status)) ? "done" : "skipped";
+  if (jobs.length === 0) return "waiting";
   if (!jobs.some((j) => OPEN.has(j.status))) return "done";
   return jobs.some((j) => j.status !== "queued") ? "active" : "waiting";
 }
@@ -42,14 +45,18 @@ export function runView(s: RunSummary) {
     const job = s.jobs.find((j) => j.kind === "role_session" && j.persona_key === p.id);
     const goals = s.goals.filter((g) => g.personaKey === p.id);
     const findings = s.findings.filter((f) => f.personaKey === p.id);
+    const reached = goals.filter((g) => g.status === "reached").length;
     let state: PersonaState = "waiting";
-    if (job?.status === "leased") state = "exploring";
-    else if (job?.status === "failed") state = "failed";
-    else if (job?.status === "cancelled" || (job?.status === "queued" && !live)) state = "cancelled";
-    else if (job?.status === "succeeded") state = goals.some((g) => g.status === "failed") ? "missed" : goals.length > 0 ? "reached" : "finished";
+    if (job?.status === "failed") state = "failed";
+    else if (job?.status === "succeeded") state = goals.some((g) => g.status === "failed") ? "missed" : reached === s.goalTexts.length ? "reached" : "finished";
+    else if (!live || job?.status === "cancelled") state = "cancelled";
+    else if (job?.status === "leased") state = "exploring";
     return {
       id: p.id, name: p.name, state, error: job?.error ?? null,
-      goals: goals.map((g) => ({ goal: goalText.get(g.goal) ?? g.goal, status: g.status, note: g.note })),
+      goals: s.goalTexts.map((g) => {
+        const outcome = goals.find((o) => o.goal === g.id);
+        return { id: g.id, goal: g.instruction, status: outcome?.status ?? null, note: outcome?.note ?? "" };
+      }),
       defects: findings.filter((f) => f.kind === "defect").length,
       friction: findings.filter((f) => f.kind === "friction").length,
     };

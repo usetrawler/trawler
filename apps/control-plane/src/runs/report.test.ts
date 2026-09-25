@@ -23,7 +23,8 @@ test("while people explore, the use stage is active and each person shows where 
   }));
   expect(view.stages.map((s) => s.state)).toEqual(["active", "waiting", "waiting", "waiting"]);
   expect(view.personas.map((p) => p.state)).toEqual(["reached", "exploring"]);
-  expect(view.personas[0]!.goals).toEqual([{ goal: "Get in.", status: "reached", note: "" }]);
+  expect(view.personas[0]!.goals).toEqual([{ id: "g", goal: "Get in.", status: "reached", note: "" }]);
+  expect(view.personas[1]!.goals).toEqual([{ id: "g", goal: "Get in.", status: null, note: "" }]);
   expect(view.headline).toMatch(/using the product/);
 });
 
@@ -53,4 +54,25 @@ test("a run stopped at the cap says so, and skipped stages are marked", () => {
   expect(view.personas[1]!.state).toBe("cancelled");
   expect(view.report.notJudged[0]!.reason).toMatch(/ended before/);
   expect(view.headline).toBe("Stopped at the cap. None of the reported defects was confirmed.");
+});
+
+test("a run stopped while someone was still exploring settles instead of looking live forever", () => {
+  const view = runView(summary({ status: "cancelled", jobs: [job("role_session", "succeeded", { persona_key: "ana" }), job("role_session", "leased", { persona_key: "lee" })] }));
+  expect(view.live).toBe(false);
+  expect(view.personas.map((p) => p.state)).toEqual(["finished", "cancelled"]);
+  expect(view.stages.map((s) => s.state)).toEqual(["done", "skipped", "skipped", "done"]);
+});
+
+test("replays that were all cancelled by the cap count as skipped, not done", () => {
+  const view = runView(summary({ status: "stopped_budget", jobs: [job("role_session", "succeeded", { persona_key: "ana" }), job("replay", "cancelled"), job("replay", "cancelled")] }));
+  expect(view.stages[1]!.state).toBe("skipped");
+});
+
+test("reaching one of several goals is not reported as reaching the goal", () => {
+  const view = runView(summary({
+    goalTexts: [{ id: "g", instruction: "Get in." }, { id: "h", instruction: "Pay." }],
+    jobs: [job("role_session", "succeeded", { persona_key: "ana" })],
+    goals: [{ personaKey: "ana", goal: "g", status: "reached", note: "" }],
+  }));
+  expect(view.personas[0]!.state).toBe("finished");
 });
