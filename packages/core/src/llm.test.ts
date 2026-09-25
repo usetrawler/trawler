@@ -180,6 +180,16 @@ test("a refusal that comes back on a retried call keeps its meaning and its reas
   expect(failureMessage(keyRefused)).toBe("the provider refused the workspace key; replace it on the plan page");
 });
 
+test("a job_stopped refusal on the last allowed attempt still stops the job", async () => {
+  expect(stoppedByRun(await refusal(402, { code: 402, message: "the run has spent its budget", type: JOB_STOPPED }, [busy(), busy()]))).toBe(true);
+});
+
+test("a failure whose last attempt has no message keeps the retry's own wording", async () => {
+  const silent = () => new Response("", { status: 502, headers: { "retry-after-ms": "1" } });
+  const err = await refusal(502, {}, [silent(), silent(), silent()]);
+  expect(failureMessage(err)).toMatch(/^Failed after 3 attempts/);
+});
+
 test("a failure that outlasts every retry says how many attempts were made", async () => {
   const unreachable = () => new Response(JSON.stringify({ error: { code: 502, message: "the provider could not be reached" } }), { status: 502, headers: { "content-type": "application/json", "retry-after-ms": "1" } });
   const err = await refusal(502, { code: 502, message: "the provider could not be reached" }, [unreachable(), unreachable()]);

@@ -84,5 +84,6 @@ export function stoppedByRun(err: unknown): boolean {
 export function failureMessage(err: unknown): string {
   const last = lastAttempt(err);
   const message = last instanceof Error ? last.message : String(last);
+  if (!message) return err instanceof Error ? err.message : String(err);
   return RetryError.isInstance(err) && err.reason === "maxRetriesExceeded" ? `${message} (after ${err.errors.length} attempts)` : message;
 }
