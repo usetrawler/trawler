@@ -2,12 +2,12 @@ import { tool } from "ai";
 import { z } from "zod";
 import { describe, expect, test } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
-import { ProjectConfigSchema, RunEventSchema, type RunEventInput } from "@usetrawler/protocol";
+import { JOB_STOPPED, ProjectConfigSchema, RunEventSchema, type RunEventInput } from "@usetrawler/protocol";
 import { Budget } from "./llm.ts";
 import { sessionStatus } from "./prompts.ts";
 import { runRoleSession } from "./role-session.ts";
 import { SecretScrubber } from "./secrets.ts";
-import { scriptedModel, text, toolCall } from "./testing.ts";
+import { proxyRefusal, scriptedModel, text, toolCall } from "./testing.ts";
 
 const project = ProjectConfigSchema.parse({
   name: "Acme",
@@ -309,6 +309,24 @@ describe("runRoleSession", () => {
     expect(result.error).toMatch(/scriptedModel has only 2 responses/);
     expect(result.findings).toHaveLength(1);
     expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "error", error: expect.stringMatching(/scriptedModel/) });
+  });
+
+  test("a model call the proxy refuses for the key ends the session with the proxy's reason", async () => {
+    const model = scriptedModel([look, proxyRefusal("the provider refused the workspace key; replace it on the plan page")]);
+    const { promise, events } = run(model);
+    const { result, usage } = await promise;
+    expect(result).toMatchObject({ stoppedBy: "error", error: "the provider refused the workspace key; replace it on the plan page" });
+    expect(usage.steps).toBe(1);
+    expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "error", error: "the provider refused the workspace key; replace it on the plan page" });
+  });
+
+  test("a model call the proxy refuses because the run stopped the job ends the session as stopped by the budget", async () => {
+    const model = scriptedModel([look, proxyRefusal("the run is no longer active", JOB_STOPPED)]);
+    const { promise, events } = run(model);
+    const { result } = await promise;
+    expect(result.stoppedBy).toBe("budget");
+    expect(result.error).toBeUndefined();
+    expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "budget" });
   });
 
   test("the returned result is scrubbed too", async () => {

@@ -1,13 +1,13 @@
-import { APICallError, tool } from "ai";
+import { tool } from "ai";
 import { z } from "zod";
 import { describe, expect, test } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
-import { ProjectConfigSchema, RunEventSchema, type Finding, type RunEventInput } from "@usetrawler/protocol";
+import { JOB_STOPPED, ProjectConfigSchema, RunEventSchema, type Finding, type RunEventInput } from "@usetrawler/protocol";
 import { Budget } from "./llm.ts";
 import { judgePrompt } from "./prompts.ts";
 import { judge, runReplay } from "./replay.ts";
 import { SecretScrubber } from "./secrets.ts";
-import { scriptedModel, text, toolCall } from "./testing.ts";
+import { proxyRefusal, scriptedModel, text, toolCall } from "./testing.ts";
 
 const project = ProjectConfigSchema.parse({
   name: "Acme",
@@ -139,6 +139,14 @@ describe("runReplay", () => {
     expect(model.doGenerateCalls).toHaveLength(0);
     expect(observation.completed).toBe(false);
     expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "budget" });
+  });
+
+  test("a model call the proxy refuses for the key ends the replay with the proxy's reason", async () => {
+    const model = scriptedModel([proxyRefusal("the provider account behind the workspace key is out of credits")]);
+    const { promise, events } = replay(model);
+    const { observation } = await promise;
+    expect(observation.completed).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "error", error: "the provider account behind the workspace key is out of credits" });
   });
 
   test("a browser that keeps crashing ends the replay with a reason", async () => {
@@ -331,15 +339,23 @@ describe("judge", () => {
     expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "no_report" });
   });
 
-  test("a model call the proxy refuses ends the judge with the proxy's reason", async () => {
-    const refusal = new APICallError({ message: "the provider account behind the workspace key is out of credits", url: "https://cp.test/api/llm/v1/chat/completions", requestBodyValues: {}, statusCode: 402 });
-    const model = new MockLanguageModelV4({ doGenerate: async () => { throw refusal; } });
+  test("a model call the proxy refuses for the key ends the judge with an error carrying the proxy's reason", async () => {
+    const model = scriptedModel([proxyRefusal("the provider account behind the workspace key is out of credits")]);
     const { promise, events } = judgeWith(model);
     const { verdict, error } = await promise;
     expect(verdict).toBeNull();
     expect(events.map((e) => e.type)).toEqual(["job_started", "job_finished"]);
-    expect(events.at(-1)).toMatchObject({ stoppedBy: "budget", error: "the provider account behind the workspace key is out of credits" });
+    expect(events.at(-1)).toMatchObject({ stoppedBy: "error", error: "the provider account behind the workspace key is out of credits" });
     expect(error).toBe("the provider account behind the workspace key is out of credits");
+  });
+
+  test("a model call the proxy refuses because the run stopped the job ends the judge as stopped by the budget, with the reason", async () => {
+    const model = scriptedModel([proxyRefusal("the run has spent its budget", JOB_STOPPED)]);
+    const { promise, events } = judgeWith(model);
+    const { verdict, error } = await promise;
+    expect(verdict).toBeNull();
+    expect(events.at(-1)).toMatchObject({ stoppedBy: "budget", error: "the run has spent its budget" });
+    expect(error).toBe("the run has spent its budget");
   });
 
   test("spends nothing and gives no verdict once the budget is gone", async () => {

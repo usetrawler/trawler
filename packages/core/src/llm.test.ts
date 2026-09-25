@@ -1,6 +1,7 @@
 import { generateText, streamText } from "ai";
 import { expect, test } from "vitest";
-import { Budget, createModel, stepCost } from "./llm.ts";
+import { JOB_STOPPED } from "@usetrawler/protocol";
+import { Budget, createModel, refusedForBudget, stepCost } from "./llm.ts";
 import { scriptedModel, text, toolCall } from "./testing.ts";
 
 test("stepCost reads OpenRouter usage accounting", () => {
@@ -151,4 +152,19 @@ test("tallyStep adds one step's tokens and cost to the usage and the budget", as
   expect(cost).toBeCloseTo(0.25, 10);
   expect(usage).toEqual({ model: "m", inputTokens: 101, outputTokens: 22, costUsd: 0.75, steps: 2 });
   expect(budget.spent).toBeCloseTo(0.25, 10);
+});
+
+async function refusal(status: number, error: Record<string, unknown>) {
+  const model = createModel({ modelId: "m", apiKey: "k", baseURL: "https://cp.test/api/llm/v1", fetch: async () => new Response(JSON.stringify({ error }), { status, headers: { "content-type": "application/json" } }) });
+  return generateText({ model, prompt: "hello" }).then(() => expect.unreachable("the call was refused"), (err: unknown) => err);
+}
+
+test("only a 402 the proxy marks as the job being stopped counts as the budget running out", async () => {
+  expect(refusedForBudget(await refusal(402, { code: 402, message: "the run has spent its budget", type: JOB_STOPPED }))).toBe(true);
+  expect(refusedForBudget(await refusal(402, { code: 402, message: "the run is no longer active", type: JOB_STOPPED }))).toBe(true);
+  const keyRefused = await refusal(402, { code: 402, message: "the provider refused the workspace key; replace it on the plan page" });
+  expect(refusedForBudget(keyRefused)).toBe(false);
+  expect((keyRefused as Error).message).toBe("the provider refused the workspace key; replace it on the plan page");
+  expect(refusedForBudget(await refusal(402, { code: 402, message: "Insufficient credits. Add more using https://openrouter.ai/settings/credits" }))).toBe(false);
+  expect(refusedForBudget(await refusal(400, { code: 400, message: "bad request", type: JOB_STOPPED }))).toBe(false);
 });
