@@ -1,6 +1,6 @@
 import type { LanguageModel } from "ai";
 import { z } from "zod";
-import { Budget, judge, runReplay, runRoleSession, SecretScrubber, type Browser } from "@usetrawler/core";
+import { Budget, judge, MIN_SECRET_LENGTH, runReplay, runRoleSession, SecretScrubber, type Browser } from "@usetrawler/core";
 import {
   JobAssignmentSchema, MAX_EVENTS_PER_BATCH, MAX_URL, PROTOCOL_HEADER, PROTOCOL_VERSION,
   type JobAssignment, type JobCompletion, type JobStopReason, type JobUsage, type ProjectConfig, type RunEvent, type RunEventInput,
@@ -28,6 +28,18 @@ const clip = (s: string) => Array.from(s).slice(0, MAX_ERROR).join("");
 
 class Unauthorized extends Error {}
 
+function pause(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
+    function done() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    }
+  });
+}
+
 async function call(deps: WorkerDeps, path: string, bearer: string, body: unknown, signal?: AbortSignal): Promise<Response> {
   const attempts = deps.attempts ?? 6;
   let last: unknown;
@@ -47,7 +59,7 @@ async function call(deps: WorkerDeps, path: string, bearer: string, body: unknow
       if (err instanceof Unauthorized || signal?.aborted) throw err;
       last = err;
     }
-    await new Promise((r) => setTimeout(r, (deps.retryBaseMs ?? 500) * 2 ** i * (0.5 + Math.random())));
+    if (i < attempts - 1) await pause((deps.retryBaseMs ?? 500) * 2 ** i * (0.5 + Math.random()), signal);
   }
   throw last instanceof Error ? last : new Error(String(last));
 }
@@ -166,9 +178,7 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
 function runnerScrubber(deps: WorkerDeps, config: ProjectConfig): SecretScrubber {
   const scrubber = SecretScrubber.forProject(config);
   for (const secret of deps.secrets ?? []) {
-    try {
-      scrubber.add(secret);
-    } catch {}
+    if (secret.length >= MIN_SECRET_LENGTH) scrubber.add(secret);
   }
   return scrubber;
 }
@@ -199,7 +209,13 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
   }
   if (res.status === 204) return "idle";
   if (!res.ok) throw new Error(`claim failed: HTTP ${res.status}`);
-  const job = await assignment(deps, res);
+  let job: JobAssignment | null;
+  try {
+    job = await assignment(deps, res);
+  } catch (err) {
+    if (signal?.aborted) return "idle";
+    throw err;
+  }
   if (!job) return "done";
   deps.log(`${job.kind} ${job.jobId} started`);
   const scrubber = runnerScrubber(deps, job.config);
@@ -217,7 +233,8 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
   await events.flush();
   if (events.failure) {
     deps.log(`${job.kind} ${job.jobId} could not report events: ${events.failure.message}`);
-    completion = { ...completion, stoppedBy: "error", error: clip(`the runner could not report events: ${scrubber.scrub(events.failure.message)}`) };
+    const reported = `the runner could not report events: ${scrubber.scrub(events.failure.message)}`;
+    completion = { ...completion, stoppedBy: "error", error: clip(completion.error ? `${reported}; ${completion.error}` : reported) };
   }
   try {
     await complete(deps, job, completion);
@@ -234,7 +251,7 @@ export async function workLoop(deps: WorkerDeps, signal: AbortSignal): Promise<v
       await workOnce(deps, signal);
     } catch (err) {
       deps.log(`claim failed: ${err instanceof Error ? err.message : String(err)}`);
-      await new Promise((r) => setTimeout(r, 5000));
+      await pause(5000, signal);
     }
   }
 }
