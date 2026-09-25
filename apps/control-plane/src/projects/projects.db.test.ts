@@ -135,7 +135,7 @@ test("test accounts are added encrypted, reach the runner, and removing one deta
   const simple = ProjectConfigSchema.parse({ name: "Shop", targetUrl: "https://shop.test/", personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "Buy." }] });
   const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", simple, keys));
   const ref = await withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: " buyer@shop.test ", password: "buyer-password-9" }, keys));
-  expect(ref).toBe("account-1");
+  expect(ref).toMatch(/^account-[0-9a-f]{12}$/);
   await withOrg(t.db, "org-a", (tx) => replacePlan(tx, "org-a", id, { personas: [{ id: "ana", name: "Ana", brief: "b", accountRef: ref }], goals: simple.goals }));
   const loaded = await withOrg(t.db, "org-a", (tx) => loadProjectConfig(tx, "org-a", id, keys));
   expect(loaded.accounts).toEqual([{ ref, username: "buyer@shop.test", password: "buyer-password-9" }]);
@@ -148,10 +148,10 @@ test("test accounts are added encrypted, reach the runner, and removing one deta
   await expect(withOrg(t.db, "org-b", (tx) => addAccount(tx, "org-b", id, { username: "x@shop.test", password: "long-enough-1" }, keys))).rejects.toThrow(/not found/);
   await expect(withOrg(t.db, "org-b", (tx) => removeAccount(tx, "org-b", id, ref))).rejects.toThrow(/not found/);
 
-  expect(await withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "two@shop.test", password: "second-pass-1" }, keys))).toBe("account-2");
+  const second = await withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "two@shop.test", password: "second-pass-1" }, keys));
   await withOrg(t.db, "org-a", (tx) => removeAccount(tx, "org-a", id, ref));
   const after = await withOrg(t.db, "org-a", (tx) => loadProjectConfig(tx, "org-a", id, keys));
-  expect(after.accounts.map((a) => a.ref)).toEqual(["account-2"]);
+  expect(after.accounts.map((a) => a.ref)).toEqual([second]);
   expect(after.personas[0]!.accountRef).toBeUndefined();
-  expect(await withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "three@shop.test", password: "third-pass-1" }, keys))).toBe("account-3");
+  expect(await withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "three@shop.test", password: "third-pass-1" }, keys))).not.toBe(ref);
 });
