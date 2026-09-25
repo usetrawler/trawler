@@ -5,8 +5,6 @@ import { DocsLink } from "./docs-link.tsx";
 import { SignOutButton } from "./sign-out-button.tsx";
 import { ThemeToggle } from "./theme-toggle.tsx";
 
-const STEPS = ["Product", "Plan", "Run"] as const;
-
 export type ShellPage = "overview" | "runs" | "new" | { project: string };
 
 export function initials(text: string): string {
@@ -53,7 +51,7 @@ function Account({ user }: { user: Shell["user"] }) {
   );
 }
 
-export function AppShell({ shell, current, parent = false, step, wide = false, children }: { shell: Shell; current?: ShellPage; parent?: boolean; step?: 1 | 2 | 3; wide?: boolean; children: ReactNode }) {
+export function AppShell({ shell, current, parent = false, wide = false, children }: { shell: Shell; current?: ShellPage; parent?: boolean; wide?: boolean; children: ReactNode }) {
   const { user, workspace } = shell;
   const marked = (page: ShellPage) => same(current, page);
   return (
@@ -62,12 +60,12 @@ export function AppShell({ shell, current, parent = false, step, wide = false, c
       <header className="flex h-16 items-center justify-between gap-4 border-b border-line bg-[var(--header)] px-4 backdrop-blur-md tall:sticky tall:top-0 tall:z-20 md:h-[76px] md:px-[clamp(20px,4.2vw,72px)]">
         <a href="/" className="flex shrink-0 items-center gap-2.5 text-[22px] font-bold tracking-tight">
           <BrandMark className="h-7 w-7" />
-          trawler
+          <span className="max-[359px]:sr-only">trawler</span>
         </a>
         <div className="flex items-center gap-3">
           <DocsLink className="-my-2 shrink-0 py-2 font-mono text-xs tracking-[0.15em] text-muted uppercase hover:text-ink">Docs</DocsLink>
           <span className="sr-only md:hidden">Signed in as {user.name || user.email}</span>
-          <span aria-hidden className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-full bg-ink font-mono text-[10px] text-paper max-[359px]:hidden md:hidden">{initials(user.name || user.email)}</span>
+          <span aria-hidden className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-full bg-ink font-mono text-[10px] text-paper max-[399px]:hidden md:hidden">{initials(user.name || user.email)}</span>
           <SignOutButton className="-my-2 shrink-0 py-2 font-mono text-xs tracking-[0.15em] text-muted uppercase hover:text-ink md:hidden" />
           <ThemeToggle />
         </div>
@@ -95,20 +93,7 @@ export function AppShell({ shell, current, parent = false, step, wide = false, c
           <Account user={user} />
         </div>
         <main id="main" className="min-w-0 px-[18px] py-9 md:px-[clamp(30px,5vw,78px)] md:py-[54px]">
-          <div className={wide ? "w-full" : "mx-auto w-full max-w-3xl"}>
-            {step && (
-              <nav aria-label="Progress" className="mb-8">
-                <ol className="flex gap-6 font-mono text-xs tracking-[0.15em] uppercase">
-                  {STEPS.map((label, i) => (
-                    <li key={label} aria-current={i + 1 === step ? "step" : undefined} className={i + 1 === step ? "text-action" : i + 1 < step ? "text-ink" : "text-muted"}>
-                      {String(i + 1).padStart(2, "0")} {label}
-                    </li>
-                  ))}
-                </ol>
-              </nav>
-            )}
-            {children}
-          </div>
+          <div className={wide ? "w-full" : "mx-auto w-full max-w-3xl"}>{children}</div>
         </main>
       </div>
     </div>

@@ -64,4 +64,5 @@ test("only the membership check reads the workspace a session names", () => {
   expect(reading("activeOrganizationId")).toEqual(["auth/auth.ts", "db/types.ts"]);
   expect(reading("getActiveMember")).toEqual([]);
   expect(reading("getFullOrganization")).toEqual([]);
+  expect(reading("getOrganization")).toEqual([]);
 });
