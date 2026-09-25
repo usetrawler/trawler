@@ -36,6 +36,7 @@ const summary: RunSummary = {
   replayErrors: { f4: "no chromium" },
   replays: { f1: { completed: true, observed: "Internal Server Error", blockedAt: null }, f3: { completed: false, observed: "No export button", blockedAt: 2 } },
   verdicts: { f1: "confirmed", f3: "refuted" },
+  judgeErrors: {},
 };
 
 test("report groups findings by verdict and shows cost and the replay", () => {
@@ -62,4 +63,13 @@ test("a replay without a report is described once", () => {
   const md = renderReport({ ...summary, replayErrors: {}, replays: { ...summary.replays, f4: { completed: false, observed: "the replay session wrote no report", blockedAt: null } } });
   expect(md).toContain("Replay: wrote no report.");
   expect(md).not.toContain("wrote no report. the replay session wrote no report");
+});
+
+test("a defect whose judge failed says so instead of passing for inconclusive", () => {
+  const md = renderReport({
+    ...summary, replayErrors: {}, replays: { ...summary.replays, f4: { completed: true, observed: "Crashed on save", blockedAt: null } },
+    judgeErrors: { f4: 'the model gave no verdict in 2 replies; the last ended with finish reason "length"' },
+  });
+  expect(md).toMatch(/## Defects not judged[\s\S]*Never checked[\s\S]*Replay: carried out every step\. Crashed on save\n\nJudge: could not be judged \(model error\)\. the model gave no verdict in 2 replies/);
+  expect(md).not.toContain("## Inconclusive defects");
 });

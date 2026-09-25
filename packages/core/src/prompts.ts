@@ -74,7 +74,8 @@ ${fence("observation", observation.observed)}
 
 Did their observation independently show the behaviour the claim describes? A step that could not be carried out can itself be the defect, for example a page that failed before its button appeared.
 If the steps spell out the expected result and the observation only repeats it without describing what the page showed, that is not independent.
-Answer "confirmed" only if the observation shows the behaviour the claim is about. Answer "refuted" if it shows the opposite or shows the thing working. Answer "inconclusive" if it does not settle it either way.`;
+Answer "confirmed" only if the observation shows the behaviour the claim is about. Answer "refuted" if it shows the opposite or shows the thing working. Answer "inconclusive" if it does not settle it either way.
+Give your answer by calling report_verdict. If you cannot call it, reply with nothing but the JSON {"verdict": "<your answer>"}.`;
 }
 
 export function setupPrompt(p: { url: string; page: string; docs?: string; focus?: string }): string {

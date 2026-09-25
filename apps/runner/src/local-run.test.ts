@@ -141,6 +141,24 @@ test("a defect is left unjudged when the budget is gone after its replay or the 
   expect(judgeModel.doGenerateCalls).toHaveLength(0);
 });
 
+test("a defect whose judge never gives a verdict is left unjudged with the judge's error", async () => {
+  const agent = scriptedModel([
+    look,
+    toolCall("submit_finding", { kind: "defect", goal: "g", title: "Broken", observed: "o", reproduction: ["a", "b"], severity: "high" }),
+    ...finished("p1"),
+    ...finished("p2"),
+    toolCall("report_replay", { completed: true, observed: "It broke", blockedAt: null }),
+  ]);
+  const judgeModel = scriptedModel([text("no idea"), text("still no idea")]);
+  const summary = await localRun({
+    project, agentModel: agent, agentModelId: "a", judgeModel, judgeModelId: "j", budgetUsd: 5, maxSteps: 10, replaySteps: 10,
+    emit: () => {}, openBrowser: fakeBrowsers().open,
+  });
+  expect(summary.verdicts).toEqual({});
+  expect(summary.judgeErrors).toEqual({ f1: expect.stringMatching(/no verdict/) });
+  expect(summary.jobs.map((j) => j.jobId)).toEqual(["role:p1", "role:p2", "replay:f1", "judge:f1"]);
+});
+
 test("failed jobs are recorded as events and replay failures leave a trace", async () => {
   const agent = scriptedModel([
     look,

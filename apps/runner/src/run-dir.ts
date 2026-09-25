@@ -15,6 +15,7 @@ export interface RunSummary {
   replays: Record<string, ReplayObservation>;
   replayErrors: Record<string, string>;
   verdicts: Record<string, Verdict>;
+  judgeErrors: Record<string, string>;
 }
 
 export class RunDir {
@@ -44,7 +45,7 @@ const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
 
 type Located = Finding & { persona: string };
 
-function describe(f: Located, replay?: ReplayObservation, replayError?: string): string {
+function describe(f: Located, replay?: ReplayObservation, replayError?: string, judgeError?: string): string {
   const steps = f.reproduction.map((step, i) => `${i + 1}. ${oneLine(step)}`).join("\n");
   const replayed = replayError
     ? `\n\nReplay: failed to run. ${oneLine(replayError)}`
@@ -53,13 +54,14 @@ function describe(f: Located, replay?: ReplayObservation, replayError?: string):
     : !replay.completed && replay.blockedAt === null
       ? "\n\nReplay: wrote no report."
       : `\n\nReplay: ${replay.completed ? "carried out every step" : `could not carry out step ${replay.blockedAt}`}. ${oneLine(replay.observed)}`;
-  return `### ${oneLine(f.title)}\n${f.kind}, ${f.severity}, ${oneLine(f.persona)} / ${oneLine(f.goal)}\n\n${oneLine(f.observed)}\n\n${steps}${replayed}\n`;
+  const judged = judgeError ? `\n\nJudge: could not be judged (model error). ${oneLine(judgeError)}` : "";
+  return `### ${oneLine(f.title)}\n${f.kind}, ${f.severity}, ${oneLine(f.persona)} / ${oneLine(f.goal)}\n\n${oneLine(f.observed)}\n\n${steps}${replayed}${judged}\n`;
 }
 
 export function renderReport(s: RunSummary): string {
   const findings: Located[] = s.roles.flatMap((r) => r.findings.map((f) => ({ ...f, persona: r.persona })));
   const section = (title: string, items: Located[]) =>
-    items.length === 0 ? "" : `## ${title}\n\n${items.map((f) => describe(f, s.replays[f.id], s.replayErrors[f.id])).join("\n")}\n`;
+    items.length === 0 ? "" : `## ${title}\n\n${items.map((f) => describe(f, s.replays[f.id], s.replayErrors[f.id], s.judgeErrors[f.id])).join("\n")}\n`;
   const defects = findings.filter((f) => f.kind === "defect");
   const by = (v: Verdict) => defects.filter((f) => s.verdicts[f.id] === v);
   const jobs = s.jobs.map((j) => `| ${j.jobId} | ${j.model} | ${j.steps} | ${usd(j.costUsd)} |`).join("\n");
