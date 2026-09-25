@@ -11,7 +11,7 @@ CREATE TABLE artifacts (
   created_at timestamptz NOT NULL DEFAULT now(),
   stored_at timestamptz,
   discarded_at timestamptz,
-  CHECK (storage_key = 'orgs/' || org_id || '/runs/' || run_id || '/' || id || '.' || CASE content_type WHEN 'image/png' THEN 'png' WHEN 'image/jpeg' THEN 'jpg' WHEN 'image/webp' THEN 'webp' END),
+  CONSTRAINT artifacts_key_is_its_own CHECK (storage_key IS NOT DISTINCT FROM 'orgs/' || org_id || '/runs/' || run_id || '/' || id || '.' || CASE content_type WHEN 'image/png' THEN 'png' WHEN 'image/jpeg' THEN 'jpg' WHEN 'image/webp' THEN 'webp' END),
   FOREIGN KEY (run_id, org_id) REFERENCES runs (id, org_id) ON DELETE CASCADE,
   FOREIGN KEY (job_id, org_id) REFERENCES jobs (id, org_id) ON DELETE CASCADE
 );
@@ -19,4 +19,5 @@ CREATE INDEX artifacts_run_idx ON artifacts (run_id);
 CREATE INDEX artifacts_job_idx ON artifacts (job_id);
 CREATE INDEX artifacts_created_idx ON artifacts (created_at);
 CREATE INDEX artifacts_discarded_idx ON artifacts (discarded_at) WHERE discarded_at IS NOT NULL;
+CREATE INDEX artifacts_pending_idx ON artifacts (created_at) WHERE stored_at IS NULL;
 CALL make_tenant_table('artifacts');

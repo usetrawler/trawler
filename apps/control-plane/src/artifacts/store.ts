@@ -26,6 +26,7 @@ export function s3Store(storage: ArtifactStorage, timeouts: { connectionMs?: num
     credentials: { accessKeyId: storage.accessKeyId, secretAccessKey: storage.secretAccessKey },
     requestChecksumCalculation: "WHEN_REQUIRED",
     responseChecksumValidation: "WHEN_REQUIRED",
+    maxAttempts: 3,
     requestHandler: { connectionTimeout: timeouts.connectionMs ?? 5_000, requestTimeout: timeouts.requestMs ?? 30_000, throwOnRequestTimeout: true },
   });
   return {

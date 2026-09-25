@@ -18,6 +18,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
   for (const socket of sockets.splice(0)) socket.destroy();
   closed.clear();
 });
@@ -38,6 +39,13 @@ test("a bucket that accepts the connection but never answers fails the call with
   await expect(store.put("k", new Uint8Array([1]), "image/png")).rejects.toThrow();
   await expect(store.remove("k")).rejects.toThrow();
   expect(Date.now() - started).toBeLessThan(4_000);
+});
+
+test("a bucket call is tried three times, whatever AWS_MAX_ATTEMPTS says, so a failing upload always ends well within the cleanup's grace period", async () => {
+  vi.stubEnv("AWS_MAX_ATTEMPTS", "8");
+  const store = s3Store(silentBucket(), { requestMs: 100 });
+  await expect(store.put("k", new Uint8Array([1]), "image/png")).rejects.toThrow();
+  expect(sockets).toHaveLength(3);
 });
 
 test("by default a bucket that never answers gets thirty seconds before the call gives up on it", async () => {

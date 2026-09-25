@@ -29,7 +29,7 @@ async function jobWithRoom(tx: Tx, token: string, jobId: string) {
     .selectFrom("artifacts")
     .select(sql<number>`count(*)::int`.as("stored"))
     .where("job_id", "=", job.id)
-    .where("discarded_at", "is", null)
+    .where((eb) => eb.or([eb("discarded_at", "is", null), eb("stored_at", "is", null)]))
     .executeTakeFirstOrThrow();
   if (stored >= MAX_ARTIFACTS_PER_JOB) throw new ArtifactRefused(`a job stores at most ${MAX_ARTIFACTS_PER_JOB} files`);
   return job;
@@ -66,7 +66,11 @@ export async function storeArtifact(
     await logError("an artifact could not be stored", { orgId: job.org_id, runId: job.run_id, jobId: job.id, err });
     throw new ArtifactNotStored("the bucket did not take the file; try again", { cause: err });
   }
-  await asSystem(db, (tx) => tx.updateTable("artifacts").set({ stored_at: new Date() }).where("id", "=", id).execute());
+  const { numUpdatedRows } = await asSystem(db, (tx) => tx.updateTable("artifacts").set({ stored_at: new Date() }).where("id", "=", id).executeTakeFirst());
+  if (numUpdatedRows === 0n) {
+    await store.remove(key).catch((err: unknown) => logError("an artifact's file could not be removed", { orgId: job.org_id, runId: job.run_id, jobId: job.id, err }));
+    throw new ArtifactNotStored("the file was cleaned up while it was being stored; try again");
+  }
   return { id };
 }
 

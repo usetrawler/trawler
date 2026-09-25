@@ -227,8 +227,43 @@ test("a file whose answer never came back is discarded, logged and cleaned up la
   expect(await objectKeys()).not.toContain(row.storage_key);
 });
 
+test("a file the bucket may have kept after a failed upload holds its place in the job's share until the cleanup removes it, so an outage cannot grow a job past its cap", async () => {
+  const job = await leasedJob();
+  await fill(job, "org-a", MAX_ARTIFACTS_PER_JOB - 1);
+  const unanswered: ArtifactStore = {
+    ...store,
+    put: async (key, bytes, type) => {
+      await store.put(key, bytes, type);
+      throw new Error("the answer never came");
+    },
+  };
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+  expect((await handleArtifactUpload(upload(job, PNG), job.jobId, { ...deps, artifacts: unanswered })).status).toBe(503);
+  expect((await handleArtifactUpload(upload(job, PNG), job.jobId, deps)).status).toBe(409);
+  await sql`update artifacts set discarded_at = now() - interval '11 minutes' where job_id = ${job.jobId} and discarded_at is not null`.execute(t.db);
+  expect(await removeExpiredArtifacts(t.db, store)).toBe(1);
+  expect((await handleArtifactUpload(upload(job, PNG), job.jobId, deps)).status).toBe(201);
+});
+
+test("a file whose row was removed while the bucket took it is removed from the bucket too, and the runner is told to try again", async () => {
+  const job = await leasedJob();
+  const late: ArtifactStore = {
+    ...store,
+    put: async (key, bytes, type) => {
+      await sql`delete from artifacts where storage_key = ${key}`.execute(t.db);
+      await store.put(key, bytes, type);
+    },
+  };
+  const res = await handleArtifactUpload(upload(job, PNG), job.jobId, { ...deps, artifacts: late });
+  expect(res.status).toBe(503);
+  expect((await res.json()).error).toMatch(/try again/);
+  expect(await rowsOf(job.jobId)).toBe(0);
+  expect((await objectKeys()).filter((key) => key.includes(job.runId))).toEqual([]);
+});
+
 test("a file still on its way to the bucket counts toward the cap but has no link, and a row left on its way past the grace period is cleaned up", async () => {
   const job = await leasedJob();
+  await fill(job, "org-a", MAX_ARTIFACTS_PER_JOB - 1);
   let arrive = () => {};
   const arrived = new Promise<void>((resolve) => (arrive = resolve));
   const slow: ArtifactStore = {
@@ -240,12 +275,12 @@ test("a file still on its way to the bucket counts toward the cap but has no lin
   };
   const answer = handleArtifactUpload(upload(job, PNG), job.jobId, { ...deps, artifacts: slow });
   const row = await vi.waitFor(async () => {
-    const rows = await sql<{ id: string; stored_at: Date | null }>`select id, stored_at from artifacts where job_id = ${job.jobId}`.execute(t.db);
+    const rows = await sql<{ id: string }>`select id from artifacts where job_id = ${job.jobId} and stored_at is null`.execute(t.db);
     expect(rows.rows).toHaveLength(1);
     return rows.rows[0]!;
   });
-  expect(row.stored_at).toBeNull();
   expect(await artifactLink(t.db, store, "org-a", row.id)).toBeNull();
+  expect((await handleArtifactUpload(upload(job, PNG), job.jobId, deps)).status).toBe(409);
   arrive();
   expect((await answer).status).toBe(201);
   expect((await rowOf(row.id)).stored_at).not.toBeNull();
@@ -261,17 +296,27 @@ test("a file still on its way to the bucket counts toward the cap but has no lin
   expect(await rowsOf(stuck.jobId)).toBe(0);
 });
 
-test("the database refuses a row whose key is not its own, or a size over the limit", async () => {
+test("the database refuses a row whose key is not its own, also for a type the key rule does not know, or a size over the limit", async () => {
   const job = await leasedJob();
-  const insert = (key: string, size: number) =>
+  const ID = "11111111-1111-4111-8111-111111111111";
+  const insert = (db: typeof t.db, key: string, size = 10, type = "image/png") =>
     sql`insert into artifacts (id, org_id, run_id, job_id, kind, content_type, size_bytes, storage_key)
-      values ('11111111-1111-4111-8111-111111111111', 'org-a', ${job.runId}, ${job.jobId}, 'screenshot', 'image/png', ${size}, ${key})`.execute(t.db);
-  const own = `orgs/org-a/runs/${job.runId}/11111111-1111-4111-8111-111111111111.png`;
-  await expect(insert(`orgs/org-b/runs/${job.runId}/11111111-1111-4111-8111-111111111111.png`, 10)).rejects.toThrow(/check constraint/);
-  await expect(insert(`orgs/org-a/runs/${job.runId}/../../org-b/11111111-1111-4111-8111-111111111111.png`, 10)).rejects.toThrow(/check constraint/);
-  await expect(insert(own.replace(".png", ".jpg"), 10)).rejects.toThrow(/check constraint/);
-  await expect(insert(own, MAX_ARTIFACT_BYTES + 1)).rejects.toThrow(/check constraint/);
-  await insert(own, MAX_ARTIFACT_BYTES);
+      values (${ID}, 'org-a', ${job.runId}, ${job.jobId}, 'screenshot', ${type}, ${size}, ${key})`.execute(db);
+  const own = `orgs/org-a/runs/${job.runId}/${ID}.png`;
+  await expect(insert(t.db, `orgs/org-b/runs/${job.runId}/${ID}.png`)).rejects.toThrow(/artifacts_key_is_its_own/);
+  await expect(insert(t.db, `orgs/org-a/runs/${job.runId}/../../org-b/${ID}.png`)).rejects.toThrow(/artifacts_key_is_its_own/);
+  await expect(insert(t.db, own.replace(".png", ".jpg"))).rejects.toThrow(/artifacts_key_is_its_own/);
+  await expect(insert(t.db, own, MAX_ARTIFACT_BYTES + 1)).rejects.toThrow(/artifacts_size_bytes_check/);
+
+  let unknownType = "";
+  await t.db.transaction().execute(async (tx) => {
+    await sql`alter table artifacts drop constraint artifacts_content_type_check`.execute(tx);
+    unknownType = await insert(tx, `orgs/org-b/runs/${job.runId}/${ID}.avif`, 10, "image/avif").then(() => "stored", (err: Error) => err.message);
+    throw new Error("roll back");
+  }).catch(() => undefined);
+  expect(unknownType).toMatch(/artifacts_key_is_its_own/);
+
+  await insert(t.db, own, MAX_ARTIFACT_BYTES);
 });
 
 test("without storage configured, uploads answer 503", async () => {
