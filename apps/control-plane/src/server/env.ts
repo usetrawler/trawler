@@ -1,3 +1,5 @@
+import type { ArtifactStorage } from "../artifacts/store.ts";
+
 export interface ServerEnv {
   databaseUrl: string;
   authSecret: string;
@@ -10,6 +12,7 @@ export interface ServerEnv {
   smokeToken?: string;
   openRouterUrl: string;
   betaEmails?: string[];
+  artifacts?: ArtifactStorage;
 }
 
 export const DEFAULT_SETUP_MODEL = "deepseek/deepseek-v4.1-flash";
@@ -40,7 +43,27 @@ export function readEnv(env: Record<string, string | undefined> = process.env): 
     openRouterUrl,
     betaEmails: env.TRAWLER_BETA_EMAILS?.trim() ? env.TRAWLER_BETA_EMAILS.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean) : undefined,
     setup: env.OPENROUTER_API_KEY ? { apiKey: env.OPENROUTER_API_KEY, model: env.TRAWLER_SETUP_MODEL ?? DEFAULT_SETUP_MODEL } : undefined,
+    artifacts: artifactStorage(env),
   };
+}
+
+const ARTIFACT_VARIABLES = {
+  bucket: "TRAWLER_ARTIFACTS_BUCKET",
+  endpoint: "TRAWLER_ARTIFACTS_ENDPOINT",
+  region: "TRAWLER_ARTIFACTS_REGION",
+  accessKeyId: "TRAWLER_ARTIFACTS_ACCESS_KEY_ID",
+  secretAccessKey: "TRAWLER_ARTIFACTS_SECRET_ACCESS_KEY",
+} as const;
+
+export function artifactStorage(env: Record<string, string | undefined> = process.env): ArtifactStorage | undefined {
+  const entries = Object.entries(ARTIFACT_VARIABLES).map(([field, name]) => [field, name, env[name]?.trim() ?? ""] as const);
+  const missing = entries.filter(([, , value]) => !value).map(([, name]) => name);
+  if (missing.length === entries.length) return undefined;
+  if (missing.length > 0) throw new Error(`artifact storage also needs ${missing.join(", ")}`);
+  const storage = Object.fromEntries(entries.map(([field, , value]) => [field, value])) as Omit<ArtifactStorage, "pathStyle">;
+  if (!URL.canParse(storage.endpoint)) throw new Error("TRAWLER_ARTIFACTS_ENDPOINT must be a URL");
+  if (env.NODE_ENV === "production" && new URL(storage.endpoint).protocol !== "https:") throw new Error("TRAWLER_ARTIFACTS_ENDPOINT must use https in production");
+  return { ...storage, pathStyle: env.TRAWLER_ARTIFACTS_PATH_STYLE === "true" };
 }
 
 const BEARER_TOKEN = /^[A-Za-z0-9._~+\/=-]{32,512}$/;

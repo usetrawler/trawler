@@ -216,6 +216,18 @@ async function jobForToken(tx: Tx, token: string, options: { allowExpired?: bool
   return job;
 }
 
+export class JobOver extends Error {
+  constructor() {
+    super("the job is over");
+  }
+}
+
+export async function leasedJobFor(tx: Tx, token: string, jobId: string) {
+  const job = await jobForToken(tx, token, { expectedJobId: jobId });
+  if (job.status !== "leased") throw new JobOver();
+  return job;
+}
+
 async function addCost(tx: Tx, runId: string, jobId: string, usd: number) {
   if (usd <= 0) return;
   await tx.updateTable("jobs").set({ counted_cost: sql`counted_cost + ${usd}` }).where("id", "=", jobId).execute();

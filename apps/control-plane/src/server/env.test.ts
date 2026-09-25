@@ -46,3 +46,18 @@ test("a smoke token that does not look like one is refused wherever the environm
   expect(readEnv({ ...base, TRAWLER_SMOKE_TOKEN: ` ${"s".repeat(48)} ` }).smokeToken).toBe("s".repeat(48));
   expect(() => readEnv({ ...base, TRAWLER_SMOKE_TOKEN: "short" })).toThrow(/TRAWLER_SMOKE_TOKEN/);
 });
+
+test("artifact storage is read from its five variables together, path style only when asked, and needs https in production", () => {
+  const bucket = {
+    TRAWLER_ARTIFACTS_BUCKET: "trawler-artifacts", TRAWLER_ARTIFACTS_ENDPOINT: "https://storage.railway.app", TRAWLER_ARTIFACTS_REGION: "auto",
+    TRAWLER_ARTIFACTS_ACCESS_KEY_ID: "key-id", TRAWLER_ARTIFACTS_SECRET_ACCESS_KEY: "key-secret",
+  };
+  expect(readEnv(base).artifacts).toBeUndefined();
+  expect(readEnv({ ...base, ...bucket }).artifacts).toEqual({ bucket: "trawler-artifacts", endpoint: "https://storage.railway.app", region: "auto", accessKeyId: "key-id", secretAccessKey: "key-secret", pathStyle: false });
+  expect(readEnv({ ...base, ...bucket, TRAWLER_ARTIFACTS_PATH_STYLE: "true" }).artifacts?.pathStyle).toBe(true);
+  expect(() => readEnv({ ...base, ...bucket, TRAWLER_ARTIFACTS_REGION: " ", TRAWLER_ARTIFACTS_SECRET_ACCESS_KEY: "" })).toThrow("artifact storage also needs TRAWLER_ARTIFACTS_REGION, TRAWLER_ARTIFACTS_SECRET_ACCESS_KEY");
+  expect(() => readEnv({ ...base, ...bucket, TRAWLER_ARTIFACTS_ENDPOINT: "storage.railway.app" })).toThrow(/TRAWLER_ARTIFACTS_ENDPOINT/);
+  const production = { ...base, NODE_ENV: "production", BETTER_AUTH_URL: "https://app.usetrawler.com" };
+  expect(() => readEnv({ ...production, ...bucket, TRAWLER_ARTIFACTS_ENDPOINT: "http://127.0.0.1:54339" })).toThrow(/https in production/);
+  expect(readEnv({ ...production, ...bucket }).artifacts?.endpoint).toBe("https://storage.railway.app");
+});

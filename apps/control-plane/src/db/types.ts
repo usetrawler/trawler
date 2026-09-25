@@ -43,6 +43,19 @@ export interface Account {
   userId: string;
 }
 
+export interface Artifacts {
+  content_type: string;
+  created_at: Generated<Timestamp>;
+  finding_key: string | null;
+  id: Generated<string>;
+  job_id: string;
+  kind: string;
+  org_id: string;
+  run_id: string;
+  size_bytes: number;
+  storage_key: string;
+}
+
 export interface Credentials {
   base_url: string | null;
   created_at: Generated<Timestamp>;
@@ -286,6 +299,7 @@ export interface Verification {
 
 export interface DB {
   account: Account;
+  artifacts: Artifacts;
   credentials: Credentials;
   findings: Findings;
   goal_outcomes: GoalOutcomes;

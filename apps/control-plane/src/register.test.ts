@@ -62,3 +62,22 @@ test("register scrubs the console before it starts Sentry, so what Sentry prints
   expect(stderr).toContain("rejected with •••");
   expect(stderr).not.toContain(TOKEN);
 });
+
+test("register starts the hourly removal of expired artifacts only where artifact storage is configured", async () => {
+  vi.useFakeTimers();
+  try {
+    vi.stubEnv("NEXT_RUNTIME", "nodejs");
+    vi.stubEnv("SENTRY_DSN", "");
+    await register();
+    expect(vi.getTimerCount()).toBe(0);
+    for (const [name, value] of Object.entries({
+      TRAWLER_ARTIFACTS_BUCKET: "trawler-artifacts", TRAWLER_ARTIFACTS_ENDPOINT: "http://127.0.0.1:54339", TRAWLER_ARTIFACTS_REGION: "us-east-1",
+      TRAWLER_ARTIFACTS_ACCESS_KEY_ID: "trawler", TRAWLER_ARTIFACTS_SECRET_ACCESS_KEY: "trawler-s3-secret",
+    })) vi.stubEnv(name, value);
+    await register();
+    expect(vi.getTimerCount()).toBe(2);
+  } finally {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
