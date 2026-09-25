@@ -12,7 +12,6 @@ export interface ServerEnv {
   smokeToken?: string;
   openRouterUrl: string;
   betaEmails?: string[];
-  artifacts?: ArtifactStorage;
 }
 
 export const DEFAULT_SETUP_MODEL = "deepseek/deepseek-v4.1-flash";
@@ -43,7 +42,6 @@ export function readEnv(env: Record<string, string | undefined> = process.env): 
     openRouterUrl,
     betaEmails: env.TRAWLER_BETA_EMAILS?.trim() ? env.TRAWLER_BETA_EMAILS.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean) : undefined,
     setup: env.OPENROUTER_API_KEY ? { apiKey: env.OPENROUTER_API_KEY, model: env.TRAWLER_SETUP_MODEL ?? DEFAULT_SETUP_MODEL } : undefined,
-    artifacts: artifactStorage(env),
   };
 }
 

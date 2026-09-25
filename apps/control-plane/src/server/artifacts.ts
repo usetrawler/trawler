@@ -5,11 +5,16 @@ import { artifactStorage } from "./env.ts";
 import { logError } from "./log.ts";
 
 let store: ArtifactStore | undefined;
+let misconfigured = false;
 
 export function artifactStore(): ArtifactStore | undefined {
-  if (!store) {
+  if (store || misconfigured) return store;
+  try {
     const storage = artifactStorage();
     if (storage) store = s3Store(storage);
+  } catch (err) {
+    misconfigured = true;
+    void logError("artifact storage is misconfigured, so files cannot be stored", { err });
   }
   return store;
 }
@@ -17,7 +22,17 @@ export function artifactStore(): ArtifactStore | undefined {
 const HOUR_MS = 60 * 60 * 1000;
 
 export function repeatHourly(task: () => Promise<unknown>, failure: string, firstMs = 60_000): () => void {
-  const run = () => void task().catch((err: unknown) => logError(failure, { err }));
+  let running = false;
+  const run = () => {
+    if (running) return;
+    running = true;
+    void Promise.resolve()
+      .then(task)
+      .catch((err: unknown) => logError(failure, { err }))
+      .finally(() => {
+        running = false;
+      });
+  };
   const first = setTimeout(run, firstMs);
   const hourly = setInterval(run, HOUR_MS);
   first.unref();
