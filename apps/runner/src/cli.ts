@@ -29,7 +29,7 @@ export interface CliDeps {
   err: (line: string) => void;
   model: (modelId: string, apiKey: string, baseURL?: string) => LanguageModel;
   fetchText: (url: string) => Promise<string>;
-  openBrowser: (opts: Parameters<OpenBrowser>[0] & { project: ReturnType<typeof ProjectConfigSchema.parse>; outputDir: string; headless: boolean }) => ReturnType<OpenBrowser>;
+  openBrowser: (opts: Parameters<OpenBrowser>[0] & { project: ReturnType<typeof ProjectConfigSchema.parse>; outputDir: string; headless: boolean; survivesSignals?: boolean }) => ReturnType<OpenBrowser>;
   runsRoot: string;
   fetchImpl?: typeof fetch;
 }
@@ -59,10 +59,10 @@ export const defaultDeps: CliDeps = {
   err: (line) => console.error(line),
   model: (modelId, apiKey, baseURL) => createModel({ modelId, apiKey, baseURL }),
   fetchText: fetchPage,
-  openBrowser: ({ project, outputDir, headless, onBlocked, scrubber }) =>
+  openBrowser: ({ project, outputDir, headless, onBlocked, scrubber, survivesSignals }) =>
     openBrowser({
       allowedOrigins: project.allowedOrigins, httpCredentials: project.httpCredentials, extraHeaders: project.extraHeaders,
-      secretHeaders: project.secretHeaders, outputDir, scrubber, onBlocked, headless,
+      secretHeaders: project.secretHeaders, outputDir, scrubber, onBlocked, headless, survivesSignals,
     }),
   runsRoot: "runs",
 };
@@ -136,7 +136,7 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
       const outputDir = mkdtempSync(join(tmpdir(), "trawler-work-"));
       const removeOutput = () => rmSync(outputDir, { recursive: true, force: true });
       try {
-        const browser = await deps.openBrowser({ project, outputDir, headless: true, onBlocked, scrubber });
+        const browser = await deps.openBrowser({ project, outputDir, headless: true, onBlocked, scrubber, survivesSignals: true });
         return { tools: browser.tools, fillField: (ref, text, kind) => browser.fillField(ref, text, kind), close: () => browser.close().finally(removeOutput) };
       } catch (err) {
         removeOutput();

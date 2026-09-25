@@ -148,7 +148,7 @@ describe("runReplay", () => {
     const { observation, usage } = await promise;
     expect(observation.completed).toBe(false);
     expect(usage.steps).toBe(3);
-    expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "error", error: "the browser failed 3 times in a row" });
+    expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "error", error: "the browser failed 3 times in a row; last error: the browser has closed" });
   });
 
   test("a secret cut by the size limit is masked before it is cut", async () => {
@@ -204,6 +204,16 @@ describe("judge", () => {
     expect(events.map((e) => e.type)).toEqual(["job_started", "verdict", "job_finished"]);
     expect(events[1]).toMatchObject({ jobId: "judge:f1", findingId: "f1", verdict: "confirmed", observed: "Internal Server Error" });
     events.forEach((e, i) => expect(() => RunEventSchema.parse({ ...e, seq: i + 1, at: "2026-09-24T10:00:00.000Z" })).not.toThrow());
+  });
+
+  test("a judge that gets no usable answer asks once more before giving up", async () => {
+    for (const first of [text(""), text("not json at all")]) {
+      const model = scriptedModel([first, text(JSON.stringify({ verdict: "confirmed" }))]);
+      const { verdict, usage } = await judgeWith(model).promise;
+      expect(verdict).toBe("confirmed");
+      expect(model.doGenerateCalls).toHaveLength(2);
+      expect(usage.steps).toBe(2);
+    }
   });
 
   test("a replay that wrote no report is inconclusive, never refuted", async () => {

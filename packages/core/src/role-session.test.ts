@@ -244,7 +244,7 @@ describe("runRoleSession", () => {
     const dead = { browser_snapshot: tool({ inputSchema: z.object({}), execute: async (): Promise<string> => { throw new Error("Target closed"); } }) };
     const model = scriptedModel(Array.from({ length: 10 }, () => toolCall("browser_snapshot", {})));
     const { result, usage } = await run(model, { browserTools: dead }).promise;
-    expect(result).toMatchObject({ stoppedBy: "error", error: "the browser failed 3 times in a row" });
+    expect(result).toMatchObject({ stoppedBy: "error", error: "the browser failed 3 times in a row; last error: Target closed" });
     expect(usage.steps).toBe(3);
   });
 

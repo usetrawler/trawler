@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { EventBatchSchema, JobCompletionSchema, PROTOCOL_HEADER, PROTOCOL_VERSION } from "@usetrawler/protocol";
 import type { Database } from "../db/index.ts";
 import type { Keyring } from "../lib/secrets.ts";
-import { claimJob, completeJob, ForeignEvents, ingestEvents, InvalidJobToken, releaseJob } from "../runs/queue.ts";
+import { claimJob, completeJob, ForeignEvents, ingestEvents, InvalidJobToken, releaseJob, releaseJobForShutdown } from "../runs/queue.ts";
 
 export interface RunnerApiDeps {
   db: Database;
@@ -119,6 +119,20 @@ export async function handleComplete(req: Request, jobId: string, deps: RunnerAp
   if (!parsed.success) return problem(400, "invalid completion", parsed.error.issues);
   try {
     await completeJob(deps.db, token, parsed.data, jobId);
+    return json({ ok: true });
+  } catch (err) {
+    if (err instanceof InvalidJobToken) return problem(401, "invalid job token");
+    throw err;
+  }
+}
+
+export async function handleRelease(req: Request, jobId: string, deps: RunnerApiDeps): Promise<Response> {
+  const wrongProtocol = protocolProblem(req);
+  if (wrongProtocol) return wrongProtocol;
+  const token = bearer(req);
+  if (!token || !UUID.test(jobId)) return problem(401, "invalid job token");
+  try {
+    await releaseJobForShutdown(deps.db, token, jobId);
     return json({ ok: true });
   } catch (err) {
     if (err instanceof InvalidJobToken) return problem(401, "invalid job token");
