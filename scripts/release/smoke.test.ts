@@ -111,9 +111,9 @@ test("a smoke token given directly is used without asking Railway", async () => 
   expect(railway.calls()).toBe(0);
 });
 
-test("the smoke token read from the control plane is masked in GitHub Actions and never printed elsewhere", async () => {
+test("the smoke token read from the control plane is trimmed like the server trims it, masked in GitHub Actions and never printed elsewhere", async () => {
   const printed: string[] = [];
-  expect(await smokeToken({ RAILWAY_CORE_TOKEN: "core", GITHUB_ACTIONS: "true" }, fakeControlPlaneVariables(TOKEN).fetch, (line) => printed.push(line))).toBe(TOKEN);
+  expect(await smokeToken({ RAILWAY_CORE_TOKEN: "core", GITHUB_ACTIONS: "true" }, fakeControlPlaneVariables(` ${TOKEN}\n`).fetch, (line) => printed.push(line))).toBe(TOKEN);
   expect(printed).toEqual([`::add-mask::${TOKEN}`]);
   printed.length = 0;
   expect(await smokeToken({ RAILWAY_CORE_TOKEN: "core" }, fakeControlPlaneVariables(TOKEN).fetch, (line) => printed.push(line))).toBe(TOKEN);

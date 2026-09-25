@@ -10,6 +10,7 @@ import { isLive } from "../runs/report.ts";
 import { cancelRun, runSummary, startRun } from "../runs/runs.ts";
 
 export const SMOKE_ORG = "trawler-smoke";
+const SMOKE_ORG_SLUG = "trawler_smoke";
 
 const SMOKE_RUN = { budgetUsd: 0.1, maxSteps: 12, replaySteps: 8 };
 const SMOKE_PROJECT = ProjectConfigSchema.parse({
@@ -45,7 +46,7 @@ export async function handleSmokeStart(req: Request, deps: SmokeDeps): Promise<R
   if (!modelKey) return json({ error: "the smoke check needs OPENROUTER_API_KEY on this server" }, 503);
   await deps.db.transaction().execute(async (tx) => {
     await sql`set local role trawler_auth`.execute(tx);
-    await tx.insertInto("organization").values({ id: SMOKE_ORG, name: "Release smoke check", slug: SMOKE_ORG, createdAt: new Date() }).onConflict((oc) => oc.column("id").doNothing()).execute();
+    await tx.insertInto("organization").values({ id: SMOKE_ORG, name: "Release smoke check", slug: SMOKE_ORG_SLUG, createdAt: new Date() }).onConflict((oc) => oc.column("id").doNothing()).execute();
   });
   const runId = await withOrg(deps.db, SMOKE_ORG, async (tx) => {
     const leftOver = await tx.selectFrom("runs").select("id").where("org_id", "=", SMOKE_ORG).where("status", "in", ["queued", "running"]).execute();

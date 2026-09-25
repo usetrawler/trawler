@@ -100,7 +100,7 @@ export async function smokeToken(env: NodeJS.ProcessEnv, call: typeof fetch = fe
   if (env.TRAWLER_SMOKE_TOKEN) return env.TRAWLER_SMOKE_TOKEN;
   if (!env.RAILWAY_CORE_TOKEN) throw new SmokeFailed("set TRAWLER_SMOKE_TOKEN, or RAILWAY_CORE_TOKEN to read it from the control plane");
   const api = railway(env.RAILWAY_CORE_TOKEN, call);
-  const token = await serviceVariable(api, await target(api), "control-plane", "TRAWLER_SMOKE_TOKEN");
+  const token = (await serviceVariable(api, await target(api), "control-plane", "TRAWLER_SMOKE_TOKEN"))?.trim();
   if (!token) throw new SmokeFailed("the control plane behind RAILWAY_CORE_TOKEN has no TRAWLER_SMOKE_TOKEN");
   if (env.GITHUB_ACTIONS) print(`::add-mask::${token}`);
   return token;

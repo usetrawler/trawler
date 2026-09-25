@@ -24,9 +24,10 @@ const summaryOf = (runId: string) => withOrg(t.db, SMOKE_ORG, (tx) => runSummary
 
 beforeAll(async () => {
   await sql`insert into organization (id, name, slug, "createdAt") values ('org-a', 'A', 'a', now())`.execute(t.db);
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-squatter', 'Squatter', 'trawler-smoke', now())`.execute(t.db);
 });
 
-test("the smoke endpoints do not exist without a smoke token", async () => {
+test("the smoke endpoints answer 404 without a smoke token", async () => {
   expect((await start({ smokeToken: undefined })).status).toBe(404);
   expect((await handleSmokeStatus(call("GET", TOKEN), "11111111-1111-4111-8111-111111111111", { ...deps, smokeToken: undefined })).status).toBe(404);
 });
@@ -43,7 +44,7 @@ test("starting says which key is missing", async () => {
   expect(await res.json()).toEqual({ error: expect.stringMatching(/OPENROUTER_API_KEY/) });
 });
 
-test("starts one short run on the demo target in its own workspace, with the smoke key", async () => {
+test("starts one short run on the demo target in its own workspace, with the smoke key, even when a user took the address trawler-smoke", async () => {
   const res = await start();
   expect(res.status).toBe(201);
   const { runId } = await res.json();
