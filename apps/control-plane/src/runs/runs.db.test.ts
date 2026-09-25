@@ -8,7 +8,7 @@ import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { createProject } from "../projects/projects.ts";
 import { cancelRun, runSummary, startRun } from "./runs.ts";
-import { claimJob, completeJob, ingestEvents, InvalidJobToken } from "./queue.ts";
+import { claimJob, completeJob, ingestEvents, InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage } from "./queue.ts";
 
 const t = await testDb();
 afterAll(() => t.drop());
@@ -82,7 +82,7 @@ describe("a whole run", () => {
 
     expect(await claimJob(t.db, keys)).toBeNull();
     const summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
-    expect(summary).toMatchObject({ status: "succeeded", costUsd: 0.031 });
+    expect(summary).toMatchObject({ status: "succeeded", costUsd: 0 });
     expect(summary!.findings).toEqual([expect.objectContaining({ key: "ana:f1", personaKey: "ana", verdict: "confirmed", replay: { completed: true, observed: "Internal Server Error", blockedAt: null } })]);
     expect(summary!.goals).toEqual([{ personaKey: "ana", goal: "g", status: "failed", note: "500" }]);
     expect(summary!.personas).toEqual([{ id: "ana", name: "Ana" }, { id: "lee", name: "Lee" }]);
@@ -127,10 +127,15 @@ describe("safety", () => {
     await drain();
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { ...options, budgetUsd: 0.05 }));
     const job = (await claimJob(t.db, keys))!;
+    const call = await llmCallFor(t.db, job.token);
+    expect(call.remainingUsd).toBeCloseTo(0.05, 6);
+    await recordLlmUsage(t.db, call, { model: "m/agent", inputTokens: 1000, outputTokens: 10, costUsd: 0.06 });
+    await expect(llmCallFor(t.db, job.token)).rejects.toBeInstanceOf(LlmRefused);
     seq = 0;
     const res = await ingestEvents(t.db, job.token, [ev({ type: "step", jobId: job.jobId, step: 1, tool: null, costUsd: 0.06 })]);
     expect(res).toEqual({ cancel: true });
     await completeJob(t.db, job.token, { usage: usage(0.06), stoppedBy: "budget" });
+    expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.costUsd).toBeCloseTo(0.06, 6);
     expect(await claimJob(t.db, keys)).toBeNull();
     expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.status).toBe("stopped_budget");
   });
@@ -296,16 +301,30 @@ describe("review round 2", () => {
     await drain();
   });
 
-  test("a runner that reports after its lease expired still gets its cost counted", async () => {
+  test("only proxied model calls count toward the cost; what a runner reports never does", async () => {
     await drain();
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
-    const late = (await claimJob(t.db, keys))!;
-    await sql`update jobs set lease_until = now() - interval '1 minute' where id = ${late.jobId}`.execute(t.db);
-    await claimJob(t.db, keys);
-    await completeJob(t.db, late.token, { usage: usage(0.5), stoppedBy: "finish" });
+    const job = (await claimJob(t.db, keys))!;
+    seq = 0;
+    await ingestEvents(t.db, job.token, [ev({ type: "step", jobId: job.jobId, step: 1, tool: null, costUsd: 0.4 })]);
+    await recordLlmUsage(t.db, await llmCallFor(t.db, job.token), { model: "m/agent", inputTokens: 5000, outputTokens: 100, costUsd: 0.012 });
+    await completeJob(t.db, job.token, { usage: usage(3), stoppedBy: "finish" });
     const summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
-    expect(summary!.costUsd).toBeCloseTo(0.5, 6);
-    expect(summary!.jobs.find((j) => j.id === late.jobId)?.status).toBe("failed");
+    expect(summary!.costUsd).toBeCloseTo(0.012, 6);
+    const { rows } = await sql<{ model: string; input_tokens: number; cost_usd: string }>`select model, input_tokens, cost_usd from llm_usage where run_id = ${run.id}`.execute(t.db);
+    expect(rows).toEqual([{ model: "m/agent", input_tokens: 5000, cost_usd: "0.012000" }]);
+    await expect(llmCallFor(t.db, job.token)).rejects.toBeInstanceOf(LlmRefused);
+    await drain();
+  });
+
+  test("a model call needs a live job of an active run and names the run's models", async () => {
+    await drain();
+    await expect(llmCallFor(t.db, "x".repeat(43))).rejects.toBeInstanceOf(InvalidJobToken);
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const job = (await claimJob(t.db, keys))!;
+    expect(await llmCallFor(t.db, job.token)).toMatchObject({ orgId: "org-a", runId: run.id, jobId: job.jobId, models: ["m/agent", "m/judge"] });
+    await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id));
+    await expect(llmCallFor(t.db, job.token)).rejects.toBeInstanceOf(LlmRefused);
     await drain();
   });
 });
@@ -316,7 +335,7 @@ test("a finished job's token cannot raise the run's cost afterwards", async () =
   const job = (await claimJob(t.db, keys))!;
   await completeJob(t.db, job.token, { usage: usage(0.1), stoppedBy: "finish" });
   await completeJob(t.db, job.token, { usage: usage(4.9), stoppedBy: "finish" });
-  expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.costUsd).toBeCloseTo(0.1, 6);
+  expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.costUsd).toBe(0);
   await drain();
 });
 

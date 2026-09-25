@@ -23,7 +23,7 @@ function protocolProblem(req: Request): Response | null {
   return null;
 }
 
-function bearer(req: Request): string | null {
+export function bearer(req: Request): string | null {
   const header = req.headers.get("authorization") ?? "";
   const match = /^Bearer ([A-Za-z0-9._~+\/=-]{16,512})$/.exec(header);
   return match ? match[1]! : null;
@@ -39,8 +39,8 @@ export const MAX_BODY_BYTES = 2_000_000;
 
 class BodyTooLarge extends Error {}
 
-async function body(req: Request): Promise<unknown> {
-  if (Number(req.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) throw new BodyTooLarge();
+async function body(req: Request, maxBytes: number): Promise<unknown> {
+  if (Number(req.headers.get("content-length") ?? 0) > maxBytes) throw new BodyTooLarge();
   if (!req.body) return undefined;
   const reader = req.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -49,7 +49,7 @@ async function body(req: Request): Promise<unknown> {
     const { done, value } = await reader.read();
     if (done) break;
     size += value.byteLength;
-    if (size > MAX_BODY_BYTES) {
+    if (size > maxBytes) {
       await reader.cancel().catch(() => undefined);
       throw new BodyTooLarge();
     }
@@ -62,9 +62,9 @@ async function body(req: Request): Promise<unknown> {
   }
 }
 
-async function readBody(req: Request): Promise<{ value: unknown } | { tooLarge: true }> {
+export async function readBody(req: Request, maxBytes = MAX_BODY_BYTES): Promise<{ value: unknown } | { tooLarge: true }> {
   try {
-    return { value: await body(req) };
+    return { value: await body(req, maxBytes) };
   } catch (err) {
     if (err instanceof BodyTooLarge) return { tooLarge: true };
     throw err;

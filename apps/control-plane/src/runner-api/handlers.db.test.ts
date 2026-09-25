@@ -100,7 +100,7 @@ test("a runner that hangs up while its claim is being prepared leaves the job in
   await handleComplete(post(`/api/jobs/${job.jobId}/complete`, { usage: { model: "a", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "finish" }, { authorization: `Bearer ${job.token}` }), job.jobId, deps);
 });
 
-test("text the database cannot store is cleaned instead of failing the batch, and a finished job's cost cannot grow", async () => {
+test("text the database cannot store is cleaned instead of failing the batch, and reported costs never count", async () => {
   const run = await startAndClaim();
   const job = await (await handleClaim(post("/api/runner/claim", {}, runner), deps)).json();
   expect(job.runId).toBe(run.id);
@@ -122,30 +122,7 @@ test("text the database cannot store is cleaned instead of failing the batch, an
   await handleComplete(post(`/api/jobs/${job.jobId}/complete`, done(0.02), auth), job.jobId, deps);
   await handleComplete(post(`/api/jobs/${job.jobId}/complete`, done(5), auth), job.jobId, deps);
   const { rows } = await sql<{ cost_usd: string }>`select cost_usd from runs where id = ${run.id}`.execute(t.db);
-  expect(Number(rows[0]!.cost_usd)).toBeCloseTo(0.02, 6);
-});
-
-test("a job that failed on its own, or was reaped, counts its reported cost once", async () => {
-  const done = (costUsd: number, stoppedBy = "finish") => ({ usage: { model: "a", inputTokens: 1, outputTokens: 1, costUsd, steps: 1 }, stoppedBy });
-  const cost = async (id: string) => Number((await sql<{ cost_usd: string }>`select cost_usd from runs where id = ${id}`.execute(t.db)).rows[0]!.cost_usd);
-
-  const failing = await startAndClaim();
-  const a = await (await handleClaim(post("/api/runner/claim", {}, runner), deps)).json();
-  expect(a.runId).toBe(failing.id);
-  const authA = { authorization: `Bearer ${a.token}` };
-  await handleComplete(post(`/api/jobs/${a.jobId}/complete`, done(0.03, "error"), authA), a.jobId, deps);
-  await handleComplete(post(`/api/jobs/${a.jobId}/complete`, done(4, "error"), authA), a.jobId, deps);
-  expect(await cost(failing.id)).toBeCloseTo(0.03, 6);
-
-  const reaped = await startAndClaim();
-  const b = await (await handleClaim(post("/api/runner/claim", {}, runner), deps)).json();
-  expect(b.runId).toBe(reaped.id);
-  await sql`update jobs set lease_until = now() - interval '1 minute' where id = ${b.jobId}`.execute(t.db);
-  expect((await handleClaim(post("/api/runner/claim", {}, runner), deps)).status).toBe(204);
-  const authB = { authorization: `Bearer ${b.token}` };
-  await handleComplete(post(`/api/jobs/${b.jobId}/complete`, done(0.02), authB), b.jobId, deps);
-  await handleComplete(post(`/api/jobs/${b.jobId}/complete`, done(5), authB), b.jobId, deps);
-  expect(await cost(reaped.id)).toBeCloseTo(0.02, 6);
+  expect(Number(rows[0]!.cost_usd)).toBe(0);
 });
 
 test("a claim released after its run was cancelled is cancelled, not queued forever", async () => {

@@ -3,11 +3,13 @@ import { createServer, type Server } from "node:http";
 import { sql } from "kysely";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { ProjectConfigSchema } from "@usetrawler/protocol";
-import { scriptedModel, text, toolCall } from "../../../../packages/core/src/testing.ts";
+import { createModel } from "@usetrawler/core";
 import { workOnce } from "../../../runner/src/worker.ts";
 import { withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
+import { setOpenRouterKey } from "../credentials/credentials.ts";
+import { handleChatCompletions } from "../llm-proxy/proxy.ts";
 import { createProject } from "../projects/projects.ts";
 import { runSummary, startRun } from "../runs/runs.ts";
 import { handleClaim, handleComplete, handleEvents, type RunnerApiDeps } from "./handlers.ts";
@@ -17,8 +19,21 @@ afterAll(() => t.drop());
 const keys = new Keyring(randomBytes(32));
 const runnerToken = "runner-" + "r".repeat(40);
 const deps: RunnerApiDeps = { db: t.db, keys, runnerToken, claimWaitMs: 50, pollMs: 10 };
+const ORG_KEY = "sk-or-v1-" + "k".repeat(64);
 let server: Server;
+let openRouter: Server;
 let base = "";
+let openRouterBase = "";
+const seen: Array<{ auth: string | undefined; body: Record<string, unknown> }> = [];
+let replies: unknown[] = [];
+
+const usage = { prompt_tokens: 1200, completion_tokens: 30, total_tokens: 1230, cost: 0.001 };
+const toolReply = (name: string, args: unknown) => ({
+  id: "gen", object: "chat.completion", created: 1, model: "m/agent",
+  choices: [{ index: 0, finish_reason: "tool_calls", message: { role: "assistant", content: null, tool_calls: [{ id: `call-${name}-${seen.length}`, type: "function", function: { name, arguments: JSON.stringify(args) } }] } }],
+  usage,
+});
+const textReply = (content: string) => ({ id: "gen", object: "chat.completion", created: 1, model: "m/judge", choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content } }], usage });
 
 beforeAll(async () => {
   server = createServer(async (req, res) => {
@@ -26,15 +41,32 @@ beforeAll(async () => {
     for await (const c of req) chunks.push(c as Buffer);
     const request = new Request(`http://cp.test${req.url}`, { method: req.method, headers: req.headers as Record<string, string>, body: chunks.length ? Buffer.concat(chunks) : undefined });
     const match = /^\/api\/jobs\/([^/]+)\/(events|complete)$/.exec(req.url ?? "");
-    const response = req.url === "/api/runner/claim" ? await handleClaim(request, deps) : match ? await (match[2] === "events" ? handleEvents : handleComplete)(request, match[1]!, deps) : new Response(null, { status: 404 });
+    const response = req.url === "/api/llm/v1/chat/completions" ? await handleChatCompletions(request, { db: t.db, keys, openRouterUrl: openRouterBase, retryBaseMs: 1 }) : req.url === "/api/runner/claim" ? await handleClaim(request, deps) : match ? await (match[2] === "events" ? handleEvents : handleComplete)(request, match[1]!, deps) : new Response(null, { status: 404 });
     res.writeHead(response.status, Object.fromEntries(response.headers));
     res.end(Buffer.from(await response.arrayBuffer()));
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  openRouter = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    seen.push({ auth: req.headers.authorization, body: JSON.parse(Buffer.concat(chunks).toString()) });
+    const reply = replies.shift();
+    res.writeHead(reply ? 200 : 500, { "content-type": "application/json" });
+    res.end(JSON.stringify(reply ?? { error: { message: "no scripted reply" } }));
+  });
+  await new Promise<void>((r) => openRouter.listen(0, "127.0.0.1", r));
+  openRouterBase = `http://127.0.0.1:${(openRouter.address() as { port: number }).port}/api/v1`;
   await sql`insert into organization (id, name, slug, "createdAt") values ('org-a', 'A', 'a', now())`.execute(t.db);
+  await withOrg(t.db, "org-a", (tx) => setOpenRouterKey(tx, "org-a", ORG_KEY, "u", keys));
 });
-afterAll(() => new Promise<void>((r) => server.close(() => r())));
+afterAll(() => new Promise<void>((r) => server.close(() => openRouter.close(() => r()))));
+
+const worker = () => ({
+  controlPlane: base, runnerToken, log: () => {}, flushMs: 5, retryBaseMs: 5,
+  model: (modelId: string, jobToken: string) => createModel({ modelId, apiKey: jobToken, baseURL: `${base}/api/llm/v1` }),
+  openBrowser: async () => ({ tools: {}, fillField: async () => "typed", close: async () => {} }),
+});
 
 test("a run goes from start to a confirmed defect through the real runner API and worker", async () => {
   const config = ProjectConfigSchema.parse({
@@ -43,27 +75,56 @@ test("a run goes from start to a confirmed defect through the real runner API an
   });
   const project = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
   const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { budgetUsd: 1, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 10, replaySteps: 10, createdBy: "u" }));
-  const scripts: Record<string, ReturnType<typeof scriptedModel>> = {
-    role: scriptedModel([
-      toolCall("submit_finding", { kind: "defect", goal: "g", title: "Saving fails", observed: "Save returned an error page", reproduction: ["Open https://app.acme.test/invoices/new", "Click Save"], severity: "high" }),
-      toolCall("goal_status", { goal: "g", status: "failed", note: "error page" }),
-      toolCall("finish", { summary: "done" }),
-    ]),
-    replay: scriptedModel([toolCall("report_replay", { completed: true, observed: "An Internal Server Error page appeared", blockedAt: null })]),
-    judge: scriptedModel([text(JSON.stringify({ verdict: "confirmed" }))]),
-  };
-  const order = ["role", "replay", "judge"];
-  let current = 0;
-  const worker = {
-    controlPlane: base, runnerToken, log: () => {}, flushMs: 5, retryBaseMs: 5,
-    model: () => scripts[order[current]!]!,
-    openBrowser: async () => ({ tools: {}, fillField: async () => "typed", close: async () => {} }),
-  };
-  for (; current < order.length; current++) expect(await workOnce(worker)).toBe("done");
-  expect(await workOnce(worker)).toBe("idle");
+  replies = [
+    toolReply("submit_finding", { kind: "defect", goal: "g", title: "Saving fails", observed: "Save returned an error page", reproduction: ["Open https://app.acme.test/invoices/new", "Click Save"], severity: "high" }),
+    toolReply("goal_status", { goal: "g", status: "failed", note: "error page" }),
+    toolReply("finish", { summary: "done" }),
+    toolReply("report_replay", { completed: true, observed: "An Internal Server Error page appeared", blockedAt: null }),
+    textReply(JSON.stringify({ verdict: "confirmed" })),
+  ];
+  seen.length = 0;
+  for (let i = 0; i < 3; i++) expect(await workOnce(worker())).toBe("done");
+  expect(await workOnce(worker())).toBe("idle");
   const summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
   expect(summary).toMatchObject({ status: "succeeded" });
   expect(summary!.findings).toEqual([expect.objectContaining({ key: "ana:f1", title: "Saving fails", verdict: "confirmed", replay: expect.objectContaining({ completed: true }) })]);
   expect(summary!.goals).toEqual([{ personaKey: "ana", goal: "g", status: "failed", note: "error page" }]);
   expect(summary!.costUsd).toBeCloseTo(0.005, 6);
+  expect(seen).toHaveLength(5);
+  for (const call of seen) {
+    expect(call.auth).toBe(`Bearer ${ORG_KEY}`);
+    expect(call.body).toMatchObject({ usage: { include: true }, provider: { data_collection: "deny" } });
+  }
+  expect(seen.map((c) => c.body.model)).toEqual(["m/agent", "m/agent", "m/agent", "m/agent", "m/judge"]);
+  const { rows } = await sql<{ n: number; cost: string }>`select count(*)::int as n, sum(cost_usd) as cost from llm_usage where run_id = ${run.id}`.execute(t.db);
+  expect(rows[0]).toEqual({ n: 5, cost: "0.005000" });
+});
+
+test("a run that spends its cap mid-session is stopped by the proxy, and the job ends as budget", async () => {
+  const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "lee", name: "Lee", brief: "b" }], goals: [{ id: "g", instruction: "Look around." }] });
+  const project = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { budgetUsd: 0.0015, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 10, replaySteps: 10, createdBy: "u" }));
+  replies = Array.from({ length: 5 }, () => toolReply("note", { text: "looking" }));
+  seen.length = 0;
+  expect(await workOnce(worker())).toBe("done");
+  expect(seen).toHaveLength(2);
+  const summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
+  expect(summary).toMatchObject({ status: "stopped_budget" });
+  expect(summary!.costUsd).toBeCloseTo(0.002, 6);
+  expect(summary!.jobs[0]).toMatchObject({ status: "succeeded", stopped_by: "budget" });
+});
+
+test("the proxy refuses a stranger, a model the run did not choose, and streaming", async () => {
+  const call = (token: string, body: unknown) => handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) }), { db: t.db, keys, openRouterUrl: openRouterBase });
+  expect((await call("x".repeat(43), { model: "m/agent", messages: [] })).status).toBe(401);
+  const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "kim", name: "Kim", brief: "b" }], goals: [{ id: "g", instruction: "x" }] });
+  const project = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { budgetUsd: 1, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 10, replaySteps: 10, createdBy: "u" }));
+  const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "1" } }), deps)).json();
+  seen.length = 0;
+  expect((await call(job.token, { model: "openai/gpt-5-pro", messages: [] })).status).toBe(400);
+  expect((await call(job.token, { model: "m/agent", stream: true, messages: [] })).status).toBe(400);
+  expect(seen).toHaveLength(0);
+  await handleComplete(new Request(`${base}/api/jobs/${job.jobId}/complete`, { method: "POST", headers: { authorization: `Bearer ${job.token}`, "x-trawler-protocol": "1", "content-type": "application/json" }, body: JSON.stringify({ usage: { model: "m/agent", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "finish" }) }), job.jobId, deps);
+  expect((await call(job.token, { model: "m/agent", messages: [] })).status).toBe(402);
 });
