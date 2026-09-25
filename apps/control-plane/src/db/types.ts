@@ -44,6 +44,7 @@ export interface Account {
 }
 
 export interface Credentials {
+  base_url: string | null;
   created_at: Generated<Timestamp>;
   created_by: string;
   hint: string;
@@ -211,9 +212,12 @@ export interface Runs {
   number: number;
   org_id: string;
   project_id: string;
+  provider: Generated<string>;
   replay_steps: number;
   started_at: Timestamp | null;
   status: Generated<string>;
+  token_cap: Int8 | null;
+  tokens_used: Generated<Int8>;
 }
 
 export interface Session {

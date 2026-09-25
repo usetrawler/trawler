@@ -1,10 +1,10 @@
 import type { Database } from "../db/index.ts";
 import { asSystem } from "../db/tenancy.ts";
-import { openRouterKey } from "../credentials/credentials.ts";
+import { modelKey } from "../credentials/credentials.ts";
 import type { Keyring } from "../lib/secrets.ts";
 import { bearer, readBody } from "../runner-api/handlers.ts";
-import { runModel } from "../runs/catalog.ts";
-import type { RunModel } from "../runs/models.ts";
+import { priceFor, type Price } from "../llm/prices.ts";
+import { chatHeaders, endpointFor, type Endpoint } from "../llm/providers.ts";
 import { InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage, type LlmCall } from "../runs/queue.ts";
 
 export interface ProxyDeps {
@@ -19,21 +19,22 @@ export interface ProxyDeps {
 const MAX_REQUEST_BYTES = 8_000_000;
 const MAX_OUTPUT_TOKENS = 16_000;
 const UPSTREAM_TIMEOUT_MS = 180_000;
-const FORWARDED = ["model", "messages", "tools", "tool_choice", "parallel_tool_calls", "temperature", "top_p", "top_k", "seed", "stop", "frequency_penalty", "presence_penalty", "response_format", "reasoning", "include_reasoning"] as const;
+const FORWARDED = ["model", "messages", "tools", "tool_choice", "parallel_tool_calls", "temperature", "top_p", "seed", "stop", "frequency_penalty", "presence_penalty", "response_format"] as const;
+const OPENROUTER_ONLY = ["top_k", "reasoning", "include_reasoning"] as const;
 const inFlight = new Set<string>();
 
 const failure = (status: number, message: string) => Response.json({ error: { code: status, message } }, { status, headers: { "cache-control": "no-store" } });
 
 class UpstreamTimeout extends Error {}
 
-async function forward(deps: ProxyDeps, key: string, payload: unknown, signal: AbortSignal): Promise<Response> {
+async function forward(deps: ProxyDeps, endpoint: Endpoint, payload: unknown, signal: AbortSignal): Promise<Response> {
   const attempts = deps.attempts ?? 3;
   let last: Response | Error = new Error("no attempt made");
   for (let i = 0; i < attempts; i++) {
     try {
-      const res = await (deps.fetch ?? fetch)(`${deps.openRouterUrl}/chat/completions`, {
+      const res = await (deps.fetch ?? fetch)(`${endpoint.baseUrl}/chat/completions`, {
         method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${key}`, "x-title": "Trawler" },
+        headers: chatHeaders(endpoint),
         body: JSON.stringify(payload),
         signal: AbortSignal.any([signal, AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)]),
       });
@@ -52,12 +53,13 @@ async function forward(deps: ProxyDeps, key: string, payload: unknown, signal: A
 
 type Usage = { prompt_tokens?: unknown; completion_tokens?: unknown; cost?: unknown };
 const count = (n: unknown) => (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0);
-const priced = (model: RunModel | null, input: number, output: number) => (model ? (input * model.promptUsdPerMtok + output * model.completionUsdPerMtok) / 1_000_000 : 0);
+const priced = (price: Price | null, input: number, output: number) => (price ? (input * price.promptUsdPerMtok + output * price.completionUsdPerMtok) / 1_000_000 : 0);
 
-function outputAllowance(model: RunModel | null, requested: unknown, remainingUsd: number): number {
-  const asked = Math.min(count(requested) || MAX_OUTPUT_TOKENS, MAX_OUTPUT_TOKENS);
-  if (!model || model.completionUsdPerMtok <= 0) return asked;
-  return Math.min(asked, Math.floor((remainingUsd * 1_000_000) / model.completionUsdPerMtok));
+function outputAllowance(price: Price | null, requested: unknown, call: LlmCall): number {
+  let allowed = Math.min(count(requested) || MAX_OUTPUT_TOKENS, MAX_OUTPUT_TOKENS);
+  if (price && price.completionUsdPerMtok > 0) allowed = Math.min(allowed, Math.floor((call.remainingUsd * 1_000_000) / price.completionUsdPerMtok));
+  if (call.remainingTokens !== null) allowed = Math.min(allowed, call.remainingTokens);
+  return allowed;
 }
 
 async function record(deps: ProxyDeps, call: LlmCall, usage: Parameters<typeof recordLlmUsage>[2]) {
@@ -98,31 +100,37 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
   const request = body as Record<string, unknown>;
   if (request.stream !== undefined && request.stream !== false) return failure(400, "streaming is not supported");
   if (typeof request.model !== "string" || !call.models.includes(request.model)) return failure(400, `this job may only use ${call.models.join(" or ")}`);
-  const [key, model] = await Promise.all([asSystem(deps.db, (tx) => openRouterKey(tx, call.orgId, deps.keys)), runModel(deps.db, request.model)]);
-  if (!key) return failure(402, "the organisation has no OpenRouter key");
-  const maxTokens = outputAllowance(model, request.max_tokens ?? request.max_completion_tokens, call.remainingUsd);
+  const stored = await asSystem(deps.db, (tx) => modelKey(tx, call.orgId, deps.keys));
+  if (!stored) return failure(402, "the workspace has no model key");
+  if (stored.provider !== call.provider) return failure(402, "the workspace key now belongs to another provider; start a new run");
+  const endpoint = endpointFor(stored.provider, stored.key, { openRouterUrl: deps.openRouterUrl, customUrl: stored.baseUrl });
+  const price = await priceFor(stored.provider, request.model, deps.openRouterUrl, deps.fetch);
+  const maxTokens = outputAllowance(price, request.max_tokens ?? request.max_completion_tokens, call);
   if (maxTokens < 1) return failure(402, "the run has spent its budget");
 
-  const payload = Object.fromEntries(FORWARDED.filter((field) => field in request).map((field) => [field, request[field]]));
+  const openRouter = stored.provider === "openrouter";
+  const fields = openRouter ? [...FORWARDED, ...OPENROUTER_ONLY] : FORWARDED;
+  const payload = Object.fromEntries(fields.filter((field) => field in request).map((field) => [field, request[field]]));
+  const extras = openRouter ? { usage: { include: true }, provider: { data_collection: "deny", allow_fallbacks: true } } : {};
   let upstream: Response;
   try {
-    upstream = await forward(deps, key, { ...payload, max_tokens: maxTokens, usage: { include: true }, provider: { data_collection: "deny", allow_fallbacks: true } }, req.signal);
+    upstream = await forward(deps, endpoint, { ...payload, max_tokens: maxTokens, ...extras }, req.signal);
   } catch (err) {
-    if (err instanceof UpstreamTimeout) return failure(504, "OpenRouter did not answer in time");
+    if (err instanceof UpstreamTimeout) return failure(504, "the provider did not answer in time");
     if (req.signal.aborted) return failure(499, "the runner hung up");
-    return failure(502, "OpenRouter could not be reached");
+    return failure(502, "the provider could not be reached");
   }
-  if (upstream.status === 401 || upstream.status === 403) return failure(402, "OpenRouter refused the organisation's key; replace it on the plan page");
-  if (upstream.status === 402) return failure(402, "the organisation's OpenRouter account is out of credits");
+  if (upstream.status === 401 || upstream.status === 403) return failure(402, "the provider refused the workspace key; replace it on the plan page");
+  if (upstream.status === 402) return failure(402, "the provider account behind the workspace key is out of credits");
   const text = await upstream.text();
   let parsed: { usage?: Usage; model?: unknown; error?: { message?: unknown } };
   try {
     parsed = JSON.parse(text);
   } catch {
-    return failure(502, "OpenRouter sent an unreadable answer");
+    return failure(502, "the provider sent an unreadable answer");
   }
   if (!upstream.ok || parsed.error) {
-    const message = typeof parsed.error?.message === "string" ? parsed.error.message.slice(0, 300) : `OpenRouter answered ${upstream.status}`;
+    const message = typeof parsed.error?.message === "string" ? parsed.error.message.slice(0, 300) : `the provider answered ${upstream.status}`;
     return failure(upstream.ok ? 502 : upstream.status, message);
   }
   const usage = parsed.usage ?? {};
@@ -132,7 +140,7 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
     model: typeof parsed.model === "string" ? parsed.model : request.model,
     inputTokens,
     outputTokens,
-    costUsd: Math.max(count(usage.cost), priced(model, inputTokens, outputTokens)),
+    costUsd: Math.max(openRouter ? count(usage.cost) : 0, priced(price, inputTokens, outputTokens)),
   });
   return new Response(text, { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 }

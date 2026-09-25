@@ -2,6 +2,7 @@ import { sql } from "kysely";
 import type { ProjectConfig, RunEvent } from "@usetrawler/protocol";
 import type { Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
+import type { Provider } from "../llm/providers.ts";
 import { loadProjectConfig } from "../projects/projects.ts";
 
 export interface StartRunOptions {
@@ -11,6 +12,8 @@ export interface StartRunOptions {
   maxSteps: number;
   replaySteps: number;
   createdBy: string;
+  provider?: Provider;
+  tokenCap?: number | null;
 }
 
 export function withoutSecrets(config: ProjectConfig) {
@@ -34,6 +37,7 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
       org_id: orgId, project_id: projectId, number: next, config_snapshot: JSON.stringify(withoutSecrets(config)),
       agent_model: options.agentModel, judge_model: options.judgeModel, budget_usd: options.budgetUsd.toFixed(4),
       max_steps: options.maxSteps, replay_steps: options.replaySteps, created_by: options.createdBy,
+      provider: options.provider ?? "openrouter", token_cap: options.tokenCap ? String(options.tokenCap) : null,
     })
     .returning(["id", "number"])
     .executeTakeFirstOrThrow();
@@ -52,7 +56,7 @@ export async function cancelRun(tx: Tx, orgId: string, runId: string): Promise<v
 export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const run = await tx
     .selectFrom("runs")
-    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot"])
+    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used"])
     .where("id", "=", runId)
     .where("org_id", "=", orgId)
     .executeTakeFirst();
@@ -76,6 +80,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   return {
     id: run.id, number: run.number, status: run.status, projectId: run.project_id,
     costUsd: Number(run.cost_usd), budgetUsd: Number(run.budget_usd), agentModel: run.agent_model, judgeModel: run.judge_model,
+    provider: run.provider, tokenCap: run.token_cap === null ? null : Number(run.token_cap), tokensUsed: Number(run.tokens_used),
     createdAt: run.created_at, startedAt: run.started_at, finishedAt: run.finished_at,
     jobs,
     findings: findings.map((f) => ({ key: f.key, personaKey: f.persona_key, kind: f.kind, goal: f.goal, title: f.title, observed: f.observed, reproduction: f.reproduction, severity: f.severity, replay: f.replay, verdict: f.verdict })),
