@@ -138,6 +138,24 @@ describe("runReplay", () => {
     expect(JSON.stringify(model.doGenerateCalls.map((c) => c.prompt))).not.toContain(password);
   });
 
+  test("a replay types its password into every field as one browser action: a click in the same reply waits for it", async () => {
+    const log: string[] = [];
+    const click = tool({ inputSchema: z.object({}), execute: async () => (log.push("click"), "clicked") });
+    const slowFill = async (ref: string) => (await new Promise((r) => setTimeout(r, 10)), log.push(`fill ${ref}`), "typed");
+    const model = scriptedModel([[toolCall("type_own_password", { fields: ["e3", "e4"] }), toolCall("browser_click", {})], report({ completed: true, observed: "Signed up", blockedAt: null })]);
+    await replay(model, { accountRef: undefined, browserTools: { ...browserTools, browser_click: click }, fillField: slowFill }).promise;
+    expect(log).toEqual(["fill e3", "fill e4", "click"]);
+  });
+
+  test("signing in during a replay is one browser action too", async () => {
+    const log: string[] = [];
+    const click = tool({ inputSchema: z.object({}), execute: async () => (log.push("click"), "clicked") });
+    const slowFill = async (ref: string) => (await new Promise((r) => setTimeout(r, 10)), log.push(`fill ${ref}`), "typed");
+    const model = scriptedModel([[toolCall("sign_in", { account: "solo", usernameField: "e1", passwordField: "e2" }), toolCall("browser_click", {})], report({ completed: true, observed: "Signed in", blockedAt: null })]);
+    await replay(model, { browserTools: { ...browserTools, browser_click: click }, fillField: slowFill }).promise;
+    expect(log).toEqual(["fill e1", "fill e2", "click"]);
+  });
+
   test("a replay with the account the steps were written for is not offered a made-up password", async () => {
     const model = scriptedModel([report({ completed: true, observed: "x", blockedAt: null })]);
     await replay(model).promise;

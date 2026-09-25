@@ -66,6 +66,8 @@ beforeAll(async () => {
         return html(`<input aria-label="PIN" type="password" oninput="this.value = this.value.slice(0, 6)">`);
       case "/js-pin-locked":
         return html(`<input aria-label="PIN" type="password" oninput="this.value = this.value.slice(0, 6); this.disabled = true">`);
+      case "/strip-show":
+        return html(`<input aria-label="Password" type="password" oninput="this.value = this.value.replace(/[^A-Za-z0-9]/g, '')"><button onclick="const o=document.querySelector('input');const n=document.createElement('input');n.type='text';n.setAttribute('aria-label','Password');n.value=o.value;o.replaceWith(n)">Show password</button>`);
       case "/echo-password": {
         let body = "";
         req.on("data", (chunk) => (body += chunk));
@@ -579,6 +581,20 @@ describe("password fields", () => {
       await navigate(b, `${origin}/js-pin-locked`);
       snap = await snapshot(b);
       expect(await b.fillField(refOf(snap, "PIN"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("failed: the field kept too little of the password to hide it, and it could not be cleared");
+    });
+  }, 60_000);
+
+  test("a rewritten password stays guarded when a show-password button swaps in a plain field holding it", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/strip-show`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Show password"), element: "show password" }, ctx);
+      const shown = await snapshot(b);
+      expect(shown).not.toContain("Kx7mPq2Rz9Lw");
+      await b.tools.browser_click!.execute!({ target: refOf(shown, "Password"), element: "password" }, ctx);
+      const key = (await b.tools.browser_press_key!.execute!({ key: "Backspace" }, ctx)) as { isError?: boolean };
+      expect(key.isError).toBe(true);
     });
   }, 60_000);
 

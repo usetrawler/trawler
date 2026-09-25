@@ -316,11 +316,9 @@ export async function openBrowser(opts: {
             const kept = await readValue(held);
             if (kept !== text && kept.length >= MIN_SECRET_LENGTH) {
               keepSecret(kept);
-              lastValues.set(held, kept);
             } else if (kept !== text && kept.length > 0) {
               await type({ target: ref, element: "password field", text: "" }, internalCall);
               const left = await within(held.evaluate((el: any) => String(el.value ?? "")).catch(() => null), HANDLE_READ_MS, null);
-              lastValues.set(held, left ?? kept);
               return left === "" ? "failed: the field kept too little of the password to hide it, so it was cleared" : "failed: the field kept too little of the password to hide it, and it could not be cleared";
             } else if (!kept && !out?.isError) {
               return "failed: the field did not keep the password";

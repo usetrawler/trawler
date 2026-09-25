@@ -262,6 +262,10 @@ describe("type_own_password", () => {
     for (const password of [first.fillField.mock.calls[0]![1], madeUpPassword()]) expect(password).toMatch(/^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z\d]).{16}$/);
   });
 
+  test("every made-up address is a new one", () => {
+    expect(madeUpEmail("ama")).not.toBe(madeUpEmail("ama"));
+  });
+
   test("a made-up address stays within the 64 characters an address may have before the @", () => {
     expect(madeUpEmail("a".repeat(60))).toMatch(/^a{40}\.[0-9a-f]{8}@example\.com$/);
   });
