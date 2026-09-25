@@ -72,14 +72,20 @@ beforeAll(async () => {
         return html(`<input aria-label="Password" type="password" oninput="this.value = this.value.replace(/[^A-Za-z0-9]/g, ''); setTimeout(() => { const n = document.createElement('input'); n.type = 'text'; n.setAttribute('aria-label', 'Password'); n.value = this.value; this.replaceWith(n); n.focus(); }, 300)">`);
       case "/placeholder":
         return html(`<p>Forgot password? Change your password below.</p><input aria-label="Password" type="password" value="password" disabled><input aria-label="Search" type="text">`);
-      case "/cut-submit":
-        return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password" oninput="this.value = this.value.slice(0, 6); this.form.submit()"></form>`);
+      case "/closing-frame":
+        return html(`<iframe src="/closing-frame-field"></iframe>`);
+      case "/closing-frame-field":
+        return html(`<input aria-label="Password" type="password" oninput="parent.document.querySelector('iframe').remove()">`);
       case "/encode":
         return html(`<input aria-label="Password" type="password"><button onclick="const p = document.querySelector('input'); p.value = btoa(p.value)">Encode</button>`);
       case "/copy-away":
         return html(`<input aria-label="Password" type="password" maxlength="12" oninput="document.getElementById('copy').textContent = 'You typed ' + this.value; this.value = ''; alert('Saved')"><p id="copy"></p>`);
       case "/empties":
         return html(`<input aria-label="Password" type="password" oninput="this.value = ''">`);
+      case "/reset-to-placeholder":
+        return html(`<input aria-label="Password" type="password"><button onclick="document.querySelector('input').value = 'password'">Reset</button>`);
+      case "/space-out":
+        return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password"><button type="button" onclick="const p = document.querySelector('input'); p.value = p.value.split('').join(' ')">Space out</button><button type="submit">Save</button></form>`);
       case "/echo-password": {
         let body = "";
         req.on("data", (chunk) => (body += chunk));
@@ -633,11 +639,35 @@ describe("password fields", () => {
     });
   }, 60_000);
 
-  test("a password the page shortens and sends before it can be checked is reported as not known to be kept", async () => {
+  test("a password field that goes away right after typing is reported as not known to be kept", async () => {
     await withBrowser(async (b) => {
-      await navigate(b, `${origin}/cut-submit`);
+      await navigate(b, `${origin}/closing-frame`);
       const snap = await snapshot(b);
-      expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toMatch(/^failed: /);
+      expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("failed: the page moved on before the field could be checked, so it is not known what the field kept");
+    });
+  }, 60_000);
+
+  test("a word the page puts into a password field after typing is hidden only while the field holds it", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/reset-to-placeholder`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Reset"), element: "Reset" }, ctx);
+      await navigate(b, `${origin}/placeholder`);
+      expect(await snapshot(b)).toContain("Forgot password? Change your password below.");
+    });
+  }, 60_000);
+
+  test("a password the page spreads out inside its field stays hidden after the form is sent", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/space-out`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Space out"), element: "Space out" }, ctx);
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Save"), element: "Save" }, ctx);
+      const shown = await snapshot(b);
+      expect(shown).toContain("Your password is •••");
+      expect(shown).not.toContain("K x 7 m");
     });
   }, 60_000);
 
