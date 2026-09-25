@@ -1,7 +1,8 @@
 FROM node:24-slim
 ARG TRAWLER_COMMIT
+ARG RAILWAY_GIT_COMMIT_SHA
 WORKDIR /app
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright NODE_ENV=production TRAWLER_COMMIT=$TRAWLER_COMMIT
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright NODE_ENV=production TRAWLER_COMMIT=${TRAWLER_COMMIT:-$RAILWAY_GIT_COMMIT_SHA}
 COPY package.json package-lock.json tsconfig.base.json tsconfig.json ./
 COPY packages/core/package.json packages/core/
 COPY packages/protocol/package.json packages/protocol/
