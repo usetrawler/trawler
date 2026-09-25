@@ -1,7 +1,7 @@
 "use client";
 import { startTransition, useActionState, useEffect, useState } from "react";
 import type { KeyHint } from "../../../credentials/credentials.ts";
-import { detectProvider, PROVIDER_LABEL, type Provider } from "../../../llm/provider-kinds.ts";
+import { detectProvider, PROVIDER_LABEL, providerArticle, type Provider } from "../../../llm/provider-kinds.ts";
 import { DEFAULT_RUN, estimateUsd } from "../../../runs/models.ts";
 import { modelsForKeyAction, startRunAction, type ModelList, type StartState } from "./actions.ts";
 
@@ -16,6 +16,10 @@ function Submit({ blocked, pending }: { blocked?: string; pending: boolean }) {
       <span aria-hidden>→</span>
     </button>
   );
+}
+
+export function Recognised({ provider }: { provider: Provider }) {
+  return <p className="text-sm"><span className="text-muted">Recognised as {providerArticle(provider)} </span>{PROVIDER_LABEL[provider]}<span className="text-muted"> key. Not right? Pick the provider below.</span></p>;
 }
 
 export function StartRun({ projectId, personas, keyHint: savedHint, canManageKey, blocked }: {
@@ -36,7 +40,7 @@ export function StartRun({ projectId, personas, keyHint: savedHint, canManageKey
   const typingKey = !keyHint || replacingKey;
   const detected = apiKey.trim() ? detectProvider(apiKey) : null;
   const provider: Provider | null = typingKey ? (apiKey.trim().length >= 20 ? chosenProvider ?? detected ?? "custom" : null) : keyHint!.provider;
-  const noKey = !keyHint && !canManageKey ? "Ask an owner of this workspace to add a model key." : undefined;
+  const noKey = !keyHint && !canManageKey ? "Ask an owner or admin of this workspace to add a model key." : undefined;
 
   useEffect(() => {
     if (typingKey && (!provider || (provider === "custom" && !/^https:\/\/.+/.test(baseUrl)))) {
@@ -91,7 +95,7 @@ export function StartRun({ projectId, personas, keyHint: savedHint, canManageKey
               {keyHint && <button type="button" onClick={() => { setReplacingKey(false); setApiKey(""); }} className="h-12 px-3 text-sm text-muted hover:text-ink">Keep {keyHint.hint}</button>}
             </span>
           </label>
-          {detected && !chosenProvider && <p className="text-sm"><span className="text-muted">Recognised as an </span>{PROVIDER_LABEL[detected]}<span className="text-muted"> key. Not right? Pick the provider below.</span></p>}
+          {detected && !chosenProvider && <Recognised provider={detected} />}
           {apiKey.trim().length >= 20 && (
             <div className="grid gap-2 sm:grid-cols-[auto_1fr]">
               <select name="provider" value={provider ?? "custom"} onChange={(e) => setChosenProvider(e.target.value as Provider)} aria-label="Provider" className={field}>

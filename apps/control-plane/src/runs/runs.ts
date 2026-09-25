@@ -1,5 +1,5 @@
 import { sql } from "kysely";
-import type { ProjectConfig, RunEvent } from "@usetrawler/protocol";
+import type { ProjectConfig, RunEvent, Verdict } from "@usetrawler/protocol";
 import { modelKey } from "../credentials/credentials.ts";
 import type { Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -121,6 +121,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
       .limit(8)
       .execute(),
   ]);
+  const findingTitle = new Map(findings.map((f) => [f.key, f.title]));
   return {
     id: run.id, number: run.number, status: run.status, projectId: run.project_id,
     costUsd: Number(run.cost_usd), budgetUsd: Number(run.budget_usd), agentModel: run.agent_model, judgeModel: run.judge_model,
@@ -132,16 +133,18 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
     target: snapshot.targetUrl,
     personas: snapshot.personas.map((p) => ({ id: p.id, name: p.name })),
     goalTexts: snapshot.goals.map((g) => ({ id: g.id, instruction: g.instruction })),
-    activity: activity.map((a) => ({ id: String(a.id), at: a.at, personaKey: a.persona_key, kind: a.kind, text: activityText(a.payload as unknown as RunEvent, goalText) })),
+    activity: activity.map((a) => ({ id: String(a.id), at: a.at, personaKey: a.persona_key, kind: a.kind, text: activityText(a.payload as unknown as RunEvent, goalText, findingTitle) })),
   };
 }
 
 export type RunSummary = NonNullable<Awaited<ReturnType<typeof runSummary>>>;
 
-function activityText(e: RunEvent, goalText: Map<string, string>): string {
+const VERDICT_LABEL: Record<Verdict, string> = { confirmed: "Confirmed", refuted: "Refuted", inconclusive: "Inconclusive" };
+
+function activityText(e: RunEvent, goalText: Map<string, string>, findingTitle: Map<string, string>): string {
   if (e.type === "note") return e.text;
   if (e.type === "finding") return `${e.finding.kind === "defect" ? "Reported a defect" : "Noted friction"}: ${e.finding.title}`;
   if (e.type === "goal_status") return `Goal ${e.outcome.status === "reached" ? "reached" : "not reached"}: ${goalText.get(e.outcome.goal) ?? e.outcome.goal}`;
-  if (e.type === "verdict") return `Judge: ${e.verdict}`;
+  if (e.type === "verdict") return `${VERDICT_LABEL[e.verdict]}: ${findingTitle.get(e.findingId) ?? e.findingId}`;
   return e.type;
 }

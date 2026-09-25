@@ -89,7 +89,7 @@ describe("a whole run", () => {
     expect(summary!.personas).toEqual([{ id: "ana", name: "Ana" }, { id: "lee", name: "Lee" }]);
     expect(summary!.goalTexts).toEqual([{ id: "g", instruction: "Get in." }]);
     expect(summary!.activity.map((a) => [a.personaKey, a.text])).toEqual([
-      [null, "Judge: confirmed"],
+      [null, "Confirmed: Broken save"],
       ["ana", "Goal not reached: Get in."],
       ["ana", "Reported a defect: Broken save"],
     ]);
