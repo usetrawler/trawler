@@ -4,6 +4,7 @@ import type { runView, StageState, PersonaState } from "../../../runs/report.ts"
 import type { RunSummary } from "../../../runs/runs.ts";
 import { runStatusLabel, runTitle } from "../../../runs/status.ts";
 import { cancelRunAction, judgeAgainAction } from "./actions.ts";
+import { RunAgainButton } from "./run-again-button.tsx";
 
 type View = ReturnType<typeof runView>;
 type Data = { run: RunSummary; view: View };
@@ -192,16 +193,19 @@ export function RunLive({ initial }: { initial: Data }) {
   const { report } = view;
   return (
     <div className="flex flex-col gap-10">
-      <div className="flex flex-col gap-3">
-        <p className="font-mono text-xs tracking-[0.2em] text-action uppercase">
-          {runTitle(run.number)} · {runStatusLabel(run.status)} · {host}
-        </p>
-        <h1 className="text-4xl leading-[0.95] font-bold tracking-tight md:text-5xl">{view.headline}</h1>
-        {view.live && <p className="text-muted">Defects count only after a fresh agent reproduces them. You can close this tab; the run keeps going.</p>}
-        <p role="status" aria-live="polite" className="text-sm text-warn">
-          {gone ? "This run is no longer available." : stale ? "Lost contact with Trawler. Retrying…" : ""}
-          <span className="sr-only">{runStatusLabel(run.status)}. {view.headline} <span key={announcement.n}>{announcement.text}</span></span>
-        </p>
+      <div className="flex flex-col items-start justify-between gap-6 md:flex-row md:items-end">
+        <div className="flex min-w-0 flex-col gap-3">
+          <p className="font-mono text-xs tracking-[0.2em] text-action uppercase">
+            {runTitle(run.number)} · {runStatusLabel(run.status)} · {host}
+          </p>
+          <h1 className="text-4xl leading-[0.95] font-bold tracking-tight md:text-5xl">{view.headline}</h1>
+          {view.live && <p className="text-muted">Defects count only after a fresh agent reproduces them. You can close this tab; the run keeps going.</p>}
+          <p role="status" aria-live="polite" className="text-sm text-warn">
+            {gone ? "This run is no longer available." : stale ? "Lost contact with Trawler. Retrying…" : ""}
+            <span className="sr-only">{runStatusLabel(run.status)}. {view.headline} <span key={announcement.n}>{announcement.text}</span></span>
+          </p>
+        </div>
+        {!view.live && <RunAgainButton runId={run.id} />}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
