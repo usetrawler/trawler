@@ -6,9 +6,10 @@ import { ProjectConfigSchema, type RunEvent } from "@usetrawler/protocol";
 import { withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
+import { setModelKey } from "../credentials/credentials.ts";
 import { createProject } from "../projects/projects.ts";
-import { cancelRun, runSummary, startRun } from "./runs.ts";
-import { claimJob, completeJob, ingestEvents, InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage } from "./queue.ts";
+import { cancelRun, CannotJudgeAgain, judgeAgain, runSummary, startRun } from "./runs.ts";
+import { claimJob, completeJob, ingestEvents, InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage, releaseJob } from "./queue.ts";
 
 const t = await testDb();
 afterAll(() => t.drop());
@@ -348,4 +349,161 @@ test("a queued run never pairs its snapshot's username with a different account'
   expect(job.config.accounts).toEqual([]);
   expect(job.config.personas.find((p) => p.id === "ana")!.accountRef).toBeUndefined();
   await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "finish" });
+});
+
+describe("judge again", () => {
+  const openRouterKey = { provider: "openrouter" as const, key: `sk-or-v1-${"a".repeat(40)}` };
+  const summaryOf = (runId: string) => withOrg(t.db, "org-a", async (tx) => (await runSummary(tx, "org-a", runId))!);
+  const again = (runId: string, findingKey = "ana:f1") => withOrg(t.db, "org-a", (tx) => judgeAgain(tx, "org-a", runId, findingKey, "u2", keys));
+
+  async function runUpToTheJudge(over: Partial<typeof options> = {}) {
+    await drain();
+    await withOrg(t.db, "org-a", (tx) => setModelKey(tx, "org-a", openRouterKey, "u1", keys));
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { ...options, ...over }));
+    const ana = (await claimJob(t.db, keys))!;
+    seq = 0;
+    await ingestEvents(t.db, ana.token, [ev({ type: "finding", jobId: ana.jobId, finding: defect })]);
+    await completeJob(t.db, ana.token, { usage: usage(0), stoppedBy: "finish" });
+    await completeJob(t.db, (await claimJob(t.db, keys))!.token, { usage: usage(0), stoppedBy: "finish" });
+    const replay = (await claimJob(t.db, keys))!;
+    await completeJob(t.db, replay.token, { usage: usage(0), stoppedBy: "report", observation: { completed: true, observed: "Internal Server Error", blockedAt: null } });
+    return { run, judge: (await claimJob(t.db, keys))! };
+  }
+
+  async function runWithFailedJudge(over: Partial<typeof options> = {}) {
+    const { run, judge } = await runUpToTheJudge(over);
+    seq = 0;
+    await ingestEvents(t.db, judge.token, [ev({ type: "verdict", jobId: judge.jobId, findingId: "ana:f1", verdict: "inconclusive", observed: "Internal Server Error" })]);
+    await completeJob(t.db, judge.token, { usage: usage(0), stoppedBy: "error", error: "No output generated." });
+    return run;
+  }
+
+  test("a failed judge runs again on the finished run, which stays finished", async () => {
+    const run = await runWithFailedJudge();
+    const before = await summaryOf(run.id);
+    expect(before.status).toBe("succeeded");
+
+    await again(run.id);
+    expect((await summaryOf(run.id)).findings[0]!.verdict).toBeNull();
+    const job = (await claimJob(t.db, keys))!;
+    expect(job).toMatchObject({ runId: run.id, kind: "judge", finding: { id: "ana:f1", title: "Broken save" }, observation: { completed: true, observed: "Internal Server Error" }, judgeModel: "m/judge" });
+    expect(job.budgetUsd).toBeCloseTo(2, 6);
+    expect(await claimJob(t.db, keys)).toBeNull();
+    expect((await summaryOf(run.id)).status).toBe("succeeded");
+
+    const call = await llmCallFor(t.db, job.token);
+    await recordLlmUsage(t.db, call, { model: "m/judge", inputTokens: 900, outputTokens: 40, costUsd: 0.002 });
+    seq = 0;
+    expect(await ingestEvents(t.db, job.token, [ev({ type: "verdict", jobId: job.jobId, findingId: "ana:f1", verdict: "confirmed", observed: "Internal Server Error" })])).toEqual({ cancel: false });
+    await completeJob(t.db, job.token, { usage: usage(0.002), stoppedBy: "done" });
+
+    const after = await summaryOf(run.id);
+    expect(after).toMatchObject({ status: "succeeded", finishedAt: before.finishedAt });
+    expect(after.costUsd).toBeCloseTo(0.002, 6);
+    expect(after.findings[0]!.verdict).toBe("confirmed");
+    expect(after.jobs.filter((j) => j.kind === "judge").map((j) => j.status)).toEqual(["failed", "succeeded"]);
+    const { rows } = await sql<{ requested_by: string | null }>`select requested_by from jobs where run_id = ${run.id} and kind = 'judge' order by position`.execute(t.db);
+    expect(rows.map((r) => r.requested_by)).toEqual([null, "u2"]);
+    expect(await claimJob(t.db, keys)).toBeNull();
+  });
+
+  test("a judge that is judged again and fails again can be asked once more", async () => {
+    const run = await runWithFailedJudge();
+    await again(run.id);
+    const first = (await claimJob(t.db, keys))!;
+    await completeJob(t.db, first.token, { usage: usage(0), stoppedBy: "error", error: "No output generated." });
+    await again(run.id);
+    expect(await claimJob(t.db, keys)).toMatchObject({ runId: run.id, kind: "judge", finding: { id: "ana:f1" } });
+    await drain();
+  });
+
+  test("is refused while the run is live, and once the judge has given a verdict", async () => {
+    const { run, judge } = await runUpToTheJudge();
+    await sql`update jobs set status = 'failed' where id = ${judge.jobId}`.execute(t.db);
+    await expect(again(run.id)).rejects.toThrow(CannotJudgeAgain);
+    await expect(again(run.id)).rejects.toThrow(/still going/);
+    await sql`update jobs set status = 'leased' where id = ${judge.jobId}`.execute(t.db);
+    seq = 0;
+    await ingestEvents(t.db, judge.token, [ev({ type: "verdict", jobId: judge.jobId, findingId: "ana:f1", verdict: "refuted", observed: "It worked" })]);
+    await completeJob(t.db, judge.token, { usage: usage(0), stoppedBy: "done" });
+    expect((await summaryOf(run.id)).status).toBe("succeeded");
+    await expect(again(run.id)).rejects.toThrow(/judge failed/);
+    await expect(again(run.id, "ana:nope")).rejects.toThrow(/judge failed/);
+  });
+
+  test("is refused while a judge again is pending", async () => {
+    const run = await runWithFailedJudge();
+    await again(run.id);
+    await expect(again(run.id)).rejects.toThrow(/already/);
+    await claimJob(t.db, keys);
+    await expect(again(run.id)).rejects.toThrow(/already/);
+    await drain();
+  });
+
+  test("is refused when the run has spent its cap", async () => {
+    const run = await runWithFailedJudge();
+    await sql`update runs set cost_usd = budget_usd where id = ${run.id}`.execute(t.db);
+    await expect(again(run.id)).rejects.toThrow(/cap/);
+    const capped = await runWithFailedJudge({ });
+    await sql`update runs set token_cap = 1000, tokens_used = 1000 where id = ${capped.id}`.execute(t.db);
+    await expect(again(capped.id)).rejects.toThrow(/cap/);
+  });
+
+  test("is refused when the workspace key is gone or belongs to another provider", async () => {
+    const run = await runWithFailedJudge();
+    await withOrg(t.db, "org-a", (tx) => setModelKey(tx, "org-a", { provider: "openai", key: `sk-proj-${"b".repeat(40)}` }, "u1", keys));
+    await expect(again(run.id)).rejects.toThrow(/key/);
+    await sql`delete from credentials where org_id = 'org-a'`.execute(t.db);
+    await expect(again(run.id)).rejects.toThrow(/key/);
+    expect(await claimJob(t.db, keys)).toBeNull();
+  });
+
+  test("another organisation cannot judge the run again", async () => {
+    const run = await runWithFailedJudge();
+    await expect(withOrg(t.db, "org-b", (tx) => judgeAgain(tx, "org-b", run.id, "ana:f1", "u9", keys))).rejects.toThrow(/not found/);
+    expect(await claimJob(t.db, keys)).toBeNull();
+  });
+
+  test("a runner that stops during a judge again hands it back to the queue", async () => {
+    const run = await runWithFailedJudge();
+    await again(run.id);
+    const job = (await claimJob(t.db, keys))!;
+    await releaseJob(t.db, { jobId: job.jobId, runId: run.id, token: job.token });
+    expect(await claimJob(t.db, keys)).toMatchObject({ runId: run.id, kind: "judge", finding: { id: "ana:f1" } });
+    expect((await summaryOf(run.id)).status).toBe("succeeded");
+    await drain();
+  });
+
+  test("a judge again whose runner stops answering fails without reopening the run", async () => {
+    const run = await runWithFailedJudge();
+    await again(run.id);
+    const job = (await claimJob(t.db, keys))!;
+    await sql`update jobs set lease_until = now() - interval '1 minute' where id = ${job.jobId}`.execute(t.db);
+    expect(await claimJob(t.db, keys)).toBeNull();
+    const summary = await summaryOf(run.id);
+    expect(summary.status).toBe("succeeded");
+    expect(summary.jobs.filter((j) => j.kind === "judge").map((j) => j.status)).toEqual(["failed", "failed"]);
+  });
+
+  test("a judge again stops when it spends the rest of the cap", async () => {
+    const run = await runWithFailedJudge({ budgetUsd: 0.1 });
+    await again(run.id);
+    const job = (await claimJob(t.db, keys))!;
+    await recordLlmUsage(t.db, await llmCallFor(t.db, job.token), { model: "m/judge", inputTokens: 900, outputTokens: 40, costUsd: 0.2 });
+    await expect(llmCallFor(t.db, job.token)).rejects.toBeInstanceOf(LlmRefused);
+    seq = 0;
+    expect(await ingestEvents(t.db, job.token, [ev({ type: "note", jobId: job.jobId, text: "x" })])).toEqual({ cancel: true });
+    await completeJob(t.db, job.token, { usage: usage(0.2), stoppedBy: "budget" });
+    expect((await summaryOf(run.id)).status).toBe("succeeded");
+  });
+
+  test("stopping a run still stops the judge that was running in it", async () => {
+    const { run, judge } = await runUpToTheJudge();
+    await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id));
+    seq = 0;
+    expect(await ingestEvents(t.db, judge.token, [ev({ type: "verdict", jobId: judge.jobId, findingId: "ana:f1", verdict: "confirmed", observed: "x" })])).toEqual({ cancel: true });
+    await expect(llmCallFor(t.db, judge.token)).rejects.toBeInstanceOf(LlmRefused);
+    expect((await summaryOf(run.id)).findings[0]!.verdict).toBeNull();
+    await completeJob(t.db, judge.token, { usage: usage(0), stoppedBy: "budget" });
+  });
 });

@@ -114,6 +114,7 @@ export interface Jobs {
   org_id: string;
   persona_key: string | null;
   position: number;
+  requested_by: string | null;
   run_id: string;
   started_at: Timestamp | null;
   status: Generated<string>;
