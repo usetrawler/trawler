@@ -2,13 +2,14 @@ import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import { ARTIFACT_EXTENSIONS, MAX_ARTIFACTS_PER_JOB, type ArtifactContentType, type ArtifactUpload } from "@usetrawler/protocol";
 import type { Database } from "../db/index.ts";
-import { asSystem, withOrg } from "../db/tenancy.ts";
-import { leasedJobFor } from "../runs/queue.ts";
+import { asSystem, withOrg, type Tx } from "../db/tenancy.ts";
+import { leasedJobFor, storable } from "../runs/queue.ts";
 import type { ArtifactStore } from "./store.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export class ArtifactRefused extends Error {}
+export class ArtifactNotStored extends Error {}
 
 const startsWith = (bytes: Uint8Array, prefix: number[], offset = 0) => bytes.length >= offset + prefix.length && prefix.every((b, i) => bytes[offset + i] === b);
 const ascii = (text: string) => [...text].map((c) => c.charCodeAt(0));
@@ -21,6 +22,22 @@ const SIGNATURES: Record<ArtifactContentType, (bytes: Uint8Array) => boolean> = 
 
 export const hasSignatureOf = (type: ArtifactContentType, bytes: Uint8Array) => SIGNATURES[type](bytes);
 
+async function jobWithRoom(tx: Tx, token: string, jobId: string) {
+  const job = await leasedJobFor(tx, token, jobId);
+  const { stored } = await tx
+    .selectFrom("artifacts")
+    .select(sql<number>`count(*)::int`.as("stored"))
+    .where("job_id", "=", job.id)
+    .where("discarded_at", "is", null)
+    .executeTakeFirstOrThrow();
+  if (stored >= MAX_ARTIFACTS_PER_JOB) throw new ArtifactRefused(`a job stores at most ${MAX_ARTIFACTS_PER_JOB} files`);
+  return job;
+}
+
+export async function checkArtifactUpload(db: Database, token: string, jobId: string): Promise<void> {
+  await asSystem(db, (tx) => jobWithRoom(tx, token, jobId));
+}
+
 export async function storeArtifact(
   db: Database,
   store: ArtifactStore,
@@ -29,27 +46,31 @@ export async function storeArtifact(
   upload: ArtifactUpload,
   file: { contentType: ArtifactContentType; bytes: Uint8Array },
 ): Promise<{ id: string }> {
-  const target = await asSystem(db, async (tx) => {
-    const job = await leasedJobFor(tx, token, jobId);
-    const { stored } = await tx.selectFrom("artifacts").select(sql<number>`count(*)::int`.as("stored")).where("job_id", "=", job.id).executeTakeFirstOrThrow();
-    if (stored >= MAX_ARTIFACTS_PER_JOB) throw new ArtifactRefused(`a job stores at most ${MAX_ARTIFACTS_PER_JOB} files`);
-    const findingKey = job.kind === "role_session" ? (upload.finding ? `${job.persona_key}:${upload.finding}` : null) : job.finding_key;
-    return { orgId: job.org_id, runId: job.run_id, jobId: job.id, findingKey };
-  });
   const id = randomUUID();
-  const key = `orgs/${target.orgId}/runs/${target.runId}/${id}.${ARTIFACT_EXTENSIONS[file.contentType]}`;
-  await store.put(key, file.bytes, file.contentType);
-  await asSystem(db, (tx) =>
-    tx.insertInto("artifacts").values({
-      id, org_id: target.orgId, run_id: target.runId, job_id: target.jobId, finding_key: target.findingKey,
+  const key = await asSystem(db, async (tx) => {
+    const job = await jobWithRoom(tx, token, jobId);
+    const finding = upload.finding === undefined ? "" : storable(upload.finding);
+    const key = `orgs/${job.org_id}/runs/${job.run_id}/${id}.${ARTIFACT_EXTENSIONS[file.contentType]}`;
+    await tx.insertInto("artifacts").values({
+      id, org_id: job.org_id, run_id: job.run_id, job_id: job.id,
+      finding_key: job.kind === "role_session" ? (finding ? `${job.persona_key}:${finding}` : null) : job.finding_key,
       kind: upload.kind, content_type: file.contentType, size_bytes: file.bytes.byteLength, storage_key: key,
-    }).execute(),
-  );
+    }).execute();
+    return key;
+  });
+  try {
+    await store.put(key, file.bytes, file.contentType);
+  } catch (err) {
+    await asSystem(db, (tx) => tx.deleteFrom("artifacts").where("id", "=", id).execute()).catch(() => undefined);
+    throw new ArtifactNotStored("the bucket did not take the file; try again", { cause: err });
+  }
   return { id };
 }
 
 export async function artifactLink(db: Database, store: ArtifactStore, orgId: string, id: string): Promise<string | null> {
   if (!UUID.test(id)) return null;
-  const artifact = await withOrg(db, orgId, (tx) => tx.selectFrom("artifacts").select("storage_key").where("id", "=", id).where("org_id", "=", orgId).executeTakeFirst());
+  const artifact = await withOrg(db, orgId, (tx) =>
+    tx.selectFrom("artifacts").select("storage_key").where("id", "=", id).where("org_id", "=", orgId).where("discarded_at", "is", null).executeTakeFirst(),
+  );
   return artifact ? store.link(artifact.storage_key) : null;
 }

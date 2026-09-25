@@ -14,4 +14,4 @@ export const ArtifactUploadSchema = z.object({
 });
 export type ArtifactUpload = z.infer<typeof ArtifactUploadSchema>;
 
-export const ArtifactStoredSchema = z.object({ id: z.string().uuid() });
+export const ArtifactStoredSchema = z.object({ id: z.uuid() });

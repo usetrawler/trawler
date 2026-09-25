@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { ARTIFACT_EXTENSIONS, ArtifactUploadSchema, EventBatchSchema, isArtifactContentType, JobCompletionSchema, MAX_ARTIFACT_BYTES, PROTOCOL_HEADER, PROTOCOL_VERSION } from "@usetrawler/protocol";
-import { ArtifactRefused, hasSignatureOf, storeArtifact } from "../artifacts/artifacts.ts";
+import { ArtifactNotStored, ArtifactRefused, checkArtifactUpload, hasSignatureOf, storeArtifact } from "../artifacts/artifacts.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
 import type { Database } from "../db/index.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -42,9 +42,9 @@ export const MAX_BODY_BYTES = 2_000_000;
 
 class BodyTooLarge extends Error {}
 
-async function bytesOf(req: Request, maxBytes: number): Promise<Uint8Array> {
+async function bytesOf(req: Request, maxBytes: number): Promise<Buffer> {
   if (Number(req.headers.get("content-length") ?? 0) > maxBytes) throw new BodyTooLarge();
-  if (!req.body) return new Uint8Array();
+  if (!req.body) return Buffer.alloc(0);
   const reader = req.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -64,7 +64,7 @@ async function bytesOf(req: Request, maxBytes: number): Promise<Uint8Array> {
 async function body(req: Request, maxBytes: number): Promise<unknown> {
   const bytes = await bytesOf(req, maxBytes);
   try {
-    return JSON.parse(Buffer.from(bytes).toString("utf8"));
+    return JSON.parse(bytes.toString("utf8"));
   } catch {
     return undefined;
   }
@@ -158,7 +158,18 @@ export async function handleArtifactUpload(req: Request, jobId: string, deps: Ru
   if (!upload.success) return problem(400, "invalid artifact", upload.error.issues);
   const contentType = (req.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
   if (!isArtifactContentType(contentType)) return problem(415, `an artifact must be one of ${Object.keys(ARTIFACT_EXTENSIONS).join(", ")}`);
-  let bytes: Uint8Array;
+  const refused = (err: unknown) => {
+    if (err instanceof InvalidJobToken) return problem(401, "invalid job token");
+    if (err instanceof JobOver || err instanceof ArtifactRefused) return problem(409, err.message);
+    if (err instanceof ArtifactNotStored) return problem(503, err.message);
+    throw err;
+  };
+  try {
+    await checkArtifactUpload(deps.db, token, jobId);
+  } catch (err) {
+    return refused(err);
+  }
+  let bytes: Buffer;
   try {
     bytes = await bytesOf(req, MAX_ARTIFACT_BYTES);
   } catch (err) {
@@ -169,8 +180,6 @@ export async function handleArtifactUpload(req: Request, jobId: string, deps: Ru
   try {
     return json(await storeArtifact(deps.db, deps.artifacts, token, jobId, upload.data, { contentType, bytes }), 201);
   } catch (err) {
-    if (err instanceof InvalidJobToken) return problem(401, "invalid job token");
-    if (err instanceof JobOver || err instanceof ArtifactRefused) return problem(409, err.message);
-    throw err;
+    return refused(err);
   }
 }

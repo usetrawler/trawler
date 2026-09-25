@@ -181,6 +181,7 @@ export async function releaseJob(db: Database, job: { jobId: string; runId: stri
 async function forgetPartialWork(tx: Tx, jobId: string) {
   const job = await tx.selectFrom("jobs").select(["run_id", "kind", "persona_key", "finding_key"]).where("id", "=", jobId).executeTakeFirstOrThrow();
   await tx.deleteFrom("run_events").where("job_id", "=", jobId).execute();
+  await tx.updateTable("artifacts").set({ discarded_at: new Date() }).where("job_id", "=", jobId).where("discarded_at", "is", null).execute();
   if (job.kind === "role_session") {
     await tx.deleteFrom("findings").where("job_id", "=", jobId).execute();
     await tx.deleteFrom("goal_outcomes").where("run_id", "=", job.run_id).where("persona_key", "=", job.persona_key!).execute();
@@ -216,15 +217,13 @@ async function jobForToken(tx: Tx, token: string, options: { allowExpired?: bool
   return job;
 }
 
-export class JobOver extends Error {
-  constructor() {
-    super("the job is over");
-  }
-}
+export class JobOver extends Error {}
 
 export async function leasedJobFor(tx: Tx, token: string, jobId: string) {
   const job = await jobForToken(tx, token, { expectedJobId: jobId });
-  if (job.status !== "leased") throw new JobOver();
+  if (job.status !== "leased") throw new JobOver("the job is over");
+  const run = await tx.selectFrom("runs").select("status").where("id", "=", job.run_id).executeTakeFirstOrThrow();
+  if (!ACTIVE.includes(run.status) && !job.requested_by) throw new JobOver("the run is no longer active");
   return job;
 }
 

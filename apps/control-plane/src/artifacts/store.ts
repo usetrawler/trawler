@@ -18,7 +18,7 @@ export interface ArtifactStore {
 
 export const LINK_SECONDS = 300;
 
-export function s3Store(storage: ArtifactStorage): ArtifactStore {
+export function s3Store(storage: ArtifactStorage, timeouts: { connectionMs?: number; requestMs?: number } = {}): ArtifactStore {
   const client = new S3Client({
     region: storage.region,
     endpoint: storage.endpoint,
@@ -26,6 +26,7 @@ export function s3Store(storage: ArtifactStorage): ArtifactStore {
     credentials: { accessKeyId: storage.accessKeyId, secretAccessKey: storage.secretAccessKey },
     requestChecksumCalculation: "WHEN_REQUIRED",
     responseChecksumValidation: "WHEN_REQUIRED",
+    requestHandler: { connectionTimeout: timeouts.connectionMs ?? 5_000, requestTimeout: timeouts.requestMs ?? 30_000, throwOnRequestTimeout: true },
   });
   return {
     async put(key, bytes, contentType) {

@@ -46,6 +46,7 @@ export interface Account {
 export interface Artifacts {
   content_type: string;
   created_at: Generated<Timestamp>;
+  discarded_at: Timestamp | null;
   finding_key: string | null;
   id: Generated<string>;
   job_id: string;
