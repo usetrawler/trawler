@@ -22,7 +22,7 @@ services:
       ROOT_ACCESS_KEY_ID: trawler
       ROOT_SECRET_ACCESS_KEY: trawler-s3-secret
     ports:
-      - "54339:7070"
+      - "127.0.0.1:54339:7070"
     healthcheck:
       test: ["CMD", "nc", "-z", "127.0.0.1", "7070"]
       interval: 2s
