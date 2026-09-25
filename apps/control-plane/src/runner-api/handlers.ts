@@ -29,7 +29,7 @@ export function bearer(req: Request): string | null {
   return match ? match[1]! : null;
 }
 
-function sameSecret(a: string, b: string): boolean {
+export function sameSecret(a: string, b: string): boolean {
   const ha = createHash("sha256").update(a).digest();
   const hb = createHash("sha256").update(b).digest();
   return timingSafeEqual(ha, hb);
