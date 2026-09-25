@@ -7,6 +7,7 @@ export interface ServerEnv {
   devOidc?: { issuer: string; clientId: string; clientSecret: string };
   setup?: { apiKey: string; model: string };
   runnerToken?: string;
+  smokeToken?: string;
   openRouterUrl: string;
   betaEmails?: string[];
 }
@@ -34,18 +35,19 @@ export function readEnv(env: Record<string, string | undefined> = process.env): 
     github: pair(env.GITHUB_CLIENT_ID, env.GITHUB_CLIENT_SECRET),
     google: pair(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET),
     devOidc: devIssuer ? { issuer: devIssuer, clientId: "trawler-dev", clientSecret: "trawler-dev-secret" } : undefined,
-    runnerToken: runnerToken(env.TRAWLER_RUNNER_TOKEN),
+    runnerToken: bearerToken(env.TRAWLER_RUNNER_TOKEN, "TRAWLER_RUNNER_TOKEN"),
+    smokeToken: bearerToken(env.TRAWLER_SMOKE_TOKEN, "TRAWLER_SMOKE_TOKEN"),
     openRouterUrl,
     betaEmails: env.TRAWLER_BETA_EMAILS?.trim() ? env.TRAWLER_BETA_EMAILS.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean) : undefined,
     setup: env.OPENROUTER_API_KEY ? { apiKey: env.OPENROUTER_API_KEY, model: env.TRAWLER_SETUP_MODEL ?? DEFAULT_SETUP_MODEL } : undefined,
   };
 }
 
-const RUNNER_TOKEN = /^[A-Za-z0-9._~+\/=-]{32,512}$/;
+const BEARER_TOKEN = /^[A-Za-z0-9._~+\/=-]{32,512}$/;
 
-function runnerToken(value: string | undefined): string | undefined {
+function bearerToken(value: string | undefined, name: string): string | undefined {
   const token = value?.trim();
   if (!token) return undefined;
-  if (!RUNNER_TOKEN.test(token)) throw new Error("TRAWLER_RUNNER_TOKEN must be 32 to 512 characters of letters, digits and ._~+/=-");
+  if (!BEARER_TOKEN.test(token)) throw new Error(`${name} must be 32 to 512 characters of letters, digits and ._~+/=-`);
   return token;
 }

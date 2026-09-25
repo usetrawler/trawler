@@ -1,0 +1,124 @@
+name: release
+run-name: release ${{ github.event.workflow_run.head_sha }}
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  images:
+    if: >-
+      github.repository == 'usetrawler/trawler' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_sha == github.sha
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      COMMIT: ${{ github.event.workflow_run.head_sha }}
+    outputs:
+      commit: ${{ github.event.workflow_run.head_sha }}
+      migrate: ghcr.io/usetrawler/trawler-migrate@${{ steps.migrate.outputs.digest }}
+      control-plane: ghcr.io/usetrawler/trawler-control-plane@${{ steps.control-plane.outputs.digest }}
+      runner: ghcr.io/usetrawler/trawler-runner@${{ steps.runner.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v5
+        with: { ref: "${{ github.event.workflow_run.head_sha }}" }
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+      - id: migrate
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: db/Dockerfile
+          push: true
+          provenance: false
+          tags: ghcr.io/usetrawler/trawler-migrate:${{ env.COMMIT }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/usetrawler/trawler
+            org.opencontainers.image.revision=${{ env.COMMIT }}
+      - id: control-plane
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/control-plane/Dockerfile
+          push: true
+          provenance: false
+          build-args: TRAWLER_COMMIT=${{ env.COMMIT }}
+          tags: ghcr.io/usetrawler/trawler-control-plane:${{ env.COMMIT }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/usetrawler/trawler
+            org.opencontainers.image.revision=${{ env.COMMIT }}
+          cache-from: type=gha,scope=control-plane
+          cache-to: type=gha,scope=control-plane,mode=max
+      - id: runner
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/runner/Dockerfile
+          push: true
+          provenance: false
+          build-args: TRAWLER_COMMIT=${{ env.COMMIT }}
+          tags: ghcr.io/usetrawler/trawler-runner:${{ env.COMMIT }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/usetrawler/trawler
+            org.opencontainers.image.revision=${{ env.COMMIT }}
+          cache-from: type=gha,scope=runner
+          cache-to: type=gha,scope=runner,mode=max
+
+  staging:
+    needs: images
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: staging
+    concurrency: { group: staging, cancel-in-progress: false }
+    env:
+      RELEASE_COMMIT: ${{ needs.images.outputs.commit }}
+      RELEASE_URL: https://staging.usetrawler.com
+    steps:
+      - uses: actions/checkout@v5
+        with: { ref: "${{ needs.images.outputs.commit }}", fetch-depth: 0 }
+      - uses: actions/setup-node@v5
+        with: { node-version: 24 }
+      - name: deploy the images to staging
+        run: node scripts/release/deploy.ts
+        env:
+          RELEASE_ENVIRONMENT: staging
+          RAILWAY_CORE_TOKEN: ${{ secrets.RAILWAY_CORE_TOKEN }}
+          RAILWAY_WORKERS_TOKEN: ${{ secrets.RAILWAY_WORKERS_TOKEN }}
+          IMAGE_MIGRATE: ${{ needs.images.outputs.migrate }}
+          IMAGE_CONTROL_PLANE: ${{ needs.images.outputs.control-plane }}
+          IMAGE_RUNNER: ${{ needs.images.outputs.runner }}
+      - name: smoke-check staging
+        run: node scripts/release/smoke.ts "$RELEASE_URL" "$RELEASE_COMMIT"
+        env:
+          RAILWAY_CORE_TOKEN: ${{ secrets.RAILWAY_CORE_TOKEN }}
+
+  production:
+    needs: [images, staging]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+    concurrency: { group: production, cancel-in-progress: false }
+    steps:
+      - uses: actions/checkout@v5
+        with: { ref: "${{ needs.images.outputs.commit }}", fetch-depth: 0 }
+      - uses: actions/setup-node@v5
+        with: { node-version: 24 }
+      - name: deploy the images staging approved to production
+        run: node scripts/release/deploy.ts
+        env:
+          RELEASE_ENVIRONMENT: production
+          RELEASE_URL: https://app.usetrawler.com
+          RELEASE_COMMIT: ${{ needs.images.outputs.commit }}
+          RAILWAY_CORE_TOKEN: ${{ secrets.RAILWAY_CORE_TOKEN }}
+          RAILWAY_WORKERS_TOKEN: ${{ secrets.RAILWAY_WORKERS_TOKEN }}
+          IMAGE_MIGRATE: ${{ needs.images.outputs.migrate }}
+          IMAGE_CONTROL_PLANE: ${{ needs.images.outputs.control-plane }}
+          IMAGE_RUNNER: ${{ needs.images.outputs.runner }}
