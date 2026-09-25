@@ -1,7 +1,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
-import { Recognised, StartRun } from "./start-run.tsx";
+import { Recognised } from "../../../components/key-fields.tsx";
+import { StartRun } from "./start-run.tsx";
 
 test("a member who cannot add the model key is told that an owner or admin can", () => {
   const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: false }));
