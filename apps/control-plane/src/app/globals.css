@@ -11,6 +11,12 @@
   }
 }
 
+@custom-variant tall {
+  @media (min-width: 48rem) and (min-height: 36rem) {
+    @slot;
+  }
+}
+
 :root {
   --paper: #f4f1eb;
   --ink: #17191c;
@@ -23,6 +29,7 @@
   --warn: #8a5e0f;
   --bad: #a63d32;
   --info: #3d6478;
+  --header: rgb(244 241 235 / 0.84);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -38,11 +45,13 @@
     --warn: #d9b25a;
     --bad: #e08a7e;
     --info: #85a7b8;
+    --header: rgb(17 19 21 / 0.84);
     color-scheme: dark;
   }
 }
 
 :root[data-theme="dark"] {
+  --header: rgb(17 19 21 / 0.84);
   --paper: #111315;
   --ink: #f4f1eb;
   --muted: #babbb7;
@@ -55,6 +64,10 @@
   --bad: #e08a7e;
   --info: #85a7b8;
   color-scheme: dark;
+}
+
+@theme {
+  --breakpoint-wide: 70rem;
 }
 
 @theme inline {
@@ -76,4 +89,15 @@
 body {
   background: var(--paper);
   color: var(--ink);
+}
+
+.app-frame {
+  background-image: linear-gradient(var(--soft) 1px, transparent 1px), linear-gradient(90deg, var(--soft) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+@media (min-width: 48rem) and (min-height: 36rem) {
+  html {
+    scroll-padding-top: 76px;
+  }
 }

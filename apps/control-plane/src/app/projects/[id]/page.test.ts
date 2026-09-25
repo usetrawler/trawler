@@ -1,7 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
-const state = vi.hoisted(() => ({ member: null as { userId: string; email: string; orgId: string; orgName: string; role: string } | null, runs: 0, counted: [] as Array<[string, string]>, tenants: [] as string[] }));
+type Member = { userId: string; name: string; email: string; orgId: string; orgName: string; role: string };
+const state = vi.hoisted(() => ({
+  member: null as { userId: string; name: string; email: string; orgId: string; orgName: string; role: string } | null,
+  runs: 0, counted: [] as Array<[string, string]>, tenants: [] as string[], shells: [] as string[],
+}));
+const ID = vi.hoisted(() => "0f8fad5b-d9cb-469f-a165-70867728950e");
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({
@@ -12,6 +17,12 @@ vi.mock("../../../server/auth.ts", () => ({
   signedInMember: async (headers: Headers) => (headers.get("cookie") === "session=ana" ? state.member : null),
   canManageBilling: () => false,
 }));
+vi.mock("../../../server/shell.ts", () => ({
+  shellFor: async (member: Member) => {
+    state.shells.push(member.orgId);
+    return { user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [{ id: ID, name: "Acme", address: "app.acme.test" }, { id: "other", name: "Globex", address: "shop.globex.test" }], runs: 60 } };
+  },
+}));
 vi.mock("../../../server/db.ts", () => ({ getDb: () => ({}) }));
 vi.mock("../../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
 vi.mock("../../../credentials/credentials.ts", () => ({ modelKeyHint: async () => null }));
@@ -21,18 +32,21 @@ vi.mock("../../../projects/projects.ts", () => ({
     personas: [], goals: [], accounts: [], gates: [],
   }),
 }));
-vi.mock("../../../projects/overview.ts", () => ({ projectRunCount: async (_tx: unknown, orgId: string, id: string) => { state.counted.push([orgId, id]); return state.runs; } }));
+vi.mock("../../../projects/overview.ts", async (original) => ({
+  hostOf: (await original<typeof import("../../../projects/overview.ts")>()).hostOf,
+  projectRunCount: async (_tx: unknown, orgId: string, id: string) => { state.counted.push([orgId, id]); return state.runs; },
+}));
 vi.mock("./plan-workspace.tsx", () => ({ PlanWorkspace: () => null }));
 
 const { default: ProjectPage } = await import("./page.tsx");
-const ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const render = async () => renderToStaticMarkup(await ProjectPage({ params: Promise.resolve({ id: ID }) }));
 
 beforeEach(() => {
-  state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-1", orgName: "Acme workspace", role: "member" };
+  state.member = { userId: "u1", name: "Ana", email: "ana@acme.test", orgId: "org-1", orgName: "Acme workspace", role: "member" };
   state.runs = 0;
   state.counted = [];
   state.tenants = [];
+  state.shells = [];
 });
 
 test("a visitor who is not signed in, or no longer belongs to any workspace, is sent to sign in before anything is read", async () => {
@@ -41,15 +55,28 @@ test("a visitor who is not signed in, or no longer belongs to any workspace, is 
   expect(state.tenants).toEqual([]);
 });
 
-test("a project with runs leads from its plan to all its runs", async () => {
-  state.runs = 3;
-  expect(await render()).toMatch(new RegExp(`<a href="/projects/${ID}/runs"[^>]*>All runs · 3</a>`));
-  expect(state.counted).toEqual([["org-1", ID]]);
+test("the plan is the page marked in the nav, under its project, and the nav is read for the signed-in workspace", async () => {
+  const html = await render();
+  const marked = (html.match(/<nav aria-label="Workspace".*?<\/nav>/)?.[0] ?? "").match(/<a [^>]*aria-current="[^"]*"[^>]*>/g) ?? [];
+  expect(marked).toEqual([expect.stringMatching(new RegExp(`^<a href="/projects/${ID}" aria-current="page"`))]);
+  expect(state.shells).toEqual(["org-1"]);
+  expect(html).toContain(">Acme workspace</p>");
 });
 
-test("a project without runs has no link to an empty list", async () => {
+test("the plan is the project's Plan tab, next to its Runs with their number, without the setup steps", async () => {
+  state.runs = 3;
   const html = await render();
-  expect(html).toContain("Acme workspace");
+  const tabs = html.match(/<nav aria-label="Project">.*?<\/nav>/)?.[0] ?? "";
+  expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}" aria-current="page"[^>]*>Plan</a>`));
+  expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}/runs" class="[^"]*">Runs<span[^>]*>3</span></a>`));
+  expect(state.counted).toEqual([["org-1", ID]]);
+  expect(html).not.toContain('aria-label="Progress"');
+  expect(html).toMatch(new RegExp(`<a href="/projects/${ID}#start"[^>]*>New run<`));
+  expect(html).toMatch(/>Project · <a href="https:\/\/app\.acme\.test\/"[^>]*>app\.acme\.test</);
+});
+
+test("a project without runs still offers its Runs tab, counted as none", async () => {
+  const html = await render();
   expect(html).toContain(">Acme</h1>");
-  expect(html).not.toContain(`/projects/${ID}/runs`);
+  expect(html).toMatch(new RegExp(`<a href="/projects/${ID}/runs" class="[^"]*">Runs<span[^>]*>0</span></a>`));
 });
