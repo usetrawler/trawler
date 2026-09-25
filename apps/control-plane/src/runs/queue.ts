@@ -41,7 +41,20 @@ export interface JobResult {
   observation?: ReplayObservation;
 }
 
+export class ForeignEvents extends Error {
+  constructor() {
+    super("events belong to another job");
+  }
+}
+
 const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
+
+export function storable<T>(value: T): T {
+  if (typeof value === "string") return value.replaceAll("\u0000", "").toWellFormed() as T;
+  if (Array.isArray(value)) return value.map(storable) as T;
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, storable(v)])) as T;
+  return value;
+}
 
 function configFor(snapshot: ConfigSnapshot, current: ProjectConfig): ProjectConfig {
   const passwords = new Map(current.accounts.map((a) => [a.ref, a.password]));
@@ -140,6 +153,23 @@ export async function claimJob(db: Database, keys: Keyring): Promise<JobAssignme
   return null;
 }
 
+export async function releaseJob(db: Database, job: { jobId: string; runId: string; token: string }): Promise<void> {
+  await asSystem(db, async (tx) => {
+    const run = await tx.selectFrom("runs").select("status").where("id", "=", job.runId).forUpdate().executeTakeFirstOrThrow();
+    const release = ACTIVE.includes(run.status) ? { status: "queued", started_at: null } : { status: "cancelled", finished_at: new Date() };
+    const released = await tx
+      .updateTable("jobs")
+      .set({ ...release, token_hash: null, lease_until: null })
+      .where("id", "=", job.jobId)
+      .where("token_hash", "=", hashToken(job.token))
+      .where("status", "=", "leased")
+      .executeTakeFirst();
+    if (!released.numUpdatedRows || run.status !== "running") return;
+    const started = await tx.selectFrom("jobs").select("id").where("run_id", "=", job.runId).where("status", "!=", "queued").executeTakeFirst();
+    if (!started) await tx.updateTable("runs").set({ status: "queued", started_at: null }).where("id", "=", job.runId).execute();
+  });
+}
+
 async function findingFor(tx: Tx, runId: string, key: string) {
   const row = await tx.selectFrom("findings").selectAll().where("run_id", "=", runId).where("key", "=", key).executeTakeFirstOrThrow();
   return {
@@ -149,7 +179,7 @@ async function findingFor(tx: Tx, runId: string, key: string) {
   };
 }
 
-async function jobForToken(tx: Tx, token: string, options: { allowExpired?: boolean } = {}) {
+async function jobForToken(tx: Tx, token: string, options: { allowExpired?: boolean; expectedJobId?: string } = {}) {
   const job = await tx
     .selectFrom("jobs")
     .selectAll()
@@ -157,7 +187,7 @@ async function jobForToken(tx: Tx, token: string, options: { allowExpired?: bool
     .where("token_hash", "=", hashToken(token))
     .forUpdate()
     .executeTakeFirst();
-  if (!job || (job.expired && !options.allowExpired)) throw new InvalidJobToken();
+  if (!job || (job.expired && !options.allowExpired) || (options.expectedJobId !== undefined && job.id !== options.expectedJobId)) throw new InvalidJobToken();
   return job;
 }
 
@@ -176,12 +206,12 @@ async function stopIfOverBudget(tx: Tx, runId: string): Promise<boolean> {
   return true;
 }
 
-export async function ingestEvents(db: Database, token: string, events: RunEvent[]): Promise<{ cancel: boolean }> {
+export async function ingestEvents(db: Database, token: string, events: RunEvent[], expectedJobId?: string): Promise<{ cancel: boolean }> {
   return asSystem(db, async (tx) => {
-    const valid = z.array(RunEventSchema).max(500).parse(events);
-    const job = await jobForToken(tx, token);
+    const valid = storable(z.array(RunEventSchema).max(500).parse(events));
+    const job = await jobForToken(tx, token, { expectedJobId });
     if (job.status !== "leased") return { cancel: true };
-    if (valid.some((e) => e.jobId !== job.id)) throw new Error("events belong to another job");
+    if (valid.some((e) => e.jobId !== job.id)) throw new ForeignEvents();
     const run = await tx.selectFrom("runs").select("status").where("id", "=", job.run_id).forUpdate().executeTakeFirstOrThrow();
     if (!ACTIVE.includes(run.status)) return { cancel: true };
     for (const e of valid) {
@@ -220,20 +250,23 @@ const noReport = (o?: ReplayObservation) => !o || (!o.completed && o.blockedAt =
 
 const JobResultSchema = z.object({ usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().max(2000).optional(), observation: ReplayObservationSchema.optional() });
 
-export async function completeJob(db: Database, token: string, input: JobResult): Promise<void> {
-  const result = JobResultSchema.parse(input);
+export async function completeJob(db: Database, token: string, input: JobResult, expectedJobId?: string): Promise<void> {
+  const result = storable(JobResultSchema.parse(input));
   await asSystem(db, async (tx) => {
-    const job = await jobForToken(tx, token, { allowExpired: true });
+    const job = await jobForToken(tx, token, { allowExpired: true, expectedJobId });
     if (job.status !== "leased") {
-      const reapedRecently = job.status === "failed" && job.finished_at !== null && Date.now() - job.finished_at.getTime() < LATE_REPORT_MS;
-      if (reapedRecently) await addCost(tx, job.run_id, job.id, result.usage.costUsd - Number(job.counted_cost));
+      const reapedRecently = job.status === "failed" && job.usage === null && job.finished_at !== null && Date.now() - job.finished_at.getTime() < LATE_REPORT_MS;
+      if (reapedRecently) {
+        await addCost(tx, job.run_id, job.id, result.usage.costUsd - Number(job.counted_cost));
+        await tx.updateTable("jobs").set({ usage: JSON.stringify(result.usage) }).where("id", "=", job.id).execute();
+      }
       return;
     }
     await addCost(tx, job.run_id, job.id, result.usage.costUsd - Number(job.counted_cost));
     const failed = result.stoppedBy === "error";
     await tx
       .updateTable("jobs")
-      .set({ status: failed ? "failed" : "succeeded", usage: JSON.stringify(result.usage), stopped_by: result.stoppedBy, error: result.error?.slice(0, 2000) ?? null, finished_at: new Date(), lease_until: null })
+      .set({ status: failed ? "failed" : "succeeded", usage: JSON.stringify(result.usage), stopped_by: result.stoppedBy, error: result.error ?? null, finished_at: new Date(), lease_until: null })
       .where("id", "=", job.id)
       .execute();
     if (job.kind === "replay" && result.observation) {

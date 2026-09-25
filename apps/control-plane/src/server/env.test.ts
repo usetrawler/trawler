@@ -23,3 +23,9 @@ test("the development sign-in can never be enabled in production", () => {
   expect(readEnv({ ...base, TRAWLER_DEV_OIDC_ISSUER: "http://localhost:4500" }).devOidc?.issuer).toBe("http://localhost:4500");
   expect(() => readEnv({ ...base, NODE_ENV: "production", BETTER_AUTH_URL: "https://app.usetrawler.com", TRAWLER_DEV_OIDC_ISSUER: "http://localhost:4500" })).toThrow(/never be set in production/);
 });
+
+test("a runner token the runner could never send is refused at start", () => {
+  expect(readEnv({ ...base, TRAWLER_RUNNER_TOKEN: ` ${"a".repeat(40)}\n` }).runnerToken).toBe("a".repeat(40));
+  expect(() => readEnv({ ...base, TRAWLER_RUNNER_TOKEN: "a".repeat(40) + "!@#" })).toThrow(/TRAWLER_RUNNER_TOKEN/);
+  expect(() => readEnv({ ...base, TRAWLER_RUNNER_TOKEN: "short" })).toThrow(/TRAWLER_RUNNER_TOKEN/);
+});

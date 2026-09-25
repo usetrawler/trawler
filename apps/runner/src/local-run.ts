@@ -1,6 +1,6 @@
 import type { LanguageModel } from "ai";
 import { Budget, judge, runReplay, runRoleSession, SecretScrubber, type Browser } from "@usetrawler/core";
-import type { ProjectConfig, RoleResult, RunEventInput } from "@usetrawler/protocol";
+import { MAX_URL, type ProjectConfig, type RoleResult, type RunEventInput } from "@usetrawler/protocol";
 import type { RunSummary } from "./run-dir.ts";
 
 const CLOSE_TIMEOUT_MS = 10_000;
@@ -31,7 +31,7 @@ export async function localRun(opts: {
   const withBrowser = async <T>(jobId: string, scrubber: SecretScrubber, fn: (b: Browser) => Promise<T>): Promise<T> => {
     const onBlocked = (url: string) => {
       try {
-        opts.emit(scrubber.scrub({ type: "blocked_request", jobId, url }));
+        opts.emit(scrubber.scrub({ type: "blocked_request", jobId, url: url.slice(0, MAX_URL) }));
       } catch {
         return;
       }

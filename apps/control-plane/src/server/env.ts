@@ -6,6 +6,7 @@ export interface ServerEnv {
   google?: { clientId: string; clientSecret: string };
   devOidc?: { issuer: string; clientId: string; clientSecret: string };
   setup?: { apiKey: string; model: string };
+  runnerToken?: string;
 }
 
 export const DEFAULT_SETUP_MODEL = "deepseek/deepseek-v4.1-flash";
@@ -28,6 +29,16 @@ export function readEnv(env: Record<string, string | undefined> = process.env): 
     github: pair(env.GITHUB_CLIENT_ID, env.GITHUB_CLIENT_SECRET),
     google: pair(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET),
     devOidc: devIssuer ? { issuer: devIssuer, clientId: "trawler-dev", clientSecret: "trawler-dev-secret" } : undefined,
+    runnerToken: runnerToken(env.TRAWLER_RUNNER_TOKEN),
     setup: env.OPENROUTER_API_KEY ? { apiKey: env.OPENROUTER_API_KEY, model: env.TRAWLER_SETUP_MODEL ?? DEFAULT_SETUP_MODEL } : undefined,
   };
+}
+
+const RUNNER_TOKEN = /^[A-Za-z0-9._~+\/=-]{32,512}$/;
+
+function runnerToken(value: string | undefined): string | undefined {
+  const token = value?.trim();
+  if (!token) return undefined;
+  if (!RUNNER_TOKEN.test(token)) throw new Error("TRAWLER_RUNNER_TOKEN must be 32 to 512 characters of letters, digits and ._~+/=-");
+  return token;
 }

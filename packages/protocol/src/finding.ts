@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+export const MAX_NOTE = 4000;
+export const MAX_GOAL_NOTE = 2000;
+export const MAX_URL = 4096;
+
 export const FindingSchema = z
   .object({
     id: z.string().min(1).max(100),
@@ -17,9 +21,9 @@ export const FindingSchema = z
 export type Finding = z.infer<typeof FindingSchema>;
 
 export const GoalOutcomeSchema = z.object({
-  goal: z.string().min(1),
+  goal: z.string().min(1).max(100),
   status: z.enum(["reached", "failed", "not_attempted"]),
-  note: z.string(),
+  note: z.string().max(MAX_GOAL_NOTE),
 });
 export type GoalOutcome = z.infer<typeof GoalOutcomeSchema>;
 
@@ -40,7 +44,7 @@ export type Verdict = z.infer<typeof VerdictSchema>;
 
 export const ReplayObservationSchema = z.object({
   completed: z.boolean(),
-  observed: z.string(),
+  observed: z.string().max(8000),
   blockedAt: z.number().int().positive().nullable(),
 });
 export type ReplayObservation = z.infer<typeof ReplayObservationSchema>;
