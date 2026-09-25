@@ -3,6 +3,8 @@ import { genericOAuth, organization } from "better-auth/plugins";
 
 const INVISIBLE = /[\p{Cc}\p{Cf}]/u;
 
+export const WORKSPACE_NAME_RULE = "workspace names are 1 to 100 plain characters";
+
 function refuse(message: string): never {
   throw new APIError("BAD_REQUEST", { code: "INVALID_WORKSPACE", message });
 }
@@ -15,7 +17,7 @@ export const organizationPlugin = () =>
     organizationHooks: {
       beforeUpdateOrganization: async ({ organization: changes }) => {
         if (changes.slug !== undefined && !/^[a-z0-9-]{1,48}$/.test(changes.slug)) refuse("workspace addresses use lowercase letters, digits and dashes, up to 48 characters");
-        if (changes.name !== undefined && (changes.name.trim().length === 0 || changes.name.length > 100 || INVISIBLE.test(changes.name))) refuse("workspace names are 1 to 100 plain characters");
+        if (changes.name !== undefined && (changes.name.trim().length === 0 || changes.name.length > 100 || INVISIBLE.test(changes.name))) refuse(WORKSPACE_NAME_RULE);
         if (changes.logo !== undefined && changes.logo !== null) {
           if (!(changes.logo.length <= 2048 && /^https:\/\//.test(changes.logo) && URL.canParse(changes.logo))) refuse("a workspace logo must be an https address");
           return { data: { ...changes, logo: new URL(changes.logo).href } };
