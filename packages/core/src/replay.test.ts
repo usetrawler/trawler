@@ -122,14 +122,19 @@ describe("runReplay", () => {
     expect(filled).toEqual([]);
   });
 
-  test("a replay with no account fills password fields with a made-up password it never sees", async () => {
-    const model = scriptedModel([toolCall("type_own_password", { fields: ["e3", "e4"] }), report({ completed: true, observed: "Account created, then Internal Server Error", blockedAt: null })]);
-    const { promise, filled } = replay(model, { accountRef: undefined });
+  test("a replay with no account fills password fields with a made-up password it never sees, even when the page shows it, and signs up with its own address", async () => {
+    const typed: string[] = [];
+    const echoing = { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => ({ content: [{ type: "text", text: `Account created with the password ${typed[0] ?? "not set"}` }] }) }) };
+    const model = scriptedModel([toolCall("type_own_password", { fields: ["e3", "e4"] }), toolCall("browser_snapshot", {}), report({ completed: true, observed: "Account created, then Internal Server Error", blockedAt: null })]);
+    const { promise, filled } = replay(model, { accountRef: undefined, browserTools: echoing, fillField: async (ref, text) => (typed.push(text), filled.push(`${ref}:${text}`), `fill('${text}') into ${ref}`) });
     await promise;
-    const password = filled[0]!.split(":")[1]!;
+    const password = typed[0]!;
     expect(filled).toEqual([`e3:${password}`, `e4:${password}`]);
     expect(password).not.toBe("hunter22-secret");
-    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt[0])).toContain("If a step has you type a password, fill the password fields with type_own_password instead");
+    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt[0])).toMatch(/If a step has you type a password, fill the password fields with type_own_password instead; you will never see the password\. If a step signs up with an email address, use replay\.[0-9a-f]{8}@example\.com in its place, since that one may be taken already\./);
+    const last = JSON.stringify(model.doGenerateCalls[2]!.prompt);
+    expect(last).toContain("fill('•••') into e3");
+    expect(last).toContain("Account created with the password •••");
     expect(JSON.stringify(model.doGenerateCalls.map((c) => c.prompt))).not.toContain(password);
   });
 

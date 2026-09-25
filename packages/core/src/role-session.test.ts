@@ -345,29 +345,48 @@ describe("runRoleSession", () => {
     expect(result).toMatchObject({ stoppedBy: "error", error: "the provider refused the workspace key; replace it on the plan page" });
   });
 
-  test("a person without an account is told to sign up with type_own_password, and never sees the password it types", async () => {
+  test("a person without an account is told to sign up with an example.com address and type_own_password, and never sees the password, even when the page shows it", async () => {
     const typed: Array<[string, string, string]> = [];
-    const model = scriptedModel([look, toolCall("type_own_password", { fields: ["e4", "e5"] }), look]);
-    const { promise, events } = run(model, {
+    const echoing = { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => ({ content: [{ type: "text", text: `- textbox "Password" [ref=e4]\nWelcome! Your password is ${typed[0]?.[1] ?? "not set"}` }] }) }) };
+    const model = scriptedModel([look, toolCall("type_own_password", { fields: ["e4", "e5"] }), look, look]);
+    await run(model, {
       persona: { id: "ama", name: "Ama", brief: "Brand new." },
+      browserTools: echoing,
       fillField: async (ref, text, kind) => (typed.push([ref, text, kind]), `fill('${text}') into ${ref}`),
-    });
-    await promise;
+    }).promise;
     const password = typed[0]![1];
     expect(typed).toEqual([["e4", password, "password"], ["e5", password, "password"]]);
     expect(model.doGenerateCalls[0]!.tools!.map((t) => t.name)).toContain("type_own_password");
-    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt[0])).toMatch(/You have no account\. If the product lets people sign up, sign up the way a new user would\. Fill password fields only with type_own_password/);
-    expect(JSON.stringify(model.doGenerateCalls[2]!.prompt)).toContain("fill('•••') into e4");
+    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt[0])).toMatch(/You have no account\. If the product lets people sign up, sign up the way a new user would, with the email address ama\.[0-9a-f]{8}@example\.com: it is yours, and no mail sent to it arrives\. Fill password fields only with type_own_password: it types a password made up for you, the same one all session, so use it again to sign in to the account you created\. You will never see it\./);
+    const later = JSON.stringify(model.doGenerateCalls[3]!.prompt);
+    expect(later).toContain("fill('•••') into e4");
+    expect(later).toContain("Welcome! Your password is •••");
     expect(JSON.stringify(model.doGenerateCalls.map((c) => c.prompt))).not.toContain(password);
-    expect(JSON.stringify(events)).not.toContain(password);
   });
 
-  test("a person with an account signs in with it and is not offered a made-up password", async () => {
+  test("a person with an account is told to sign in with it and is not offered a made-up password", async () => {
     const model = scriptedModel([look]);
     await run(model).promise;
-    const tools = model.doGenerateCalls[0]!.tools!.map((t) => t.name);
-    expect(tools).toContain("sign_in");
-    expect(tools).not.toContain("type_own_password");
+    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt[0])).toContain('You have an account \\"solo\\". To sign in');
+    expect(model.doGenerateCalls[0]!.tools!.map((t) => t.name)).not.toContain("type_own_password");
+  });
+
+  test("a password typed into several fields is one browser action: nothing else from the same reply runs between the fields", async () => {
+    const log: string[] = [];
+    const click = tool({ inputSchema: z.object({}), execute: async () => (log.push("click"), "clicked") });
+    const slowFill = async (ref: string) => (await new Promise((r) => setTimeout(r, 10)), log.push(`fill ${ref}`), "typed");
+    const model = scriptedModel([look, [toolCall("type_own_password", { fields: ["e4", "e5"] }), toolCall("browser_click", {})]]);
+    await run(model, { persona: { id: "ama", name: "Ama", brief: "Brand new." }, browserTools: { ...browserTools, browser_click: click }, fillField: slowFill }).promise;
+    expect(log).toEqual(["fill e4", "fill e5", "click"]);
+  });
+
+  test("signing in is one browser action too: a click in the same reply waits for both fields", async () => {
+    const log: string[] = [];
+    const click = tool({ inputSchema: z.object({}), execute: async () => (log.push("click"), "clicked") });
+    const slowFill = async (ref: string) => (await new Promise((r) => setTimeout(r, 10)), log.push(`fill ${ref}`), "typed");
+    const model = scriptedModel([look, [toolCall("sign_in", { account: "solo", usernameField: "e3", passwordField: "e4" }), toolCall("browser_click", {})]]);
+    await run(model, { browserTools: { ...browserTools, browser_click: click }, fillField: slowFill }).promise;
+    expect(log).toEqual(["fill e3", "fill e4", "click"]);
   });
 
   test("the returned result is scrubbed too", async () => {

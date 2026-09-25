@@ -113,15 +113,16 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
       const snapshot = picked.config_snapshot as unknown as ConfigSnapshot;
       const current = await loadProjectConfig(tx, picked.org_id, picked.project_id, keys);
       const finding = picked.finding_key ? await findingFor(tx, picked.run_id, picked.finding_key) : undefined;
+      const config = configFor(snapshot, current);
       return {
         assignment: {
           jobId: picked.id,
           runId: picked.run_id,
           token,
           kind: picked.kind as JobAssignment["kind"],
-          config: configFor(snapshot, current),
+          config,
           personaKey: picked.persona_key ?? undefined,
-          accountRef: finding ? snapshot.personas.find((p) => p.id === finding.personaKey)?.accountRef : undefined,
+          accountRef: finding ? config.personas.find((p) => p.id === finding.personaKey)?.accountRef : undefined,
           finding: finding?.finding,
           observation: finding?.replay,
           maxSteps: picked.kind === "role_session" ? picked.max_steps : picked.replay_steps,

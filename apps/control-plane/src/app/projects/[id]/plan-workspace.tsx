@@ -25,7 +25,7 @@ function RemoveButton({ label, onClick, disabled }: { label: string; onClick: ()
   return <button type="button" aria-label={label} title={label} onClick={onClick} disabled={disabled} className="h-9 w-9 shrink-0 text-muted hover:text-bad disabled:opacity-40">×</button>;
 }
 
-const WITHOUT_ACCOUNT = "People without a test account sign up the way a new user would, if your product lets them, with a password Trawler makes up. They cannot confirm an email address yet.";
+const WITHOUT_ACCOUNT = "People without a test account sign up the way a new user would, if your product lets them, with an example.com address and a password Trawler makes up. They cannot receive email yet.";
 
 function Accounts({ projectId, accounts, anyoneWithout, onChange }: { projectId: string; accounts: AccountView[]; anyoneWithout: boolean; onChange: (accounts: AccountView[], removed?: string) => void }) {
   const [open, setOpen] = useState(accounts.length > 0);
@@ -36,7 +36,7 @@ function Accounts({ projectId, accounts, anyoneWithout, onChange }: { projectId:
   if (!open) return (
     <div className="flex flex-col gap-1">
       <AddButton onClick={() => setOpen(true)}>Your product needs sign-in? Add a test account</AddButton>
-      {anyoneWithout && <p className="text-sm text-muted">{WITHOUT_ACCOUNT}</p>}
+      <p className="text-sm text-muted">{WITHOUT_ACCOUNT}</p>
     </div>
   );
   return (

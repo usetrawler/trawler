@@ -1,4 +1,4 @@
-import { randomInt } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import { tool } from "ai";
 import { z } from "zod";
 import { FindingSchema, type Finding, type Goal, type GoalOutcome, type RunEventInput, type TargetAccount, MAX_GOAL_NOTE, MAX_NOTE } from "@usetrawler/protocol";
@@ -14,12 +14,17 @@ export interface SessionState {
 
 export type FieldKind = "username" | "password";
 export type FillField = (ref: string, text: string, kind: FieldKind) => Promise<string>;
+export type InBrowser = <T>(action: () => Promise<T>) => Promise<T>;
 
 const CLOSED = "rejected: the session is already finished";
 const PASSWORD_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 
 export function madeUpPassword(): string {
   return `${Array.from({ length: 12 }, () => PASSWORD_CHARS[randomInt(PASSWORD_CHARS.length)]).join("")}!Aa7`;
+}
+
+export function madeUpEmail(name: string): string {
+  return `${name}.${randomBytes(4).toString("hex")}@example.com`;
 }
 
 export function newSessionState(goals: Goal[]): SessionState {
@@ -51,6 +56,7 @@ export function sessionTools(opts: {
   emit: (e: RunEventInput) => void;
   jobId: string;
   fillField: FillField;
+  inBrowser: InBrowser;
   scrubber: SecretScrubber;
   newId: () => string;
 }) {
@@ -127,14 +133,17 @@ export function sessionTools(opts: {
       execute: async ({ account, usernameField, passwordField }) => {
         if (state.finished !== null) return CLOSED;
         const a = opts.accounts.find((x) => x.ref === account);
-        if (!a) return `rejected: unknown account ${account}; known: ${opts.accounts.map((x) => x.ref).join(", ") || "none"}`;
+        if (!a && opts.accounts.length === 0) return "rejected: you have no stored account; for an account you created, type its email yourself and fill its password with type_own_password";
+        if (!a) return `rejected: unknown account ${account}; known: ${opts.accounts.map((x) => x.ref).join(", ")}`;
         opts.scrubber.add(a.password);
-        try {
-          await opts.fillField(usernameField, a.username, "username");
-          return opts.scrubber.scrub(await opts.fillField(passwordField, a.password, "password"));
-        } catch (err) {
-          return opts.scrubber.scrub(`failed: ${err instanceof Error ? err.message : String(err)}`);
-        }
+        return opts.inBrowser(async () => {
+          try {
+            await opts.fillField(usernameField, a.username, "username");
+            return opts.scrubber.scrub(await opts.fillField(passwordField, a.password, "password"));
+          } catch (err) {
+            return opts.scrubber.scrub(`failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        });
       },
     }),
     finish: tool({
@@ -154,7 +163,7 @@ export function sessionTools(opts: {
 
 export type SessionTools = ReturnType<typeof sessionTools>;
 
-export function ownPasswordTool(opts: { state: SessionState; fillField: FillField; scrubber: SecretScrubber }) {
+export function ownPasswordTool(opts: { state: SessionState; fillField: FillField; inBrowser: InBrowser; scrubber: SecretScrubber }) {
   const password = madeUpPassword();
   opts.scrubber.add(password);
   return {
@@ -163,17 +172,19 @@ export function ownPasswordTool(opts: { state: SessionState; fillField: FillFiel
       inputSchema: z.object({ fields: z.union([z.array(z.string()), z.string()]).nullish() }),
       execute: async ({ fields }) => {
         if (opts.state.finished !== null) return CLOSED;
-        const refs = [...new Set((typeof fields === "string" ? [fields] : fields ?? []).map((f) => f.trim()).filter(Boolean))];
+        const refs = [...new Set((typeof fields === "string" ? fields.split(/[\s,]+/) : fields ?? []).map((f) => f.trim()).filter(Boolean))];
         if (refs.length === 0) return "rejected: fields: give the refs of the password fields";
-        const typed: string[] = [];
-        for (const ref of refs) {
-          try {
-            typed.push(`${ref}: ${await opts.fillField(ref, password, "password")}`);
-          } catch (err) {
-            typed.push(`${ref}: failed: ${err instanceof Error ? err.message : String(err)}`);
+        return opts.inBrowser(async () => {
+          const typed: string[] = [];
+          for (const ref of refs) {
+            try {
+              typed.push(`${ref}: ${await opts.fillField(ref, password, "password")}`);
+            } catch (err) {
+              typed.push(`${ref}: failed: ${err instanceof Error ? err.message : String(err)}`);
+            }
           }
-        }
-        return opts.scrubber.scrub(typed.join("\n"));
+          return opts.scrubber.scrub(typed.join("\n"));
+        });
       },
     }),
   };

@@ -3,7 +3,6 @@ import type { JobUsage, StopReason } from "@usetrawler/protocol";
 import { pruneMessages } from "./context.ts";
 import { type Budget, failureMessage, stoppedByRun, tallyStep } from "./llm.ts";
 import type { SecretScrubber } from "./secrets.ts";
-import type { FillField } from "./session-tools.ts";
 
 const MAX_SILENT_TURNS = 3;
 const MAX_CUT_OFFS = 3;
@@ -20,7 +19,7 @@ function oneAtATime() {
   };
 }
 
-export function browserQueue(browserTools: ToolSet, fillField: FillField, onOutcome: (ok: boolean) => void = () => {}) {
+export function browserQueue(browserTools: ToolSet, onOutcome: (ok: boolean) => void = () => {}) {
   const run = oneAtATime();
   let crashes = 0;
   let lastError = "";
@@ -49,7 +48,6 @@ export function browserQueue(browserTools: ToolSet, fillField: FillField, onOutc
   return {
     tools,
     run,
-    fillField: ((ref, text, kind) => run(() => fillField(ref, text, kind))) as FillField,
     crashed: (): string | false => (crashes >= MAX_BROWSER_CRASHES ? lastError || "no error text" : false),
   };
 }

@@ -306,7 +306,20 @@ export async function openBrowser(opts: {
         if (kind === "password") {
           typedSecrets.add(text);
           const held = filled.at(-1);
-          if (held) lastValues.set(held, text);
+          if (held) {
+            lastValues.set(held, text);
+            const kept = await readValue(held);
+            if (kept !== text) {
+              if (kept.length < MIN_SECRET_LENGTH) {
+                await type({ target: ref, element: "password field", text: "" }, internalCall);
+                lastValues.set(held, "");
+                return "failed: the field keeps too little of the password to keep it hidden, so it was cleared";
+              }
+              typedSecrets.add(kept);
+              opts.scrubber.add(kept);
+              lastValues.set(held, kept);
+            }
+          }
         }
         return kind === "password" ? "typed the password" : "typed the username";
       },
