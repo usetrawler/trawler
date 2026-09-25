@@ -153,10 +153,21 @@ export async function claimJob(db: Database, keys: Keyring): Promise<JobAssignme
   return null;
 }
 
-export async function releaseJob(db: Database, jobId: string): Promise<void> {
-  await asSystem(db, (tx) =>
-    tx.updateTable("jobs").set({ status: "queued", token_hash: null, lease_until: null, started_at: null }).where("id", "=", jobId).where("status", "=", "leased").execute(),
-  );
+export async function releaseJob(db: Database, job: { jobId: string; runId: string; token: string }): Promise<void> {
+  await asSystem(db, async (tx) => {
+    const run = await tx.selectFrom("runs").select("status").where("id", "=", job.runId).forUpdate().executeTakeFirstOrThrow();
+    const release = ACTIVE.includes(run.status) ? { status: "queued", started_at: null } : { status: "cancelled", finished_at: new Date() };
+    const released = await tx
+      .updateTable("jobs")
+      .set({ ...release, token_hash: null, lease_until: null })
+      .where("id", "=", job.jobId)
+      .where("token_hash", "=", hashToken(job.token))
+      .where("status", "=", "leased")
+      .executeTakeFirst();
+    if (!released.numUpdatedRows || run.status !== "running") return;
+    const started = await tx.selectFrom("jobs").select("id").where("run_id", "=", job.runId).where("status", "!=", "queued").executeTakeFirst();
+    if (!started) await tx.updateTable("runs").set({ status: "queued", started_at: null }).where("id", "=", job.runId).execute();
+  });
 }
 
 async function findingFor(tx: Tx, runId: string, key: string) {
@@ -255,7 +266,7 @@ export async function completeJob(db: Database, token: string, input: JobResult,
     const failed = result.stoppedBy === "error";
     await tx
       .updateTable("jobs")
-      .set({ status: failed ? "failed" : "succeeded", usage: JSON.stringify(result.usage), stopped_by: result.stoppedBy, error: result.error?.slice(0, 2000) ?? null, finished_at: new Date(), lease_until: null })
+      .set({ status: failed ? "failed" : "succeeded", usage: JSON.stringify(result.usage), stopped_by: result.stoppedBy, error: result.error ?? null, finished_at: new Date(), lease_until: null })
       .where("id", "=", job.id)
       .execute();
     if (job.kind === "replay" && result.observation) {

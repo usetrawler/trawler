@@ -79,7 +79,7 @@ export async function handleClaim(req: Request, deps: RunnerApiDeps): Promise<Re
   while (!req.signal.aborted) {
     const job = await claimJob(deps.db, deps.keys);
     if (job && req.signal.aborted) {
-      await releaseJob(deps.db, job.jobId);
+      await releaseJob(deps.db, job);
       break;
     }
     if (job) return json(job);

@@ -6,7 +6,8 @@ import { withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { createProject } from "../projects/projects.ts";
-import { startRun } from "../runs/runs.ts";
+import { cancelRun, startRun } from "../runs/runs.ts";
+import { claimJob, releaseJob } from "../runs/queue.ts";
 import { handleClaim, handleComplete, handleEvents, type RunnerApiDeps } from "./handlers.ts";
 
 const t = await testDb();
@@ -90,6 +91,8 @@ test("a runner that hangs up while its claim is being prepared leaves the job in
   expect((await handleClaim(hungUp, deps)).status).toBe(204);
   const { rows } = await sql<{ status: string; token_hash: string | null }>`select status, token_hash from jobs where run_id = ${run.id}`.execute(t.db);
   expect(rows).toEqual([{ status: "queued", token_hash: null }]);
+  const { rows: runs } = await sql<{ status: string }>`select status from runs where id = ${run.id}`.execute(t.db);
+  expect(runs[0]!.status).toBe("queued");
   const again = await handleClaim(post("/api/runner/claim", {}, runner), deps);
   expect(again.status).toBe(200);
   const job = await again.json();
@@ -120,4 +123,37 @@ test("text the database cannot store is cleaned instead of failing the batch, an
   await handleComplete(post(`/api/jobs/${job.jobId}/complete`, done(5), auth), job.jobId, deps);
   const { rows } = await sql<{ cost_usd: string }>`select cost_usd from runs where id = ${run.id}`.execute(t.db);
   expect(Number(rows[0]!.cost_usd)).toBeCloseTo(0.02, 6);
+});
+
+test("a job that failed on its own, or was reaped, counts its reported cost once", async () => {
+  const done = (costUsd: number, stoppedBy = "finish") => ({ usage: { model: "a", inputTokens: 1, outputTokens: 1, costUsd, steps: 1 }, stoppedBy });
+  const cost = async (id: string) => Number((await sql<{ cost_usd: string }>`select cost_usd from runs where id = ${id}`.execute(t.db)).rows[0]!.cost_usd);
+
+  const failing = await startAndClaim();
+  const a = await (await handleClaim(post("/api/runner/claim", {}, runner), deps)).json();
+  expect(a.runId).toBe(failing.id);
+  const authA = { authorization: `Bearer ${a.token}` };
+  await handleComplete(post(`/api/jobs/${a.jobId}/complete`, done(0.03, "error"), authA), a.jobId, deps);
+  await handleComplete(post(`/api/jobs/${a.jobId}/complete`, done(4, "error"), authA), a.jobId, deps);
+  expect(await cost(failing.id)).toBeCloseTo(0.03, 6);
+
+  const reaped = await startAndClaim();
+  const b = await (await handleClaim(post("/api/runner/claim", {}, runner), deps)).json();
+  expect(b.runId).toBe(reaped.id);
+  await sql`update jobs set lease_until = now() - interval '1 minute' where id = ${b.jobId}`.execute(t.db);
+  expect((await handleClaim(post("/api/runner/claim", {}, runner), deps)).status).toBe(204);
+  const authB = { authorization: `Bearer ${b.token}` };
+  await handleComplete(post(`/api/jobs/${b.jobId}/complete`, done(0.02), authB), b.jobId, deps);
+  await handleComplete(post(`/api/jobs/${b.jobId}/complete`, done(5), authB), b.jobId, deps);
+  expect(await cost(reaped.id)).toBeCloseTo(0.02, 6);
+});
+
+test("a claim released after its run was cancelled is cancelled, not queued forever", async () => {
+  const run = await startAndClaim();
+  const job = await claimJob(t.db, keys);
+  expect(job?.runId).toBe(run.id);
+  await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id));
+  await releaseJob(t.db, job!);
+  const { rows } = await sql<{ status: string }>`select status from jobs where run_id = ${run.id}`.execute(t.db);
+  expect(rows).toEqual([{ status: "cancelled" }]);
 });
