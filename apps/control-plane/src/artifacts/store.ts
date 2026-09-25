@@ -12,7 +12,7 @@ export interface ArtifactStorage {
 
 export interface ArtifactStore {
   put(key: string, bytes: Uint8Array, contentType: string): Promise<void>;
-  link(key: string, contentType: string): Promise<string>;
+  link(key: string): Promise<string>;
   remove(key: string): Promise<void>;
 }
 
@@ -31,8 +31,8 @@ export function s3Store(storage: ArtifactStorage): ArtifactStore {
     async put(key, bytes, contentType) {
       await client.send(new PutObjectCommand({ Bucket: storage.bucket, Key: key, Body: bytes, ContentType: contentType }));
     },
-    link(key, contentType) {
-      return getSignedUrl(client, new GetObjectCommand({ Bucket: storage.bucket, Key: key, ResponseContentType: contentType, ResponseCacheControl: `private, max-age=${LINK_SECONDS}` }), { expiresIn: LINK_SECONDS });
+    link(key) {
+      return getSignedUrl(client, new GetObjectCommand({ Bucket: storage.bucket, Key: key }), { expiresIn: LINK_SECONDS });
     },
     async remove(key) {
       await client.send(new DeleteObjectCommand({ Bucket: storage.bucket, Key: key }));

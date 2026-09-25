@@ -201,5 +201,6 @@ test("a file the bucket fails to delete keeps its row for the next cleanup, and 
   const left = await sql<{ id: string }>`select id from artifacts where job_id = ${job.jobId}`.execute(t.db);
   expect(left.rows.map((r) => r.id)).toEqual([ids[0]]);
   expect(await objectKeys()).toContain(stuckKey);
+  expect(await removeExpiredArtifacts(t.db, flaky, { batch: 1 })).toBe(0);
   expect(await removeExpiredArtifacts(t.db, store)).toBe(1);
 });

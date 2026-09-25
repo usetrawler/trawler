@@ -50,6 +50,6 @@ export async function storeArtifact(
 
 export async function artifactLink(db: Database, store: ArtifactStore, orgId: string, id: string): Promise<string | null> {
   if (!UUID.test(id)) return null;
-  const artifact = await withOrg(db, orgId, (tx) => tx.selectFrom("artifacts").select(["storage_key", "content_type"]).where("id", "=", id).where("org_id", "=", orgId).executeTakeFirst());
-  return artifact ? store.link(artifact.storage_key, artifact.content_type) : null;
+  const artifact = await withOrg(db, orgId, (tx) => tx.selectFrom("artifacts").select("storage_key").where("id", "=", id).where("org_id", "=", orgId).executeTakeFirst());
+  return artifact ? store.link(artifact.storage_key) : null;
 }
