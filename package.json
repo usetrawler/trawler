@@ -15,7 +15,7 @@
     "runner": "tsx apps/runner/src/main.ts",
     "control-plane": "npm run dev -w @usetrawler/control-plane",
     "test:unit": "vitest run --project unit",
-    "db:up": "docker compose up -d --wait postgres",
+    "db:up": "docker compose up -d --wait postgres s3",
     "db:down": "docker compose down",
     "db:migrate": "docker compose run --rm flyway migrate",
     "db:validate": "docker compose run --rm flyway validate",
