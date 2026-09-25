@@ -16,7 +16,7 @@ let server: Server | undefined;
 afterEach(() => new Promise<void>((r) => (server ? server.close(() => r()) : r())));
 
 function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; failEvents?: number; eventsStatus?: number; completeStatus?: number } = {}) {
-  const seen = { claims: 0, events: [] as Array<{ seq: number; type: string }>, completions: [] as unknown[], headers: [] as Array<string | undefined>, auth: [] as Array<string | undefined> };
+  const seen = { claims: 0, events: [] as Array<{ seq: number; type: string }>, completions: [] as unknown[], releases: 0, headers: [] as Array<string | undefined>, auth: [] as Array<string | undefined> };
   let batches = 0;
   let failures = opts.failEvents ?? 0;
   server = createServer(async (req, res) => {
@@ -36,6 +36,10 @@ function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; failEvents
       batches++;
       seen.events.push(...body.events);
       return res.end(JSON.stringify({ cancel: opts.cancelAfter !== undefined && batches >= opts.cancelAfter }));
+    }
+    if (req.url?.endsWith("/release")) {
+      seen.releases++;
+      return res.end(JSON.stringify({ ok: true }));
     }
     if (req.url?.endsWith("/complete")) {
       seen.completions.push(body);
@@ -173,4 +177,20 @@ test("stopping the runner abandons a claim that is still waiting", async () => {
   const pending = workOnce(deps("http://127.0.0.1:1", scriptedModel([]), { fetch: hanging }), stop.signal);
   stop.abort();
   expect(await pending).toBe("idle");
+});
+
+test("a runner told to stop mid-session hands the job back instead of failing it", async () => {
+  const { url, seen } = await fakeControlPlane(role);
+  const slow = endless();
+  const original = slow.doGenerate.bind(slow);
+  slow.doGenerate = async (o) => { await new Promise((r) => setTimeout(r, 30)); return original(o); };
+  const stop = new AbortController();
+  const lines: string[] = [];
+  const pending = workOnce(deps(url, slow, { log: (l) => lines.push(l) }), stop.signal);
+  await new Promise((r) => setTimeout(r, 150));
+  stop.abort();
+  expect(await pending).toBe("done");
+  expect(seen.releases).toBe(1);
+  expect(seen.completions).toEqual([]);
+  expect(lines.some((l) => l.includes("handed back to the queue"))).toBe(true);
 });

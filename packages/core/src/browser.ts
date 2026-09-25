@@ -127,6 +127,7 @@ export async function openBrowser(opts: {
   scrubber: SecretScrubber;
   onBlocked: (url: string) => void;
   headless?: boolean;
+  survivesSignals?: boolean;
 }): Promise<Browser> {
   const allowed = new Set(opts.allowedOrigins.map((o) => new URL(o).origin));
   const isAllowed = (url: string) => {
@@ -142,7 +143,7 @@ export async function openBrowser(opts: {
   };
   let blockedNavigation: string | null = null;
 
-  const chrome = await chromium.launch({ headless: opts.headless ?? true });
+  const chrome = await chromium.launch({ headless: opts.headless ?? true, handleSIGTERM: !opts.survivesSignals, handleSIGINT: !opts.survivesSignals, handleSIGHUP: !opts.survivesSignals });
   let disconnected = false;
   chrome.on("disconnected", () => (disconnected = true));
   try {

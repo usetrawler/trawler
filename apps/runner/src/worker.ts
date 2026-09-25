@@ -222,12 +222,27 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
   const budget = new Budget(Math.max(job.budgetUsd, 1e-6));
   if (job.budgetUsd <= 0) budget.add(1e-6);
   const events = new JobEvents(deps, job, () => budget.add(budget.limitUsd));
+  let released: Promise<boolean> | undefined;
+  const handOver = () => {
+    released ??= call(deps, `/api/jobs/${job.jobId}/release`, job.token, {})
+      .then((r) => r.ok)
+      .catch(() => false);
+    budget.add(budget.limitUsd);
+  };
+  signal?.addEventListener("abort", handOver, { once: true });
   let completion: JobCompletion;
   try {
     completion = await run(deps, job, events, budget, scrubber);
     if (events.cancelled && completion.stoppedBy !== "error") completion = { ...completion, stoppedBy: "budget" };
   } catch (err) {
     completion = { usage: zeroUsage(job.agentModel), stoppedBy: "error", error: clip(scrubber.scrub(err instanceof Error ? err.message : String(err))) };
+  }
+  signal?.removeEventListener("abort", handOver);
+  if (released) {
+    events.stop();
+    const handedOver = await released;
+    deps.log(`${job.kind} ${job.jobId} ${handedOver ? "handed back to the queue because the runner is stopping" : "could not be handed back; it will be retried when its lease expires"}`);
+    return "done";
   }
   events.stop();
   await events.flush();
@@ -238,7 +253,7 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
   }
   try {
     await complete(deps, job, completion);
-    deps.log(`${job.kind} ${job.jobId} finished (${completion.stoppedBy})`);
+    deps.log(`${job.kind} ${job.jobId} finished (${completion.stoppedBy})${completion.error ? `: ${completion.error}` : ""}`);
   } catch (err) {
     deps.log(`${job.kind} ${job.jobId} could not report back: ${err instanceof Error ? err.message : String(err)}`);
   }

@@ -23,6 +23,7 @@ function oneAtATime() {
 export function browserQueue(browserTools: ToolSet, fillField: FillField) {
   const run = oneAtATime();
   let crashes = 0;
+  let lastError = "";
   const tools: ToolSet = Object.fromEntries(
     Object.entries(browserTools).map(([name, t]) => [
       name,
@@ -36,6 +37,7 @@ export function browserQueue(browserTools: ToolSet, fillField: FillField) {
               return out;
             } catch (err) {
               crashes++;
+              lastError = err instanceof Error ? err.message : String(err);
               throw err;
             }
           }),
@@ -46,7 +48,7 @@ export function browserQueue(browserTools: ToolSet, fillField: FillField) {
     tools,
     run,
     fillField: ((ref, text, kind) => run(() => fillField(ref, text, kind))) as FillField,
-    crashed: () => crashes >= MAX_BROWSER_CRASHES,
+    crashed: (): string | false => (crashes >= MAX_BROWSER_CRASHES ? lastError || "no error text" : false),
   };
 }
 
@@ -73,13 +75,13 @@ export async function runAgentLoop(opts: {
   maxSteps: number;
   usage: JobUsage;
   finished: () => boolean;
-  crashed: () => boolean;
+  crashed: () => string | false;
   onStep: (step: StepResult<ToolSet>, costUsd: number) => void;
   largeResultChars?: number;
 }): Promise<{ stoppedBy: StopReason; error?: string }> {
   const { usage } = opts;
   let stepFailure: unknown;
-  const done = () => opts.finished() || usage.steps >= opts.maxSteps || opts.budget.exceeded || opts.crashed() || stepFailure !== undefined;
+  const done = () => opts.finished() || usage.steps >= opts.maxSteps || opts.budget.exceeded || opts.crashed() !== false || stepFailure !== undefined;
   let history: ModelMessage[] = [{ role: "user", content: "Begin." }];
   let silentTurns = 0;
   let cutOffs = 0;
@@ -124,7 +126,8 @@ export async function runAgentLoop(opts: {
     }
     if (stepFailure !== undefined) throw stepFailure;
     if (opts.finished()) return { stoppedBy: "finish" };
-    if (opts.crashed()) return { stoppedBy: "error", error: `the browser failed ${MAX_BROWSER_CRASHES} times in a row` };
+    const crash = opts.crashed();
+    if (crash !== false) return { stoppedBy: "error", error: `the browser failed ${MAX_BROWSER_CRASHES} times in a row; last error: ${opts.scrubber.scrub(crash).slice(0, 500)}` };
     if (opts.budget.exceeded) return { stoppedBy: "budget" };
     return { stoppedBy: "max_steps" };
   } catch (err) {

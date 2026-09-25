@@ -1,4 +1,4 @@
-import { generateText, Output, tool, type LanguageModel, type ToolSet } from "ai";
+import { generateText, NoObjectGeneratedError, NoOutputGeneratedError, Output, tool, type LanguageModel, type ToolSet } from "ai";
 import { z } from "zod";
 import { VerdictSchema, type Finding, type JobStopReason, type JobUsage, type ProjectConfig, type ReplayObservation, type RunEventInput, type Verdict } from "@usetrawler/protocol";
 import { browserQueue, runAgentLoop } from "./agent-loop.ts";
@@ -96,6 +96,17 @@ export async function runReplay(opts: {
   return { observation, usage };
 }
 
+async function judgeOnce(opts: { model: LanguageModel; finding: Finding; observation: ReplayObservation; scrubber: SecretScrubber; budget: Budget }, usage: JobUsage): Promise<Verdict> {
+  const { output } = await generateText({
+    model: opts.model,
+    output: Output.object({ schema: z.object({ verdict: VerdictSchema }) }),
+    prompt: opts.scrubber.scrub(judgePrompt(opts.finding, opts.observation)),
+    maxOutputTokens: JUDGE_OUTPUT_TOKENS,
+    onStepEnd: (step) => void tallyStep(usage, opts.budget, step),
+  });
+  return output.verdict;
+}
+
 export async function judge(opts: {
   model: LanguageModel;
   modelId: string;
@@ -117,14 +128,10 @@ export async function judge(opts: {
   else if (opts.budget.exceeded) stoppedBy = "budget";
   else {
     try {
-      const { output } = await generateText({
-        model: opts.model,
-        output: Output.object({ schema: z.object({ verdict: VerdictSchema }) }),
-        prompt: opts.scrubber.scrub(judgePrompt(opts.finding, opts.observation)),
-        maxOutputTokens: JUDGE_OUTPUT_TOKENS,
-        onStepEnd: (step) => void tallyStep(usage, opts.budget, step),
+      verdict = await judgeOnce(opts, usage).catch((err: unknown) => {
+        if (!(NoOutputGeneratedError.isInstance(err) || NoObjectGeneratedError.isInstance(err)) || opts.budget.exceeded) throw err;
+        return judgeOnce(opts, usage);
       });
-      verdict = output.verdict;
     } catch (err) {
       if (refusedForBudget(err)) stoppedBy = "budget";
       else {

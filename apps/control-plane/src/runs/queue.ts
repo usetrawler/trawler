@@ -168,10 +168,29 @@ export async function releaseJob(db: Database, job: { jobId: string; runId: stri
       .where("token_hash", "=", hashToken(job.token))
       .where("status", "=", "leased")
       .executeTakeFirst();
-    if (!released.numUpdatedRows || run.status !== "running") return;
+    if (!released.numUpdatedRows) return;
+    await forgetPartialWork(tx, job.jobId);
+    if (run.status !== "running") return;
     const started = await tx.selectFrom("jobs").select("id").where("run_id", "=", job.runId).where("status", "!=", "queued").executeTakeFirst();
     if (!started) await tx.updateTable("runs").set({ status: "queued", started_at: null }).where("id", "=", job.runId).execute();
   });
+}
+
+async function forgetPartialWork(tx: Tx, jobId: string) {
+  const job = await tx.selectFrom("jobs").select(["run_id", "kind", "persona_key", "finding_key"]).where("id", "=", jobId).executeTakeFirstOrThrow();
+  await tx.deleteFrom("run_events").where("job_id", "=", jobId).execute();
+  if (job.kind === "role_session") {
+    await tx.deleteFrom("findings").where("job_id", "=", jobId).execute();
+    await tx.deleteFrom("goal_outcomes").where("run_id", "=", job.run_id).where("persona_key", "=", job.persona_key!).execute();
+  } else if (job.kind === "judge") {
+    await tx.updateTable("findings").set({ verdict: null, updated_at: new Date() }).where("run_id", "=", job.run_id).where("key", "=", job.finding_key!).execute();
+  }
+}
+
+export async function releaseJobForShutdown(db: Database, token: string, expectedJobId: string): Promise<void> {
+  const job = await asSystem(db, (tx) => jobForToken(tx, token, { expectedJobId }));
+  if (job.status !== "leased") return;
+  await releaseJob(db, { jobId: job.id, runId: job.run_id, token });
 }
 
 async function findingFor(tx: Tx, runId: string, key: string) {

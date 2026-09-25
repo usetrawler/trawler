@@ -13,7 +13,7 @@ import { resetPriceCache } from "../llm/prices.ts";
 import { handleChatCompletions } from "../llm-proxy/proxy.ts";
 import { createProject } from "../projects/projects.ts";
 import { runSummary, startRun } from "../runs/runs.ts";
-import { handleClaim, handleComplete, handleEvents, type RunnerApiDeps } from "./handlers.ts";
+import { handleClaim, handleComplete, handleEvents, handleRelease, type RunnerApiDeps } from "./handlers.ts";
 
 const t = await testDb();
 afterAll(() => t.drop());
@@ -41,8 +41,8 @@ beforeAll(async () => {
     const chunks: Buffer[] = [];
     for await (const c of req) chunks.push(c as Buffer);
     const request = new Request(`http://cp.test${req.url}`, { method: req.method, headers: req.headers as Record<string, string>, body: chunks.length ? Buffer.concat(chunks) : undefined });
-    const match = /^\/api\/jobs\/([^/]+)\/(events|complete)$/.exec(req.url ?? "");
-    const response = req.url === "/api/llm/v1/chat/completions" ? await handleChatCompletions(request, { db: t.db, keys, openRouterUrl: openRouterBase, retryBaseMs: 1 }) : req.url === "/api/runner/claim" ? await handleClaim(request, deps) : match ? await (match[2] === "events" ? handleEvents : handleComplete)(request, match[1]!, deps) : new Response(null, { status: 404 });
+    const match = /^\/api\/jobs\/([^/]+)\/(events|complete|release)$/.exec(req.url ?? "");
+    const response = req.url === "/api/llm/v1/chat/completions" ? await handleChatCompletions(request, { db: t.db, keys, openRouterUrl: openRouterBase, retryBaseMs: 1 }) : req.url === "/api/runner/claim" ? await handleClaim(request, deps) : match ? await (match[2] === "events" ? handleEvents : match[2] === "release" ? handleRelease : handleComplete)(request, match[1]!, deps) : new Response(null, { status: 404 });
     res.writeHead(response.status, Object.fromEntries(response.headers));
     res.end(Buffer.from(await response.arrayBuffer()));
   });
@@ -192,4 +192,32 @@ test("a run on a direct provider goes to that provider without OpenRouter extras
   const summary = await withOrg(t.db, "org-o", (tx) => runSummary(tx, "org-o", run.id));
   expect(summary).toMatchObject({ status: "stopped_budget", costUsd: 0, tokensUsed: 2100, tokenCap: 2000, provider: "openai" });
   expect((await call()).status).toBe(402);
+});
+
+test("a session interrupted by a runner shutdown goes back to the queue with its partial work forgotten, and the next runner finishes the run", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-s', 'S', 's', now())`.execute(t.db);
+  await withOrg(t.db, "org-s", (tx) => setModelKey(tx, "org-s", { provider: "openrouter", key: ORG_KEY }, "u", keys));
+  const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "priya", name: "Priya", brief: "b" }], goals: [{ id: "g", instruction: "x" }] });
+  const project = await withOrg(t.db, "org-s", (tx) => createProject(tx, "org-s", config, keys));
+  const run = await withOrg(t.db, "org-s", (tx) => startRun(tx, "org-s", project, keys, { budgetUsd: 1, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 10, replaySteps: 10, createdBy: "u" }));
+  replies = [
+    { ...toolReply("goal_status", { goal: "g", status: "failed", note: "half way" }), delayMs: 0 },
+    ...Array.from({ length: 4 }, () => ({ ...toolReply("note", { text: "still going" }), delayMs: 150 })),
+  ];
+  const stop = new AbortController();
+  const first = workOnce({ ...worker(), flushMs: 5 }, stop.signal);
+  await new Promise((r) => setTimeout(r, 400));
+  stop.abort();
+  expect(await first).toBe("done");
+  const { rows: jobs } = await sql<{ status: string; token_hash: string | null }>`select status, token_hash from jobs where run_id = ${run.id}`.execute(t.db);
+  expect(jobs).toEqual([{ status: "queued", token_hash: null }]);
+  expect((await sql`select 1 from run_events where run_id = ${run.id}`.execute(t.db)).rows).toHaveLength(0);
+  expect((await sql`select 1 from goal_outcomes where run_id = ${run.id}`.execute(t.db)).rows).toHaveLength(0);
+
+  replies = [toolReply("goal_status", { goal: "g", status: "reached", note: "" }), toolReply("finish", { summary: "done" })];
+  expect(await workOnce(worker())).toBe("done");
+  const summary = await withOrg(t.db, "org-s", (tx) => runSummary(tx, "org-s", run.id));
+  expect(summary).toMatchObject({ status: "succeeded" });
+  expect(summary!.goals).toEqual([{ personaKey: "priya", goal: "g", status: "reached", note: "" }]);
+  expect(summary!.jobs.map((j) => j.status)).toEqual(["succeeded"]);
 });
