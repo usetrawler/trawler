@@ -1,8 +1,8 @@
-<p align="center">
+<h1 align="center">
   <a href="https://usetrawler.com">
     <img src="https://usetrawler.com/assets/og-image.png" alt="Trawler — test your product the way people use it" width="820">
   </a>
-</p>
+</h1>
 
 <p align="center">
   <b>People played by AI use your real product in a real browser.<br>
@@ -22,17 +22,17 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/usetrawler/trawler/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/usetrawler/trawler/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/usetrawler/trawler/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/usetrawler/trawler/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <a href="#use-it-in-the-app"><img alt="Hosted runs: private beta" src="https://img.shields.io/badge/hosted_runs-private_beta-B03711"></a>
   <img alt="Node.js 24 or later" src="https://img.shields.io/badge/node-%E2%89%A5_24-17191C">
   <a href="#licence"><img alt="Licence: Apache-2.0 and FSL-1.1-ALv2" src="https://img.shields.io/badge/licence-Apache--2.0_%2B_FSL--1.1--ALv2-2C4A57"></a>
 </p>
 
-## Test your product the way people use it
+## What Trawler does
 
 Paste the address of your staging or preview environment. Trawler reads the page and proposes a few **people** — each with a situation, a temperament and things they care about — and the **goals** they want to get done. Then each person uses your product in a real browser, works through the goals and reports what went wrong on the way: a **defect** when something behaved wrongly, **friction** when it worked but slowed them down.
 
-Nothing a person reports reaches the top of your report on their word alone. Every defect goes to a fresh agent that has never seen the report: it is given the steps and nothing about what went wrong, follows them in a new browser, and says what it saw. A **judge** compares that with the claim, and only a defect the replay reproduces is **confirmed**.
+Nothing a person reports reaches the top of your report on their word alone. Every defect is replayed by a fresh agent that has never seen the claim, and a **judge** decides whether the replay saw the same thing. Only a defect the replay reproduces is **confirmed**.
 
 ## How it works
 
@@ -40,19 +40,21 @@ Nothing a person reports reaches the top of your report on their word alone. Eve
 
 **02 · Meet your users.** The people take their turns in your real product: clicking, typing and navigating as they see fit, working through every goal, and reporting defects and friction with the steps that led there. No scripts, no recorded flows to maintain.
 
-**03 · Believe the second agent.** Every defect is replayed blind — a fresh agent in a new browser gets the steps, never the claim — and a judge answers *confirmed*, *refuted* or *inconclusive*.
-
-**04 · Act on what was confirmed.** The report opens with the defects a fresh agent reproduced, each with its steps, what the person saw and what the replay saw.
+**03 · Believe the second agent.** The replay gets a defect's steps — not its title, not what the person saw, not the goal they were after — and follows them in a new browser. The judge compares what it saw with the claim and answers *confirmed*, *refuted* or *inconclusive*.
 
 ```mermaid
 flowchart TB
-    person["A person reports a defect<br/>the steps and what went wrong"] -- "the steps only" --> replay["A fresh agent<br/>follows them in a new browser"]
+    accTitle: How a defect is checked
+    accDescr: A person reports a defect. A fresh agent gets its steps, not the claim, and follows them in a new browser. The judge gets the claim and what the replay saw, and answers confirmed, refuted or inconclusive.
+    person["A person reports a defect<br/>with steps and a claim"] -- "the steps, not the claim" --> replay["A fresh agent<br/>in a new browser"]
     person -- "the claim" --> judge
     replay -- "what it saw" --> judge["The judge<br/>compares the two"]
     judge --> confirmed(["confirmed"])
     judge --> refuted(["refuted"])
     judge --> inconclusive(["inconclusive"])
 ```
+
+**04 · Act on what was confirmed.** The report opens with the defects a fresh agent reproduced, each with its steps, what the person saw and what the replay saw.
 
 ## Who it is for
 
@@ -64,54 +66,61 @@ It is not a scripted test suite, a load test or a security scan. The people deci
 
 ## Your product stays yours
 
-| | |
-| --- | --- |
-| **Credentials** | Test account passwords are typed by Trawler, not the model, and only into a real password field on an allowed origin. Every password and secret a run knows about is masked as `•••` in what the model reads and what the run records. |
-| **Reach** | A browser limited to your product's own origins — every other request is stopped before it is sent — and a handful of tools: no shell, no file system, no uploads, no JavaScript in the page. |
-| **Spend** | Estimated before you start and capped during the run: $2 by default, $50 at most, though the last call can take it slightly past. A model with no known price, such as one on an OpenAI-compatible service, gets no estimate, and its run stops after 3 million tokens. |
-| **Your key** | Runs in the app are billed to your workspace's own key — OpenRouter, OpenAI, Anthropic, Google or any OpenAI-compatible service. Trawler adds nothing on top, and setting up a project in the app costs you nothing. |
-| **Isolation** | The model key and passwords are encrypted at rest, runners never hold the model key, and the database itself keeps each workspace's rows from every other. |
-| **Execution** | Hosted at app.usetrawler.com, or entirely on your own machine with the runner in this repository. |
+- **Credentials.** Test account passwords are typed by Trawler, not the model, and only into a real password field on an allowed origin. Every password and secret a run knows about is masked as `•••` in what the model reads and what the run records.
+- **Reach.** A browser limited to your product's own origins — every other request is stopped before it is sent — and a handful of tools: no shell, no file system, no uploads, no JavaScript in the page.
+- **Spend.** In the app, a run is estimated before you start and capped while it runs: $2 by default, $50 at most. A model with no known price, such as one on an OpenAI-compatible service, gets no estimate and stops after 3 million tokens. The local runner caps a run at `--budget`, $5 unless you set it. Either way, the last call can take a run slightly past its cap.
+- **Your key.** Runs in the app are billed to your workspace's own key — OpenRouter, OpenAI, Anthropic, Google or any OpenAI-compatible service. Trawler adds nothing on top, and setting up a project in the app costs you nothing.
+- **Isolation.** The model key and passwords are encrypted at rest, runners never hold the model key, and the database itself keeps each workspace's rows from every other.
+- **Execution.** Hosted at app.usetrawler.com, or entirely on your own machine with the runner in this repository.
 
 The details are in [Security and data](https://usetrawler.com/docs/reference/security-and-data/), including what masking cannot hide, and in [Models, estimates and the cap](https://usetrawler.com/docs/models/models-and-cost/).
 
 ## Use it in the app
 
 > [!NOTE]
-> Hosted runs are in a private beta. Anyone can sign in, analyse a product and edit its plan; starting a run needs an email address on the beta list — write to [contact@usetrawler.com](mailto:contact@usetrawler.com).
+> Hosted runs are in a private beta. Anyone can sign in, analyse a product and edit its plan; starting a run needs an email address on the beta list — write to [contact@usetrawler.com](mailto:contact@usetrawler.com?subject=Trawler%20private%20beta).
 
-1. **Sign in** at [app.usetrawler.com](https://app.usetrawler.com) with **Continue with GitHub** or **Continue with Google** — there are no passwords. Your first sign-in creates your workspace, unless you were invited to one.
-2. **Paste your product's address** — the page a new user would open first — and, if you like, a few words to focus on, such as *the new team-invite flow*. Choose **Analyse product**.
-3. **Review the plan.** The people under **These people will try it** and the goals under **What they want to get done** are yours to rename, rewrite, add to or trim. If your product needs sign-in, add a test account and choose it under **Signs in as**. Choose **Save plan** to keep your changes.
-4. **Start.** The first time, an owner or admin of the workspace pastes an API key from your model provider. Pick a model (one is filled in for you), read the estimate, set the **Hard cap**, tick the box confirming that you may test this product and that it is not a production system with real people's data, and choose **Start run**.
-5. **Follow the run:** cost against the cap, goals reached and a card for each person. Close the tab if you like — the run keeps going.
-6. **Read the report.** **Confirmed** comes first: the defects a fresh agent reproduced and the judge agreed with.
+1. Sign in at [app.usetrawler.com](https://app.usetrawler.com) with **Continue with GitHub** or **Continue with Google** — Trawler has no passwords of its own. Your first sign-in creates your workspace, unless your email address already has an invitation to one.
+2. Put the address of the page a new user would open first into **Product URL** and, if you like, a few words into **Anything specific to test?**, such as *the new team-invite flow*. Choose **Analyse product**.
+3. Review the plan. The people under **These people will try it** and the goals under **What they want to get done** are yours to rename, rewrite, add to or trim. If your product needs sign-in, add an account with **Your product needs sign-in? Add a test account** and pick it under **Signs in as**. Choose **Save plan** to keep your changes.
+4. Start from the **Start** panel. The first time, an owner or admin of the workspace pastes an API key from your model provider. Pick a model — one is filled in for you — read the estimate, set **Hard cap (USD)**, tick the box confirming that you are authorised to test the product and that it is not a production system with real people's data, and choose **Start run**.
+5. Follow the run: cost against the cap, goals reached and a card for each person. You can close the tab; the run keeps going.
+6. Read the report. **Confirmed** comes first: the defects a fresh agent reproduced and the judge agreed with.
 
 Screen by screen: [Your first run](https://usetrawler.com/docs/getting-started/first-run/).
 
 ## Run it on your own machine
 
-The runner is the program that actually uses your product: it opens the browser, plays the people, replays the defects and asks the judge. The same program carries out hosted runs, and it runs just as well entirely on your machine — no Trawler account, no Trawler server — reaching whatever your machine can reach: `localhost`, a VPN, staging behind a password.
+The runner is the program that actually uses your product: it opens the browser, plays the people, replays the defects and asks the judge. The same program carries out hosted runs, and it can also run entirely on your machine — no Trawler account, no Trawler server — reaching whatever your machine can reach: `localhost`, a VPN, staging behind a password. Model calls go from your machine to OpenRouter, asking the providers behind it not to keep or train on the data; nothing goes to Trawler.
 
-You need Node.js 24 or later and an [OpenRouter API key](https://openrouter.ai/keys); the local runner calls models through OpenRouter only.
+You need Node.js 24 or later and an [OpenRouter API key](https://openrouter.ai/keys); the local runner calls models through OpenRouter only. On Linux, add `--with-deps` to the Playwright command so it installs the libraries Chromium needs.
 
 ```bash
 git clone https://github.com/usetrawler/trawler.git
 cd trawler
 npm ci
 npx playwright install chromium
-export OPENROUTER_API_KEY=sk-or-...
 ```
 
-On Linux, add `--with-deps` to the Playwright command so it installs the libraries Chromium needs.
+Then export your key, with your own in place of `sk-or-…`, in every terminal you run the runner from:
 
-**1. Propose a plan** from your product's address. Setup reads the page, writes a name, a description, up to four people and up to six goals to `project.yaml`, and prints what it wrote and what it cost, such as `wrote project.yaml: 4 personas, 5 goals, $0.004`.
+```bash
+export OPENROUTER_API_KEY="sk-or-…"
+```
+
+Run the commands below from the `trawler` directory. Outside the checkout, `npx` would fetch a package called `trawler-runner` from the npm registry instead, and that name is not Trawler's.
+
+### 1. Propose a plan
 
 ```bash
 npx trawler-runner setup https://staging.example.com --focus "the new team-invite flow"
 ```
 
-**2. Edit `project.yaml`.** It is plain YAML: the people (`personas`), their `goals` and test `accounts`, plus what the app does not offer yet — extra `allowedOrigins`, HTTP basic auth and headers for protected staging. It holds passwords, so setup writes it readable by you alone.
+Setup reads the page and writes a name, a description, up to four people and up to six goals to `project.yaml` — the runner calls people *personas* — then prints what it wrote and what it cost, such as `wrote project.yaml: 4 personas, 5 goals, $0.004`.
+
+### 2. Edit `project.yaml`
+
+It is plain YAML: the people (`personas`), the `goals` every person works through, test `accounts`, and what the app does not offer yet — extra `allowedOrigins`, HTTP basic auth and headers for protected staging. It holds passwords, so setup writes it readable by you alone.
 
 ```yaml
 name: Acme
@@ -136,15 +145,15 @@ httpCredentials:
   password: the-staging-password
 ```
 
-**3. Run it.** Every person takes a session in turn, then every defect is replayed and judged, all under one budget.
+### 3. Run it
 
 ```bash
 npx trawler-runner run --config project.yaml
 ```
 
-Progress streams to the terminal — `role:ana started`, `role:ana found a defect: …`, `judge:f1 confirmed` — and the run is written to `runs/<start time, UTC>/`:
+Every person takes a session in turn, then every defect is replayed and judged, all under one budget. Progress streams to the terminal — `role:ana started` for Ana's session, `judge:f1 confirmed` for the verdict on finding `f1` — and the run is written to `runs/<start time, UTC>/`:
 
-| File | |
+| File | What's in it |
 | --- | --- |
 | `report.md` | The cost against the budget, a table of the sessions, replays and judge calls, each person's goals, then the defects grouped as confirmed, inconclusive, refuted and not judged, and the friction |
 | `summary.json` | The same results as data |
@@ -166,27 +175,26 @@ After choosing Send invite the page says "Permission denied", and Members still 
 Replay: carried out every step. After "Send invite" a red banner reads "Permission denied"; the member list is unchanged.
 ```
 
-| `run` option | Default | |
+| `run` option | Default | What it does |
 | --- | --- | --- |
+| `--config <file>` | required | The project file to run |
 | `--model <id>` | `deepseek/deepseek-v4.1-flash` | The OpenRouter model that plays the people and carries out the replays |
 | `--judge-model <id>` | the same as `--model` | The model that judges |
 | `--budget <usd>` | `5` | The cap for the whole run, in dollars, checked after every step |
 | `--max-steps <n>` | `120` | Steps for each person's session |
 | `--replay-steps <n>` | `40` | Steps for each replay |
-| `--headed` | | Show the browser instead of running it hidden |
+| `--headed` | | Shows the browser instead of running it hidden |
 
-`setup` also takes `--docs <url>`, `--model <id>`, `--out <file>` and `--force`. The runner exits `0` when the run finished and at least one person's session did not fail, `1` when every session failed or something else went wrong, and `2` on a usage mistake, a project file that is not valid YAML or not a valid project, or a missing `OPENROUTER_API_KEY`. Model calls go from your machine to OpenRouter, asking the providers behind it not to keep or train on the data; nothing goes to Trawler.
-
-Every field and option: [The local runner](https://usetrawler.com/docs/runner/local-runner/).
+Exit codes, the other `setup` options and every field of the project file: [The local runner](https://usetrawler.com/docs/runner/local-runner/).
 
 ## Not built yet
 
-So you don't go looking:
+In case you go looking:
 
 - comparing a run with an earlier one;
 - people using the product together;
 - screenshots on findings;
-- inviting people to a workspace, or switching between workspaces;
+- inviting teammates to a workspace, or switching between workspaces;
 - deleting a project, a run or the model key;
 - handing runs from the app to a runner inside your own network;
 - reaching staging behind basic auth or a secret header from the app — the local runner covers private addresses and protected staging today.
@@ -197,14 +205,16 @@ Hosted runs stay in a private beta until Trawler can verify that you control the
 
 ```mermaid
 flowchart TB
-    you(["You, in a browser"]) --> cp["Control plane<br/>web app · API · model proxy"]
+    accTitle: A hosted run
+    accDescr: You use the control plane in a browser. The runner takes jobs from the control plane, streams events back and calls models through it. The control plane adds your key to each model call and keeps everything in Postgres. The runner drives a real browser on your product.
+    you(["You, in a browser"]) --> cp["Control plane<br/>web app · API<br/>model proxy"]
     runner["Runner<br/>agent loop · Playwright"] -- "takes jobs, streams events,<br/>calls models through it" --> cp
     runner -- "a real browser" --> product(["Your product"])
     cp --- db[("Postgres")]
     cp -- "adds your key" --> llm(["Model provider"])
 ```
 
-That is a hosted run. Run locally, the runner needs neither the control plane nor Postgres: it reads `project.yaml` and calls OpenRouter itself.
+In a hosted run, the runner takes jobs from the control plane, streams events back to it and calls models through it; the control plane adds your key to each call, so a runner never holds it. Run locally, the runner needs neither the control plane nor Postgres: it reads `project.yaml` and calls OpenRouter itself.
 
 | Path | Licence | What it is |
 | --- | --- | --- |
@@ -219,7 +229,7 @@ Built with TypeScript on Node.js 24, Next.js, Postgres with Flyway and Kysely, B
 
 ## Development
 
-You need Node.js 24 or later, and Docker, which runs Postgres 18 and Flyway for the database tests.
+You need Node.js 24 or later, and Docker, which runs Postgres 18 and Flyway for the database tests. On Linux, add `--with-deps` to the Playwright command.
 
 ```bash
 npm ci
@@ -232,12 +242,16 @@ npm test
 
 `npm run test:unit` runs the tests that need no database; `npm test` runs them all, once `npm run db:up` has started Postgres on `localhost:54329`. Every pull request runs the same checks in CI, plus the migrations, the generated database types and the control plane's production build.
 
-| Command | |
+| Command | What it does |
 | --- | --- |
 | `npm run db:migrate`, `npm run db:validate` | Apply or check `db/migrations` on the local database |
 | `npm run db:codegen` | Regenerate `apps/control-plane/src/db/types.ts` from the migrations |
 | `npm run db:down` | Stop the local database |
 | `npm run control-plane` | Start the app in development; it reads its configuration from the environment, in [`env.ts`](apps/control-plane/src/server/env.ts) |
+
+## Security
+
+Found a vulnerability? Report it privately to [contact@usetrawler.com](mailto:contact@usetrawler.com), not in a public issue.
 
 ## Licence
 
