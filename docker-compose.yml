@@ -20,11 +20,14 @@ services:
     profiles: [tools]
     volumes:
       - ./db/migrations:/flyway/sql:ro
+      - ./db/callbacks:/flyway/callbacks:ro
     environment:
       FLYWAY_URL: jdbc:postgresql://postgres:5432/trawler
       FLYWAY_USER: trawler
       FLYWAY_PASSWORD: trawler
-      FLYWAY_LOCATIONS: filesystem:/flyway/sql
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql,filesystem:/flyway/callbacks
+      FLYWAY_PLACEHOLDERS_APPLOGIN: ""
+      FLYWAY_PLACEHOLDERS_APPLOGINPASSWORD: ""
     depends_on:
       postgres:
         condition: service_healthy
