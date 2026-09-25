@@ -5,11 +5,11 @@ import { redirect } from "next/navigation";
 import { keyLooksValid, modelKey, modelKeyHint, setModelKey, type KeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
 import { openRouterPrices, priceFor, type Price } from "../../../llm/prices.ts";
-import { ProjectNotFound } from "../../../projects/projects.ts";
+import { projectExists, ProjectNotFound } from "../../../projects/projects.ts";
 import { checkModelCall, customUrlProblem, detectProvider, endpointFor, listModels, PREFERRED_MODELS, PROVIDER_LABEL, PROVIDERS, priceKey, type Endpoint, type Provider } from "../../../llm/providers.ts";
 import { DEFAULT_RUN } from "../../../runs/models.ts";
 import { startRun } from "../../../runs/runs.ts";
-import { canManageBilling, getAuth } from "../../../server/auth.ts";
+import { canManageBilling, signedInMember } from "../../../server/auth.ts";
 import { betaRefusal } from "../../../server/beta.ts";
 import { getDb, getKeyring } from "../../../server/db.ts";
 import { readEnv } from "../../../server/env.ts";
@@ -28,6 +28,7 @@ export interface ModelOption {
 export type ModelList = { ok: true; provider: Provider; models: ModelOption[]; suggested: string } | { ok: false; error: string };
 
 const MODEL_ID = /^[A-Za-z0-9._:\/@-]{1,200}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 interface KeyInput {
   key?: string;
@@ -66,19 +67,15 @@ function withinListingLimit(userId: string, now = Date.now()): boolean {
   return true;
 }
 
-async function activeOrg() {
-  const requestHeaders = await headers();
-  const session = await getAuth().api.getSession({ headers: requestHeaders });
-  return { session, requestHeaders, orgId: session?.session.activeOrganizationId ?? null };
-}
 
 export async function modelsForKeyAction(input: KeyInput): Promise<ModelList> {
-  const { session, requestHeaders, orgId } = await activeOrg();
-  if (!session || !orgId) return { ok: false, error: "Sign in again." };
-  const refusal = betaRefusal(session.user.email);
+  const member = await signedInMember(await headers());
+  if (!member) return { ok: false, error: "Sign in again." };
+  const { orgId } = member;
+  const refusal = betaRefusal(member.email);
   if (refusal) return { ok: false, error: refusal };
-  if ((input.key ?? "").trim() && !(await canManageBilling(requestHeaders))) return { ok: false, error: "Only an owner or admin of this workspace can change its model key." };
-  if (!withinListingLimit(session.user.id)) return { ok: false, error: "Too many model lookups. Wait a few minutes, or type a model name." };
+  if ((input.key ?? "").trim() && !canManageBilling(member)) return { ok: false, error: "Only an owner or admin of this workspace can change its model key." };
+  if (!withinListingLimit(member.userId)) return { ok: false, error: "Too many model lookups. Wait a few minutes, or type a model name." };
   const resolved = await endpointFrom(orgId, input);
   if ("error" in resolved) return { ok: false, error: resolved.error };
   const { endpoint } = resolved;
@@ -104,16 +101,17 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   if (form.get("authorised") !== "on") return { error: "Confirm that you may test this product." };
   if (!MODEL_ID.test(modelId)) return { error: "Choose a model or type its exact name." };
   if (!Number.isFinite(budgetUsd) || budgetUsd < 0.1 || budgetUsd > 50) return { error: "Set a cap between $0.10 and $50." };
-  const { session, requestHeaders, orgId } = await activeOrg();
-  if (!session) redirect("/sign-in");
-  if (!orgId) return { error: "Your account has no workspace yet." };
-  const refusal = betaRefusal(session.user.email);
+  const member = await signedInMember(await headers());
+  if (!member) redirect("/sign-in");
+  const { orgId } = member;
+  const refusal = betaRefusal(member.email);
   if (refusal) return { error: refusal };
+  if (!UUID.test(projectId) || !(await withOrg(getDb(), orgId, (tx) => projectExists(tx, orgId, projectId)))) return { error: "The run could not start. Try again." };
 
   const resolved = await endpointFrom(orgId, { key: String(form.get("apiKey") ?? ""), provider: String(form.get("provider") ?? ""), baseUrl: String(form.get("baseUrl") ?? "") });
   if ("error" in resolved) return { error: resolved.error };
   const { endpoint, fresh } = resolved;
-  if (fresh && !(await canManageBilling(requestHeaders))) return { error: "Only an owner or admin of this workspace can change its model key." };
+  if (fresh && !canManageBilling(member)) return { error: "Only an owner or admin of this workspace can change its model key." };
   const label = PROVIDER_LABEL[endpoint.provider];
   const check = await checkModelCall(endpoint, modelId);
   if (!check.ok) {
@@ -123,7 +121,7 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
     return { error: `${label} could not be reached to check the key. Try again in a moment.` };
   }
   if (fresh) {
-    await withOrg(getDb(), orgId, (tx) => setModelKey(tx, orgId, { provider: endpoint.provider, key: endpoint.key, baseUrl: endpoint.provider === "custom" ? endpoint.baseUrl : null }, session.user.id, getKeyring()));
+    await withOrg(getDb(), orgId, (tx) => setModelKey(tx, orgId, { provider: endpoint.provider, key: endpoint.key, baseUrl: endpoint.provider === "custom" ? endpoint.baseUrl : null }, member.userId, getKeyring()));
     revalidatePath(`/projects/${projectId}`);
   }
   const price = await priceFor(endpoint.provider, modelId, readEnv().openRouterUrl);
@@ -131,7 +129,7 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   try {
     const run = await withOrg(getDb(), orgId, (tx) =>
       startRun(tx, orgId, projectId, getKeyring(), {
-        budgetUsd, agentModel: modelId, judgeModel: modelId, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: session.user.id,
+        budgetUsd, agentModel: modelId, judgeModel: modelId, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: member.userId,
         provider: endpoint.provider, providerBaseUrl: endpoint.provider === "custom" ? endpoint.baseUrl : null, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap,
       }),
     );

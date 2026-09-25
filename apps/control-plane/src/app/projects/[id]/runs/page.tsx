@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { AppShell } from "../../../../components/app-shell.tsx";
 import { withOrg } from "../../../../db/tenancy.ts";
 import { projectRuns } from "../../../../projects/overview.ts";
-import { getAuth } from "../../../../server/auth.ts";
+import { signedInMember } from "../../../../server/auth.ts";
 import { getDb } from "../../../../server/db.ts";
 import { RunHistory } from "./run-history.tsx";
 
@@ -21,17 +21,14 @@ function cursor(before: string | string[] | undefined): number | undefined {
 export default async function ProjectRunsPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ before?: string | string[] }> }) {
   const { id } = await params;
   const before = cursor((await searchParams).before);
-  const requestHeaders = await headers();
-  const auth = getAuth();
-  const session = await auth.api.getSession({ headers: requestHeaders });
-  if (!session) redirect("/sign-in");
-  const orgId = session.session.activeOrganizationId;
-  if (!orgId || !UUID.test(id)) notFound();
+  const member = await signedInMember(await headers());
+  if (!member) redirect("/sign-in");
+  const { orgId } = member;
+  if (!UUID.test(id)) notFound();
   const history = await withOrg(getDb(), orgId, (tx) => projectRuns(tx, orgId, id, { before }));
   if (!history) notFound();
-  const organization = await auth.api.getFullOrganization({ headers: requestHeaders });
   return (
-    <AppShell organization={organization?.name ?? "Workspace"} email={session.user.email}>
+    <AppShell organization={member.orgName} email={member.email}>
       <RunHistory project={history.project} runs={history.runs} olderThan={history.olderThan} paged={before !== undefined} />
     </AppShell>
   );

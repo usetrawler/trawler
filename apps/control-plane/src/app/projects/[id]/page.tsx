@@ -6,7 +6,7 @@ import { modelKeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
 import { projectRunCount } from "../../../projects/overview.ts";
 import { projectForEditing } from "../../../projects/projects.ts";
-import { canManageBilling, getAuth } from "../../../server/auth.ts";
+import { canManageBilling, signedInMember } from "../../../server/auth.ts";
 import { getDb } from "../../../server/db.ts";
 
 export const dynamic = "force-dynamic";
@@ -15,17 +15,14 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const requestHeaders = await headers();
-  const auth = getAuth();
-  const session = await auth.api.getSession({ headers: requestHeaders });
-  if (!session) redirect("/sign-in");
-  const orgId = session.session.activeOrganizationId;
-  if (!orgId || !UUID.test(id)) notFound();
+  const member = await signedInMember(await headers());
+  if (!member) redirect("/sign-in");
+  const { orgId } = member;
+  if (!UUID.test(id)) notFound();
   const [project, keyHint, runs] = await withOrg(getDb(), orgId, (tx) => Promise.all([projectForEditing(tx, orgId, id), modelKeyHint(tx, orgId), projectRunCount(tx, orgId, id)]));
   if (!project) notFound();
-  const organization = await auth.api.getFullOrganization({ headers: requestHeaders });
   return (
-    <AppShell organization={organization?.name ?? "Workspace"} email={session.user.email} step={2}>
+    <AppShell organization={member.orgName} email={member.email} step={2}>
       <div className="flex flex-col gap-10">
         <div className="flex flex-col gap-3">
           <p className="font-mono text-xs tracking-[0.2em] text-action uppercase">02 / Plan · {new URL(project.target_url).host}</p>
@@ -40,7 +37,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           initialGoals={project.goals.map((g) => ({ id: g.key, instruction: g.instruction }))}
           initialAccounts={project.accounts.map((a) => ({ ref: a.ref, username: a.username, hint: a.password_hint }))}
           keyHint={keyHint}
-          canManageKey={await canManageBilling(requestHeaders)}
+          canManageKey={canManageBilling(member)}
         />
       </div>
     </AppShell>

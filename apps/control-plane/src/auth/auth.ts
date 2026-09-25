@@ -21,6 +21,7 @@ type AuthTables = {
   invitation: { id: string; organizationId: string; email: string; role: string | null; status: string; expiresAt: Date };
   organization: { id: string; name: string; slug: string; createdAt: Date };
   user: { id: string; email: string; emailVerified: boolean; name: string };
+  session: { id: string; userId: string; activeOrganizationId: string | null };
 };
 
 export function authPool(connectionString: string, max = 10): pg.Pool {
@@ -80,6 +81,20 @@ export function createAuth(options: AuthOptions) {
       return onboard(storeFor(tx), user);
     });
   };
+  const workspaceOf = async (session: { id: string; userId: string; activeOrganizationId?: string | null }): Promise<{ orgId: string; orgName: string; role: string } | null> => {
+    const membership = session.activeOrganizationId
+      ? await db
+          .selectFrom("member")
+          .innerJoin("organization", "organization.id", "member.organizationId")
+          .select(["organization.id as orgId", "organization.name as orgName", "member.role"])
+          .where("member.organizationId", "=", session.activeOrganizationId)
+          .where("member.userId", "=", session.userId)
+          .executeTakeFirst()
+      : undefined;
+    if (membership) return membership;
+    await db.deleteFrom("session").where("id", "=", session.id).execute();
+    return null;
+  };
 
   const auth = betterAuth({
     secret: options.secret,
@@ -92,6 +107,7 @@ export function createAuth(options: AuthOptions) {
       ...(options.google ? { google: options.google } : {}),
     },
     plugins: [organizationPlugin(), ...devSignIn(options.devOidc), nextCookies()],
+    disabledPaths: ["/organization/get-organization", "/organization/get-full-organization"],
     databaseHooks: {
       session: {
         create: {
@@ -108,7 +124,7 @@ export function createAuth(options: AuthOptions) {
       },
     },
   });
-  return auth;
+  return Object.assign(auth, { workspaceOf });
 }
 
 export type Auth = ReturnType<typeof createAuth>;

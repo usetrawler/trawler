@@ -5,7 +5,7 @@ import { ProjectConfigSchema } from "@usetrawler/protocol";
 import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring, last4 } from "../lib/secrets.ts";
-import { AccountLimit, addAccount, createProject, listProjects, loadProjectConfig, projectForEditing, ProjectNotFound, removeAccount, replacePlan, UnknownAccount } from "./projects.ts";
+import { AccountLimit, addAccount, createProject, listProjects, loadProjectConfig, projectExists, projectForEditing, ProjectNotFound, removeAccount, replacePlan, UnknownAccount } from "./projects.ts";
 import { ProjectConfigSchema as Schema } from "@usetrawler/protocol";
 
 const t = await testDb();
@@ -163,4 +163,11 @@ test("saving a plan that points at a removed account says so, and the account li
   await expect(withOrg(t.db, "org-a", (tx) => replacePlan(tx, "org-a", id, { personas: [{ id: "ana", name: "Ana", brief: "b", accountRef: "account-gone" }], goals: simple.goals }))).rejects.toBeInstanceOf(UnknownAccount);
   for (let i = 0; i < 20; i++) await withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: `u${i}@shop.test`, password: "password-123" }, keys));
   await expect(withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "one-more@shop.test", password: "password-123" }, keys))).rejects.toBeInstanceOf(AccountLimit);
+});
+
+test("a project exists only in its own workspace", async () => {
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  expect(await withOrg(t.db, "org-a", (tx) => projectExists(tx, "org-a", id))).toBe(true);
+  expect(await withOrg(t.db, "org-b", (tx) => projectExists(tx, "org-b", id))).toBe(false);
+  expect(await withOrg(t.db, "org-a", (tx) => projectExists(tx, "org-a", "0f8fad5b-d9cb-469f-a165-70867728950e"))).toBe(false);
 });

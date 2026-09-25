@@ -149,3 +149,82 @@ test("a workspace that cannot be set up fails with a code the sign-in page can s
     await sql`drop function refuse_org()`.execute(t.db);
   }
 });
+
+type StoredSession = { id: string; token: string; userId: string; activeOrganizationId: string | null };
+const sessionOf = (s: unknown) => s as StoredSession;
+const cookieFor = (token: string) =>
+  new Headers({ "content-type": "application/json", origin: "http://localhost:3000", cookie: `better-auth.session_token=${encodeURIComponent(`${token}.${createHmac("sha256", SECRET).update(token).digest("base64")}`)}` });
+const activeOf = async (sessionId: string) => (await sql<{ active: string | null }>`select "activeOrganizationId" as active from session where id = ${sessionId}`.execute(t.db)).rows;
+
+test("a member keeps the workspace their session is in, with its name and their role", async () => {
+  const session = sessionOf((await signIn("stays@acme.test")).session);
+  await sql`update organization set name = 'Renamed & Co' where id = ${session.activeOrganizationId}`.execute(t.db);
+  expect(await auth.workspaceOf(session)).toEqual({ orgId: session.activeOrganizationId, orgName: "Renamed & Co", role: "owner" });
+  expect(await activeOf(session.id)).toEqual([{ active: session.activeOrganizationId }]);
+});
+
+test("a member who switched to a newer workspace keeps it, though they have belonged to an older one longer", async () => {
+  const host = sessionOf((await signIn("newer@acme.test")).session);
+  const { user, session } = await signIn("switcher@acme.test");
+  const switcher = sessionOf(session);
+  await sql`insert into member (id, "organizationId", "userId", role, "createdAt") values ('m-switcher-newer', ${host.activeOrganizationId}, ${user.id}, 'member', now() + interval '1 minute')`.execute(t.db);
+  await sql`update session set "activeOrganizationId" = ${host.activeOrganizationId} where id = ${switcher.id}`.execute(t.db);
+  expect(await auth.workspaceOf({ ...switcher, activeOrganizationId: host.activeOrganizationId })).toEqual({ orgId: host.activeOrganizationId, orgName: "newer-org", role: "member" });
+  expect(await activeOf(switcher.id)).toEqual([{ active: host.activeOrganizationId }]);
+});
+
+test("a member removed from the workspace a session is in is signed out of that session, and only that one", async () => {
+  const host = sessionOf((await signIn("host@acme.test")).session);
+  const { user, session } = await signIn("guest@acme.test");
+  const own = sessionOf(session);
+  const inHost = sessionOf(await (await auth.$context).internalAdapter.createSession(user.id, false));
+  await sql`insert into member (id, "organizationId", "userId", role, "createdAt") values ('m-guest-host', ${host.activeOrganizationId}, ${user.id}, 'member', now())`.execute(t.db);
+  await sql`update session set "activeOrganizationId" = ${host.activeOrganizationId} where id = ${inHost.id}`.execute(t.db);
+  await sql`delete from member where id = 'm-guest-host'`.execute(t.db);
+  expect(await auth.workspaceOf({ ...inHost, activeOrganizationId: host.activeOrganizationId })).toBeNull();
+  expect(await activeOf(inHost.id)).toEqual([]);
+  expect(await activeOf(own.id)).toEqual([{ active: own.activeOrganizationId }]);
+  expect(await auth.workspaceOf(own)).toMatchObject({ orgId: own.activeOrganizationId });
+});
+
+test("a session that names no workspace is signed out", async () => {
+  const session = sessionOf((await signIn("unset@acme.test")).session);
+  await sql`update session set "activeOrganizationId" = null where id = ${session.id}`.execute(t.db);
+  expect(await auth.workspaceOf({ ...session, activeOrganizationId: null })).toBeNull();
+  expect(await activeOf(session.id)).toEqual([]);
+});
+
+test("a member removed from their only workspace loses that session, so their next request signs in again", async () => {
+  const owner = await signIn("boss@acme.test");
+  await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-gone', ${owner.session.activeOrganizationId}, 'gone@acme.test', 'member', 'pending', now() + interval '1 day', ${owner.user.id})`.execute(t.db);
+  const { user, session } = await signIn("gone@acme.test");
+  const gone = sessionOf(session);
+  expect(gone.activeOrganizationId).toBe(owner.session.activeOrganizationId);
+  await sql`delete from member where "userId" = ${user.id}`.execute(t.db);
+  expect(await auth.workspaceOf(gone)).toBeNull();
+  expect(await activeOf(gone.id)).toEqual([]);
+});
+
+test("a member the owner removes through Better Auth still names the workspace in their other session, until the check signs that session out", async () => {
+  const owner = await signIn("remover@acme.test");
+  const org = sessionOf(owner.session).activeOrganizationId!;
+  await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-removed', ${org}, 'removed@acme.test', 'member', 'pending', now() + interval '1 day', ${owner.user.id})`.execute(t.db);
+  const { user } = await signIn("removed@acme.test");
+  const other = sessionOf(await (await auth.$context).internalAdapter.createSession(user.id, false));
+  const removal = await auth.handler(new Request("http://localhost:3000/api/auth/organization/remove-member", { method: "POST", headers: cookieFor(sessionOf(owner.session).token), body: JSON.stringify({ memberIdOrEmail: "removed@acme.test", organizationId: org }) }));
+  expect(removal.status).toBe(200);
+  const found = await auth.api.getSession({ headers: cookieFor(other.token) });
+  expect(found?.session.activeOrganizationId).toBe(org);
+  expect(await auth.workspaceOf(found!.session)).toBeNull();
+  expect(await auth.api.getSession({ headers: cookieFor(other.token) })).toBeNull();
+});
+
+test("a link to Better Auth's workspace lookups cannot empty a session's workspace", async () => {
+  await signIn("mallory@acme.test");
+  const victim = sessionOf((await signIn("clicker@acme.test")).session);
+  for (const path of ["get-organization", "get-full-organization"]) {
+    const res = await auth.handler(new Request(`http://localhost:3000/api/auth/organization/${path}?organizationSlug=mallory-org`, { headers: cookieFor(victim.token) }));
+    expect(res.status, path).toBe(404);
+  }
+  expect(await activeOf(victim.id)).toEqual([{ active: victim.activeOrganizationId }]);
+});
