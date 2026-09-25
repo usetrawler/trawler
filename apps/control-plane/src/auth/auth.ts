@@ -21,6 +21,7 @@ type AuthTables = {
   invitation: { id: string; organizationId: string; email: string; role: string | null; status: string; expiresAt: Date };
   organization: { id: string; name: string; slug: string; createdAt: Date };
   user: { id: string; email: string; emailVerified: boolean; name: string };
+  session: { id: string; userId: string; activeOrganizationId: string | null };
 };
 
 export function authPool(connectionString: string, max = 10): pg.Pool {
@@ -80,6 +81,17 @@ export function createAuth(options: AuthOptions) {
       return onboard(storeFor(tx), user);
     });
   };
+  const workspaceOf = async (session: { id: string; userId: string; activeOrganizationId?: string | null }): Promise<string | null> => {
+    const active = session.activeOrganizationId;
+    if (active && (await db.selectFrom("member").select("id").where("organizationId", "=", active).where("userId", "=", session.userId).executeTakeFirst())) return active;
+    const [remaining] = await storeFor(db).organizationsOf(session.userId);
+    if (remaining) {
+      await db.updateTable("session").set({ activeOrganizationId: remaining }).where("id", "=", session.id).execute();
+      return remaining;
+    }
+    await db.deleteFrom("session").where("id", "=", session.id).execute();
+    return null;
+  };
 
   const auth = betterAuth({
     secret: options.secret,
@@ -108,7 +120,7 @@ export function createAuth(options: AuthOptions) {
       },
     },
   });
-  return auth;
+  return Object.assign(auth, { workspaceOf });
 }
 
 export type Auth = ReturnType<typeof createAuth>;
