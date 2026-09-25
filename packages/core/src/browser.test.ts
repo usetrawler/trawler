@@ -70,6 +70,10 @@ beforeAll(async () => {
         return html(`<input aria-label="Password" type="password" oninput="this.value = this.value.replace(/[^A-Za-z0-9]/g, '')"><button onclick="const o=document.querySelector('input');const n=document.createElement('input');n.type='text';n.setAttribute('aria-label','Password');n.value=o.value;o.replaceWith(n)">Show password</button>`);
       case "/strip-autoshow":
         return html(`<input aria-label="Password" type="password" oninput="this.value = this.value.replace(/[^A-Za-z0-9]/g, ''); setTimeout(() => { const n = document.createElement('input'); n.type = 'text'; n.setAttribute('aria-label', 'Password'); n.value = this.value; this.replaceWith(n); n.focus(); }, 300)">`);
+      case "/placeholder":
+        return html(`<p>Forgot password? Change your password below.</p><input aria-label="Password" type="password" value="password" disabled><input aria-label="Search" type="text">`);
+      case "/cut-submit":
+        return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password" oninput="this.value = this.value.slice(0, 6); this.form.submit()"></form>`);
       case "/echo-password": {
         let body = "";
         req.on("data", (chunk) => (body += chunk));
@@ -608,6 +612,26 @@ describe("password fields", () => {
       await new Promise((r) => setTimeout(r, 600));
       const key = (await b.tools.browser_press_key!.execute!({ key: "Backspace" }, ctx)) as { isError?: boolean };
       expect(key.isError).toBe(true);
+    });
+  }, 60_000);
+
+  test("a placeholder a password field shows is not taken for a password: the page's words stay readable and other fields typeable", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/placeholder`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toMatch(/^failed: /);
+      expect(await snapshot(b)).toContain("Forgot password? Change your password below.");
+      const search = (await b.tools.browser_type!.execute!({ target: refOf(snap, "Search"), text: "password reset", element: "search" }, ctx)) as { isError?: boolean };
+      expect(search.isError).toBeFalsy();
+      expect(await snapshot(b)).toContain("Forgot password? Change your password below.");
+    });
+  }, 60_000);
+
+  test("a password the page shortens and sends before it can be checked is reported as not known to be kept", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/cut-submit`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toMatch(/^failed: /);
     });
   }, 60_000);
 

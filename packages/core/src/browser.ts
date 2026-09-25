@@ -53,6 +53,12 @@ const DEEPEST_ACTIVE = `(() => {
 
 type FieldState = { marked: boolean; value: string };
 
+function keptFrom(value: string, typed: string): boolean {
+  let at = 0;
+  for (const c of typed) if (c === value[at]) at++;
+  return at === value.length;
+}
+
 function within<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
   return Promise.race([work, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))]);
 }
@@ -197,6 +203,7 @@ export async function openBrowser(opts: {
     const probe = async (args: Record<string, unknown>) => evaluatedValue((await evaluate(args, internalCall)) as McpResult);
 
     const typedSecrets = new Set<string>();
+    const typedPasswords = new Set<string>();
     const holdsSecret = (value: string) => [...typedSecrets].some((secret) => value.includes(secret));
     let dialogOpen = false;
     context.on("page", (page) => {
@@ -224,7 +231,7 @@ export async function openBrowser(opts: {
     const scrubWithFilledValues = async <T>(result: T): Promise<T> => {
       for (const h of await liveFilled()) {
         const value = await readValue(h);
-        if (value.length >= MIN_SECRET_LENGTH) keepSecret(value);
+        if (value.length >= MIN_SECRET_LENGTH && [...typedPasswords].some((typed) => keptFrom(value, typed) || keptFrom(typed, value))) keepSecret(value);
       }
       return opts.scrubber.scrub(result);
     };
@@ -310,13 +317,17 @@ export async function openBrowser(opts: {
         const out = (await type({ target: ref, element: kind === "password" ? "password field" : "username field", text }, internalCall)) as McpResult;
         if (kind === "password") {
           typedSecrets.add(text);
+          typedPasswords.add(text);
           const held = filled.at(-1);
           if (held) {
             lastValues.set(held, text);
-            const kept = await readValue(held);
-            if (kept !== text && kept.length >= MIN_SECRET_LENGTH) {
+            const kept = await within(held.evaluate((el: any) => String(el.value ?? "")).catch(() => null), FOCUS_CHECK_MS, text);
+            if (kept === null) return out?.isError ? `failed: ${opts.scrubber.scrub(textOf(out))}` : "failed: the page moved on before the field could be checked, so it is not known what the field kept";
+            lastValues.set(held, kept);
+            const shortened = kept !== text && kept.length > 0 && keptFrom(kept, text);
+            if (shortened && kept.length >= MIN_SECRET_LENGTH) {
               keepSecret(kept);
-            } else if (kept !== text && kept.length > 0) {
+            } else if (shortened) {
               await type({ target: ref, element: "password field", text: "" }, internalCall);
               const left = await within(held.evaluate((el: any) => String(el.value ?? "")).catch(() => null), HANDLE_READ_MS, null);
               return left === "" ? "failed: the field kept too little of the password to hide it, so it was cleared" : "failed: the field kept too little of the password to hide it, and it could not be cleared";
