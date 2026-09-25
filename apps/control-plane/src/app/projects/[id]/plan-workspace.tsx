@@ -25,17 +25,25 @@ function RemoveButton({ label, onClick, disabled }: { label: string; onClick: ()
   return <button type="button" aria-label={label} title={label} onClick={onClick} disabled={disabled} className="h-9 w-9 shrink-0 text-muted hover:text-bad disabled:opacity-40">×</button>;
 }
 
-function Accounts({ projectId, accounts, onChange }: { projectId: string; accounts: AccountView[]; onChange: (accounts: AccountView[], removed?: string) => void }) {
+const WITHOUT_ACCOUNT = "People without a test account sign up the way a new user would, if your product lets them, with a password Trawler makes up. They cannot confirm an email address yet.";
+
+function Accounts({ projectId, accounts, anyoneWithout, onChange }: { projectId: string; accounts: AccountView[]; anyoneWithout: boolean; onChange: (accounts: AccountView[], removed?: string) => void }) {
   const [open, setOpen] = useState(accounts.length > 0);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  if (!open) return <AddButton onClick={() => setOpen(true)}>Your product needs sign-in? Add a test account</AddButton>;
+  if (!open) return (
+    <div className="flex flex-col gap-1">
+      <AddButton onClick={() => setOpen(true)}>Your product needs sign-in? Add a test account</AddButton>
+      {anyoneWithout && <p className="text-sm text-muted">{WITHOUT_ACCOUNT}</p>}
+    </div>
+  );
   return (
     <section className="flex flex-col gap-3">
       <Heading>Test accounts</Heading>
       <p className="text-sm text-muted">Only for products with sign-in. Passwords are encrypted and never shown again; the agents type them without seeing them.</p>
+      {anyoneWithout && <p className="text-sm text-muted">{WITHOUT_ACCOUNT}</p>}
       {accounts.length > 0 && (
         <ul className="flex flex-col gap-2">
           {accounts.map((a) => (
@@ -156,6 +164,7 @@ export function PlanWorkspace({ projectId, initialPersonas, initialGoals, initia
       <Accounts
         projectId={projectId}
         accounts={accounts}
+        anyoneWithout={personas.some((p) => !p.accountRef)}
         onChange={(next, removed) => {
           setAccounts(next);
           if (!removed) return;
