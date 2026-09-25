@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function SignInPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const { error } = await searchParams;
   const session = await getAuth().api.getSession({ headers: await headers() });
-  if (session) redirect("/new");
+  if (session) redirect("/");
   return (
     <main className="mx-auto grid min-h-dvh max-w-5xl items-center gap-12 px-4 py-16 md:grid-cols-2">
       <section className="flex flex-col gap-5">
