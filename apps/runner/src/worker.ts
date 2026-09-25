@@ -6,17 +6,26 @@ import {
   type JobAssignment, type JobCompletion, type JobStopReason, type JobUsage, type ProjectConfig, type RunEvent, type RunEventInput,
 } from "@usetrawler/protocol";
 
+export interface LogFields {
+  level?: "info" | "error";
+  jobId?: string;
+  runId?: string;
+  kind?: string;
+}
+
 export interface WorkerDeps {
   controlPlane: string;
   runnerToken: string;
   model: (modelId: string, jobToken: string) => LanguageModel;
   openBrowser: (config: ProjectConfig, opts: { onBlocked: (url: string) => void; scrubber: SecretScrubber }) => Promise<Browser>;
-  log: (line: string) => void;
+  log: (line: string, fields?: LogFields) => void;
+  report?: (message: string, fields: LogFields) => void;
   fetch?: typeof fetch;
   flushMs?: number;
   heartbeatMs?: number;
   retryBaseMs?: number;
   attempts?: number;
+  claimRetryMs?: number;
   secrets?: string[];
 }
 
@@ -175,12 +184,20 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
   return { usage, stoppedBy: events.finished?.stoppedBy ?? "done", ...(events.finished?.error ? { error: clip(events.finished.error) } : {}) };
 }
 
-function runnerScrubber(deps: WorkerDeps, config: ProjectConfig): SecretScrubber {
-  const scrubber = SecretScrubber.forProject(config);
+function withRunnerSecrets(deps: WorkerDeps, scrubber: SecretScrubber): SecretScrubber {
   for (const secret of deps.secrets ?? []) {
     if (secret.length >= MIN_SECRET_LENGTH) scrubber.add(secret);
   }
   return scrubber;
+}
+
+function runnerScrubber(deps: WorkerDeps, config: ProjectConfig): SecretScrubber {
+  return withRunnerSecrets(deps, SecretScrubber.forProject(config));
+}
+
+function problem(deps: WorkerDeps, message: string, fields: LogFields = {}): void {
+  deps.log(message, { ...fields, level: "error" });
+  deps.report?.(message, fields);
 }
 
 async function complete(deps: WorkerDeps, job: { jobId: string; token: string }, completion: JobCompletion): Promise<void> {
@@ -194,7 +211,7 @@ async function assignment(deps: WorkerDeps, res: Response): Promise<JobAssignmen
   if (parsed.success) return parsed.data;
   const ids = z.object({ jobId: z.string().uuid(), token: z.string().min(16) }).safeParse(body);
   const reason = `this runner cannot read the job: ${parsed.error.issues.slice(0, 3).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`;
-  deps.log(reason);
+  problem(deps, withRunnerSecrets(deps, new SecretScrubber()).scrub(reason), ids.success ? { jobId: ids.data.jobId } : {});
   if (ids.success) await complete(deps, ids.data, { usage: zeroUsage(""), stoppedBy: "error", error: clip(reason) }).catch(() => undefined);
   return null;
 }
@@ -217,8 +234,11 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
     throw err;
   }
   if (!job) return "done";
-  deps.log(`${job.kind} ${job.jobId} started`);
   const scrubber = runnerScrubber({ ...deps, secrets: [...(deps.secrets ?? []), job.token] }, job.config);
+  const ids: LogFields = { jobId: job.jobId, runId: job.runId, kind: job.kind };
+  const note = (line: string) => deps.log(scrubber.scrub(line), { ...ids, level: "info" });
+  const fail = (line: string) => problem(deps, scrubber.scrub(line), ids);
+  note(`${job.kind} ${job.jobId} started`);
   const budget = new Budget(Math.max(job.budgetUsd, 1e-6));
   if (job.budgetUsd <= 0) budget.add(1e-6);
   const events = new JobEvents(deps, job, () => budget.add(budget.limitUsd));
@@ -241,32 +261,39 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
   if (released) {
     events.stop();
     const handedOver = await released;
-    deps.log(`${job.kind} ${job.jobId} ${handedOver ? "handed back to the queue because the runner is stopping" : "could not be handed back; it will be retried when its lease expires"}`);
+    if (handedOver) note(`${job.kind} ${job.jobId} handed back to the queue because the runner is stopping`);
+    else fail(`${job.kind} ${job.jobId} could not be handed back; it will be retried when its lease expires`);
     return "done";
   }
   events.stop();
   await events.flush();
   if (events.failure) {
-    deps.log(`${job.kind} ${job.jobId} could not report events: ${events.failure.message}`);
+    fail(`${job.kind} ${job.jobId} could not report events: ${events.failure.message}`);
     const reported = `the runner could not report events: ${scrubber.scrub(events.failure.message)}`;
     completion = { ...completion, stoppedBy: "error", error: clip(completion.error ? `${reported}; ${completion.error}` : reported) };
   }
   try {
     await complete(deps, job, completion);
-    deps.log(`${job.kind} ${job.jobId} finished (${completion.stoppedBy})${completion.error ? `: ${completion.error}` : ""}`);
+    (completion.stoppedBy === "error" ? fail : note)(`${job.kind} ${job.jobId} finished (${completion.stoppedBy})${completion.error ? `: ${completion.error}` : ""}`);
   } catch (err) {
-    deps.log(`${job.kind} ${job.jobId} could not report back: ${err instanceof Error ? err.message : String(err)}`);
+    fail(`${job.kind} ${job.jobId} could not report back: ${err instanceof Error ? err.message : String(err)}`);
   }
   return "done";
 }
 
 export async function workLoop(deps: WorkerDeps, signal: AbortSignal): Promise<void> {
+  const scrubber = withRunnerSecrets(deps, new SecretScrubber());
+  let reported: string | undefined;
   while (!signal.aborted) {
     try {
       await workOnce(deps, signal);
+      reported = undefined;
     } catch (err) {
-      deps.log(`claim failed: ${err instanceof Error ? err.message : String(err)}`);
-      await pause(5000, signal);
+      const message = scrubber.scrub(`claim failed: ${err instanceof Error ? err.message : String(err)}`);
+      deps.log(message, { level: "error" });
+      if (message !== reported) deps.report?.(message, {});
+      reported = message;
+      await pause(deps.claimRetryMs ?? 5000, signal);
     }
   }
 }
