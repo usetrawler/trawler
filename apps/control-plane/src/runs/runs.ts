@@ -1,10 +1,12 @@
 import { sql } from "kysely";
 import type { ProjectConfig, RunEvent } from "@usetrawler/protocol";
+import { modelKey } from "../credentials/credentials.ts";
 import type { Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
 import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
 import { loadProjectConfig } from "../projects/projects.ts";
+import { gaveNoVerdict } from "./report.ts";
 
 export interface StartRunOptions {
   budgetUsd: number;
@@ -57,6 +59,44 @@ export async function cancelRun(tx: Tx, orgId: string, runId: string): Promise<v
   await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date() }).where("run_id", "=", runId).where("status", "=", "queued").execute();
 }
 
+export function capSpent(run: { cost_usd: string; budget_usd: string; token_cap: string | null; tokens_used: string }): boolean {
+  const overTokens = run.token_cap !== null && Number(run.tokens_used) >= Number(run.token_cap);
+  return Number(run.cost_usd) >= Number(run.budget_usd) || overTokens;
+}
+
+export class CannotJudgeAgain extends Error {}
+
+export async function judgeAgain(tx: Tx, orgId: string, runId: string, findingKey: string, requestedBy: string, keys: Keyring): Promise<void> {
+  const run = await tx
+    .selectFrom("runs")
+    .select(["status", "cost_usd", "budget_usd", "token_cap", "tokens_used", "provider", "provider_base_url"])
+    .where("id", "=", runId)
+    .where("org_id", "=", orgId)
+    .forUpdate()
+    .executeTakeFirst();
+  if (!run) throw new CannotJudgeAgain("This run was not found.");
+  if (run.status === "queued" || run.status === "running") throw new CannotJudgeAgain("The run is still going. You can judge it again once it has finished.");
+  const latest = await tx
+    .selectFrom("jobs")
+    .select(["status", "stopped_by", sql<boolean>`requested_by is not null`.as("requested")])
+    .where("run_id", "=", runId)
+    .where("kind", "=", "judge")
+    .where("finding_key", "=", findingKey)
+    .orderBy("position", "desc")
+    .executeTakeFirst();
+  if (latest?.status === "queued" || latest?.status === "leased") throw new CannotJudgeAgain("It is already being judged again.");
+  const finding = await tx.selectFrom("findings").select("verdict").where("run_id", "=", runId).where("key", "=", findingKey).executeTakeFirst();
+  if (!latest || !finding || !gaveNoVerdict(latest, finding.verdict)) throw new CannotJudgeAgain("Only a defect whose judge gave no verdict can be judged again.");
+  if (capSpent(run)) throw new CannotJudgeAgain("This run has spent its cap, so it cannot be judged again.");
+  const stored = await modelKey(tx, orgId, keys);
+  if (!stored || stored.provider !== run.provider || (run.provider === "custom" && stored.baseUrl !== run.provider_base_url)) {
+    throw new CannotJudgeAgain("The workspace model key was removed or changed since this run, so this run's model cannot be called. Start a new run instead.");
+  }
+  const { next } = await tx.selectFrom("jobs").select(sql<number>`coalesce(max(position), -1) + 1`.as("next")).where("run_id", "=", runId).executeTakeFirstOrThrow();
+  await tx.insertInto("jobs").values({ org_id: orgId, run_id: runId, kind: "judge", position: next, finding_key: findingKey, requested_by: requestedBy }).execute();
+  await tx.updateTable("findings").set({ verdict: null, updated_at: new Date() }).where("run_id", "=", runId).where("key", "=", findingKey).execute();
+}
+
 export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const run = await tx
     .selectFrom("runs")
@@ -68,7 +108,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const snapshot = run.config_snapshot as unknown as ConfigSnapshot;
   const goalText = new Map(snapshot.goals.map((g) => [g.id, g.instruction]));
   const [jobs, findings, goals, activity] = await Promise.all([
-    tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error"]).where("run_id", "=", runId).orderBy("position").execute(),
+    tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error", sql<boolean>`requested_by is not null`.as("requested")]).where("run_id", "=", runId).orderBy("position").execute(),
     tx.selectFrom("findings").select(["key", "persona_key", "kind", "goal", "title", "observed", "reproduction", "severity", "replay", "verdict"]).where("run_id", "=", runId).orderBy("created_at").orderBy("key").execute(),
     tx.selectFrom("goal_outcomes").select(["persona_key", "goal", "status", "note"]).where("run_id", "=", runId).orderBy("persona_key").orderBy("goal").execute(),
     tx

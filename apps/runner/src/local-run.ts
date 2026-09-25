@@ -23,7 +23,7 @@ export async function localRun(opts: {
   const budget = new Budget(opts.budgetUsd);
   const summary: RunSummary = {
     project: opts.project.name, agentModel: opts.agentModelId, judgeModel: opts.judgeModelId,
-    startedAt, finishedAt: startedAt, budgetUsd: opts.budgetUsd, totalCostUsd: 0, jobs: [], roles: [], replays: {}, replayErrors: {}, verdicts: {},
+    startedAt, finishedAt: startedAt, budgetUsd: opts.budgetUsd, totalCostUsd: 0, jobs: [], roles: [], replays: {}, replayErrors: {}, verdicts: {}, judgeErrors: {},
   };
   const scrubberFor = () => SecretScrubber.forProject(opts.project);
   let findingNo = 0;
@@ -103,7 +103,8 @@ export async function localRun(opts: {
       if (wroteNoReport || budget.exceeded) continue;
       const judged = await judge({ model: opts.judgeModel, modelId: opts.judgeModelId, finding, observation, scrubber, budget, emit: opts.emit });
       summary.jobs.push({ jobId: `judge:${finding.id}`, ...judged.usage });
-      summary.verdicts[finding.id] = judged.verdict;
+      if (judged.verdict) summary.verdicts[finding.id] = judged.verdict;
+      else if (judged.error) summary.judgeErrors[finding.id] = judged.error;
     }
   }
 

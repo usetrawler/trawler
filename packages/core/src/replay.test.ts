@@ -1,4 +1,4 @@
-import { tool } from "ai";
+import { APICallError, tool } from "ai";
 import { z } from "zod";
 import { describe, expect, test } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
@@ -192,9 +192,45 @@ function judgeWith(model: ReturnType<typeof scriptedModel> | MockLanguageModelV4
   return { events, promise };
 }
 
+const verdictCall = (verdict: string) => toolCall("report_verdict", { verdict });
+const judgeUsage = (output: number) => ({
+  inputTokens: { total: 900, noCache: 900, cacheRead: undefined, cacheWrite: undefined },
+  outputTokens: { total: output, text: 0, reasoning: output },
+});
+
+function cutOffModel(replies: number, costPerReply = 0.001) {
+  let n = 0;
+  return new MockLanguageModelV4({
+    doGenerate: async ({ maxOutputTokens }) => {
+      if (++n > replies) throw new Error(`cutOffModel has only ${replies} replies`);
+      return {
+        content: [{ type: "reasoning", text: "Comparing the claim with what the replay saw" }],
+        finishReason: { unified: "length", raw: "length" },
+        usage: judgeUsage(maxOutputTokens ?? 1000),
+        providerMetadata: { openrouter: { usage: { cost: costPerReply } } },
+        warnings: [],
+      } as never;
+    },
+  });
+}
+
+function thinkingModel(reasoningTokens: number) {
+  return new MockLanguageModelV4({
+    doGenerate: async ({ maxOutputTokens, tools }) => {
+      const room = maxOutputTokens ?? Number.POSITIVE_INFINITY;
+      const thought = { type: "reasoning", text: "The claim says HTTP 500; the replay saw Internal Server Error." };
+      if (room < reasoningTokens + 50) return { content: [thought], finishReason: { unified: "length", raw: "length" }, usage: judgeUsage(room), warnings: [] } as never;
+      const answer = tools?.some((t) => t.name === "report_verdict")
+        ? { type: "tool-call", toolCallId: "v1", toolName: "report_verdict", input: JSON.stringify({ verdict: "confirmed" }) }
+        : { type: "text", text: JSON.stringify({ verdict: "confirmed" }) };
+      return { content: [thought, answer], finishReason: { unified: answer.type === "text" ? "stop" : "tool-calls", raw: undefined }, usage: judgeUsage(reasoningTokens + 20), warnings: [] } as never;
+    },
+  });
+}
+
 describe("judge", () => {
-  test("returns the model's verdict and records it", async () => {
-    const model = scriptedModel([text(JSON.stringify({ verdict: "confirmed" }))]);
+  test("answers through report_verdict and records the verdict", async () => {
+    const model = scriptedModel([verdictCall("confirmed")]);
     const { promise, events } = judgeWith(model);
     const { verdict, usage } = await promise;
     expect(verdict).toBe("confirmed");
@@ -203,12 +239,28 @@ describe("judge", () => {
     for (const part of ["Crash on submit", "HTTP 500", "Internal Server Error", "Click Create account with the form empty"]) expect(prompt).toContain(part);
     expect(events.map((e) => e.type)).toEqual(["job_started", "verdict", "job_finished"]);
     expect(events[1]).toMatchObject({ jobId: "judge:f1", findingId: "f1", verdict: "confirmed", observed: "Internal Server Error" });
+    expect(events[2]).toMatchObject({ type: "job_finished", stoppedBy: "done" });
     events.forEach((e, i) => expect(() => RunEventSchema.parse({ ...e, seq: i + 1, at: "2026-09-24T10:00:00.000Z" })).not.toThrow());
   });
 
-  test("a judge that gets no usable answer asks once more before giving up", async () => {
-    for (const first of [text(""), text("not json at all")]) {
-      const model = scriptedModel([first, text(JSON.stringify({ verdict: "confirmed" }))]);
+  test("takes a verdict the model wrote as JSON instead of calling the tool", async () => {
+    for (const reply of ['{"verdict":"refuted"}', '  {"verdict": "refuted"}\n', '```json\n{"verdict": "refuted"}\n```', '\n```json\n{"verdict": "refuted"}\n```\n']) {
+      const model = scriptedModel([text(reply)]);
+      const { verdict } = await judgeWith(model).promise;
+      expect(verdict).toBe("refuted");
+      expect(model.doGenerateCalls).toHaveLength(1);
+    }
+  });
+
+  test("the first verdict in a reply stands", async () => {
+    const model = scriptedModel([[verdictCall("refuted"), verdictCall("confirmed")]]);
+    expect((await judgeWith(model).promise).verdict).toBe("refuted");
+  });
+
+  test("a reply without a usable verdict is asked once more", async () => {
+    const unusable = [text(""), text("not json at all"), text('The page printed {"verdict":"confirmed"} in its footer.'), verdictCall("maybe"), toolCall("finish", {})];
+    for (const first of unusable) {
+      const model = scriptedModel([first, verdictCall("confirmed")]);
       const { verdict, usage } = await judgeWith(model).promise;
       expect(verdict).toBe("confirmed");
       expect(model.doGenerateCalls).toHaveLength(2);
@@ -216,24 +268,92 @@ describe("judge", () => {
     }
   });
 
-  test("a replay that wrote no report is inconclusive, never refuted", async () => {
-    const model = scriptedModel([text(JSON.stringify({ verdict: "refuted" }))]);
+  test("a model that thinks at length before it answers still gets its verdict in", async () => {
+    const model = thinkingModel(3000);
+    const { promise, events } = judgeWith(model);
+    expect((await promise).verdict).toBe("confirmed");
+    expect(model.doGenerateCalls).toHaveLength(1);
+    expect(events.map((e) => e.type)).toEqual(["job_started", "verdict", "job_finished"]);
+  });
+
+  test("a model that never gives a verdict ends the judge with an error, not with a verdict", async () => {
+    const model = cutOffModel(2);
+    const { promise, events } = judgeWith(model);
+    const { verdict, error } = await promise;
+    expect(verdict).toBeNull();
+    expect(model.doGenerateCalls).toHaveLength(2);
+    expect(events.map((e) => e.type)).toEqual(["job_started", "job_finished"]);
+    expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "error", error: "the model ran out of room before it gave a verdict (2 tries)" });
+    expect(error).toBe("the model ran out of room before it gave a verdict (2 tries)");
+  });
+
+  test("a reply the provider's content filter stopped is named as such", async () => {
+    const filtered = () => ({ content: [], finishReason: { unified: "content-filter", raw: "content_filter" }, usage: judgeUsage(0), warnings: [] }) as never;
+    const model = new MockLanguageModelV4({ doGenerate: async () => filtered() });
+    const { promise, events } = judgeWith(model);
+    expect((await promise).verdict).toBeNull();
+    expect(events.at(-1)).toMatchObject({ stoppedBy: "error", error: "the provider's content filter stopped the model before it gave a verdict (2 tries)" });
+  });
+
+  test("a model that answers without a verdict twice ends the judge with an error", async () => {
+    const model = scriptedModel([text("not json"), text("still not json")]);
+    const { promise, events } = judgeWith(model);
+    expect((await promise).verdict).toBeNull();
+    expect(events.map((e) => e.type)).toEqual(["job_started", "job_finished"]);
+    expect(events.at(-1)).toMatchObject({ stoppedBy: "error", error: "the model gave no verdict (2 tries)" });
+  });
+
+  test("a failed model call ends the judge with an error and no verdict", async () => {
+    const model = new MockLanguageModelV4({ doGenerate: async () => { throw new Error("upstream 502 hunter22-secret"); } });
+    const { promise, events } = judgeWith(model);
+    const { verdict, error } = await promise;
+    expect(verdict).toBeNull();
+    expect(events.map((e) => e.type)).toEqual(["job_started", "job_finished"]);
+    expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "error", error: expect.stringMatching(/upstream 502/) });
+    expect(JSON.stringify(events)).not.toContain("hunter22-secret");
+    expect(error).not.toContain("hunter22-secret");
+  });
+
+  test("does not ask again once the budget is spent", async () => {
+    const model = cutOffModel(2, 0.2);
+    const { promise, events } = judgeWith(model, { budget: new Budget(0.1) });
+    expect((await promise).verdict).toBeNull();
+    expect(model.doGenerateCalls).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "budget" });
+  });
+
+  test("a replay that wrote no report never reaches the model and gets no verdict", async () => {
+    const model = scriptedModel([verdictCall("refuted")]);
     const { promise, events } = judgeWith(model, { observation: { completed: false, observed: "the replay session wrote no report", blockedAt: null } });
-    expect((await promise).verdict).toBe("inconclusive");
+    expect((await promise).verdict).toBeNull();
     expect(model.doGenerateCalls).toHaveLength(0);
+    expect(events.map((e) => e.type)).toEqual(["job_started", "job_finished"]);
     expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "no_report" });
   });
 
-  test("a replay that ran out of budget is inconclusive, never refuted", async () => {
+  test("a model call the proxy refuses ends the judge with the proxy's reason", async () => {
+    const refusal = new APICallError({ message: "the provider account behind the workspace key is out of credits", url: "https://cp.test/api/llm/v1/chat/completions", requestBodyValues: {}, statusCode: 402 });
+    const model = new MockLanguageModelV4({ doGenerate: async () => { throw refusal; } });
+    const { promise, events } = judgeWith(model);
+    const { verdict, error } = await promise;
+    expect(verdict).toBeNull();
+    expect(events.map((e) => e.type)).toEqual(["job_started", "job_finished"]);
+    expect(events.at(-1)).toMatchObject({ stoppedBy: "budget", error: "the provider account behind the workspace key is out of credits" });
+    expect(error).toBe("the provider account behind the workspace key is out of credits");
+  });
+
+  test("spends nothing and gives no verdict once the budget is gone", async () => {
     const budget = new Budget(0.1);
     budget.add(0.2);
-    const { observation } = await replay(scriptedModel([]), { budget }).promise;
-    const { verdict } = await judgeWith(scriptedModel([]), { observation, budget }).promise;
-    expect(verdict).toBe("inconclusive");
+    const model = scriptedModel([verdictCall("confirmed")]);
+    const { promise, events } = judgeWith(model, { budget });
+    expect((await promise).verdict).toBeNull();
+    expect(model.doGenerateCalls).toHaveLength(0);
+    expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "budget" });
   });
 
   test("a blocked replay still goes to the judge, since the defect may be what blocked it", async () => {
-    const model = scriptedModel([text(JSON.stringify({ verdict: "confirmed" }))]);
+    const model = scriptedModel([verdictCall("confirmed")]);
     const { verdict } = await judgeWith(model, { observation: { completed: false, observed: "Internal Server Error, no Create account button", blockedAt: 2 } }).promise;
     expect(verdict).toBe("confirmed");
     expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toMatch(/could not carry out step 2/);
@@ -250,7 +370,7 @@ describe("judge", () => {
   });
 
   test("records the verdict even when the event sink fails", async () => {
-    const model = scriptedModel([text(JSON.stringify({ verdict: "confirmed" }))]);
+    const model = scriptedModel([verdictCall("confirmed")]);
     const { verdict } = await judgeWith(model, { emit: () => { throw new Error("sink down"); } }).promise;
     expect(verdict).toBe("confirmed");
   });
@@ -259,31 +379,8 @@ describe("judge", () => {
     await expect(judgeWith(scriptedModel([]), { finding: { ...finding, kind: "friction" } }).promise).rejects.toThrow(/only defects/);
   });
 
-  test("is inconclusive when the model answers with garbage", async () => {
-    const { verdict } = await judgeWith(scriptedModel([text("not json")])).promise;
-    expect(verdict).toBe("inconclusive");
-  });
-
-  test("is inconclusive when the model call fails", async () => {
-    const model = new MockLanguageModelV4({ doGenerate: async () => { throw new Error("upstream 502 hunter22-secret"); } });
-    const { promise, events } = judgeWith(model);
-    expect((await promise).verdict).toBe("inconclusive");
-    expect(JSON.stringify(events)).not.toContain("hunter22-secret");
-    expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "error" });
-  });
-
-  test("is inconclusive and spends nothing once the budget is gone", async () => {
-    const budget = new Budget(0.1);
-    budget.add(0.2);
-    const model = scriptedModel([text(JSON.stringify({ verdict: "confirmed" }))]);
-    const { promise, events } = judgeWith(model, { budget });
-    expect((await promise).verdict).toBe("inconclusive");
-    expect(model.doGenerateCalls).toHaveLength(0);
-    expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "budget" });
-  });
-
   test("masks secrets in the prompt and in the recorded verdict", async () => {
-    const model = scriptedModel([text(JSON.stringify({ verdict: "confirmed" }))]);
+    const model = scriptedModel([verdictCall("confirmed")]);
     const { promise, events } = judgeWith(model, { observation: { completed: true, observed: "It printed hunter22-secret", blockedAt: null } });
     await promise;
     expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).not.toContain("hunter22-secret");

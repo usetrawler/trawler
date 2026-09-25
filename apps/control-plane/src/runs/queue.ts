@@ -8,7 +8,7 @@ import type { Keyring } from "../lib/secrets.ts";
 import { loadProjectConfig } from "../projects/projects.ts";
 import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
-import type { ConfigSnapshot } from "./runs.ts";
+import { capSpent, type ConfigSnapshot } from "./runs.ts";
 
 const LEASE_MINUTES = 10;
 const ACTIVE = ["queued", "running"];
@@ -96,7 +96,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
       .innerJoin("runs as r", "r.id", "j.run_id")
       .select(["j.id", "j.org_id", "j.run_id", "j.kind", "j.persona_key", "j.finding_key", "r.project_id", "r.config_snapshot", "r.max_steps", "r.replay_steps", "r.budget_usd", "r.cost_usd", "r.agent_model", "r.judge_model"])
       .where("j.status", "=", "queued")
-      .where("r.status", "in", ACTIVE)
+      .where((eb) => eb.or([eb("r.status", "in", ACTIVE), eb("j.requested_by", "is not", null)]))
       .where((eb) => eb.not(eb.exists(eb.selectFrom("jobs as busy").select("busy.id").whereRef("busy.run_id", "=", "j.run_id").where("busy.status", "=", "leased"))))
       .orderBy("r.created_at")
       .orderBy("j.position")
@@ -107,7 +107,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
     if (!picked) return null;
     const token = randomBytes(32).toString("base64url");
     await tx.updateTable("jobs").set({ status: "leased", token_hash: hashToken(token), lease_until: sql<Date>`now() + make_interval(mins => ${LEASE_MINUTES})`, started_at: new Date() }).where("id", "=", picked.id).execute();
-    await tx.updateTable("runs").set({ status: "running", started_at: sql<Date>`coalesce(started_at, now())` }).where("id", "=", picked.run_id).execute();
+    await tx.updateTable("runs").set({ status: "running", started_at: sql<Date>`coalesce(started_at, now())` }).where("id", "=", picked.run_id).where("status", "in", ACTIVE).execute();
     await sql`savepoint prepare_assignment`.execute(tx);
     try {
       const snapshot = picked.config_snapshot as unknown as ConfigSnapshot;
@@ -158,9 +158,9 @@ export async function claimJob(db: Database, keys: Keyring): Promise<JobAssignme
 
 export async function releaseJob(db: Database, job: { jobId: string; runId: string; token: string }): Promise<void> {
   await asSystem(db, async (tx) => {
-    await tx.selectFrom("jobs").select("id").where("id", "=", job.jobId).forUpdate().executeTakeFirst();
+    const current = await tx.selectFrom("jobs").select("requested_by").where("id", "=", job.jobId).forUpdate().executeTakeFirst();
     const run = await tx.selectFrom("runs").select("status").where("id", "=", job.runId).forUpdate().executeTakeFirstOrThrow();
-    const release = ACTIVE.includes(run.status) ? { status: "queued", started_at: null } : { status: "cancelled", finished_at: new Date() };
+    const release = ACTIVE.includes(run.status) || current?.requested_by ? { status: "queued", started_at: null } : { status: "cancelled", finished_at: new Date() };
     const released = await tx
       .updateTable("jobs")
       .set({ ...release, token_hash: null, lease_until: null })
@@ -220,11 +220,13 @@ async function addCost(tx: Tx, runId: string, jobId: string, usd: number) {
   await tx.updateTable("runs").set({ cost_usd: sql`cost_usd + ${usd}` }).where("id", "=", runId).execute();
 }
 
+const lockedRun = (tx: Tx, runId: string) =>
+  tx.selectFrom("runs").select(["status", "cost_usd", "budget_usd", "token_cap", "tokens_used"]).where("id", "=", runId).forUpdate().executeTakeFirstOrThrow();
+
 async function stopIfOverBudget(tx: Tx, runId: string): Promise<boolean> {
-  const run = await tx.selectFrom("runs").select(["status", "cost_usd", "budget_usd", "token_cap", "tokens_used"]).where("id", "=", runId).forUpdate().executeTakeFirstOrThrow();
+  const run = await lockedRun(tx, runId);
   if (!ACTIVE.includes(run.status)) return true;
-  const overTokens = run.token_cap !== null && Number(run.tokens_used) >= Number(run.token_cap);
-  if (Number(run.cost_usd) < Number(run.budget_usd) && !overTokens) return false;
+  if (!capSpent(run)) return false;
   await tx.updateTable("runs").set({ status: "stopped_budget", finished_at: new Date() }).where("id", "=", runId).execute();
   await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date() }).where("run_id", "=", runId).where("status", "=", "queued").execute();
   return true;
@@ -237,7 +239,8 @@ export async function ingestEvents(db: Database, token: string, events: RunEvent
     if (job.status !== "leased") return { cancel: true };
     if (valid.some((e) => e.jobId !== job.id)) throw new ForeignEvents();
     const run = await tx.selectFrom("runs").select("status").where("id", "=", job.run_id).forUpdate().executeTakeFirstOrThrow();
-    if (!ACTIVE.includes(run.status)) return { cancel: true };
+    const judgingAgain = Boolean(job.requested_by);
+    if (!ACTIVE.includes(run.status) && !judgingAgain) return { cancel: true };
     for (const e of valid) {
       const inserted = await tx
         .insertInto("run_events")
@@ -265,7 +268,7 @@ export async function ingestEvents(db: Database, token: string, events: RunEvent
       }
     }
     await tx.updateTable("jobs").set({ lease_until: sql<Date>`now() + make_interval(mins => ${LEASE_MINUTES})` }).where("id", "=", job.id).execute();
-    return { cancel: await stopIfOverBudget(tx, job.run_id) };
+    return { cancel: judgingAgain ? capSpent(await lockedRun(tx, job.run_id)) : await stopIfOverBudget(tx, job.run_id) };
   });
 }
 
@@ -288,7 +291,7 @@ export async function llmCallFor(db: Database, token: string): Promise<LlmCall> 
     const job = await jobForToken(tx, token);
     if (job.status !== "leased") throw new LlmRefused("the job is over");
     const run = await tx.selectFrom("runs").select(["status", "cost_usd", "budget_usd", "agent_model", "judge_model", "provider", "provider_base_url", "prompt_usd_per_mtok", "completion_usd_per_mtok", "token_cap", "tokens_used"]).where("id", "=", job.run_id).executeTakeFirstOrThrow();
-    if (!ACTIVE.includes(run.status)) throw new LlmRefused("the run is no longer active");
+    if (!ACTIVE.includes(run.status) && !job.requested_by) throw new LlmRefused("the run is no longer active");
     const remainingUsd = Number(run.budget_usd) - Number(run.cost_usd);
     const remainingTokens = run.token_cap === null ? null : Number(run.token_cap) - Number(run.tokens_used);
     if (remainingUsd <= 0 || (remainingTokens !== null && remainingTokens <= 0)) throw new LlmRefused("the run has spent its budget");
