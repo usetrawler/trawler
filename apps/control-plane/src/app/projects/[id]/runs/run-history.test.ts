@@ -20,18 +20,21 @@ test("every run is listed in the order given, newest first, each leading to its 
   expect(html).toContain("Cancelled");
 });
 
-test("the page names the project and leads back to its plan", () => {
+test("the page names the project and its runs, and leads back to its plan", () => {
   const html = render([run(1, "succeeded")], null);
   expect(html).toContain("Runs · app.acme.test");
   expect(html).toContain(">Acme</h1>");
+  expect(html).toMatch(/<h2 [^>]*>All runs<\/h2>/);
   expect(html).toMatch(/<a href="\/projects\/p1"[^>]*>Back to the plan<\/a>/);
 });
 
 test("a longer history leads to its older runs, and an older page back to the newest", () => {
   const first = render([run(12, "succeeded")], 12);
+  expect(first).toContain('<nav aria-label="Run history pages"');
   expect(first).toMatch(/<a href="\/projects\/p1\/runs\?before=12"[^>]*>Older runs<\/a>/);
   expect(first).not.toContain("Newest runs");
   const older = render([run(3, "succeeded")], null, true);
+  expect(older).toContain('<nav aria-label="Run history pages"');
   expect(older).toMatch(/<a href="\/projects\/p1\/runs"[^>]*>Newest runs<\/a>/);
   expect(older).not.toContain("Older runs");
   expect(render([run(1, "succeeded")], null)).not.toContain("Run history pages");

@@ -32,7 +32,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           <h1 className="text-4xl leading-[0.95] font-bold tracking-tight md:text-5xl">{project.name}</h1>
           <p className="text-lg text-muted">{project.description}</p>
           {project.focus && <p className="text-sm">Focus: <span className="text-muted">{project.focus}</span></p>}
-          {runs > 0 && <p className="text-sm"><a href={`/projects/${project.id}/runs`} className="underline underline-offset-4 hover:text-action">Past runs · {runs}</a></p>}
+          {runs > 0 && <p className="text-sm"><a href={`/projects/${project.id}/runs`} className="underline underline-offset-4 hover:text-action">All runs · {runs}</a></p>}
         </div>
         <PlanWorkspace
           projectId={project.id}
