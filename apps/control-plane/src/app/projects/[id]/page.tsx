@@ -40,6 +40,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           initialAccounts={project.accounts.map((a) => ({ ref: a.ref, username: a.username, hint: a.password_hint }))}
           keyHint={keyHint}
           canManageKey={canManageBilling(member)}
+          authorisedBefore={runs > 0}
         />
       </div>
     </AppShell>
