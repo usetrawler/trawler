@@ -1,6 +1,7 @@
 FROM node:24-slim
+ARG TRAWLER_COMMIT
 WORKDIR /app
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright NODE_ENV=production
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright NODE_ENV=production TRAWLER_COMMIT=$TRAWLER_COMMIT
 COPY package.json package-lock.json tsconfig.base.json tsconfig.json ./
 COPY packages/core/package.json packages/core/
 COPY packages/protocol/package.json packages/protocol/

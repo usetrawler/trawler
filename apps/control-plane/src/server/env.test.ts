@@ -40,3 +40,9 @@ test("hosted runs can be limited to a list of emails", () => {
   expect(readEnv(base).betaEmails).toBeUndefined();
   expect(readEnv({ ...base, TRAWLER_BETA_EMAILS: " Ana@Acme.test, bo@acme.test ,," }).betaEmails).toEqual(["ana@acme.test", "bo@acme.test"]);
 });
+
+test("a smoke token is read only when it looks like one, and is absent by default", () => {
+  expect(readEnv(base).smokeToken).toBeUndefined();
+  expect(readEnv({ ...base, TRAWLER_SMOKE_TOKEN: ` ${"s".repeat(48)} ` }).smokeToken).toBe("s".repeat(48));
+  expect(() => readEnv({ ...base, TRAWLER_SMOKE_TOKEN: "short" })).toThrow(/TRAWLER_SMOKE_TOKEN/);
+});

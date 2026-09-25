@@ -12,8 +12,9 @@ COPY apps/control-plane apps/control-plane
 RUN npm run build -w @usetrawler/control-plane
 
 FROM node:24-slim
+ARG TRAWLER_COMMIT
 WORKDIR /app
-ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000 TRAWLER_COMMIT=$TRAWLER_COMMIT
 COPY --from=build --chown=node:node /app/apps/control-plane/.next/standalone ./
 USER node
 EXPOSE 3000
