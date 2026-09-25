@@ -203,7 +203,7 @@ test("work refuses to send the runner token over plain http to another machine",
   expect(err.join("\n")).toMatch(/https/);
 });
 
-test("work reports a failed job with its ids, logs JSON lines when asked, and closes reporting at the end", async () => {
+test("work starts reporting with the runner token, reports a failed job with its ids and masks with its secrets, logs JSON lines when asked, and closes reporting at the end", async () => {
   const job = {
     kind: "role_session", personaKey: "ana", jobId: "11111111-1111-4111-8111-111111111111", runId: "22222222-2222-4222-8222-222222222222", token: "job-token-" + "x".repeat(40),
     config: { name: "Acme", targetUrl: "https://a.test/", description: "", allowedOrigins: ["https://a.test"], personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "x" }], accounts: [], extraHeaders: {}, secretHeaders: {} },
@@ -215,16 +215,28 @@ test("work reports a failed job with its ids, logs JSON lines when asked, and cl
     if (path.endsWith("/events")) return Response.json({ cancel: false });
     return Response.json({ ok: true });
   }) as typeof fetch;
+  const env = { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_LOG_FORMAT: "json" };
+  const started: Array<[unknown, string[]]> = [];
   const reports: Array<[string, LogFields]> = [];
+  const masked: string[] = [];
   let closed = false;
   const { d, out, err } = deps({
-    env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_LOG_FORMAT: "json" },
+    env,
     fetchImpl: controlPlane,
     openBrowser: async () => { throw new Error("no chromium"); },
-    startReporting: async () => ({ report: (message, fields) => void reports.push([message, fields]), close: async () => { closed = true; } }),
+    startReporting: async (reportingEnv, secrets) => {
+      started.push([reportingEnv, secrets]);
+      return {
+        report: (message, fields) => void reports.push([message, fields]),
+        maskWith: (scrubber) => void masked.push(scrubber.scrub(`token ${job.token}`)),
+        close: async () => { closed = true; },
+      };
+    },
   });
   expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(0);
+  expect(started).toEqual([[env, ["t".repeat(40)]]]);
   expect(reports).toEqual([[expect.stringContaining("finished (error): no chromium"), { jobId: job.jobId, runId: job.runId, kind: "role_session" }]]);
+  expect(masked).toEqual(["token •••"]);
   expect(closed).toBe(true);
   expect(JSON.parse(out[0]!)).toMatchObject({ level: "info", msg: expect.stringContaining("started"), job_id: job.jobId, run_id: job.runId });
   expect(JSON.parse(err.at(-1)!)).toMatchObject({ level: "error", msg: expect.stringContaining("no chromium"), job_id: job.jobId });

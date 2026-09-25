@@ -1,11 +1,12 @@
 import type { NodeOptions } from "@sentry/node";
-import { MIN_SECRET_LENGTH, SecretScrubber } from "@usetrawler/core";
+import { MIN_SECRET_LENGTH, scrubConsole, SecretScrubber } from "@usetrawler/core";
 import type { LogFields } from "./worker.ts";
 
 type Env = Record<string, string | undefined>;
 
 export interface Reporting {
   report: (message: string, fields: LogFields) => void;
+  maskWith: (job: SecretScrubber) => void;
   close: () => Promise<void>;
 }
 
@@ -23,12 +24,15 @@ export function fingerprintOf(message: string): string {
 
 export async function startReporting(env: Env, secrets: string[], overrides: Partial<NodeOptions> = {}): Promise<Reporting> {
   const dsn = env.TRAWLER_SENTRY_DSN?.trim();
-  if (!dsn) return { report: () => {}, close: async () => {} };
+  if (!dsn) return { report: () => {}, maskWith: () => {}, close: async () => {} };
   const Sentry = await import("@sentry/node");
-  const scrubber = new SecretScrubber();
+  const runner = new SecretScrubber();
   for (const secret of secrets) {
-    if (secret.length >= MIN_SECRET_LENGTH) scrubber.add(secret);
+    if (secret.length >= MIN_SECRET_LENGTH) runner.add(secret);
   }
+  let job: SecretScrubber | undefined;
+  const scrubber = { scrub: <T>(value: T): T => runner.scrub(job ? job.scrub(value) : value) };
+  scrubConsole(scrubber);
   Sentry.init({
     dsn,
     environment: env.RAILWAY_ENVIRONMENT_NAME || undefined,
@@ -46,6 +50,7 @@ export async function startReporting(env: Env, secrets: string[], overrides: Par
     maxBreadcrumbs: 0,
     tracePropagationTargets: [],
     enableRuntimeChannelInjection: false,
+    traceLifecycle: "static",
     dataCollection: DATA_COLLECTION,
     beforeSend: (event) => scrubber.scrub(event),
     beforeSendTransaction: () => null,
@@ -60,6 +65,9 @@ export async function startReporting(env: Env, secrets: string[], overrides: Par
         scope.setFingerprint(["runner", kind ?? "claim", fingerprintOf(scrubbed)]);
         Sentry.captureException(new Error(scrubbed));
       });
+    },
+    maskWith: (scrubber) => {
+      job = scrubber;
     },
     close: async () => {
       await Sentry.close(2000);

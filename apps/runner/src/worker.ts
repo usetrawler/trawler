@@ -20,6 +20,7 @@ export interface WorkerDeps {
   openBrowser: (config: ProjectConfig, opts: { onBlocked: (url: string) => void; scrubber: SecretScrubber }) => Promise<Browser>;
   log: (line: string, fields?: LogFields) => void;
   report?: (message: string, fields: LogFields) => void;
+  maskReportsWith?: (scrubber: SecretScrubber) => void;
   fetch?: typeof fetch;
   flushMs?: number;
   heartbeatMs?: number;
@@ -235,6 +236,7 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
   }
   if (!job) return "done";
   const scrubber = runnerScrubber({ ...deps, secrets: [...(deps.secrets ?? []), job.token] }, job.config);
+  deps.maskReportsWith?.(scrubber);
   const ids: LogFields = { jobId: job.jobId, runId: job.runId, kind: job.kind };
   const note = (line: string) => deps.log(scrubber.scrub(line), { ...ids, level: "info" });
   const fail = (line: string) => problem(deps, scrubber.scrub(line), ids);

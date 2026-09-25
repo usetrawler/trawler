@@ -4,18 +4,24 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as Sentry from "@sentry/node";
-import { expect, test } from "vitest";
-import { fingerprintOf, startReporting, workerLog } from "./report.ts";
+import { SecretScrubber } from "@usetrawler/core";
+import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
+import { fingerprintOf, startReporting, workerLog, type Reporting } from "./report.ts";
 
 const RUNNER_TOKEN = "runner-" + "r".repeat(40);
+const JOB_PASSWORD = "correct-horse-battery";
 const sent: string[] = [];
+const everything: string[] = [];
 const transport = () => ({
   send: async (envelope: unknown) => {
+    everything.push(JSON.stringify(envelope));
     if (JSON.stringify(envelope).includes('"type":"event"')) sent.push(JSON.stringify(envelope));
     return {};
   },
   flush: async () => true,
 });
+type SentEvent = { tags?: Record<string, string>; exception: { values: Array<{ value: string }> } };
+const events = () => sent.map((envelope) => JSON.parse(envelope)[1][0][1] as SentEvent);
 
 test("a customer's own runner reports nothing, even when their environment has its own SENTRY_DSN", async () => {
   const reporting = await startReporting({ SENTRY_DSN: "https://theirs@sentry.test/9" }, [RUNNER_TOKEN]);
@@ -24,31 +30,68 @@ test("a customer's own runner reports nothing, even when their environment has i
   await reporting.close();
 });
 
-test("the hosted runner sends errors only: no breadcrumbs, trace headers, sessions, request data or local variables", async () => {
-  const reporting = await startReporting({ TRAWLER_SENTRY_DSN: "https://public@sentry.test/2", RAILWAY_ENVIRONMENT_NAME: "staging", TRAWLER_COMMIT: "c0ffee" }, [RUNNER_TOKEN], { transport });
-  const client = Sentry.getClient()!;
-  const options = client.getOptions() as Sentry.NodeOptions;
-  expect(options.maxBreadcrumbs).toBe(0);
-  expect(options.tracePropagationTargets).toEqual([]);
-  expect(options.enableRuntimeChannelInjection).toBe(false);
-  for (const name of ["Console", "Http", "NodeFetch", "ProcessSession", "LocalVariablesAsync", "RequestData", "ChildProcess"]) {
-    expect(client.getIntegrationByName(name)).toBeUndefined();
-  }
-  expect(client.getIntegrationByName("OnUnhandledRejection")).toBeDefined();
+describe("the hosted runner", () => {
+  let reporting: Reporting;
 
-  reporting.report(`role_session job-1 finished (error): the control plane refused ${RUNNER_TOKEN}`, { jobId: "job-1", runId: "run-1", kind: "role_session" });
-  Sentry.captureException(new Error(`an unexpected failure near ${RUNNER_TOKEN}`));
-  await Sentry.flush(2000);
-  expect(sent).toHaveLength(2);
-  const exception = (envelope: string): string => JSON.parse(envelope)[1][0][1].exception.values[0].value;
-  const reported = sent.find((envelope) => exception(envelope).includes("the control plane refused"))!;
-  expect(exception(reported)).toBe("role_session job-1 finished (error): the control plane refused •••");
-  for (const part of ['"job_id":"job-1"', '"run_id":"run-1"', '"kind":"role_session"', '"environment":"staging"', '"release":"c0ffee"', '"fingerprint":["runner","role_session",']) {
-    expect(reported).toContain(part);
-  }
-  expect(sent.map(exception)).toContain("an unexpected failure near •••");
-  expect(sent.join("\n")).not.toContain(RUNNER_TOKEN);
-  await reporting.close();
+  beforeAll(async () => {
+    vi.stubEnv("SENTRY_TRACES_SAMPLE_RATE", "1");
+    reporting = await startReporting({ TRAWLER_SENTRY_DSN: "https://public@sentry.test/2", RAILWAY_ENVIRONMENT_NAME: "staging", TRAWLER_COMMIT: "c0ffee" }, [RUNNER_TOKEN], { transport });
+    vi.unstubAllEnvs();
+  });
+
+  afterAll(() => reporting.close());
+
+  beforeEach(() => {
+    sent.length = 0;
+    everything.length = 0;
+  });
+
+  test("sends errors only: no breadcrumbs, trace headers, sessions, request data or local variables", async () => {
+    const client = Sentry.getClient()!;
+    const options = client.getOptions() as Sentry.NodeOptions;
+    expect(options.maxBreadcrumbs).toBe(0);
+    expect(options.tracePropagationTargets).toEqual([]);
+    expect(options.enableRuntimeChannelInjection).toBe(false);
+    for (const name of ["Console", "Http", "NodeFetch", "ProcessSession", "LocalVariablesAsync", "RequestData", "ChildProcess"]) {
+      expect(client.getIntegrationByName(name)).toBeUndefined();
+    }
+    expect(client.getIntegrationByName("OnUnhandledRejection")).toBeDefined();
+
+    reporting.report(`role_session job-1 finished (error): the control plane refused ${RUNNER_TOKEN}`, { jobId: "job-1", runId: "run-1", kind: "role_session" });
+    Sentry.captureException(new Error(`an unexpected failure near ${RUNNER_TOKEN}`));
+    await Sentry.flush(2000);
+    expect(sent).toHaveLength(2);
+    const reported = sent.find((envelope) => envelope.includes("the control plane refused"))!;
+    expect(events().map((e) => e.exception.values[0]!.value)).toEqual(expect.arrayContaining([
+      "role_session job-1 finished (error): the control plane refused •••",
+      "an unexpected failure near •••",
+    ]));
+    for (const part of ['"job_id":"job-1"', '"run_id":"run-1"', '"kind":"role_session"', '"environment":"staging"', '"release":"c0ffee"', '"fingerprint":["runner","role_session",']) {
+      expect(reported).toContain(part);
+    }
+    const unexpected = events().find((e) => e.exception.values[0]!.value.startsWith("an unexpected failure"))!;
+    expect(unexpected.tags ?? {}).not.toHaveProperty("job_id");
+    expect(unexpected.tags ?? {}).not.toHaveProperty("run_id");
+    expect(unexpected.tags ?? {}).not.toHaveProperty("kind");
+    expect(sent.join("\n")).not.toContain(RUNNER_TOKEN);
+  });
+
+  test("sends no span or transaction, even with SENTRY_TRACES_SAMPLE_RATE set in the environment", async () => {
+    Sentry.startSpan({ name: `job with ${RUNNER_TOKEN}`, forceTransaction: true }, () => undefined);
+    await Sentry.flush(2000);
+    expect(everything.filter((envelope) => /"type":"(span|transaction)"/.test(envelope))).toEqual([]);
+    expect(everything.join("\n")).not.toContain(RUNNER_TOKEN);
+  });
+
+  test("masks an error Sentry catches by itself with the secrets of the job the runner is working on", async () => {
+    const job = new SecretScrubber();
+    job.add(JOB_PASSWORD);
+    reporting.maskWith(job);
+    Sentry.captureException(new Error(`the page crashed after typing ${JOB_PASSWORD}`));
+    await Sentry.flush(2000);
+    expect(events().map((e) => e.exception.values[0]!.value)).toEqual(["the page crashed after typing •••"]);
+    expect(sent.join("\n")).not.toContain(JOB_PASSWORD);
+  });
 });
 
 test("the same failure of different jobs is one issue, a different failure another", () => {
@@ -59,21 +102,28 @@ test("the same failure of different jobs is one issue, a different failure anoth
   expect(a).not.toBe(c);
 });
 
-test("with a DSN an unhandled promise rejection still stops the hosted runner, as it does without one", () => {
+test("with a DSN an unhandled promise rejection still stops the hosted runner, and what it prints is masked with the job's secrets", () => {
   const dir = mkdtempSync(join(tmpdir(), "reject-"));
   const script = join(dir, "reject.mts");
   const report = fileURLToPath(new URL("./report.ts", import.meta.url));
+  const secrets = fileURLToPath(new URL("../../../packages/core/src/secrets.ts", import.meta.url));
   writeFileSync(script, `
+    import { SecretScrubber } from ${JSON.stringify(secrets)};
     import { startReporting } from ${JSON.stringify(report)};
-    await startReporting({ TRAWLER_SENTRY_DSN: "https://public@127.0.0.1:9/2" }, []);
+    const reporting = await startReporting({ TRAWLER_SENTRY_DSN: "https://public@127.0.0.1:9/2" }, []);
+    const job = new SecretScrubber();
+    job.add(${JSON.stringify(JOB_PASSWORD)});
+    reporting.maskWith(job);
     console.log("reporting started");
-    Promise.reject(new Error("nobody caught this"));
+    Promise.reject(new Error("nobody caught this after typing " + ${JSON.stringify(JOB_PASSWORD)}));
     setTimeout(() => process.exit(0), 5000);
   `);
   const root = fileURLToPath(new URL("../../..", import.meta.url));
-  const { status, stdout } = spawnSync(process.execPath, ["--import", "tsx", script], { cwd: root, encoding: "utf8", timeout: 20_000 });
+  const { status, stdout, stderr } = spawnSync(process.execPath, ["--import", "tsx", script], { cwd: root, encoding: "utf8", timeout: 20_000 });
   expect(stdout).toContain("reporting started");
   expect(status).toBe(1);
+  expect(stderr).toContain("nobody caught this after typing •••");
+  expect(stderr).not.toContain(JOB_PASSWORD);
 });
 
 test("log lines stay plain text on stderr unless TRAWLER_LOG_FORMAT is json, which sends info to stdout and errors to stderr", () => {

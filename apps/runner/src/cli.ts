@@ -149,6 +149,7 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
     },
     log,
     report: reporting.report,
+    maskReportsWith: reporting.maskWith,
     fetch: deps.fetchImpl,
     secrets: [runnerToken],
   };

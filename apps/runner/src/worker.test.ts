@@ -15,7 +15,7 @@ const baseJob = { jobId: "11111111-1111-4111-8111-111111111111", runId: "2222222
 let server: Server | undefined;
 afterEach(() => new Promise<void>((r) => (server ? server.close(() => r()) : r())));
 
-function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; failEvents?: number; eventsStatus?: number; completeStatus?: number; completeBody?: string } = {}) {
+function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; failEvents?: number; eventsStatus?: number; eventsBody?: string; completeStatus?: number; completeBody?: string } = {}) {
   const seen = { claims: 0, events: [] as Array<{ seq: number; type: string }>, completions: [] as unknown[], releases: 0, headers: [] as Array<string | undefined>, auth: [] as Array<string | undefined> };
   let batches = 0;
   let failures = opts.failEvents ?? 0;
@@ -32,7 +32,7 @@ function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; failEvents
       return res.end(JSON.stringify(job));
     }
     if (req.url?.endsWith("/events")) {
-      if (failures-- > 0) { res.statusCode = opts.eventsStatus ?? 503; return res.end("{}"); }
+      if (failures-- > 0) { res.statusCode = opts.eventsStatus ?? 503; return res.end(opts.eventsBody ?? "{}"); }
       batches++;
       seen.events.push(...body.events);
       return res.end(JSON.stringify({ cancel: opts.cancelAfter !== undefined && batches >= opts.cancelAfter }));
@@ -157,6 +157,19 @@ test("events the control plane keeps refusing stop the job instead of crashing t
   }
 });
 
+test("events refused with an answer that echoes the job's secrets are logged and reported masked", async () => {
+  const withPassword = { ...config, accounts: [{ ref: "account-1", username: "ana@a.test", password: "correct-horse-battery" }] };
+  const { url } = await fakeControlPlane({ ...baseJob, config: withPassword, kind: "role_session", personaKey: "ana", accountRef: "account-1" }, {
+    failEvents: 1000, eventsStatus: 400, eventsBody: `{"error":"refused correct-horse-battery for ${token}"}`,
+  });
+  const lines: string[] = [];
+  const reports: string[] = [];
+  await workOnce(deps(url, endless(), { attempts: 1, log: (l) => void lines.push(l), report: (m) => void reports.push(m) }));
+  expect(lines.find((l) => l.includes("could not report events"))).toContain('HTTP 400 {"error":"refused ••• for •••"}');
+  expect(JSON.stringify([lines, reports])).not.toContain("correct-horse-battery");
+  expect(JSON.stringify([lines, reports])).not.toContain(token);
+});
+
 test("a refused completion is logged, not reported as finished", async () => {
   const { url } = await fakeControlPlane(role, { completeStatus: 400 });
   const lines: string[] = [];
@@ -227,6 +240,17 @@ test("a failed job is reported and logged as an error with its ids, without the 
   expect(JSON.stringify([reports, logs])).not.toContain(token);
 });
 
+test("before the browser opens, reporting gets the job's scrubber, so what it catches by itself is masked too", async () => {
+  const withPassword = { ...config, accounts: [{ ref: "account-1", username: "ana@a.test", password: "correct-horse-battery" }] };
+  const { url } = await fakeControlPlane({ ...baseJob, config: withPassword, kind: "role_session", personaKey: "ana", accountRef: "account-1" });
+  const seen: string[] = [];
+  await workOnce(deps(url, scriptedModel([]), {
+    maskReportsWith: (scrubber) => void seen.push(scrubber.scrub(`correct-horse-battery ${token}`)),
+    openBrowser: async () => { seen.push("browser opened"); throw new Error("no chromium"); },
+  }));
+  expect(seen).toEqual(["••• •••", "browser opened"]);
+});
+
 test("a job that finishes normally is logged with its ids and not reported", async () => {
   const { url } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" });
   const reports: string[] = [];
@@ -241,7 +265,7 @@ test("a job that finishes normally is logged with its ids and not reported", asy
 });
 
 test("a control plane that keeps failing claims is reported once, and again after it recovered and failed anew", async () => {
-  const statuses = [503, 503, 503, 204, 503, 503];
+  const statuses = [503, 502, 503, 204, 502, 503];
   let claims = 0;
   server = createServer((req, res) => {
     const status = statuses[claims++] ?? 204;
@@ -255,7 +279,7 @@ test("a control plane that keeps failing claims is reported once, and again afte
   while (claims < statuses.length + 1) await new Promise((r) => setTimeout(r, 5));
   stop.abort();
   await looping;
-  expect(reports).toEqual(["claim failed: HTTP 503 from /api/runner/claim", "claim failed: HTTP 503 from /api/runner/claim"]);
+  expect(reports).toEqual(["claim failed: HTTP 503 from /api/runner/claim", "claim failed: HTTP 502 from /api/runner/claim"]);
 });
 
 test("a completion the control plane refuses is reported, masking the job's secrets its answer echoes", async () => {
