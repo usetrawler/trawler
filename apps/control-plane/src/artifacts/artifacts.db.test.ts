@@ -230,10 +230,11 @@ test("a file whose answer never came back is discarded, logged and cleaned up la
 test("a file still on its way to the bucket counts toward the cap but has no link, and a row left on its way past the grace period is cleaned up", async () => {
   const job = await leasedJob();
   let arrive = () => {};
+  const arrived = new Promise<void>((resolve) => (arrive = resolve));
   const slow: ArtifactStore = {
     ...store,
     put: async (key, bytes, type) => {
-      await new Promise<void>((resolve) => (arrive = resolve));
+      await arrived;
       await store.put(key, bytes, type);
     },
   };
