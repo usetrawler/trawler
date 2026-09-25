@@ -1,4 +1,3 @@
-import { inspect } from "node:util";
 import * as Sentry from "@sentry/nextjs";
 import { MIN_SECRET_LENGTH, SecretScrubber } from "@usetrawler/core/secrets";
 
@@ -46,31 +45,6 @@ export function sharedScrubber(): SecretScrubber {
   return shared;
 }
 
-function scrubbedError(original: Error, scrubber: SecretScrubber): Error {
-  const error = new Error(scrubber.scrub(original.message));
-  error.name = original.name;
-  error.stack = original.stack === undefined ? undefined : scrubber.scrub(original.stack);
-  return error;
-}
-
-const CONSOLE_LEVELS = ["log", "info", "warn", "error", "debug"] as const;
-let consoleScrubbed = false;
-
-export function scrubConsole(scrubber: SecretScrubber = sharedScrubber()): void {
-  if (consoleScrubbed) return;
-  consoleScrubbed = true;
-  for (const level of CONSOLE_LEVELS) {
-    const write = console[level].bind(console);
-    console[level] = (...args: unknown[]) =>
-      write(...args.map((arg) => {
-        if (typeof arg === "string") return scrubber.scrub(arg);
-        if (arg instanceof Error) return scrubbedError(arg, scrubber);
-        if (arg !== null && typeof arg === "object") return scrubber.scrub(inspect(arg, { depth: 6 }));
-        return arg;
-      }));
-  }
-}
-
 export interface LogFields {
   orgId?: string;
   runId?: string;
@@ -90,9 +64,11 @@ async function currentRequestId(): Promise<string | undefined> {
   }
 }
 
-function describe(err: unknown): Record<string, unknown> | undefined {
-  if (err === undefined) return undefined;
-  if (err instanceof Error) return { name: err.name, message: err.message, stack: err.stack };
+const MAX_CAUSES = 5;
+
+function describe(err: unknown, depth = 0): Record<string, unknown> | undefined {
+  if (err === undefined || depth > MAX_CAUSES) return undefined;
+  if (err instanceof Error) return { name: err.name, message: err.message, stack: err.stack, cause: describe(err.cause, depth + 1) };
   return { message: String(err) };
 }
 
@@ -116,7 +92,7 @@ export async function writeLog(level: "error" | "info", message: string, fields:
 export async function logError(message: string, fields: LogFields = {}, scrubber: SecretScrubber = sharedScrubber()): Promise<void> {
   const record = await writeLog("error", message, fields, scrubber);
   const tags = Object.fromEntries(["org_id", "run_id", "job_id", "request_id"].filter((k) => typeof record[k] === "string").map((k) => [k, record[k] as string]));
-  const error = fields.err instanceof Error ? scrubbedError(fields.err, scrubber) : new Error(scrubber.scrub(message));
+  const error = fields.err instanceof Error ? fields.err : new Error(message);
   Sentry.withScope((scope) => {
     scope.setTags(tags);
     if (!(fields.err instanceof Error)) scope.setFingerprint(["logged", message]);

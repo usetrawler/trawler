@@ -32,6 +32,7 @@ test("without a DSN register scrubs the console and starts no Sentry", () => {
 });
 
 test("with a DSN register starts Sentry with the server options", () => {
+  vi.stubEnv("NEXT_RUNTIME", "nodejs");
   vi.stubEnv("SENTRY_DSN", "https://public@sentry.test/1");
   vi.stubEnv("RAILWAY_ENVIRONMENT_NAME", "staging");
   register();

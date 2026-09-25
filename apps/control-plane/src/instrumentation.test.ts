@@ -61,7 +61,7 @@ const page = (meta: Record<string, string> | undefined) => ({
 });
 
 test("the browser reads the DSN, environment and commit the layout renders, and starts nothing without them", () => {
-  const env = { SENTRY_DSN: "https://public@sentry.test/1", RAILWAY_ENVIRONMENT_NAME: "production", TRAWLER_COMMIT: "c0ffee", BETTER_AUTH_SECRET: "a".repeat(40) };
+  const env = { SENTRY_DSN: "https://public@sentry.test/1", RAILWAY_ENVIRONMENT_NAME: "production", NODE_ENV: "development", TRAWLER_COMMIT: "c0ffee", BETTER_AUTH_SECRET: "a".repeat(40) };
   expect(sentryMeta({})).toBeUndefined();
   expect(readBrowserSentryConfig(page(sentryMeta(env)))).toEqual({ dsn: "https://public@sentry.test/1", environment: "production", release: "c0ffee" });
   expect(browserSentryConfig(env)).toEqual({ dsn: "https://public@sentry.test/1", environment: "production", release: "c0ffee" });

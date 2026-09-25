@@ -20,19 +20,24 @@ const ENV = {
 
 let lines: string[];
 const sent: string[] = [];
-const events = () => sent.map((envelope) => JSON.parse(envelope)[1][0][1] as Record<string, unknown> & { exception: { values: Array<{ value: string }> } });
+const everything: string[] = [];
+type SentException = { value: string; stacktrace?: { frames?: Array<{ function?: string }> } };
+const events = () => sent.map((envelope) => JSON.parse(envelope)[1][0][1] as Record<string, unknown> & { exception: { values: SentException[] } });
 
 beforeAll(() => {
+  vi.stubEnv("SENTRY_TRACES_SAMPLE_RATE", "1");
   Sentry.init({
     ...serverSentryOptions({ ...ENV, SENTRY_DSN: "https://public@sentry.test/1", RAILWAY_ENVIRONMENT_NAME: "staging", NODE_ENV: "production", TRAWLER_COMMIT: "c0ffee" })!,
     transport: () => ({
       send: async (envelope: unknown) => {
+        everything.push(JSON.stringify(envelope));
         if (JSON.stringify(envelope).includes('"type":"event"')) sent.push(JSON.stringify(envelope));
         return {};
       },
       flush: async () => true,
     }),
   });
+  vi.unstubAllEnvs();
 });
 
 afterAll(() => Sentry.close());
@@ -40,6 +45,7 @@ afterAll(() => Sentry.close());
 beforeEach(() => {
   lines = [];
   sent.length = 0;
+  everything.length = 0;
   Sentry.getIsolationScope().clearBreadcrumbs();
   Sentry.getCurrentScope().clearBreadcrumbs();
   vi.spyOn(console, "error").mockImplementation((line: unknown) => void lines.push(String(line)));
@@ -48,12 +54,17 @@ beforeEach(() => {
 
 afterEach(() => vi.restoreAllMocks());
 
-test("every secret the control plane holds is masked: previous master keys one by one, and the database password", () => {
-  const masked = envScrubber(ENV).scrub(`${Object.values(ENV).filter((v) => !v.startsWith("postgres") && !v.includes(",")).join(" | ")}|${OLDER_KEY}|${"p".repeat(24)}|`);
-  for (const secret of [SECRET, "a".repeat(40), "r".repeat(40), "s".repeat(40), "g".repeat(40), "o".repeat(40), OLDER_KEY, "p".repeat(24)]) {
-    expect(masked).not.toContain(secret);
-  }
-  expect(envScrubber(ENV).scrub(`reached postgres.railway.internal with ${OLD_KEY}`)).toBe("reached postgres.railway.internal with •••");
+test("every secret the control plane holds is masked: each secret variable, previous master keys one by one, and the database password", () => {
+  const scrubber = envScrubber(ENV);
+  const secrets = Object.entries(ENV).filter(([name]) => name !== "DATABASE_URL" && name !== "TRAWLER_PREVIOUS_MASTER_KEYS");
+  expect(secrets.map(([name]) => name)).toContain("TRAWLER_MASTER_KEY");
+  for (const [name, value] of secrets) expect(scrubber.scrub(`${name} is ${value}.`)).toBe(`${name} is •••.`);
+  for (const secret of [OLD_KEY, OLDER_KEY, "p".repeat(24)]) expect(scrubber.scrub(`reached postgres.railway.internal with ${secret}`)).toBe("reached postgres.railway.internal with •••");
+});
+
+test("a percent-encoded database password is masked as written in the URL and as the database receives it", () => {
+  const scrubber = envScrubber({ DATABASE_URL: "postgres://app:p%40ss-w0rd%2F12@db.test:5432/app" });
+  expect(scrubber.scrub("url p%40ss-w0rd%2F12, password p@ss-w0rd/12")).toBe("url •••, password •••");
 });
 
 test("a database password pg accepts but that is not valid percent-encoding is masked instead of breaking every log call", () => {
@@ -86,6 +97,13 @@ test("Sentry sends errors only: nothing about users, cookies, headers, bodies, q
   expect(options.tracePropagationTargets).toEqual([]);
   expect(options.enableRuntimeChannelInjection).toBe(false);
   expect(options.beforeSendTransaction!({ type: "transaction" }, {})).toBeNull();
+});
+
+test("no span or transaction leaves, even with SENTRY_TRACES_SAMPLE_RATE set in the environment", async () => {
+  Sentry.startSpan({ name: `GET /api/auth/callback/github?code=${SECRET}`, forceTransaction: true }, () => undefined);
+  await Sentry.flush(1000);
+  expect(everything.filter((envelope) => /"type":"(span|transaction)"/.test(envelope))).toEqual([]);
+  expect(everything.join("\n")).not.toContain(SECRET);
 });
 
 test("without a DSN Sentry is never started", () => {
@@ -124,6 +142,23 @@ test("a secret only the call knows, like a password being added, is masked in th
   expect(events()[0]!.exception.values[0]!.value).toBe("duplicate key for account with password •••");
   expect(JSON.stringify(events()[0]!.breadcrumbs)).toContain("inserting an account with •••");
   expect(sent[0]).not.toContain(password);
+});
+
+function unreachableProvider(): Error {
+  return new Error("fetch failed", { cause: Object.assign(new Error(`getaddrinfo ENOTFOUND ${SECRET}.test`), { code: "ENOTFOUND" }) });
+}
+
+test("a logged error keeps its cause and where it was thrown, in the log line and in Sentry, with no secret", async () => {
+  await logError("setup failed", { orgId: "org-1", err: unreachableProvider() }, envScrubber(ENV));
+  await Sentry.flush(1000);
+  const record = JSON.parse(lines[0]!);
+  expect(record.error).toMatchObject({ name: "Error", message: "fetch failed", cause: { name: "Error", message: "getaddrinfo ENOTFOUND •••.test" } });
+  expect(record.error.stack).toContain("at unreachableProvider ");
+  const values = events()[0]!.exception.values;
+  expect(values.map((v) => v.value)).toEqual(["getaddrinfo ENOTFOUND •••.test", "fetch failed"]);
+  expect(values.at(-1)!.stacktrace!.frames!.map((f) => f.function)).toContain("unreachableProvider");
+  expect(sent[0]).not.toContain(SECRET);
+  expect(lines[0]).not.toContain(SECRET);
 });
 
 test("a failure logged without an error object is its own Sentry issue", async () => {

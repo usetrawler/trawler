@@ -15,6 +15,7 @@ export function serverSentryOptions(env: Env = process.env): NodeOptions | undef
     dataCollection: DATA_COLLECTION,
     tracePropagationTargets: [],
     enableRuntimeChannelInjection: false,
+    traceLifecycle: "static",
     beforeSend: (event) => scrubber.scrub(event),
     beforeSendTransaction: () => null,
   };

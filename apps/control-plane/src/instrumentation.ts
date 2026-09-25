@@ -1,11 +1,12 @@
 import * as Sentry from "@sentry/nextjs";
+import { scrubConsole } from "@usetrawler/core/secrets";
 import type { Instrumentation } from "next";
-import { scrubConsole, writeLog } from "./server/log.ts";
+import { sharedScrubber, writeLog } from "./server/log.ts";
 import { serverSentryOptions } from "./server/sentry.ts";
 
 export function register(): void {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
-  scrubConsole();
+  scrubConsole(sharedScrubber());
   const options = serverSentryOptions();
   if (options) Sentry.init(options);
 }

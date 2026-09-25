@@ -1,3 +1,5 @@
+import { format, inspect, type InspectOptions } from "node:util";
+
 const MASK = "•••";
 export const MIN_SECRET_LENGTH = 8;
 
@@ -102,4 +104,18 @@ export class SecretScrubber {
       ancestors.delete(value);
     }
   }
+}
+
+const CONSOLE_LEVELS = ["log", "info", "warn", "error", "debug"] as const;
+let consoleScrubbed = false;
+
+export function scrubConsole(scrubber: Pick<SecretScrubber, "scrub">): void {
+  if (consoleScrubbed) return;
+  consoleScrubbed = true;
+  for (const level of CONSOLE_LEVELS) {
+    const write = console[level].bind(console);
+    console[level] = (...args: unknown[]) => write(scrubber.scrub(format(...args)));
+  }
+  console.dir = (item: unknown, options?: InspectOptions) => console.log(inspect(item, { customInspect: false, ...options }));
+  console.dirxml = (...data: unknown[]) => console.log(...data);
 }
