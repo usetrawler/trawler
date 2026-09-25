@@ -39,6 +39,14 @@ test("a signed-in person is a member of the workspace the membership check retur
   expect(state.checked).toEqual([found.session]);
 });
 
+test("a plain member stays a plain member, and does not manage the model key", async () => {
+  state.found = found;
+  state.workspace = { orgId: "org-1", orgName: "Acme", role: "member" };
+  const member = await signedInMember(new Headers());
+  expect(member).toEqual({ userId: "u1", email: "ana@acme.test", orgId: "org-1", orgName: "Acme", role: "member" });
+  expect(canManageBilling(member!)).toBe(false);
+});
+
 test("a signed-in person the membership check finds in no workspace is no member", async () => {
   state.found = found;
   expect(await signedInMember(new Headers())).toBeNull();

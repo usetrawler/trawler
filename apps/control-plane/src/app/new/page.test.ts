@@ -23,6 +23,7 @@ test("a visitor who is not signed in, or no longer belongs to any workspace, is 
 
 test("the new project page is marked as the one the person is on, and Sign out is in the header once", async () => {
   const html = renderToStaticMarkup(await NewProjectPage());
+  expect(html).toContain("Acme workspace");
   expect(html).toMatch(/<a href="\/new" aria-current="page"[^>]*>New project<\/a>/);
   expect(html.match(/>Sign out</g)).toHaveLength(1);
   expect(html.indexOf(">Sign out<")).toBeLessThan(html.indexOf("</header>"));

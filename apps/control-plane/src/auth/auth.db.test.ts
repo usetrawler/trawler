@@ -158,7 +158,8 @@ const activeOf = async (sessionId: string) => (await sql<{ active: string | null
 
 test("a member keeps the workspace their session is in, with its name and their role", async () => {
   const session = sessionOf((await signIn("stays@acme.test")).session);
-  expect(await auth.workspaceOf(session)).toEqual({ orgId: session.activeOrganizationId, orgName: "stays-org", role: "owner" });
+  await sql`update organization set name = 'Renamed & Co' where id = ${session.activeOrganizationId}`.execute(t.db);
+  expect(await auth.workspaceOf(session)).toEqual({ orgId: session.activeOrganizationId, orgName: "Renamed & Co", role: "owner" });
   expect(await activeOf(session.id)).toEqual([{ active: session.activeOrganizationId }]);
 });
 

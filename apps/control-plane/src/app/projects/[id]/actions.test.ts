@@ -67,3 +67,10 @@ test("a key typed on the page of a project outside the member's workspace is nei
   expect(state.tenants).toEqual(["org-2"]);
   expect([state.keyChecks, state.keysSaved]).toEqual([0, 0]);
 });
+
+test("a malformed project id starts nothing, checks and saves no key, and reads nothing", async () => {
+  state.member = { userId: "owner-1", email: "owner@acme.test", orgId: "org-1", orgName: "Acme", role: "owner" };
+  expect(await startRunAction({}, startForm({ projectId: "not-a-uuid", apiKey: KEY }))).toEqual({ error: "The run could not start. Try again." });
+  expect(state.tenants).toEqual([]);
+  expect([state.keyChecks, state.keysSaved]).toEqual([0, 0]);
+});

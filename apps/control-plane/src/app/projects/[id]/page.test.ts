@@ -49,6 +49,7 @@ test("a project with runs leads from its plan to all its runs", async () => {
 
 test("a project without runs has no link to an empty list", async () => {
   const html = await render();
+  expect(html).toContain("Acme workspace");
   expect(html).toContain(">Acme</h1>");
   expect(html).not.toContain(`/projects/${ID}/runs`);
 });

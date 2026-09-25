@@ -34,6 +34,7 @@ beforeEach(() => {
 
 test("the history is read for the signed-in workspace, from the page the address asks for", async () => {
   const html = renderToStaticMarkup(await open(ID, "40"));
+  expect(html).toContain("Acme workspace");
   expect(state.tenants).toEqual(["org-1"]);
   expect(state.asked).toEqual([{ orgId: "org-1", projectId: ID, page: { before: 40 } }]);
   expect(html).toContain("There are no older runs.");
