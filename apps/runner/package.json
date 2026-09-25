@@ -8,6 +8,7 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
+    "@sentry/node": "^11.0.0",
     "@usetrawler/core": "^0.0.0",
     "@usetrawler/protocol": "^0.0.0",
     "ai": "^7.0.114",
