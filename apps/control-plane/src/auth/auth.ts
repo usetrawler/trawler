@@ -5,6 +5,7 @@ import { Kysely, PostgresDialect, sql, type Transaction } from "kysely";
 import pg from "pg";
 import { onboard, type OnboardingStore } from "./onboarding.ts";
 import { devSignIn, organizationPlugin } from "./plugins.ts";
+import { logError } from "../server/log.ts";
 
 export interface AuthOptions {
   pool: pg.Pool;
@@ -99,8 +100,7 @@ export function createAuth(options: AuthOptions) {
               const user = await db.selectFrom("user").selectAll().where("id", "=", session.userId).executeTakeFirstOrThrow();
               return { data: { ...session, activeOrganizationId: await onboardSerialised(user) } };
             } catch (err) {
-              const e = err as { code?: unknown; message?: unknown };
-              console.error("workspace setup failed", { code: e.code, message: e.message });
+              await logError("workspace setup failed", { err, code: (err as { code?: unknown }).code });
               throw new APIError("INTERNAL_SERVER_ERROR", { code: "WORKSPACE_SETUP_FAILED", message: "workspace_setup_failed" });
             }
           },

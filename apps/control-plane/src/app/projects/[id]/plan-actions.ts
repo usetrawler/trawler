@@ -6,6 +6,7 @@ import { withOrg } from "../../../db/tenancy.ts";
 import { AccountLimit, addAccount, projectForEditing, removeAccount, replacePlan, UnknownAccount } from "../../../projects/projects.ts";
 import { getAuth } from "../../../server/auth.ts";
 import { getDb, getKeyring } from "../../../server/db.ts";
+import { logError, scrubberWith } from "../../../server/log.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const text = (schema: z.ZodString) => z.string().trim().pipe(schema);
@@ -46,7 +47,7 @@ export async function savePlanAction(projectId: string, plan: unknown): Promise<
     return { ok: true };
   } catch (err) {
     if (err instanceof UnknownAccount) return { ok: false, error: "An account you picked was removed. Choose another one and save again.", accounts: await accountsOf(orgId, projectId) };
-    console.error("plan could not be saved", { message: err instanceof Error ? err.message : String(err) });
+    await logError("plan could not be saved", { orgId, projectId, err });
     return { ok: false, error: "The plan could not be saved. Try again." };
   }
 }
@@ -64,7 +65,7 @@ export async function addAccountAction(projectId: string, input: { username: str
     return { ok: true, ref, accounts: await accountsOf(orgId, projectId) };
   } catch (err) {
     if (err instanceof AccountLimit) return { ok: false, error: err.message.replace(/^a/, "A") + "." };
-    console.error("account could not be added", { message: err instanceof Error ? err.message : String(err) });
+    await logError("account could not be added", { orgId, projectId, err }, scrubberWith([parsed.data.password]));
     return { ok: false, error: "The account could not be added." };
   }
 }

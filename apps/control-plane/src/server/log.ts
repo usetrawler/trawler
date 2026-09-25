@@ -15,11 +15,16 @@ function databasePassword(url: string | undefined): string | undefined {
 }
 
 export function envScrubber(env: Env = process.env): SecretScrubber {
+  return scrubberWith([], env);
+}
+
+export function scrubberWith(extra: Array<string | undefined>, env: Env = process.env): SecretScrubber {
   const scrubber = new SecretScrubber();
   const values = [
     ...SECRET_VARIABLES.map((name) => env[name]),
     ...(env.TRAWLER_PREVIOUS_MASTER_KEYS ?? "").split(","),
     databasePassword(env.DATABASE_URL),
+    ...extra,
   ];
   for (const value of values) {
     const secret = value?.trim();
@@ -80,6 +85,9 @@ export async function writeLog(level: "error" | "info", message: string, fields:
 export async function logError(message: string, fields: LogFields = {}, scrubber: SecretScrubber = sharedScrubber()): Promise<void> {
   const record = await writeLog("error", message, fields, scrubber);
   const tags = Object.fromEntries(["org_id", "run_id", "job_id", "request_id"].filter((k) => typeof record[k] === "string").map((k) => [k, record[k] as string]));
-  const error = fields.err instanceof Error ? fields.err : new Error(message);
+  const original = fields.err instanceof Error ? fields.err : undefined;
+  const error = new Error(scrubber.scrub(original?.message ?? message));
+  error.name = original?.name ?? "Error";
+  if (original?.stack) error.stack = scrubber.scrub(original.stack);
   Sentry.captureException(error, { tags, extra: { message } });
 }

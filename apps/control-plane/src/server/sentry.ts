@@ -1,4 +1,5 @@
 import type { NodeOptions } from "@sentry/nextjs";
+import { DATA_COLLECTION } from "../lib/browser-sentry.ts";
 import { envScrubber } from "./log.ts";
 
 type Env = Record<string, string | undefined>;
@@ -11,7 +12,7 @@ export function serverSentryOptions(env: Env = process.env): NodeOptions | undef
     dsn,
     environment: env.RAILWAY_ENVIRONMENT_NAME || env.NODE_ENV,
     release: env.TRAWLER_COMMIT || undefined,
-    sendDefaultPii: false,
+    dataCollection: DATA_COLLECTION,
     beforeSend: (event) => scrubber.scrub(event),
     beforeBreadcrumb: (breadcrumb) => scrubber.scrub(breadcrumb),
   };

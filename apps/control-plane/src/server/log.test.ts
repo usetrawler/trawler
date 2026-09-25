@@ -1,6 +1,6 @@
 import * as Sentry from "@sentry/nextjs";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { envScrubber, logError, writeLog } from "./log.ts";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
+import { envScrubber, logError, scrubberWith, writeLog } from "./log.ts";
 import { serverSentryOptions } from "./sentry.ts";
 
 const SECRET = "sk-or-v1-" + "5".repeat(48);
@@ -17,17 +17,31 @@ const ENV = {
 };
 
 let lines: string[];
+const sent: string[] = [];
+
+beforeAll(() => {
+  Sentry.init({
+    ...serverSentryOptions({ ...ENV, SENTRY_DSN: "https://public@sentry.test/1", RAILWAY_ENVIRONMENT_NAME: "staging", TRAWLER_COMMIT: "c0ffee" })!,
+    transport: () => ({
+      send: async (envelope: unknown) => {
+        if (JSON.stringify(envelope).includes('"type":"event"')) sent.push(JSON.stringify(envelope));
+        return {};
+      },
+      flush: async () => true,
+    }),
+  });
+});
+
+afterAll(() => Sentry.close());
 
 beforeEach(() => {
   lines = [];
+  sent.length = 0;
   vi.spyOn(console, "error").mockImplementation((line: unknown) => void lines.push(String(line)));
   vi.spyOn(console, "log").mockImplementation((line: unknown) => void lines.push(String(line)));
 });
 
-afterEach(async () => {
-  vi.restoreAllMocks();
-  await Sentry.close();
-});
+afterEach(() => vi.restoreAllMocks());
 
 test("every secret the control plane holds is masked, the database password included", () => {
   const scrubber = envScrubber(ENV);
@@ -57,23 +71,18 @@ test("a log line outside a request carries no request id and still works", async
   expect(record).not.toHaveProperty("org_id");
 });
 
+test("Sentry collects no user, cookie, header, body, query or local variable data", () => {
+  expect(serverSentryOptions({ SENTRY_DSN: "https://public@sentry.test/1" })!.dataCollection).toMatchObject({
+    userInfo: false, cookies: false, httpHeaders: false, httpBodies: [], urlQueryParams: false, stackFrameVariables: false,
+  });
+});
+
 test("without a DSN Sentry is never started", () => {
   expect(serverSentryOptions({ ...ENV })).toBeUndefined();
   expect(serverSentryOptions({ ...ENV, SENTRY_DSN: "  " })).toBeUndefined();
 });
 
 test("a logged error reaches Sentry with its ids as tags and without the secret", async () => {
-  const sent: string[] = [];
-  const options = serverSentryOptions({ ...ENV, SENTRY_DSN: "https://public@sentry.test/1", RAILWAY_ENVIRONMENT_NAME: "staging", TRAWLER_COMMIT: "c0ffee" })!;
-  Sentry.init({
-    ...options,
-    transport: () => ({
-      send: async (envelope) => {
-        if (JSON.stringify(envelope).includes('"type":"event"')) sent.push(JSON.stringify(envelope));
-      },
-      flush: async () => true,
-    }),
-  });
   await logError("run could not start", { orgId: "org-1", runId: "run-1", err: new Error(`provider said no to ${SECRET}`) }, envScrubber(ENV));
   await Sentry.flush(1000);
   expect(sent).toHaveLength(1);
@@ -83,4 +92,16 @@ test("a logged error reaches Sentry with its ids as tags and without the secret"
   expect(sent[0]).toContain('"release":"c0ffee"');
   expect(sent[0]).toContain("provider said no to •••");
   expect(sent[0]).not.toContain(SECRET);
+});
+
+test("a secret only the call knows, like a password being added, is masked in the log line and in Sentry", async () => {
+  const password = "hunter2-" + "q".repeat(20);
+  const failure = new Error(`duplicate key for account with password ${password}`);
+  await logError("account could not be added", { orgId: "org-1", err: failure }, scrubberWith([password], ENV));
+  await Sentry.flush(1000);
+  expect(lines[0]).toContain("password •••");
+  expect(lines[0]).not.toContain(password);
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).toContain("password •••");
+  expect(sent[0]).not.toContain(password);
 });

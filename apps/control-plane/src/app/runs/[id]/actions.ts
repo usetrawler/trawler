@@ -5,6 +5,7 @@ import { cancelRun, CannotJudgeAgain, judgeAgain } from "../../../runs/runs.ts";
 import { getAuth } from "../../../server/auth.ts";
 import { betaRefusal } from "../../../server/beta.ts";
 import { getDb, getKeyring } from "../../../server/db.ts";
+import { logError } from "../../../server/log.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -32,7 +33,7 @@ export async function judgeAgainAction(runId: string, findingKey: string): Promi
     return {};
   } catch (err) {
     if (err instanceof CannotJudgeAgain) return { error: err.message };
-    console.error("judge again could not start", { runId, message: err instanceof Error ? err.message : String(err) });
+    await logError("judge again could not start", { orgId, runId, err });
     return { error: "The judge could not be started. Try again." };
   }
 }

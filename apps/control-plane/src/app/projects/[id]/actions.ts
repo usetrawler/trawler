@@ -12,6 +12,7 @@ import { canManageBilling, getAuth } from "../../../server/auth.ts";
 import { betaRefusal } from "../../../server/beta.ts";
 import { getDb, getKeyring } from "../../../server/db.ts";
 import { readEnv } from "../../../server/env.ts";
+import { logError, scrubberWith } from "../../../server/log.ts";
 
 export interface StartState {
   error?: string;
@@ -135,7 +136,7 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
     );
     runId = run.id;
   } catch (err) {
-    console.error("run could not start", { message: err instanceof Error ? err.message : String(err) });
+    await logError("run could not start", { orgId, projectId, err }, scrubberWith([endpoint.key]));
     const keyHint = await withOrg(getDb(), orgId, (tx) => modelKeyHint(tx, orgId));
     return { error: "The run could not start. Try again.", ...(keyHint ? { keyHint } : {}) };
   }
