@@ -85,6 +85,13 @@ describe("a whole run", () => {
     expect(summary).toMatchObject({ status: "succeeded", costUsd: 0.031 });
     expect(summary!.findings).toEqual([expect.objectContaining({ key: "ana:f1", personaKey: "ana", verdict: "confirmed", replay: { completed: true, observed: "Internal Server Error", blockedAt: null } })]);
     expect(summary!.goals).toEqual([{ personaKey: "ana", goal: "g", status: "failed", note: "500" }]);
+    expect(summary!.personas).toEqual([{ id: "ana", name: "Ana" }, { id: "lee", name: "Lee" }]);
+    expect(summary!.goalTexts).toEqual([{ id: "g", instruction: "Get in." }]);
+    expect(summary!.activity.map((a) => [a.personaKey, a.text])).toEqual([
+      [null, "Judge: confirmed"],
+      ["ana", "Goal not reached: Get in."],
+      ["ana", "Reported a defect: Broken save"],
+    ]);
   });
 
   test("a defect whose replay wrote no report is not judged", async () => {
