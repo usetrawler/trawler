@@ -76,6 +76,10 @@ beforeAll(async () => {
         return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password" oninput="this.value = this.value.slice(0, 6); this.form.submit()"></form>`);
       case "/encode":
         return html(`<input aria-label="Password" type="password"><button onclick="const p = document.querySelector('input'); p.value = btoa(p.value)">Encode</button>`);
+      case "/copy-away":
+        return html(`<input aria-label="Password" type="password" maxlength="12" oninput="document.getElementById('copy').textContent = 'You typed ' + this.value; this.value = ''; alert('Saved')"><p id="copy"></p>`);
+      case "/empties":
+        return html(`<input aria-label="Password" type="password" oninput="this.value = ''">`);
       case "/echo-password": {
         let body = "";
         req.on("data", (chunk) => (body += chunk));
@@ -646,6 +650,26 @@ describe("password fields", () => {
       const shown = await snapshot(b);
       expect(shown).not.toContain(Buffer.from(PASSWORD).toString("base64"));
       expect(shown).toContain("•••");
+    });
+  }, 60_000);
+
+  test("a password a shorter maximum cuts is hidden even when the field hands it on and empties before it can be read", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/copy-away`);
+      const snap = await snapshot(b);
+      await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password");
+      await b.tools.browser_handle_dialog!.execute!({ accept: true }, ctx);
+      const shown = await snapshot(b);
+      expect(shown).toContain("You typed •••");
+      expect(shown).not.toContain("Kx7mPq2Rz9Lw");
+    });
+  }, 60_000);
+
+  test("a field that throws away what was typed is reported as not keeping the password", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/empties`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("failed: the field did not keep the password");
     });
   }, 60_000);
 
