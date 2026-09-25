@@ -74,7 +74,14 @@ export function tallyStep(
   return cost;
 }
 
+const lastAttempt = (err: unknown) => (RetryError.isInstance(err) ? err.lastError : err);
+
 export function refusedForBudget(err: unknown): boolean {
-  const last = RetryError.isInstance(err) ? err.lastError : err;
+  const last = lastAttempt(err);
   return APICallError.isInstance(last) && last.statusCode === 402 && (last.data as { error?: { type?: unknown } } | undefined)?.error?.type === JOB_STOPPED;
+}
+
+export function failureMessage(err: unknown): string {
+  const last = lastAttempt(err);
+  return last instanceof Error ? last.message : String(last);
 }

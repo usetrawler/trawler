@@ -2,7 +2,7 @@ import { generateText, tool, type LanguageModel, type ToolSet } from "ai";
 import { z } from "zod";
 import { VerdictSchema, type Finding, type JobStopReason, type JobUsage, type ProjectConfig, type ReplayObservation, type RunEventInput, type Verdict } from "@usetrawler/protocol";
 import { browserQueue, runAgentLoop } from "./agent-loop.ts";
-import { type Budget, refusedForBudget, tallyStep } from "./llm.ts";
+import { type Budget, failureMessage, refusedForBudget, tallyStep } from "./llm.ts";
 import { judgePrompt, replayPrompt } from "./prompts.ts";
 import type { SecretScrubber } from "./secrets.ts";
 import { newSessionState, sessionTools, type FillField } from "./session-tools.ts";
@@ -160,7 +160,7 @@ export async function judge(opts: {
       }
     } catch (err) {
       stoppedBy = refusedForBudget(err) ? "budget" : "error";
-      error = opts.scrubber.scrub(err instanceof Error ? err.message : String(err));
+      error = opts.scrubber.scrub(failureMessage(err));
     }
   }
   if (verdict) emit({ type: "verdict", jobId, findingId: opts.finding.id, verdict, observed: opts.observation.observed });

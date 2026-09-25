@@ -1,7 +1,7 @@
 import { generateText, RetryError, streamText } from "ai";
 import { expect, test } from "vitest";
 import { JOB_STOPPED } from "@usetrawler/protocol";
-import { Budget, createModel, refusedForBudget, stepCost } from "./llm.ts";
+import { Budget, createModel, failureMessage, refusedForBudget, stepCost } from "./llm.ts";
 import { scriptedModel, text, toolCall } from "./testing.ts";
 
 test("stepCost reads OpenRouter usage accounting", () => {
@@ -171,9 +171,17 @@ test("only a 402 the proxy marks as the job being stopped counts as the budget r
   expect(refusedForBudget(await refusal(400, { code: 400, message: "bad request", type: JOB_STOPPED }))).toBe(false);
 });
 
-test("a refusal that comes back on a retried call keeps its meaning", async () => {
+test("a refusal that comes back on a retried call keeps its meaning and its reason", async () => {
   const stopped = await refusal(402, { code: 402, message: "the run is no longer active", type: JOB_STOPPED }, [busy()]);
   expect(RetryError.isInstance(stopped)).toBe(true);
   expect(refusedForBudget(stopped)).toBe(true);
-  expect(refusedForBudget(await refusal(402, { code: 402, message: "the provider refused the workspace key; replace it on the plan page" }, [busy()]))).toBe(false);
+  const keyRefused = await refusal(402, { code: 402, message: "the provider refused the workspace key; replace it on the plan page" }, [busy()]);
+  expect(refusedForBudget(keyRefused)).toBe(false);
+  expect(failureMessage(keyRefused)).toBe("the provider refused the workspace key; replace it on the plan page");
+});
+
+test("a 402 without a readable body is not taken for the budget", async () => {
+  const model = createModel({ modelId: "m", apiKey: "k", baseURL: "https://cp.test/api/llm/v1", fetch: async () => new Response("<html>Payment Required</html>", { status: 402, headers: { "content-type": "text/html" } }) });
+  const err = await generateText({ model, prompt: "hello" }).then(() => expect.unreachable("the call was refused"), (e: unknown) => e);
+  expect(refusedForBudget(err)).toBe(false);
 });

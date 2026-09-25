@@ -122,8 +122,8 @@ test("a judge the provider refused the key for says so, and can be judged again"
 });
 
 test("a judge stopped by the proxy or the cap says why, and offers judging again only while the cap has room", () => {
-  const refused = finished({ jobs: [judged("succeeded", { stopped_by: "budget", error: "the provider account behind the workspace key is out of credits" })], findings: [finding("ana:f1", "ana", replayed)] });
-  expect(refused.report.couldNotJudge).toEqual([expect.objectContaining({ reason: "Stopped: the provider account behind the workspace key is out of credits", action: "judge_again" })]);
+  const refused = finished({ jobs: [judged("succeeded", { stopped_by: "budget", error: "the run has spent its budget" })], findings: [finding("ana:f1", "ana", replayed)] });
+  expect(refused.report.couldNotJudge).toEqual([expect.objectContaining({ reason: "Stopped: the run has spent its budget", action: "judge_again" })]);
   const capped = finished({ status: "stopped_budget", costUsd: 2.01, jobs: [judged("succeeded", { stopped_by: "budget" })], findings: [finding("ana:f1", "ana", replayed)] });
   expect(capped.report.couldNotJudge).toEqual([expect.objectContaining({ reason: "The run's cap ran out before the judge answered.", action: "cap_spent" })]);
   const stopped = finished({ status: "cancelled", jobs: [judged("succeeded", { stopped_by: "budget", error: "the run is no longer active" })], findings: [finding("ana:f1", "ana", replayed)] });

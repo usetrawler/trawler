@@ -196,6 +196,8 @@ test("the proxy marks the 402s that mean the run stopped the job, and only those
   expect(await refusal()).toEqual({ code: 402, message: "the provider account behind the workspace key is out of credits" });
   await withOrg(t.db, "org-m", (tx) => setModelKey(tx, "org-m", { provider: "openai", key: "sk-proj-" + "m".repeat(40) }, "u", keys));
   expect(await refusal()).toEqual({ code: 402, message: "the workspace key changed to another provider or endpoint; start a new run" });
+  await sql`delete from credentials where org_id = 'org-m'`.execute(t.db);
+  expect(await refusal()).toEqual({ code: 402, message: "the workspace has no model key" });
   await withOrg(t.db, "org-m", (tx) => setModelKey(tx, "org-m", { provider: "openrouter", key: ORG_KEY }, "u", keys));
 
   await sql`update runs set cost_usd = budget_usd - 0.000001 where id = ${run.id}`.execute(t.db);

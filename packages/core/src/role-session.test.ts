@@ -338,6 +338,13 @@ describe("runRoleSession", () => {
     expect(result.error).toBeUndefined();
   });
 
+  test("a key refused on a retried model call ends the session with the proxy's reason, not the retry's wording", async () => {
+    const busy = new APICallError({ message: "one model call at a time per job", url: "https://cp.test/api/llm/v1/chat/completions", requestBodyValues: {}, statusCode: 429, responseHeaders: { "retry-after-ms": "1" } });
+    const model = scriptedModel([look, busy, proxyRefusal("the provider refused the workspace key; replace it on the plan page")]);
+    const { result } = await run(model).promise;
+    expect(result).toMatchObject({ stoppedBy: "error", error: "the provider refused the workspace key; replace it on the plan page" });
+  });
+
   test("the returned result is scrubbed too", async () => {
     const model = scriptedModel([
       look,
