@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -124,17 +124,29 @@ async function work(args: string[], deps: CliDeps, apiKey: () => string): Promis
   if (positionals.length > 0) throw new UsageError(`work takes no positional arguments, got ${positionals.join(" ")}`);
   const controlPlane = values["control-plane"];
   if (!controlPlane || !URL.canParse(controlPlane) || !/^https?:$/.test(new URL(controlPlane).protocol)) throw new UsageError("work needs --control-plane <http(s) address>");
+  const { protocol, hostname } = new URL(controlPlane);
+  if (protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(hostname)) throw new UsageError("work sends the runner token, so --control-plane must use https unless it is on this machine");
   const runnerToken = deps.env.TRAWLER_RUNNER_TOKEN?.trim();
   if (!runnerToken) throw new UsageError("TRAWLER_RUNNER_TOKEN is not set");
   const key = apiKey();
-  const outputDir = mkdtempSync(join(tmpdir(), "trawler-work-"));
   const workerDeps: WorkerDeps = {
     controlPlane,
     runnerToken,
     model: (modelId) => deps.model(modelId, key),
-    openBrowser: (project, { onBlocked, scrubber }) => deps.openBrowser({ project, outputDir, headless: true, onBlocked, scrubber }),
+    openBrowser: async (project, { onBlocked, scrubber }) => {
+      const outputDir = mkdtempSync(join(tmpdir(), "trawler-work-"));
+      const removeOutput = () => rmSync(outputDir, { recursive: true, force: true });
+      try {
+        const browser = await deps.openBrowser({ project, outputDir, headless: true, onBlocked, scrubber });
+        return { tools: browser.tools, fillField: (ref, text, kind) => browser.fillField(ref, text, kind), close: () => browser.close().finally(removeOutput) };
+      } catch (err) {
+        removeOutput();
+        throw err;
+      }
+    },
     log: deps.err,
     fetch: deps.fetchImpl,
+    secrets: [key, runnerToken],
   };
   if (values.once) {
     await workOnce(workerDeps);

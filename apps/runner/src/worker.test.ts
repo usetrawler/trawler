@@ -15,7 +15,7 @@ const baseJob = { jobId: "11111111-1111-4111-8111-111111111111", runId: "2222222
 let server: Server | undefined;
 afterEach(() => new Promise<void>((r) => (server ? server.close(() => r()) : r())));
 
-function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; failEvents?: number } = {}) {
+function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; failEvents?: number; eventsStatus?: number; completeStatus?: number } = {}) {
   const seen = { claims: 0, events: [] as Array<{ seq: number; type: string }>, completions: [] as unknown[], headers: [] as Array<string | undefined>, auth: [] as Array<string | undefined> };
   let batches = 0;
   let failures = opts.failEvents ?? 0;
@@ -32,13 +32,14 @@ function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; failEvents
       return res.end(JSON.stringify(job));
     }
     if (req.url?.endsWith("/events")) {
-      if (failures-- > 0) { res.statusCode = 503; return res.end("{}"); }
+      if (failures-- > 0) { res.statusCode = opts.eventsStatus ?? 503; return res.end("{}"); }
       batches++;
       seen.events.push(...body.events);
       return res.end(JSON.stringify({ cancel: opts.cancelAfter !== undefined && batches >= opts.cancelAfter }));
     }
     if (req.url?.endsWith("/complete")) {
       seen.completions.push(body);
+      if (opts.completeStatus) { res.statusCode = opts.completeStatus; return res.end("{}"); }
       return res.end(JSON.stringify({ ok: true }));
     }
     res.statusCode = 404;
@@ -124,4 +125,52 @@ test("a long quiet job keeps its lease with empty heartbeat batches", async () =
   await workOnce(deps(url, model, { heartbeatMs: 40, fetch: counting }));
   expect(beats).toBeGreaterThan(0);
   expect(seen.completions).toHaveLength(1);
+});
+
+const role = { ...baseJob, kind: "role_session", personaKey: "ana" };
+const endless = () => scriptedModel(Array.from({ length: 40 }, () => toolCall("note", { text: "still going" })));
+
+test("events the control plane keeps refusing stop the job instead of crashing the runner, and usage is still reported", async () => {
+  for (const eventsStatus of [401, 503]) {
+    const { url, seen } = await fakeControlPlane(role, { failEvents: 1000, eventsStatus });
+    const lines: string[] = [];
+    expect(await workOnce(deps(url, endless(), { attempts: 2, log: (l) => lines.push(l) }))).toBe("done");
+    expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "error", error: expect.stringMatching(/could not report events/) })]);
+    expect((seen.completions[0] as { usage: { steps: number } }).usage.steps).toBeLessThan(40);
+    expect(lines.some((l) => l.includes("could not report events"))).toBe(true);
+    await new Promise<void>((r) => server!.close(() => r()));
+    server = undefined;
+  }
+});
+
+test("a refused completion is logged, not reported as finished", async () => {
+  const { url } = await fakeControlPlane(role, { completeStatus: 400 });
+  const lines: string[] = [];
+  await workOnce(deps(url, scriptedModel([toolCall("finish", { summary: "done" })]), { log: (l) => lines.push(l) }));
+  expect(lines.some((l) => l.includes("could not report back") && l.includes("HTTP 400"))).toBe(true);
+  expect(lines.some((l) => l.includes("finished"))).toBe(false);
+});
+
+test("a very long model error is cut to what the protocol accepts", async () => {
+  const { url, seen } = await fakeControlPlane(role);
+  const failing = { specificationVersion: "v3", provider: "x", modelId: "x", supportedUrls: {}, doGenerate: async () => { throw new Error("provider said: " + "e".repeat(3000)); }, doStream: async () => { throw new Error("no"); } };
+  await workOnce(deps(url, failing as unknown as ReturnType<typeof scriptedModel>, { secrets: ["sk-or-secret-key-123456"] }));
+  const completion = seen.completions[0] as { error?: string };
+  expect(completion.error!.length).toBeLessThanOrEqual(2000);
+  const finished = seen.events.find((e) => e.type === "job_finished") as unknown as { error?: string } | undefined;
+  expect((finished?.error ?? "").length).toBeLessThanOrEqual(2000);
+});
+
+test("a job this runner cannot read is completed as an error, not left leased", async () => {
+  const { url, seen } = await fakeControlPlane({ ...role, kind: "time_travel" });
+  expect(await workOnce(deps(url, scriptedModel([])))).toBe("done");
+  expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "error", error: expect.stringMatching(/cannot read the job/) })]);
+});
+
+test("stopping the runner abandons a claim that is still waiting", async () => {
+  const stop = new AbortController();
+  const hanging: typeof fetch = (_url, init) => new Promise((_, reject) => init!.signal!.addEventListener("abort", () => reject(new Error("aborted"))));
+  const pending = workOnce(deps("http://127.0.0.1:1", scriptedModel([]), { fetch: hanging }), stop.signal);
+  stop.abort();
+  expect(await pending).toBe("idle");
 });
