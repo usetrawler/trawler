@@ -3,6 +3,7 @@ import type { Shell } from "../server/shell.ts";
 import { BrandMark } from "./brand-mark.tsx";
 import { DocsLink } from "./docs-link.tsx";
 import { SignOutButton } from "./sign-out-button.tsx";
+import { ThemeToggle } from "./theme-toggle.tsx";
 
 const STEPS = ["Product", "Plan", "Run"] as const;
 
@@ -68,6 +69,7 @@ export function AppShell({ shell, current, parent = false, step, wide = false, c
           <span className="sr-only md:hidden">Signed in as {user.name || user.email}</span>
           <span aria-hidden className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-full bg-ink font-mono text-[10px] text-paper max-[359px]:hidden md:hidden">{initials(user.name || user.email)}</span>
           <SignOutButton className="-my-2 shrink-0 py-2 font-mono text-xs tracking-[0.15em] text-muted uppercase hover:text-ink md:hidden" />
+          <ThemeToggle />
         </div>
       </header>
       <div className="md:grid md:grid-cols-[220px_minmax(0,1fr)]">

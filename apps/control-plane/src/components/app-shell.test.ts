@@ -106,6 +106,10 @@ describe("AppShell", () => {
     expect(html).not.toMatch(/\bmd:sticky\b/);
   });
 
+  it("offers the theme switch at the end of the header on every page", () => {
+    expect(render().match(/<header.*<\/header>/)?.[0]).toMatch(/<button type="button" aria-label="Theme: System\. Switch to Dark\."[^>]*><span aria-hidden="true">◐<\/span><\/button><\/div><\/header>$/);
+  });
+
   it("lets a keyboard skip the header and the panel", () => {
     const html = render();
     expect(html).toMatch(/^<div[^>]*><a href="#main" class="sr-only[^"]*focus:not-sr-only[^"]*\bfocus:px-4 focus:py-3">Skip to content<\/a>/);
