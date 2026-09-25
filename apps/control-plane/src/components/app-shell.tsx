@@ -3,15 +3,27 @@ import { BrandMark } from "./brand-mark.tsx";
 import { DocsLink } from "./docs-link.tsx";
 
 const STEPS = ["Product", "Plan", "Run"] as const;
+const NAV = [["projects", "/", "Projects"], ["new", "/new", "New project"]] as const;
 
-export function AppShell({ organization, email, step, children }: { organization: string; email: string; step?: 1 | 2 | 3; children: ReactNode }) {
+export function AppShell({ organization, email, step, current, children }: { organization: string; email: string; step?: 1 | 2 | 3; current?: "projects" | "new"; children: ReactNode }) {
   return (
     <div className="min-h-dvh">
-      <header className="flex items-center justify-between gap-4 border-b border-line px-4 py-3 md:px-8">
-        <a href="/new" className="flex items-center gap-2 text-lg font-bold tracking-tight">
-          <BrandMark />
-          trawler
-        </a>
+      <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-line px-4 py-3 md:px-8">
+        <div className="flex items-center gap-6">
+          <a href="/" className="flex items-center gap-2 text-lg font-bold tracking-tight">
+            <BrandMark />
+            trawler
+          </a>
+          <nav aria-label="Main">
+            <ul className="flex items-center gap-4">
+              {NAV.map(([key, href, label]) => (
+                <li key={key}>
+                  <a href={href} aria-current={current === key ? "page" : undefined} className="-my-2 block py-2 font-mono text-xs tracking-[0.15em] text-muted uppercase hover:text-ink aria-[current=page]:text-ink">{label}</a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </div>
         <div className="flex min-w-0 items-center gap-3 text-sm">
           <DocsLink className="-my-2 mr-3 shrink-0 py-2 font-mono text-xs tracking-[0.15em] text-muted uppercase hover:text-ink">Docs</DocsLink>
           <span className="hidden truncate text-muted sm:inline">{email}</span>

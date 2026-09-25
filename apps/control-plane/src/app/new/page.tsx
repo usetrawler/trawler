@@ -14,7 +14,7 @@ export default async function NewProjectPage() {
   if (!session) redirect("/sign-in");
   const organization = await auth.api.getFullOrganization({ headers: requestHeaders });
   return (
-    <AppShell organization={organization?.name ?? "Workspace"} email={session.user.email} step={1}>
+    <AppShell organization={organization?.name ?? "Workspace"} email={session.user.email} step={1} current="new">
       <div className="flex flex-col gap-8">
         <div className="flex flex-col gap-4">
           <p className="font-mono text-xs tracking-[0.2em] text-action uppercase">01 / Product</p>
