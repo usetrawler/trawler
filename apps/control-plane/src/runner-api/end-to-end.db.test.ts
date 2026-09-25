@@ -4,6 +4,8 @@ import { sql } from "kysely";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { ProjectConfigSchema } from "@usetrawler/protocol";
 import { createModel } from "@usetrawler/core";
+import { tool } from "ai";
+import { z } from "zod";
 import { workOnce } from "../../../runner/src/worker.ts";
 import { withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
@@ -72,7 +74,7 @@ afterAll(() => new Promise<void>((r) => server.close(() => openRouter.close(() =
 const worker = () => ({
   controlPlane: base, runnerToken, log: () => {}, flushMs: 5, retryBaseMs: 5,
   model: (modelId: string, jobToken: string) => createModel({ modelId, apiKey: jobToken, baseURL: `${base}/api/llm/v1` }),
-  openBrowser: async () => ({ tools: {}, fillField: async () => "typed", close: async () => {} }),
+  openBrowser: async () => ({ tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => "the invoice form" }) }, fillField: async () => "typed", close: async () => {} }),
 });
 
 test("a run goes from start to a confirmed defect through the real runner API and worker", async () => {
@@ -83,6 +85,7 @@ test("a run goes from start to a confirmed defect through the real runner API an
   const project = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
   const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { budgetUsd: 1, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 10, replaySteps: 10, createdBy: "u" }));
   replies = [
+    toolReply("browser_snapshot", {}),
     toolReply("submit_finding", { kind: "defect", goal: "g", title: "Saving fails", observed: "Save returned an error page", reproduction: ["Open https://app.acme.test/invoices/new", "Click Save"], severity: "high" }),
     toolReply("goal_status", { goal: "g", status: "failed", note: "error page" }),
     toolReply("finish", { summary: "done" }),
@@ -96,15 +99,15 @@ test("a run goes from start to a confirmed defect through the real runner API an
   expect(summary).toMatchObject({ status: "succeeded" });
   expect(summary!.findings).toEqual([expect.objectContaining({ key: "ana:f1", title: "Saving fails", verdict: "confirmed", replay: expect.objectContaining({ completed: true }) })]);
   expect(summary!.goals).toEqual([{ personaKey: "ana", goal: "g", status: "failed", note: "error page" }]);
-  expect(summary!.costUsd).toBeCloseTo(0.005, 6);
-  expect(seen).toHaveLength(5);
+  expect(summary!.costUsd).toBeCloseTo(0.006, 6);
+  expect(seen).toHaveLength(6);
   for (const call of seen) {
     expect(call.auth).toBe(`Bearer ${ORG_KEY}`);
     expect(call.body).toMatchObject({ usage: { include: true }, provider: { data_collection: "deny" } });
   }
-  expect(seen.map((c) => c.body.model)).toEqual(["m/agent", "m/agent", "m/agent", "m/agent", "m/judge"]);
+  expect(seen.map((c) => c.body.model)).toEqual(["m/agent", "m/agent", "m/agent", "m/agent", "m/agent", "m/judge"]);
   const { rows } = await sql<{ n: number; cost: string }>`select count(*)::int as n, sum(cost_usd) as cost from llm_usage where run_id = ${run.id}`.execute(t.db);
-  expect(rows[0]).toEqual({ n: 5, cost: "0.005000" });
+  expect(rows[0]).toEqual({ n: 6, cost: "0.006000" });
 });
 
 test("a run that spends its cap mid-session is stopped by the proxy, and the job ends as budget", async () => {

@@ -8,6 +8,7 @@ export interface SessionState {
   findings: Finding[];
   goals: Map<string, GoalOutcome>;
   finished: string | null;
+  page: "unseen" | "seen" | "stale";
 }
 
 export type FieldKind = "username" | "password";
@@ -19,6 +20,7 @@ export function newSessionState(goals: Goal[]): SessionState {
     findings: [],
     goals: new Map(goals.map((g) => [g.id, { goal: g.id, status: "not_attempted", note: "" }])),
     finished: null,
+    page: "unseen",
   };
 }
 
@@ -78,6 +80,7 @@ export function sessionTools(opts: {
       }),
       execute: async (input) => {
         if (state.finished !== null) return closed;
+        if (state.page !== "seen") return state.page === "unseen" ? "rejected: you have not looked at the product yet; open it and take a browser_snapshot, then report what it shows" : "rejected: your last browser action failed, so you are not looking at the page any more; take a browser_snapshot and report what it shows";
         const goal = lower(input.goal);
         if (typeof goal !== "string" || !state.goals.has(goal)) return unknownGoal(input.goal);
         const candidate = { ...input, goal, kind: lower(input.kind), severity: lower(input.severity), reproduction: steps(input.reproduction), id: "pending" };

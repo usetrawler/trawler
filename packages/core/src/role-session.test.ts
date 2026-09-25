@@ -23,6 +23,7 @@ const browserTools = {
 };
 const reached = (goal: string) => toolCall("goal_status", { goal, status: "reached", note: "" });
 const finish = toolCall("finish", { summary: "done" });
+const look = toolCall("browser_snapshot", {});
 
 function run(model: ReturnType<typeof scriptedModel>, over: Partial<Parameters<typeof runRoleSession>[0]> = {}) {
   const events: RunEventInput[] = [];
@@ -70,6 +71,7 @@ describe("runRoleSession", () => {
 
   test("reports goals it never reached as not attempted when stopped at maxSteps", async () => {
     const model = scriptedModel([
+      look,
       toolCall("submit_finding", { kind: "friction", goal: "invoice", title: "lost", observed: "could not find it", reproduction: ["a"], severity: "low" }),
       ...Array.from({ length: 10 }, () => toolCall("browser_snapshot", {})),
     ]);
@@ -281,7 +283,7 @@ describe("runRoleSession", () => {
   });
 
   test("a sink that fails at the very end still returns the findings", async () => {
-    const model = scriptedModel([toolCall("submit_finding", { kind: "friction", goal: "invoice", title: "lost", observed: "could not find it", reproduction: ["a"], severity: "low" }), reached("sign-up"), reached("invoice"), finish]);
+    const model = scriptedModel([look,toolCall("submit_finding", { kind: "friction", goal: "invoice", title: "lost", observed: "could not find it", reproduction: ["a"], severity: "low" }), reached("sign-up"), reached("invoice"), finish]);
     const { result } = await run(model, { emit: (e) => { if (e.type === "job_finished") throw new Error("sink down"); } }).promise;
     expect(result.findings).toHaveLength(1);
     expect(result.stoppedBy).toBe("error");
@@ -300,17 +302,18 @@ describe("runRoleSession", () => {
   });
 
   test("a model error ends the session but keeps what was recorded", async () => {
-    const model = scriptedModel([toolCall("submit_finding", { kind: "friction", goal: "invoice", title: "lost", observed: "could not find it", reproduction: ["a"], severity: "low" })]);
+    const model = scriptedModel([look,toolCall("submit_finding", { kind: "friction", goal: "invoice", title: "lost", observed: "could not find it", reproduction: ["a"], severity: "low" })]);
     const { promise, events } = run(model);
     const { result } = await promise;
     expect(result.stoppedBy).toBe("error");
-    expect(result.error).toMatch(/scriptedModel has only 1 responses/);
+    expect(result.error).toMatch(/scriptedModel has only 2 responses/);
     expect(result.findings).toHaveLength(1);
     expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "error", error: expect.stringMatching(/scriptedModel/) });
   });
 
   test("the returned result is scrubbed too", async () => {
     const model = scriptedModel([
+      look,
       toolCall("submit_finding", { kind: "friction", goal: "invoice", title: "pw hunter22-secret", observed: "saw hunter22-secret", reproduction: ["typed hunter22-secret"], severity: "low" }),
       toolCall("goal_status", { goal: "sign-up", status: "reached", note: "used hunter22-secret" }),
       reached("invoice"),

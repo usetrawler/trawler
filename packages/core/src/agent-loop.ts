@@ -20,7 +20,7 @@ function oneAtATime() {
   };
 }
 
-export function browserQueue(browserTools: ToolSet, fillField: FillField) {
+export function browserQueue(browserTools: ToolSet, fillField: FillField, onOutcome: (ok: boolean) => void = () => {}) {
   const run = oneAtATime();
   let crashes = 0;
   let lastError = "";
@@ -34,9 +34,11 @@ export function browserQueue(browserTools: ToolSet, fillField: FillField) {
             try {
               const out = await t.execute!(input as never, options as never);
               crashes = 0;
+              onOutcome(true);
               return out;
             } catch (err) {
               crashes++;
+              onOutcome(false);
               lastError = err instanceof Error ? err.message : String(err);
               throw err;
             }

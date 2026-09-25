@@ -13,6 +13,7 @@ const finding = { kind: "defect", goal: "sign-up", title: "500 on submit", obser
 function setup() {
   const events: RunEventInput[] = [];
   const state = newSessionState(goals);
+  state.page = "seen";
   const scrubber = new SecretScrubber();
   const fillField = vi.fn(async (ref: string, value: string) => `await page.getByRef('${ref}').fill('${value}');`);
   let n = 0;
@@ -21,6 +22,17 @@ function setup() {
 }
 
 describe("submit_finding", () => {
+  test("refuses a finding while the model is not looking at the page", async () => {
+    const { tools, state, events } = setup();
+    state.page = "unseen";
+    expect(await tools.submit_finding.execute!(finding, ctx)).toMatch(/rejected: you have not looked at the product yet; .*browser_snapshot/);
+    state.page = "stale";
+    expect(await tools.submit_finding.execute!(finding, ctx)).toMatch(/rejected: your last browser action failed.*browser_snapshot/);
+    expect(events).toEqual([]);
+    state.page = "seen";
+    expect(await tools.submit_finding.execute!(finding, ctx)).toBe("recorded f1");
+  });
+
   test("stores a valid finding and emits it", async () => {
     const { tools, state, events } = setup();
     expect(await tools.submit_finding.execute!(finding, ctx)).toBe("recorded f1");
@@ -87,6 +99,7 @@ describe("submit_finding", () => {
   });
   test("keeps nothing when emitting fails, so a retry does not duplicate", async () => {
     const state = newSessionState(goals);
+    state.page = "seen";
     const tools = sessionTools({ state, accounts, emit: () => { throw new Error("sink down"); }, jobId: "j", fillField: async () => "", scrubber: new SecretScrubber(), newId: () => "f1" });
     await expect(tools.submit_finding.execute!(finding, ctx)).rejects.toThrow("sink down");
     expect(state.findings).toHaveLength(0);

@@ -25,7 +25,7 @@ export async function runRoleSession(opts: {
   const jobId = `role:${opts.persona.id}`;
   const emit = (e: RunEventInput) => opts.emit(opts.scrubber.scrub(e));
   const state = newSessionState(opts.project.goals);
-  const queue = browserQueue(opts.browserTools, opts.fillField);
+  const queue = browserQueue(opts.browserTools, opts.fillField, (ok) => (state.page = ok ? "seen" : "stale"));
   const tools = {
     ...queue.tools,
     ...sessionTools({
