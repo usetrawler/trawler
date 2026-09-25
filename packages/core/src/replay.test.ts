@@ -1,4 +1,4 @@
-import { tool } from "ai";
+import { APICallError, tool } from "ai";
 import { z } from "zod";
 import { describe, expect, test } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
@@ -347,6 +347,13 @@ describe("judge", () => {
     expect(events.map((e) => e.type)).toEqual(["job_started", "job_finished"]);
     expect(events.at(-1)).toMatchObject({ stoppedBy: "error", error: "the provider account behind the workspace key is out of credits" });
     expect(error).toBe("the provider account behind the workspace key is out of credits");
+  });
+
+  test("a key refused on a retried call ends the judge with the proxy's reason, not the retry's wording", async () => {
+    const busy = new APICallError({ message: "one model call at a time per job", url: "https://cp.test/api/llm/v1/chat/completions", requestBodyValues: {}, statusCode: 429, responseHeaders: { "retry-after-ms": "1" } });
+    const { promise, events } = judgeWith(scriptedModel([busy, proxyRefusal("the provider refused the workspace key; replace it on the plan page")]));
+    expect((await promise).error).toBe("the provider refused the workspace key; replace it on the plan page");
+    expect(events.at(-1)).toMatchObject({ stoppedBy: "error", error: "the provider refused the workspace key; replace it on the plan page" });
   });
 
   test("a model call the proxy refuses because the run stopped the job ends the judge as stopped by the budget, with the reason", async () => {
