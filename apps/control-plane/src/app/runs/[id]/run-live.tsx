@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useId, useRef, useState, useTransition } from "react";
 import type { runView, StageState, PersonaState } from "../../../runs/report.ts";
 import type { RunSummary } from "../../../runs/runs.ts";
+import { runStatusLabel, runTitle } from "../../../runs/status.ts";
 import { cancelRunAction, judgeAgainAction } from "./actions.ts";
 
 type View = ReturnType<typeof runView>;
@@ -13,7 +14,6 @@ const POLL_MS = 2000;
 const usd = (n: number) => `$${n.toFixed(2)}`;
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-const STATUS_LABEL: Record<string, string> = { queued: "Queued", running: "Live", succeeded: "Complete", stopped_budget: "Stopped at cap", cancelled: "Cancelled", failed: "Failed" };
 const STAGE_STYLE: Record<StageState, string> = { waiting: "text-muted", active: "text-info", done: "text-ok", skipped: "text-muted italic" };
 const STAGE_LABEL: Record<StageState, string> = { waiting: "Waiting", active: "In progress", done: "Done", skipped: "Skipped" };
 const PERSONA_LABEL: Record<PersonaState, [string, string]> = {
@@ -194,13 +194,13 @@ export function RunLive({ initial }: { initial: Data }) {
     <div className="flex flex-col gap-10">
       <div className="flex flex-col gap-3">
         <p className="font-mono text-xs tracking-[0.2em] text-action uppercase">
-          Run {String(run.number).padStart(4, "0")} · {STATUS_LABEL[run.status] ?? run.status} · {host}
+          {runTitle(run.number)} · {runStatusLabel(run.status)} · {host}
         </p>
         <h1 className="text-4xl leading-[0.95] font-bold tracking-tight md:text-5xl">{view.headline}</h1>
         {view.live && <p className="text-muted">Defects count only after a fresh agent reproduces them. You can close this tab; the run keeps going.</p>}
         <p role="status" aria-live="polite" className="text-sm text-warn">
           {gone ? "This run is no longer available." : stale ? "Lost contact with Trawler. Retrying…" : ""}
-          <span className="sr-only">{STATUS_LABEL[run.status] ?? run.status}. {view.headline} <span key={announcement.n}>{announcement.text}</span></span>
+          <span className="sr-only">{runStatusLabel(run.status)}. {view.headline} <span key={announcement.n}>{announcement.text}</span></span>
         </p>
       </div>
 

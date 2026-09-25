@@ -4,6 +4,7 @@ import { AppShell } from "../../../components/app-shell.tsx";
 import { PlanWorkspace } from "./plan-workspace.tsx";
 import { modelKeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
+import { projectRunCount } from "../../../projects/overview.ts";
 import { projectForEditing } from "../../../projects/projects.ts";
 import { canManageBilling, getAuth } from "../../../server/auth.ts";
 import { getDb } from "../../../server/db.ts";
@@ -20,7 +21,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   if (!session) redirect("/sign-in");
   const orgId = session.session.activeOrganizationId;
   if (!orgId || !UUID.test(id)) notFound();
-  const [project, keyHint] = await withOrg(getDb(), orgId, (tx) => Promise.all([projectForEditing(tx, orgId, id), modelKeyHint(tx, orgId)]));
+  const [project, keyHint, runs] = await withOrg(getDb(), orgId, (tx) => Promise.all([projectForEditing(tx, orgId, id), modelKeyHint(tx, orgId), projectRunCount(tx, orgId, id)]));
   if (!project) notFound();
   const organization = await auth.api.getFullOrganization({ headers: requestHeaders });
   return (
@@ -31,6 +32,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           <h1 className="text-4xl leading-[0.95] font-bold tracking-tight md:text-5xl">{project.name}</h1>
           <p className="text-lg text-muted">{project.description}</p>
           {project.focus && <p className="text-sm">Focus: <span className="text-muted">{project.focus}</span></p>}
+          {runs > 0 && <p className="text-sm"><a href={`/projects/${project.id}/runs`} className="underline underline-offset-4 hover:text-action">Past runs · {runs}</a></p>}
         </div>
         <PlanWorkspace
           projectId={project.id}
