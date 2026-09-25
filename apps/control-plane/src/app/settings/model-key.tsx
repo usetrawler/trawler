@@ -37,7 +37,8 @@ export function ModelKey({ saved, addedBy, canManage }: { saved: SavedKey | null
   const detected = apiKey.trim() ? detectProvider(apiKey) : null;
   const provider: Provider | null = apiKey.trim().length >= 20 ? chosen ?? detected ?? "custom" : null;
   const editing = canManage && (replacing || !saved);
-  const error = replaced.error ?? removed.error;
+  const error = editing ? replaced.error : removed.error;
+  const status = editing || confirming ? "" : removed.saved && !saved ? "Key removed." : replaced.saved ? "Key saved." : "";
 
   return (
     <section aria-labelledby="key-heading" className="flex flex-col gap-4 border border-line bg-panel p-5">
@@ -78,7 +79,7 @@ export function ModelKey({ saved, addedBy, canManage }: { saved: SavedKey | null
           <button type="button" onClick={() => setConfirming(true)} className={button}>Remove</button>
         </div>
       )}
-      <p role="status" className="text-sm text-ok">{replaced.saved && !editing ? "Key saved." : removed.saved && !saved ? "Key removed." : ""}</p>
+      <p role="status" className="text-sm text-ok">{status}</p>
       {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
     </section>
   );
