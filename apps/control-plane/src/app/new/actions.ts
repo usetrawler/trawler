@@ -1,7 +1,7 @@
 "use server";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { createModel } from "@usetrawler/core";
+import { createModel } from "@usetrawler/core/setup";
 import { getAuth } from "../../server/auth.ts";
 import { getDb, getKeyring } from "../../server/db.ts";
 import { readEnv } from "../../server/env.ts";

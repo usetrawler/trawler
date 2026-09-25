@@ -26,9 +26,13 @@ jobs:
       - run: npm run db:codegen && git diff --exit-code apps/control-plane/src/db/types.ts
       - run: npm test
       - run: npm run build -w @usetrawler/control-plane
-      - name: control plane answers on /healthz
+      - name: the standalone control plane carries no browser automation
+        run: test ! -e apps/control-plane/.next/standalone/node_modules/@playwright/mcp && test ! -e apps/control-plane/.next/standalone/node_modules/playwright-core
+      - name: control plane answers on /healthz outside the repository
         run: |
-          HOSTNAME=0.0.0.0 PORT=3000 node apps/control-plane/.next/standalone/apps/control-plane/server.js &
+          cp -r apps/control-plane/.next/standalone "$RUNNER_TEMP/standalone"
+          cd "$RUNNER_TEMP/standalone"
+          HOSTNAME=0.0.0.0 PORT=3000 node apps/control-plane/server.js &
           trap 'kill %1' EXIT
           for i in $(seq 1 30); do curl -sf -o /dev/null localhost:3000/healthz && break; sleep 1; done
           curl -sf localhost:3000/healthz
