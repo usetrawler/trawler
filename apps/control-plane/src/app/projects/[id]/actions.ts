@@ -28,6 +28,8 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   if (!session) redirect("/sign-in");
   const orgId = session.session.activeOrganizationId;
   if (!orgId) return { error: "Your account has no workspace yet." };
+  const beta = readEnv().betaEmails;
+  if (beta && !beta.includes(session.user.email.toLowerCase())) return { error: "Hosted runs are in private beta. Write to contact@usetrawler.com to get access." };
   const newKey = String(form.get("openrouterKey") ?? "").trim();
   if (newKey) {
     if (!(await canManageBilling(requestHeaders))) return { error: "Only an owner of this workspace can change its OpenRouter key." };
