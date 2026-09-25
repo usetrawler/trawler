@@ -49,6 +49,13 @@ export class ForeignEvents extends Error {
 
 const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 
+export function storable<T>(value: T): T {
+  if (typeof value === "string") return value.replaceAll("\u0000", "").toWellFormed() as T;
+  if (Array.isArray(value)) return value.map(storable) as T;
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, storable(v)])) as T;
+  return value;
+}
+
 function configFor(snapshot: ConfigSnapshot, current: ProjectConfig): ProjectConfig {
   const passwords = new Map(current.accounts.map((a) => [a.ref, a.password]));
   return {
@@ -146,6 +153,12 @@ export async function claimJob(db: Database, keys: Keyring): Promise<JobAssignme
   return null;
 }
 
+export async function releaseJob(db: Database, jobId: string): Promise<void> {
+  await asSystem(db, (tx) =>
+    tx.updateTable("jobs").set({ status: "queued", token_hash: null, lease_until: null, started_at: null }).where("id", "=", jobId).where("status", "=", "leased").execute(),
+  );
+}
+
 async function findingFor(tx: Tx, runId: string, key: string) {
   const row = await tx.selectFrom("findings").selectAll().where("run_id", "=", runId).where("key", "=", key).executeTakeFirstOrThrow();
   return {
@@ -184,7 +197,7 @@ async function stopIfOverBudget(tx: Tx, runId: string): Promise<boolean> {
 
 export async function ingestEvents(db: Database, token: string, events: RunEvent[], expectedJobId?: string): Promise<{ cancel: boolean }> {
   return asSystem(db, async (tx) => {
-    const valid = z.array(RunEventSchema).max(500).parse(events);
+    const valid = storable(z.array(RunEventSchema).max(500).parse(events));
     const job = await jobForToken(tx, token, { expectedJobId });
     if (job.status !== "leased") return { cancel: true };
     if (valid.some((e) => e.jobId !== job.id)) throw new ForeignEvents();
@@ -227,12 +240,15 @@ const noReport = (o?: ReplayObservation) => !o || (!o.completed && o.blockedAt =
 const JobResultSchema = z.object({ usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().max(2000).optional(), observation: ReplayObservationSchema.optional() });
 
 export async function completeJob(db: Database, token: string, input: JobResult, expectedJobId?: string): Promise<void> {
-  const result = JobResultSchema.parse(input);
+  const result = storable(JobResultSchema.parse(input));
   await asSystem(db, async (tx) => {
     const job = await jobForToken(tx, token, { allowExpired: true, expectedJobId });
     if (job.status !== "leased") {
-      const reapedRecently = job.status === "failed" && job.finished_at !== null && Date.now() - job.finished_at.getTime() < LATE_REPORT_MS;
-      if (reapedRecently) await addCost(tx, job.run_id, job.id, result.usage.costUsd - Number(job.counted_cost));
+      const reapedRecently = job.status === "failed" && job.usage === null && job.finished_at !== null && Date.now() - job.finished_at.getTime() < LATE_REPORT_MS;
+      if (reapedRecently) {
+        await addCost(tx, job.run_id, job.id, result.usage.costUsd - Number(job.counted_cost));
+        await tx.updateTable("jobs").set({ usage: JSON.stringify(result.usage) }).where("id", "=", job.id).execute();
+      }
       return;
     }
     await addCost(tx, job.run_id, job.id, result.usage.costUsd - Number(job.counted_cost));

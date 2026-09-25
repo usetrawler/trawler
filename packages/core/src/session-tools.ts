@@ -59,7 +59,7 @@ export function sessionTools(opts: {
       execute: async ({ text }) => {
         if (state.finished !== null) return closed;
         if (!text?.trim()) return "rejected: text: the note is empty";
-        const kept = text.slice(0, MAX_NOTE);
+        const kept = Array.from(text).slice(0, MAX_NOTE).join("");
         emit({ type: "note", jobId, text: kept });
         state.notes.push(kept);
         return "noted";
@@ -105,7 +105,7 @@ export function sessionTools(opts: {
         if (typeof goal !== "string" || !state.goals.has(goal)) return unknownGoal(input.goal);
         const normalised = lower(status);
         if (normalised !== "reached" && normalised !== "failed") return `rejected: status: use reached or failed`;
-        const outcome = { goal, status: normalised, note: (note ?? "").slice(0, MAX_GOAL_NOTE) } as const;
+        const outcome = { goal, status: normalised, note: Array.from(note ?? "").slice(0, MAX_GOAL_NOTE).join("") } as const;
         emit({ type: "goal_status", jobId, outcome });
         state.goals.set(goal, outcome);
         return "recorded";

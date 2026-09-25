@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { EventBatchSchema, JobCompletionSchema, PROTOCOL_HEADER, PROTOCOL_VERSION } from "@usetrawler/protocol";
 import type { Database } from "../db/index.ts";
 import type { Keyring } from "../lib/secrets.ts";
-import { claimJob, completeJob, ForeignEvents, ingestEvents, InvalidJobToken } from "../runs/queue.ts";
+import { claimJob, completeJob, ForeignEvents, ingestEvents, InvalidJobToken, releaseJob } from "../runs/queue.ts";
 
 export interface RunnerApiDeps {
   db: Database;
@@ -78,6 +78,10 @@ export async function handleClaim(req: Request, deps: RunnerApiDeps): Promise<Re
   const deadline = Date.now() + (deps.claimWaitMs ?? 25_000);
   while (!req.signal.aborted) {
     const job = await claimJob(deps.db, deps.keys);
+    if (job && req.signal.aborted) {
+      await releaseJob(deps.db, job.jobId);
+      break;
+    }
     if (job) return json(job);
     if (Date.now() >= deadline) break;
     await new Promise((r) => setTimeout(r, deps.pollMs ?? 1000));
@@ -88,12 +92,12 @@ export async function handleClaim(req: Request, deps: RunnerApiDeps): Promise<Re
 export async function handleEvents(req: Request, jobId: string, deps: RunnerApiDeps): Promise<Response> {
   const wrongProtocol = protocolProblem(req);
   if (wrongProtocol) return wrongProtocol;
+  const token = bearer(req);
+  if (!token || !UUID.test(jobId)) return problem(401, "invalid job token");
   const read = await readBody(req);
   if ("tooLarge" in read) return problem(413, "the request is too large");
   const parsed = EventBatchSchema.safeParse(read.value);
   if (!parsed.success) return problem(400, "invalid event batch");
-  const token = bearer(req);
-  if (!token || !UUID.test(jobId)) return problem(401, "invalid job token");
   try {
     return json(await ingestEvents(deps.db, token, parsed.data.events, jobId));
   } catch (err) {
@@ -106,12 +110,12 @@ export async function handleEvents(req: Request, jobId: string, deps: RunnerApiD
 export async function handleComplete(req: Request, jobId: string, deps: RunnerApiDeps): Promise<Response> {
   const wrongProtocol = protocolProblem(req);
   if (wrongProtocol) return wrongProtocol;
+  const token = bearer(req);
+  if (!token || !UUID.test(jobId)) return problem(401, "invalid job token");
   const read = await readBody(req);
   if ("tooLarge" in read) return problem(413, "the request is too large");
   const parsed = JobCompletionSchema.safeParse(read.value);
   if (!parsed.success) return problem(400, "invalid completion");
-  const token = bearer(req);
-  if (!token || !UUID.test(jobId)) return problem(401, "invalid job token");
   try {
     await completeJob(deps.db, token, parsed.data, jobId);
     return json({ ok: true });

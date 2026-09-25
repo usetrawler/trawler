@@ -66,11 +66,58 @@ test("a job is claimed, streamed and completed over HTTP with its own token only
 });
 
 test("malformed bodies are rejected without touching the queue", async () => {
-  expect((await handleEvents(new Request("http://cp.test/x", { method: "POST", headers: { [PROTOCOL_HEADER]: "1", authorization: "Bearer y" }, body: "{not json" }), "00000000-0000-0000-0000-000000000000", deps)).status).toBe(400);
+  expect((await handleEvents(new Request("http://cp.test/x", { method: "POST", headers: { [PROTOCOL_HEADER]: "1", authorization: `Bearer ${"t".repeat(40)}` }, body: "{not json" }), "00000000-0000-0000-0000-000000000000", deps)).status).toBe(400);
 });
 
 test("oversized bodies are refused before parsing", async () => {
   const big = JSON.stringify({ events: [{ seq: 1, at: new Date().toISOString(), jobId: "x", type: "note", text: "a".repeat(2_100_000) }] });
   const res = await handleEvents(new Request("http://cp.test/x", { method: "POST", headers: { [PROTOCOL_HEADER]: "1", authorization: `Bearer ${"t".repeat(40)}` }, body: big }), "00000000-0000-0000-0000-000000000000", deps);
   expect(res.status).toBe(413);
+});
+
+async function startAndClaim() {
+  const project = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { budgetUsd: 1, agentModel: "a", judgeModel: "j", maxSteps: 5, replaySteps: 5, createdBy: "u" }));
+  return run;
+}
+
+test("a runner that hangs up while its claim is being prepared leaves the job in the queue", async () => {
+  const run = await startAndClaim();
+  let checks = 0;
+  const signal = { get aborted() { return ++checks > 1; } };
+  const req = post("/api/runner/claim", {}, runner);
+  const hungUp = new Proxy(req, { get: (target, prop) => (prop === "signal" ? signal : Reflect.get(target, prop, target)) });
+  expect((await handleClaim(hungUp, deps)).status).toBe(204);
+  const { rows } = await sql<{ status: string; token_hash: string | null }>`select status, token_hash from jobs where run_id = ${run.id}`.execute(t.db);
+  expect(rows).toEqual([{ status: "queued", token_hash: null }]);
+  const again = await handleClaim(post("/api/runner/claim", {}, runner), deps);
+  expect(again.status).toBe(200);
+  const job = await again.json();
+  expect(job.runId).toBe(run.id);
+  await handleComplete(post(`/api/jobs/${job.jobId}/complete`, { usage: { model: "a", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "finish" }, { authorization: `Bearer ${job.token}` }), job.jobId, deps);
+});
+
+test("text the database cannot store is cleaned instead of failing the batch, and a finished job's cost cannot grow", async () => {
+  const run = await startAndClaim();
+  const job = await (await handleClaim(post("/api/runner/claim", {}, runner), deps)).json();
+  expect(job.runId).toBe(run.id);
+  const auth = { authorization: `Bearer ${job.token}` };
+  const at = new Date().toISOString();
+  const split = ("a".repeat(3999) + "😀 tail").slice(0, 4000);
+  const events = { events: [
+    { seq: 1, at, jobId: job.jobId, type: "note", text: split },
+    { seq: 2, at, jobId: job.jobId, type: "note", text: "nul\u0000byte" },
+    { seq: 3, at, jobId: job.jobId, type: "goal_status", outcome: { goal: "g", status: "failed", note: "bad\u0000note" } },
+  ] };
+  expect((await handleEvents(post(`/api/jobs/${job.jobId}/events`, events, auth), job.jobId, deps)).status).toBe(200);
+  const { rows: notes } = await sql<{ text: string }>`select payload->>'text' as text from run_events where job_id = ${job.jobId} and type = 'note' order by seq`.execute(t.db);
+  expect(notes.map((n) => n.text)).toEqual(["a".repeat(3999) + "\ufffd", "nulbyte"]);
+  const { rows: goals } = await sql<{ note: string }>`select note from goal_outcomes where run_id = ${run.id}`.execute(t.db);
+  expect(goals[0]!.note).toBe("badnote");
+
+  const done = (costUsd: number) => ({ usage: { model: "a", inputTokens: 1, outputTokens: 1, costUsd, steps: 1 }, stoppedBy: "finish" });
+  await handleComplete(post(`/api/jobs/${job.jobId}/complete`, done(0.02), auth), job.jobId, deps);
+  await handleComplete(post(`/api/jobs/${job.jobId}/complete`, done(5), auth), job.jobId, deps);
+  const { rows } = await sql<{ cost_usd: string }>`select cost_usd from runs where id = ${run.id}`.execute(t.db);
+  expect(Number(rows[0]!.cost_usd)).toBeCloseTo(0.02, 6);
 });
