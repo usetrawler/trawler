@@ -1,7 +1,7 @@
 "use server";
 import { headers } from "next/headers";
 import { withOrg } from "../../../db/tenancy.ts";
-import { cancelRun, CannotJudgeAgain, judgeAgain } from "../../../runs/runs.ts";
+import { cancelRun, CannotJudgeAgain, judgeAgain, RunNotFound } from "../../../runs/runs.ts";
 import { getAuth } from "../../../server/auth.ts";
 import { betaRefusal } from "../../../server/beta.ts";
 import { getDb, getKeyring } from "../../../server/db.ts";
@@ -17,7 +17,7 @@ export async function cancelRunAction(runId: string): Promise<boolean> {
     await withOrg(getDb(), orgId, (tx) => cancelRun(tx, orgId, runId));
     return true;
   } catch (err) {
-    await logError("run could not be cancelled", { orgId, runId, err });
+    if (!(err instanceof RunNotFound)) await logError("run could not be cancelled", { orgId, runId, err });
     return false;
   }
 }

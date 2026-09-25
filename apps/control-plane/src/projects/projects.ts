@@ -51,9 +51,15 @@ export async function createProject(tx: Tx, orgId: string, config: ProjectConfig
   return id;
 }
 
+export class ProjectNotFound extends Error {
+  constructor() {
+    super("project not found");
+  }
+}
+
 export async function loadProjectConfig(tx: Tx, orgId: string, projectId: string, keys: Keyring): Promise<ProjectConfig> {
   const project = await tx.selectFrom("projects").selectAll().where("id", "=", projectId).where("org_id", "=", orgId).executeTakeFirst();
-  if (!project) throw new Error("project not found");
+  if (!project) throw new ProjectNotFound();
   const [personas, goals, accounts, gates] = await Promise.all([
     tx.selectFrom("personas").selectAll().where("project_id", "=", projectId).orderBy("position").execute(),
     tx.selectFrom("goals").selectAll().where("project_id", "=", projectId).orderBy("position").execute(),
@@ -94,7 +100,7 @@ export async function projectForEditing(tx: Tx, orgId: string, projectId: string
 
 export async function replacePlan(tx: Tx, orgId: string, projectId: string, plan: { personas: Persona[]; goals: Goal[] }): Promise<void> {
   const project = await tx.selectFrom("projects").select("target_url").where("id", "=", projectId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
-  if (!project) throw new Error("project not found");
+  if (!project) throw new ProjectNotFound();
   const refs = new Set((await tx.selectFrom("target_accounts").select("ref").where("project_id", "=", projectId).execute()).map((a) => a.ref));
   const checked = ProjectConfigSchema.safeParse({
     name: "check", targetUrl: project.target_url, personas: plan.personas, goals: plan.goals,
@@ -120,7 +126,7 @@ export class UnknownAccount extends Error {}
 
 export async function addAccount(tx: Tx, orgId: string, projectId: string, input: { username: string; password: string }, keys: Keyring): Promise<string> {
   const project = await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
-  if (!project) throw new Error("project not found");
+  if (!project) throw new ProjectNotFound();
   const existing = await tx.selectFrom("target_accounts").select(["ref", "position"]).where("project_id", "=", projectId).execute();
   if (existing.length >= MAX_ACCOUNTS) throw new AccountLimit();
   const account = TargetAccountSchema.parse({ ref: `account-${randomBytes(6).toString("hex")}`, username: input.username.trim(), password: input.password });
@@ -133,7 +139,7 @@ export async function addAccount(tx: Tx, orgId: string, projectId: string, input
 
 export async function removeAccount(tx: Tx, orgId: string, projectId: string, ref: string): Promise<void> {
   const project = await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
-  if (!project) throw new Error("project not found");
+  if (!project) throw new ProjectNotFound();
   await tx.updateTable("personas").set({ account_ref: null }).where("project_id", "=", projectId).where("account_ref", "=", ref).execute();
   await tx.deleteFrom("target_accounts").where("project_id", "=", projectId).where("ref", "=", ref).execute();
 }

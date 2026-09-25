@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { keyLooksValid, modelKey, modelKeyHint, setModelKey, type KeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
 import { openRouterPrices, priceFor, type Price } from "../../../llm/prices.ts";
+import { ProjectNotFound } from "../../../projects/projects.ts";
 import { checkModelCall, customUrlProblem, detectProvider, endpointFor, listModels, PREFERRED_MODELS, PROVIDER_LABEL, PROVIDERS, priceKey, type Endpoint, type Provider } from "../../../llm/providers.ts";
 import { DEFAULT_RUN } from "../../../runs/models.ts";
 import { startRun } from "../../../runs/runs.ts";
@@ -136,7 +137,7 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
     );
     runId = run.id;
   } catch (err) {
-    await logError("run could not start", { orgId, projectId, err }, scrubberWith([endpoint.key]));
+    if (!(err instanceof ProjectNotFound)) await logError("run could not start", { orgId, projectId, err }, scrubberWith([endpoint.key]));
     const keyHint = await withOrg(getDb(), orgId, (tx) => modelKeyHint(tx, orgId));
     return { error: "The run could not start. Try again.", ...(keyHint ? { keyHint } : {}) };
   }
