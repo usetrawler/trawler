@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { beforeEach, expect, test, vi } from "vitest";
 
-type Found = { user: { id: string; email: string }; session: { id: string; userId: string; activeOrganizationId: string | null } };
+type Found = { user: { id: string; name: string; email: string }; session: { id: string; userId: string; activeOrganizationId: string | null } };
 type Workspace = { orgId: string; orgName: string; role: string };
 const state = vi.hoisted(() => ({ found: null as Found | null, workspace: null as Workspace | null, checked: [] as unknown[], asked: [] as Headers[] }));
 
@@ -16,7 +16,7 @@ vi.mock("../auth/auth.ts", () => ({
 }));
 
 const { canManageBilling, signedInMember } = await import("./auth.ts");
-const found: Found = { user: { id: "u1", email: "ana@acme.test" }, session: { id: "s1", userId: "u1", activeOrganizationId: "org-1" } };
+const found: Found = { user: { id: "u1", name: "Ana Lopez", email: "ana@acme.test" }, session: { id: "s1", userId: "u1", activeOrganizationId: "org-1" } };
 
 beforeEach(() => {
   state.found = null;
@@ -34,7 +34,7 @@ test("a signed-in person is a member of the workspace the membership check retur
   state.found = found;
   state.workspace = { orgId: "org-1", orgName: "Acme", role: "owner" };
   const request = new Headers({ cookie: "session=ana" });
-  expect(await signedInMember(request)).toEqual({ userId: "u1", email: "ana@acme.test", orgId: "org-1", orgName: "Acme", role: "owner" });
+  expect(await signedInMember(request)).toEqual({ userId: "u1", name: "Ana Lopez", email: "ana@acme.test", orgId: "org-1", orgName: "Acme", role: "owner" });
   expect(state.asked).toEqual([request]);
   expect(state.checked).toEqual([found.session]);
 });
@@ -43,7 +43,7 @@ test("a plain member stays a plain member, and does not manage the model key", a
   state.found = found;
   state.workspace = { orgId: "org-1", orgName: "Acme", role: "member" };
   const member = await signedInMember(new Headers());
-  expect(member).toEqual({ userId: "u1", email: "ana@acme.test", orgId: "org-1", orgName: "Acme", role: "member" });
+  expect(member).toEqual({ userId: "u1", name: "Ana Lopez", email: "ana@acme.test", orgId: "org-1", orgName: "Acme", role: "member" });
   expect(canManageBilling(member!)).toBe(false);
 });
 
@@ -53,7 +53,7 @@ test("a signed-in person the membership check finds in no workspace is no member
 });
 
 test("owners and admins manage the model key, by the role the membership check found", () => {
-  const as = (role: string) => canManageBilling({ userId: "u1", email: "ana@acme.test", orgId: "org-1", orgName: "Acme", role });
+  const as = (role: string) => canManageBilling({ userId: "u1", name: "Ana Lopez", email: "ana@acme.test", orgId: "org-1", orgName: "Acme", role });
   expect([as("owner"), as("admin"), as("member, admin"), as("member"), as("")]).toEqual([true, true, true, false, false]);
 });
 

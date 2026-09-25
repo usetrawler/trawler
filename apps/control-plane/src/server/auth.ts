@@ -25,6 +25,7 @@ export function signInProviders(): Array<"github" | "google" | "dev"> {
 
 export interface Member {
   userId: string;
+  name: string;
   email: string;
   orgId: string;
   orgName: string;
@@ -36,7 +37,7 @@ export async function signedInMember(requestHeaders: Headers): Promise<Member | 
   const found = await auth.api.getSession({ headers: requestHeaders });
   if (!found) return null;
   const workspace = await auth.workspaceOf(found.session);
-  return workspace ? { userId: found.user.id, email: found.user.email, ...workspace } : null;
+  return workspace ? { userId: found.user.id, name: found.user.name, email: found.user.email, ...workspace } : null;
 }
 
 export function canManageBilling(member: Member): boolean {

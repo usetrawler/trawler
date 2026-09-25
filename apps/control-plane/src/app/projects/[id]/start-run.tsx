@@ -22,8 +22,8 @@ export function Recognised({ provider }: { provider: Provider }) {
   return <p className="text-sm"><span className="text-muted">Recognised as {providerArticle(provider)} </span>{PROVIDER_LABEL[provider]}<span className="text-muted"> key. Not right? Pick the provider below.</span></p>;
 }
 
-export function StartRun({ projectId, personas, keyHint: savedHint, canManageKey, blocked }: {
-  projectId: string; personas: number; keyHint: KeyHint | null; canManageKey: boolean; blocked?: string;
+export function StartRun({ projectId, projectName, personas, keyHint: savedHint, canManageKey, blocked }: {
+  projectId: string; projectName: string; personas: number; keyHint: KeyHint | null; canManageKey: boolean; blocked?: string;
 }) {
   const [state, action, pending] = useActionState<StartState, FormData>(startRunAction, {});
   const keyHint = state.keyHint ?? savedHint;
@@ -74,9 +74,10 @@ export function StartRun({ projectId, personas, keyHint: savedHint, canManageKey
         const data = new FormData(e.currentTarget);
         startTransition(() => action(data));
       }}
+      id="start"
       className="flex flex-col gap-5 border border-line bg-panel p-5">
       <input type="hidden" name="projectId" value={projectId} />
-      <p className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Start</p>
+      <p className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Start · <span className="text-ink">{projectName}</span></p>
 
       {!typingKey ? (
         <p className="text-sm">

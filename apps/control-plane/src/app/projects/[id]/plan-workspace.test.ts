@@ -11,7 +11,7 @@ const ama: Persona = { id: "ama", name: "Ama", brief: "Brand new." };
 const kwame: Persona = { id: "kwame", name: "Kwame", brief: "Has an account.", accountRef: "account-1" };
 
 function render(initialPersonas: Persona[], initialAccounts: AccountView[]) {
-  return renderToStaticMarkup(createElement(PlanWorkspace, { projectId: "p1", initialPersonas, initialGoals: [{ id: "g", instruction: "Send an invoice." }], initialAccounts, keyHint: null, canManageKey: true }));
+  return renderToStaticMarkup(createElement(PlanWorkspace, { projectId: "p1", projectName: "Acme", initialPersonas, initialGoals: [{ id: "g", instruction: "Send an invoice." }], initialAccounts, keyHint: null, canManageKey: true }));
 }
 
 describe("PlanWorkspace", () => {

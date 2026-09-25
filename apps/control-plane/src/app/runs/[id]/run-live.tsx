@@ -281,7 +281,7 @@ export function RunLive({ initial }: { initial: Data }) {
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-6">
         {view.live ? <CancelButton runId={run.id} onDone={refresh} /> : <span className="text-sm text-muted">{run.agentModel}</span>}
-        <a href={`/projects/${run.projectId}`} className="flex h-10 items-center border border-line px-4 text-sm hover:border-ink">{view.live ? "Back to the plan" : "Start another run"}</a>
+        <a href={view.live ? `/projects/${run.projectId}` : `/projects/${run.projectId}#start`} className="flex h-10 items-center border border-line px-4 text-sm hover:border-ink">{view.live ? "Back to the plan" : "Start another run"}</a>
       </div>
     </div>
   );
