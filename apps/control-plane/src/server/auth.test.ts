@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { beforeEach, expect, test, vi } from "vitest";
 
 type Found = { user: { id: string; email: string }; session: { id: string; userId: string; activeOrganizationId: string | null } };
@@ -36,4 +38,13 @@ test("a signed-in person is a member of the workspace the membership check retur
 test("a signed-in person the membership check finds in no workspace is no member", async () => {
   state.found = found;
   expect(await signedInMember(new Headers())).toBeNull();
+});
+
+test("only the membership check reads the workspace a session names", () => {
+  const src = fileURLToPath(new URL("..", import.meta.url));
+  const readers = readdirSync(src, { recursive: true, encoding: "utf8" })
+    .filter((file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$/.test(file))
+    .filter((file) => readFileSync(`${src}/${file}`, "utf8").includes("activeOrganizationId"))
+    .sort();
+  expect(readers).toEqual(["auth/auth.ts", "db/types.ts"]);
 });

@@ -10,10 +10,8 @@ vi.mock("next/navigation", () => ({
   notFound: () => { throw Object.assign(new Error("not found"), { notFound: true }); },
 }));
 vi.mock("../../../../server/auth.ts", () => ({
-  getAuth: () => ({ api: {
-    getSession: async () => (state.signedIn ? { user: { email: "ana@acme.test" }, session: { activeOrganizationId: "org-1" } } : null),
-    getFullOrganization: async () => ({ name: "Acme workspace" }),
-  } }),
+  getAuth: () => ({ api: { getFullOrganization: async () => ({ name: "Acme workspace" }) } }),
+  signedInMember: async () => (state.signedIn ? { userId: "u1", email: "ana@acme.test", orgId: "org-1" } : null),
 }));
 vi.mock("../../../../server/db.ts", () => ({ getDb: () => ({}) }));
 vi.mock("../../../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
@@ -58,8 +56,9 @@ test("a malformed project address is not found without reaching the database", a
   expect(state.asked).toEqual([]);
 });
 
-test("a visitor who is not signed in is sent to sign in", async () => {
+test("a visitor who is not signed in, or no longer belongs to any workspace, is sent to sign in before anything is read", async () => {
   state.signedIn = false;
   await expect(open(ID)).rejects.toMatchObject({ to: "/sign-in" });
+  expect(state.tenants).toEqual([]);
   expect(state.asked).toEqual([]);
 });

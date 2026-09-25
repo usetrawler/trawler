@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
-const state = vi.hoisted(() => ({ runs: 0, counted: [] as Array<[string, string]> }));
+const state = vi.hoisted(() => ({ member: null as { userId: string; email: string; orgId: string } | null, runs: 0, counted: [] as Array<[string, string]>, tenants: [] as string[] }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 vi.mock("next/navigation", () => ({
@@ -9,14 +9,12 @@ vi.mock("next/navigation", () => ({
   notFound: () => { throw Object.assign(new Error("not found"), { notFound: true }); },
 }));
 vi.mock("../../../server/auth.ts", () => ({
-  getAuth: () => ({ api: {
-    getSession: async () => ({ user: { email: "ana@acme.test" }, session: { activeOrganizationId: "org-1" } }),
-    getFullOrganization: async () => ({ name: "Acme workspace" }),
-  } }),
+  getAuth: () => ({ api: { getFullOrganization: async () => ({ name: "Acme workspace" }) } }),
+  signedInMember: async () => state.member,
   canManageBilling: async () => false,
 }));
 vi.mock("../../../server/db.ts", () => ({ getDb: () => ({}) }));
-vi.mock("../../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, _orgId: string, work: (tx: unknown) => unknown) => work({}) }));
+vi.mock("../../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
 vi.mock("../../../credentials/credentials.ts", () => ({ modelKeyHint: async () => null }));
 vi.mock("../../../projects/projects.ts", () => ({
   projectForEditing: async (_tx: unknown, _orgId: string, id: string) => ({
@@ -32,8 +30,16 @@ const ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const render = async () => renderToStaticMarkup(await ProjectPage({ params: Promise.resolve({ id: ID }) }));
 
 beforeEach(() => {
+  state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-1" };
   state.runs = 0;
   state.counted = [];
+  state.tenants = [];
+});
+
+test("a visitor who is not signed in, or no longer belongs to any workspace, is sent to sign in before anything is read", async () => {
+  state.member = null;
+  await expect(ProjectPage({ params: Promise.resolve({ id: ID }) })).rejects.toMatchObject({ to: "/sign-in" });
+  expect(state.tenants).toEqual([]);
 });
 
 test("a project with runs leads from its plan to all its runs", async () => {

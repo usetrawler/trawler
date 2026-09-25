@@ -2,7 +2,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { createModel } from "@usetrawler/core/setup";
-import { getAuth } from "../../server/auth.ts";
+import { signedInMember } from "../../server/auth.ts";
 import { getDb, getKeyring } from "../../server/db.ts";
 import { readEnv } from "../../server/env.ts";
 import { logError, writeLog } from "../../server/log.ts";
@@ -39,12 +39,9 @@ function friendly(err: unknown): string {
 export async function startSetup(_previous: SetupState, form: FormData): Promise<SetupState> {
   const url = String(form.get("url") ?? "");
   const focus = String(form.get("focus") ?? "").slice(0, 500);
-  const requestHeaders = await headers();
-  const auth = getAuth();
-  const session = await auth.api.getSession({ headers: requestHeaders });
-  if (!session) redirect("/sign-in");
-  const orgId = session.session.activeOrganizationId;
-  if (!orgId) return { error: "Your account has no workspace yet. Sign out and in again.", url, focus };
+  const member = await signedInMember(await headers());
+  if (!member) redirect("/sign-in");
+  const { orgId } = member;
   if (!url.trim()) return { error: "Paste the address of the product to test.", url, focus };
   if (url.length > 2048) return { error: MESSAGES.too_long, url: url.slice(0, 2048), focus };
   const setup = readEnv().setup;

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { GoalSchema, MAX_GOALS, MAX_PERSONAS, PersonaSchema, TargetAccountSchema } from "@usetrawler/protocol";
 import { withOrg } from "../../../db/tenancy.ts";
 import { AccountLimit, addAccount, projectForEditing, ProjectNotFound, removeAccount, replacePlan, UnknownAccount } from "../../../projects/projects.ts";
-import { getAuth } from "../../../server/auth.ts";
+import { signedInMember } from "../../../server/auth.ts";
 import { getDb, getKeyring } from "../../../server/db.ts";
 import { logError, scrubberWith } from "../../../server/log.ts";
 
@@ -26,8 +26,7 @@ type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 
 async function activeOrg(projectId: string): Promise<string | null> {
   if (!UUID.test(projectId)) return null;
-  const session = await getAuth().api.getSession({ headers: await headers() });
-  return session?.session.activeOrganizationId ?? null;
+  return (await signedInMember(await headers()))?.orgId ?? null;
 }
 
 async function accountsOf(orgId: string, projectId: string): Promise<AccountView[]> {

@@ -9,7 +9,7 @@ import { ProjectNotFound } from "../../../projects/projects.ts";
 import { checkModelCall, customUrlProblem, detectProvider, endpointFor, listModels, PREFERRED_MODELS, PROVIDER_LABEL, PROVIDERS, priceKey, type Endpoint, type Provider } from "../../../llm/providers.ts";
 import { DEFAULT_RUN } from "../../../runs/models.ts";
 import { startRun } from "../../../runs/runs.ts";
-import { canManageBilling, getAuth } from "../../../server/auth.ts";
+import { canManageBilling, signedInMember } from "../../../server/auth.ts";
 import { betaRefusal } from "../../../server/beta.ts";
 import { getDb, getKeyring } from "../../../server/db.ts";
 import { readEnv } from "../../../server/env.ts";
@@ -66,19 +66,19 @@ function withinListingLimit(userId: string, now = Date.now()): boolean {
   return true;
 }
 
-async function activeOrg() {
+async function signedIn() {
   const requestHeaders = await headers();
-  const session = await getAuth().api.getSession({ headers: requestHeaders });
-  return { session, requestHeaders, orgId: session?.session.activeOrganizationId ?? null };
+  return { member: await signedInMember(requestHeaders), requestHeaders };
 }
 
 export async function modelsForKeyAction(input: KeyInput): Promise<ModelList> {
-  const { session, requestHeaders, orgId } = await activeOrg();
-  if (!session || !orgId) return { ok: false, error: "Sign in again." };
-  const refusal = betaRefusal(session.user.email);
+  const { member, requestHeaders } = await signedIn();
+  if (!member) return { ok: false, error: "Sign in again." };
+  const { orgId } = member;
+  const refusal = betaRefusal(member.email);
   if (refusal) return { ok: false, error: refusal };
   if ((input.key ?? "").trim() && !(await canManageBilling(requestHeaders))) return { ok: false, error: "Only an owner or admin of this workspace can change its model key." };
-  if (!withinListingLimit(session.user.id)) return { ok: false, error: "Too many model lookups. Wait a few minutes, or type a model name." };
+  if (!withinListingLimit(member.userId)) return { ok: false, error: "Too many model lookups. Wait a few minutes, or type a model name." };
   const resolved = await endpointFrom(orgId, input);
   if ("error" in resolved) return { ok: false, error: resolved.error };
   const { endpoint } = resolved;
@@ -104,10 +104,10 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   if (form.get("authorised") !== "on") return { error: "Confirm that you may test this product." };
   if (!MODEL_ID.test(modelId)) return { error: "Choose a model or type its exact name." };
   if (!Number.isFinite(budgetUsd) || budgetUsd < 0.1 || budgetUsd > 50) return { error: "Set a cap between $0.10 and $50." };
-  const { session, requestHeaders, orgId } = await activeOrg();
-  if (!session) redirect("/sign-in");
-  if (!orgId) return { error: "Your account has no workspace yet." };
-  const refusal = betaRefusal(session.user.email);
+  const { member, requestHeaders } = await signedIn();
+  if (!member) redirect("/sign-in");
+  const { orgId } = member;
+  const refusal = betaRefusal(member.email);
   if (refusal) return { error: refusal };
 
   const resolved = await endpointFrom(orgId, { key: String(form.get("apiKey") ?? ""), provider: String(form.get("provider") ?? ""), baseUrl: String(form.get("baseUrl") ?? "") });
@@ -123,7 +123,7 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
     return { error: `${label} could not be reached to check the key. Try again in a moment.` };
   }
   if (fresh) {
-    await withOrg(getDb(), orgId, (tx) => setModelKey(tx, orgId, { provider: endpoint.provider, key: endpoint.key, baseUrl: endpoint.provider === "custom" ? endpoint.baseUrl : null }, session.user.id, getKeyring()));
+    await withOrg(getDb(), orgId, (tx) => setModelKey(tx, orgId, { provider: endpoint.provider, key: endpoint.key, baseUrl: endpoint.provider === "custom" ? endpoint.baseUrl : null }, member.userId, getKeyring()));
     revalidatePath(`/projects/${projectId}`);
   }
   const price = await priceFor(endpoint.provider, modelId, readEnv().openRouterUrl);
@@ -131,7 +131,7 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   try {
     const run = await withOrg(getDb(), orgId, (tx) =>
       startRun(tx, orgId, projectId, getKeyring(), {
-        budgetUsd, agentModel: modelId, judgeModel: modelId, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: session.user.id,
+        budgetUsd, agentModel: modelId, judgeModel: modelId, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: member.userId,
         provider: endpoint.provider, providerBaseUrl: endpoint.provider === "custom" ? endpoint.baseUrl : null, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap,
       }),
     );
