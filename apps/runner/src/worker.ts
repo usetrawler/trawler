@@ -185,7 +185,7 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
 }
 
 function withRunnerSecrets(deps: WorkerDeps, scrubber: SecretScrubber): SecretScrubber {
-  for (const secret of deps.secrets ?? []) {
+  for (const secret of [deps.runnerToken, ...(deps.secrets ?? [])]) {
     if (secret.length >= MIN_SECRET_LENGTH) scrubber.add(secret);
   }
   return scrubber;
@@ -238,6 +238,7 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
   const ids: LogFields = { jobId: job.jobId, runId: job.runId, kind: job.kind };
   const note = (line: string) => deps.log(scrubber.scrub(line), { ...ids, level: "info" });
   const fail = (line: string) => problem(deps, scrubber.scrub(line), ids);
+  const warn = (line: string) => deps.log(scrubber.scrub(line), { ...ids, level: "error" });
   note(`${job.kind} ${job.jobId} started`);
   const budget = new Budget(Math.max(job.budgetUsd, 1e-6));
   if (job.budgetUsd <= 0) budget.add(1e-6);
@@ -268,7 +269,7 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
   events.stop();
   await events.flush();
   if (events.failure) {
-    fail(`${job.kind} ${job.jobId} could not report events: ${events.failure.message}`);
+    warn(`${job.kind} ${job.jobId} could not report events: ${events.failure.message}`);
     const reported = `the runner could not report events: ${scrubber.scrub(events.failure.message)}`;
     completion = { ...completion, stoppedBy: "error", error: clip(completion.error ? `${reported}; ${completion.error}` : reported) };
   }
@@ -283,16 +284,16 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
 
 export async function workLoop(deps: WorkerDeps, signal: AbortSignal): Promise<void> {
   const scrubber = withRunnerSecrets(deps, new SecretScrubber());
-  let reported: string | undefined;
+  let reportedSinceLastClaim = false;
   while (!signal.aborted) {
     try {
       await workOnce(deps, signal);
-      reported = undefined;
+      reportedSinceLastClaim = false;
     } catch (err) {
       const message = scrubber.scrub(`claim failed: ${err instanceof Error ? err.message : String(err)}`);
       deps.log(message, { level: "error" });
-      if (message !== reported) deps.report?.(message, {});
-      reported = message;
+      if (!reportedSinceLastClaim) deps.report?.(message, {});
+      reportedSinceLastClaim = true;
       await pause(deps.claimRetryMs ?? 5000, signal);
     }
   }

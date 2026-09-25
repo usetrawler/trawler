@@ -33,6 +33,7 @@ export interface CliDeps {
   openBrowser: (opts: Parameters<OpenBrowser>[0] & { project: ReturnType<typeof ProjectConfigSchema.parse>; outputDir: string; headless: boolean; survivesSignals?: boolean }) => ReturnType<OpenBrowser>;
   runsRoot: string;
   fetchImpl?: typeof fetch;
+  startReporting?: typeof startReporting;
 }
 
 class UsageError extends Error {}
@@ -129,8 +130,8 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
   if (protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(hostname)) throw new UsageError("work sends the runner token, so --control-plane must use https unless it is on this machine");
   const runnerToken = deps.env.TRAWLER_RUNNER_TOKEN?.trim();
   if (!runnerToken) throw new UsageError("TRAWLER_RUNNER_TOKEN is not set");
-  const log = workerLog(deps.env, deps.err);
-  const reporting = startReporting(deps.env, [runnerToken]);
+  const log = workerLog(deps.env, { out: deps.out, err: deps.err });
+  const reporting = await (deps.startReporting ?? startReporting)(deps.env, [runnerToken]);
   const workerDeps: WorkerDeps = {
     controlPlane,
     runnerToken,

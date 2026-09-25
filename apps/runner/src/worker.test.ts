@@ -15,7 +15,7 @@ const baseJob = { jobId: "11111111-1111-4111-8111-111111111111", runId: "2222222
 let server: Server | undefined;
 afterEach(() => new Promise<void>((r) => (server ? server.close(() => r()) : r())));
 
-function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; failEvents?: number; eventsStatus?: number; completeStatus?: number } = {}) {
+function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; failEvents?: number; eventsStatus?: number; completeStatus?: number; completeBody?: string } = {}) {
   const seen = { claims: 0, events: [] as Array<{ seq: number; type: string }>, completions: [] as unknown[], releases: 0, headers: [] as Array<string | undefined>, auth: [] as Array<string | undefined> };
   let batches = 0;
   let failures = opts.failEvents ?? 0;
@@ -43,7 +43,7 @@ function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; failEvents
     }
     if (req.url?.endsWith("/complete")) {
       seen.completions.push(body);
-      if (opts.completeStatus) { res.statusCode = opts.completeStatus; return res.end("{}"); }
+      if (opts.completeStatus) { res.statusCode = opts.completeStatus; return res.end(opts.completeBody ?? "{}"); }
       return res.end(JSON.stringify({ ok: true }));
     }
     res.statusCode = 404;
@@ -145,11 +145,13 @@ const endless = () => scriptedModel(Array.from({ length: 40 }, () => toolCall("n
 test("events the control plane keeps refusing stop the job instead of crashing the runner, and usage is still reported", async () => {
   for (const eventsStatus of [401, 503]) {
     const { url, seen } = await fakeControlPlane(role, { failEvents: 1000, eventsStatus });
-    const lines: string[] = [];
-    expect(await workOnce(deps(url, endless(), { attempts: 2, log: (l) => lines.push(l) }))).toBe("done");
+    const lines: Array<[string, LogFields | undefined]> = [];
+    const reports: string[] = [];
+    expect(await workOnce(deps(url, endless(), { attempts: 2, log: (l, f) => lines.push([l, f]), report: (m) => void reports.push(m) }))).toBe("done");
     expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "error", error: expect.stringMatching(/could not report events/) })]);
     expect((seen.completions[0] as { usage: { steps: number } }).usage.steps).toBeLessThan(40);
-    expect(lines.some((l) => l.includes("could not report events"))).toBe(true);
+    expect(lines.find(([l]) => l.includes("could not report events"))?.[1]?.level).toBe("error");
+    expect(reports).toEqual([expect.stringMatching(/finished \(error\): the runner could not report events/)]);
     await new Promise<void>((r) => server!.close(() => r()));
     server = undefined;
   }
@@ -175,8 +177,10 @@ test("a very long model error is cut to what the protocol accepts", async () => 
 
 test("a job this runner cannot read is completed as an error, not left leased", async () => {
   const { url, seen } = await fakeControlPlane({ ...role, kind: "time_travel" });
-  expect(await workOnce(deps(url, scriptedModel([])))).toBe("done");
+  const reports: Array<[string, LogFields]> = [];
+  expect(await workOnce(deps(url, scriptedModel([]), { report: (m, f) => void reports.push([m, f]) }))).toBe("done");
   expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "error", error: expect.stringMatching(/cannot read the job/) })]);
+  expect(reports).toEqual([[expect.stringMatching(/cannot read the job/), { jobId: baseJob.jobId }]]);
 });
 
 test("stopping the runner abandons a claim that is still waiting", async () => {
@@ -193,14 +197,16 @@ test("a runner told to stop mid-session hands the job back instead of failing it
   const original = slow.doGenerate.bind(slow);
   slow.doGenerate = async (o) => { await new Promise((r) => setTimeout(r, 30)); return original(o); };
   const stop = new AbortController();
-  const lines: string[] = [];
-  const pending = workOnce(deps(url, slow, { log: (l) => lines.push(l) }), stop.signal);
+  const lines: Array<[string, LogFields | undefined]> = [];
+  const reports: string[] = [];
+  const pending = workOnce(deps(url, slow, { log: (l, f) => lines.push([l, f]), report: (m) => void reports.push(m) }), stop.signal);
   await new Promise((r) => setTimeout(r, 150));
   stop.abort();
   expect(await pending).toBe("done");
   expect(seen.releases).toBe(1);
   expect(seen.completions).toEqual([]);
-  expect(lines.some((l) => l.includes("handed back to the queue"))).toBe(true);
+  expect(lines.find(([l]) => l.includes("handed back to the queue"))?.[1]?.level).toBe("info");
+  expect(reports).toEqual([]);
 });
 
 test("a failed job is reported and logged as an error with its ids, without the job's secrets", async () => {
@@ -250,4 +256,32 @@ test("a control plane that keeps failing claims is reported once, and again afte
   stop.abort();
   await looping;
   expect(reports).toEqual(["claim failed: HTTP 503 from /api/runner/claim", "claim failed: HTTP 503 from /api/runner/claim"]);
+});
+
+test("a completion the control plane refuses is reported, masking the job's secrets its answer echoes", async () => {
+  const withPassword = { ...config, accounts: [{ ref: "account-1", username: "ana@a.test", password: "correct-horse-battery" }] };
+  const { url } = await fakeControlPlane({ ...baseJob, config: withPassword, kind: "role_session", personaKey: "ana", accountRef: "account-1" }, {
+    completeStatus: 400, completeBody: `{"error":"refused correct-horse-battery for ${token}"}`,
+  });
+  const reports: string[] = [];
+  const logs: string[] = [];
+  const model = scriptedModel([toolCall("goal_status", { goal: "g", status: "reached", note: "" }), toolCall("finish", { summary: "done" })]);
+  await workOnce(deps(url, model, { report: (m) => void reports.push(m), log: (l) => void logs.push(l) }));
+  expect(reports).toEqual([expect.stringContaining('could not report back: the control plane rejected the completion: HTTP 400 {"error":"refused ••• for •••"}')]);
+  expect(JSON.stringify([reports, logs])).not.toContain("correct-horse-battery");
+  expect(JSON.stringify([reports, logs])).not.toContain(token);
+});
+
+test("a claim failure is logged as an error and reported without the runner token", async () => {
+  const runnerToken = "runner-" + "r".repeat(40);
+  const reports: string[] = [];
+  const logs: Array<[string, LogFields | undefined]> = [];
+  const stop = new AbortController();
+  const failing = (async () => { throw new Error(`connection refused while sending ${runnerToken}`); }) as unknown as typeof fetch;
+  const looping = workLoop(deps("http://127.0.0.1:1", scriptedModel([]), {
+    fetch: failing, attempts: 1, claimRetryMs: 1, report: (m) => { reports.push(m); stop.abort(); }, log: (l, f) => void logs.push([l, f]),
+  }), stop.signal);
+  await looping;
+  expect(reports).toEqual(["claim failed: connection refused while sending •••"]);
+  expect(logs[0]).toEqual(["claim failed: connection refused while sending •••", { level: "error" }]);
 });
