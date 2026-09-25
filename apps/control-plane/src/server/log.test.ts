@@ -100,6 +100,7 @@ test("Sentry sends errors only: nothing about users, cookies, headers, bodies, q
 });
 
 test("no span or transaction leaves, even with SENTRY_TRACES_SAMPLE_RATE set in the environment", async () => {
+  expect(Sentry.getClient()!.getOptions().tracesSampleRate).toBe(1);
   Sentry.startSpan({ name: `GET /api/auth/callback/github?code=${SECRET}`, forceTransaction: true }, () => undefined);
   await Sentry.flush(1000);
   expect(everything.filter((envelope) => /"type":"(span|transaction)"/.test(envelope))).toEqual([]);
@@ -159,6 +160,15 @@ test("a logged error keeps its cause and where it was thrown, in the log line an
   expect(values.at(-1)!.stacktrace!.frames!.map((f) => f.function)).toContain("unreachableProvider");
   expect(sent[0]).not.toContain(SECRET);
   expect(lines[0]).not.toContain(SECRET);
+});
+
+test("an error whose cause leads back to itself is logged with a bounded chain of causes", async () => {
+  const loop = new Error("retrying");
+  loop.cause = loop;
+  await writeLog("error", "gave up", { err: loop }, envScrubber(ENV));
+  let depth = 0;
+  for (let cause = JSON.parse(lines[0]!).error; cause; cause = cause.cause) depth++;
+  expect(depth).toBe(6);
 });
 
 test("a failure logged without an error object is its own Sentry issue", async () => {

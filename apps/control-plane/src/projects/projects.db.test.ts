@@ -57,6 +57,7 @@ test("another organisation can neither see nor load the project", async () => {
   const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
   expect(await withOrg(t.db, "org-b", (tx) => projectForEditing(tx, "org-b", id))).toBeNull();
   await expect(withOrg(t.db, "org-b", (tx) => loadProjectConfig(tx, "org-b", id, keys))).rejects.toThrow(ProjectNotFound);
+  await expect(withOrg(t.db, "org-b", (tx) => replacePlan(tx, "org-b", id, { personas: config.personas, goals: config.goals }))).rejects.toThrow(ProjectNotFound);
   expect((await withOrg(t.db, "org-b", (tx) => listProjects(tx, "org-b"))).map((p) => p.id)).not.toContain(id);
   expect((await asSystem(t.db, (tx) => listProjects(tx, "org-b"))).map((p) => p.id)).not.toContain(id);
 });
