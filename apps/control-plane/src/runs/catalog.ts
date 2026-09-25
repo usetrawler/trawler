@@ -8,9 +8,8 @@ const OPENROUTER_MODELS = "https://openrouter.ai/api/v1/models";
 const STALE_MS = 24 * 60 * 60 * 1000;
 
 const Price = z.coerce.number().nonnegative().finite();
-const OpenRouterModels = z.object({
-  data: z.array(z.object({ id: z.string(), pricing: z.object({ prompt: Price, completion: Price, overrides: z.array(z.object({ prompt: Price, completion: Price })).optional() }).loose() }).loose()),
-});
+const OpenRouterModels = z.object({ data: z.array(z.object({ id: z.string() }).loose()) });
+const OpenRouterPricing = z.object({ prompt: Price, completion: Price, overrides: z.array(z.object({ prompt: Price, completion: Price }).loose()).optional() }).loose();
 
 const toModel = (r: { id: string; label: string; note: string | null; prompt_usd_per_mtok: string; completion_usd_per_mtok: string }): RunModel => ({
   id: r.id, label: r.label, note: r.note, promptUsdPerMtok: Number(r.prompt_usd_per_mtok), completionUsdPerMtok: Number(r.completion_usd_per_mtok),
@@ -37,11 +36,12 @@ export async function refreshPrices(db: Database, fetchImpl: typeof fetch = fetc
   if (!res.ok) throw new Error(`OpenRouter answered ${res.status}`);
   const { data } = OpenRouterModels.parse(await res.json());
   const byId = new Map(data.map((m) => [m.id, m.pricing]));
+  const priced = (id: string) => (byId.has(id) ? OpenRouterPricing.parse(byId.get(id)) : undefined);
   return asSystem(db, async (tx) => {
     const catalog = await tx.selectFrom("model_catalog").select("id").execute();
     let updated = 0;
-    for (const { id } of catalog) {
-      const pricing = byId.get(id);
+    const prices = catalog.map(({ id }) => ({ id, pricing: priced(id) }));
+    for (const { id, pricing } of prices) {
       if (!pricing) continue;
       const peak = (key: "prompt" | "completion") => Math.max(pricing[key], ...(pricing.overrides ?? []).map((o) => o[key])) * 1_000_000;
       await tx.updateTable("model_catalog").set({ prompt_usd_per_mtok: peak("prompt").toFixed(6), completion_usd_per_mtok: peak("completion").toFixed(6), prices_refreshed_at: new Date() }).where("id", "=", id).execute();

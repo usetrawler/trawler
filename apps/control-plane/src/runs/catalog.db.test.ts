@@ -21,6 +21,7 @@ test("prices refresh from OpenRouter at their peak, and unknown or disabled mode
     { id: "deepseek/deepseek-v4.1-flash", name: "x", pricing: { prompt: "0.00000015", completion: "0.0000006", overrides: [{ utc_days: ["monday"], prompt: "0.0000003", completion: "0.0000012" }] } },
     { id: "anthropic/claude-haiku-4.5", pricing: { prompt: "0.000002", completion: "0.00001", web_search: "0.01" } },
     { id: "someone/else", pricing: { prompt: "1", completion: "1" } },
+    { id: "openrouter/auto", pricing: { prompt: "-1", completion: "-1" } },
   ] }));
   expect(updated).toBe(2);
   const models = await runModels(t.db);
