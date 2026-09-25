@@ -5,7 +5,8 @@ import { ProjectConfigSchema } from "@usetrawler/protocol";
 import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
-import { startRun } from "../runs/runs.ts";
+import { runView } from "../runs/report.ts";
+import { runSummary, startRun } from "../runs/runs.ts";
 import { projectRunCount, projectRuns, workspaceProjects } from "./overview.ts";
 import { createProject, replacePlan } from "./projects.ts";
 
@@ -22,6 +23,7 @@ const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
 
 let acme = "";
 let empty = "";
+let fresh = "";
 let foreign = "";
 const runs: Array<{ id: string; number: number }> = [];
 
@@ -52,15 +54,17 @@ beforeAll(async () => {
   for (const org of ["org-a", "org-b"]) await sql`insert into organization (id, name, slug, "createdAt") values (${org}, ${org}, ${org}, now())`.execute(t.db);
   acme = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
   empty = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", { ...config, name: "Empty", targetUrl: "https://empty.acme.test/" }, keys));
+  fresh = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", { ...config, name: "Fresh", targetUrl: "https://fresh.acme.test/" }, keys));
   foreign = await withOrg(t.db, "org-b", (tx) => createProject(tx, "org-b", { ...config, name: "Globex" }, keys));
   await asSystem(t.db, (tx) => tx.updateTable("projects").set({ created_at: hoursAgo(100) }).where("id", "=", acme).execute());
   await asSystem(t.db, (tx) => tx.updateTable("projects").set({ created_at: hoursAgo(12) }).where("id", "=", empty).execute());
+  await asSystem(t.db, (tx) => tx.updateTable("projects").set({ created_at: hoursAgo(1) }).where("id", "=", fresh).execute());
 
   runs.push(await seedRun("org-a", acme, hoursAgo(72), { status: "failed", cost: 0.1 }, [], 0, 0));
   runs.push(await seedRun("org-a", acme, hoursAgo(48), { status: "stopped_budget", cost: 2, tokenCap: 100_000, tokensUsed: 120_000 }, [
     { kind: "defect", verdict: "confirmed" }, { kind: "defect", verdict: "refuted" }, { kind: "defect", verdict: "inconclusive" }, { kind: "defect", verdict: null }, { kind: "friction", verdict: null },
   ], 2, 1));
-  runs.push(await seedRun("org-a", acme, hoursAgo(24), { status: "succeeded", cost: 0.35 }, [
+  runs.push(await seedRun("org-a", acme, hoursAgo(6), { status: "succeeded", cost: 0.35 }, [
     { kind: "defect", verdict: "confirmed" }, { kind: "defect", verdict: "confirmed" }, { kind: "friction", verdict: null },
   ], 4, 2));
   await seedRun("org-b", foreign, hoursAgo(1), { status: "succeeded", cost: 1 }, [{ kind: "defect", verdict: "confirmed" }], 6, 0);
@@ -68,8 +72,8 @@ beforeAll(async () => {
 
 test("the home page lists every project of the workspace, the most recently active first, with its last run", async () => {
   const projects = await withOrg(t.db, "org-a", (tx) => workspaceProjects(tx, "org-a"));
-  expect(projects.map((p) => p.name)).toEqual(["Empty", "Acme"]);
-  expect(projects[0]).toEqual({ id: empty, name: "Empty", targetUrl: "https://empty.acme.test/", runs: 0, lastRun: null });
+  expect(projects.map((p) => p.name)).toEqual(["Fresh", "Acme", "Empty"]);
+  expect(projects[2]).toEqual({ id: empty, name: "Empty", targetUrl: "https://empty.acme.test/", runs: 0, lastRun: null });
   expect(projects[1]).toMatchObject({ id: acme, targetUrl: "https://app.acme.test/", runs: 3 });
   expect(projects[1]!.lastRun).toEqual({
     id: runs[2]!.id, number: runs[2]!.number, status: "succeeded", createdAt: expect.any(Date),
@@ -97,6 +101,22 @@ test("the history pages through every past run", async () => {
   const second = (await withOrg(t.db, "org-a", (tx) => projectRuns(tx, "org-a", acme, { size: 2, before: first.olderThan! })))!;
   expect(second.runs.map((r) => r.id)).toEqual([runs[0]!.id]);
   expect(second.olderThan).toBeNull();
+  const exact = (await withOrg(t.db, "org-a", (tx) => projectRuns(tx, "org-a", acme, { size: 3 })))!;
+  expect(exact.runs).toHaveLength(3);
+  expect(exact.olderThan).toBeNull();
+});
+
+test("a defect being judged again counts as confirmed only once its judge has finished, as on the run page", async () => {
+  const project = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", { ...config, name: "Judging" }, keys));
+  const run = await seedRun("org-a", project, hoursAgo(3), { status: "succeeded", cost: 0.1 }, [{ kind: "defect", verdict: "confirmed" }, { kind: "defect", verdict: "confirmed" }], 0, 0);
+  await asSystem(t.db, (tx) => tx.insertInto("jobs").values({ org_id: "org-a", run_id: run.id, kind: "judge", position: 10, finding_key: "ana:f0", requested_by: "u1", status: "leased" }).execute());
+  const counts = async () => ({
+    history: (await withOrg(t.db, "org-a", (tx) => projectRuns(tx, "org-a", project)))!.runs[0]!.confirmed,
+    runPage: runView((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!).report.confirmed.length,
+  });
+  expect(await counts()).toEqual({ history: 1, runPage: 1 });
+  await asSystem(t.db, (tx) => tx.updateTable("jobs").set({ status: "succeeded" }).where("run_id", "=", run.id).where("kind", "=", "judge").execute());
+  expect(await counts()).toEqual({ history: 2, runPage: 2 });
 });
 
 test("a run keeps the number of goals it was started with after the plan changes", async () => {
