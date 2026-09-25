@@ -51,11 +51,15 @@ test("starts one short run on the demo target in its own workspace, with the smo
   expect(summary).toMatchObject({ status: "queued", target: "https://demo.playwright.dev/todomvc/", agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash", budgetUsd: 0.1 });
   expect(summary!.personas).toHaveLength(1);
   expect(summary!.goalTexts).toHaveLength(1);
+  const steps = await withOrg(t.db, SMOKE_ORG, (tx) => tx.selectFrom("runs").select(["max_steps", "replay_steps"]).where("id", "=", runId).executeTakeFirstOrThrow());
+  expect(steps).toEqual({ max_steps: 12, replay_steps: 8 });
   expect(await withOrg(t.db, SMOKE_ORG, (tx) => modelKey(tx, SMOKE_ORG, keys))).toMatchObject({ provider: "openrouter", key: KEY });
 });
 
 test("a run left over from an earlier check is cancelled, so the new one is not stuck behind it", async () => {
   const old = (await (await start()).json()).runId;
+  expect((await claimJob(t.db, keys))!.runId).toBe(old);
+  expect((await summaryOf(old))!.status).toBe("running");
   const fresh = (await (await start()).json()).runId;
   expect(fresh).not.toBe(old);
   expect((await summaryOf(old))!.status).toBe("cancelled");
@@ -78,6 +82,30 @@ test("reports how the run went, job by job", async () => {
   expect(await res.json()).toEqual({
     runId, status: "succeeded", finished: true, costUsd: 0, goalsReached: 1, goalsTotal: 1,
     jobs: [{ kind: "role_session", status: "succeeded", stoppedBy: "finish", error: null }],
+  });
+});
+
+async function finishOnlySession(runId: string, result: { goal?: "reached" | "failed"; stoppedBy: "finish" | "error"; error?: string }) {
+  const job = (await claimJob(t.db, keys))!;
+  expect(job.runId).toBe(runId);
+  if (result.goal) {
+    await ingestEvents(t.db, job.token, [{ seq: 1, at: new Date().toISOString(), jobId: job.jobId, type: "goal_status", outcome: { goal: "add-todo", status: result.goal, note: "" } }]);
+  }
+  await completeJob(t.db, job.token, { usage: { model: deps.model, inputTokens: 10, outputTokens: 5, costUsd: 0, steps: 3 }, stoppedBy: result.stoppedBy, error: result.error });
+}
+
+test("a goal the agent did not reach is not counted as reached, although the run succeeded", async () => {
+  const { runId } = await (await start()).json();
+  await finishOnlySession(runId, { goal: "failed", stoppedBy: "finish" });
+  expect(await (await status(runId)).json()).toMatchObject({ status: "succeeded", finished: true, goalsReached: 0, goalsTotal: 1 });
+});
+
+test("a run whose session failed is finished, and says why", async () => {
+  const { runId } = await (await start()).json();
+  await finishOnlySession(runId, { stoppedBy: "error", error: "the browser failed 3 times in a row" });
+  expect(await (await status(runId)).json()).toMatchObject({
+    status: "failed", finished: true, goalsReached: 0,
+    jobs: [{ kind: "role_session", status: "failed", stoppedBy: "error", error: "the browser failed 3 times in a row" }],
   });
 });
 
