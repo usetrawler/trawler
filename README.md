@@ -45,7 +45,7 @@ Nothing a person reports reaches the top of your report on their word alone. Eve
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://usetrawler.com/assets/diagrams/how-a-defect-is-checked-dark.svg">
-    <img src="https://usetrawler.com/assets/diagrams/how-a-defect-is-checked-light.svg" width="600" alt="How a defect is checked: a person reports a defect with its steps and what went wrong. A fresh agent gets the steps, not the claim, and replays them in a new browser. The judge compares the claim with what the replay saw and answers confirmed, refuted or inconclusive.">
+    <img src="https://usetrawler.com/assets/diagrams/how-a-defect-is-checked-light.svg" width="520" alt="Diagram: the fresh agent gets the steps, not the claim, and the judge compares what it saw with the claim.">
   </picture>
 </p>
 
@@ -63,7 +63,7 @@ It is not a scripted test suite, a load test or a security scan. The people deci
 
 - **Credentials.** Test account passwords are typed by Trawler, not the model, and only into a real password field on an allowed origin. Every password and secret a run knows about is masked as `•••` in what the model reads and what the run records.
 - **Reach.** A browser limited to your product's own origins — every other request is stopped before it is sent — and a handful of tools: no shell, no file system, no uploads, no JavaScript in the page.
-- **Spend.** In the app, a run is estimated before you start and capped while it runs: $2 by default, $50 at most. A model with no known price, such as one on an OpenAI-compatible service, gets no estimate, and its run stops after 3 million tokens instead; only through OpenRouter, which reports each call's cost, is it also held to the dollar cap, so watch your provider's billing. The local runner caps a run at `--budget`, $5 unless you set it. Either way, the last call can take a run slightly past its cap.
+- **Spend.** In the app, a run is estimated before you start and capped while it runs: $2 by default, $50 at most. A model with no known price, such as one on an OpenAI-compatible service, gets no estimate, and its run stops after 3 million tokens. Only through OpenRouter, which reports each call's cost, is it held to the dollar cap as well, so watch your provider's billing. The local runner caps a run at `--budget`, $5 unless you set it. Either way, the last call can take a run slightly past its cap.
 - **Your key.** Runs in the app are billed to your workspace's own key — OpenRouter, OpenAI, Anthropic, Google or any OpenAI-compatible service. Trawler adds nothing on top, and setting up a project in the app costs you nothing.
 - **Isolation.** The model key and passwords are encrypted at rest, runners never hold the model key, and the database itself keeps each workspace's rows from every other.
 - **Execution.** Hosted at app.usetrawler.com, or entirely on your own machine with the runner in this repository.
@@ -203,7 +203,7 @@ Hosted runs stay in a private beta until Trawler can verify that you control the
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://usetrawler.com/assets/diagrams/a-hosted-run-dark.svg">
-    <img src="https://usetrawler.com/assets/diagrams/a-hosted-run-light.svg" width="600" alt="A hosted run: you use the control plane in a browser; the runner takes jobs from it, streams events back and calls models through it; the control plane adds your key and keeps each workspace apart in Postgres; the runner drives a real browser on your product.">
+    <img src="https://usetrawler.com/assets/diagrams/a-hosted-run-light.svg" width="520" alt="Diagram of a hosted run: the runner calls models through the control plane, which adds your key, so the runner never holds it.">
   </picture>
 </p>
 
