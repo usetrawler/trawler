@@ -3,8 +3,8 @@ import { asSystem } from "../db/tenancy.ts";
 import { modelKey } from "../credentials/credentials.ts";
 import type { Keyring } from "../lib/secrets.ts";
 import { bearer, readBody } from "../runner-api/handlers.ts";
-import { priceFor, type Price } from "../llm/prices.ts";
-import { chatHeaders, endpointFor, type Endpoint } from "../llm/providers.ts";
+import type { Price } from "../llm/prices.ts";
+import { chatHeaders, endpointFor, fetchFor, type Endpoint } from "../llm/providers.ts";
 import { InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage, type LlmCall } from "../runs/queue.ts";
 
 export interface ProxyDeps {
@@ -32,10 +32,11 @@ async function forward(deps: ProxyDeps, endpoint: Endpoint, payload: unknown, si
   let last: Response | Error = new Error("no attempt made");
   for (let i = 0; i < attempts; i++) {
     try {
-      const res = await (deps.fetch ?? fetch)(`${endpoint.baseUrl}/chat/completions`, {
+      const res = await fetchFor(endpoint, deps.fetch ?? fetch)(`${endpoint.baseUrl}/chat/completions`, {
         method: "POST",
         headers: chatHeaders(endpoint),
         body: JSON.stringify(payload),
+        redirect: "error",
         signal: AbortSignal.any([signal, AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)]),
       });
       if (res.status !== 429 && res.status !== 502 && res.status !== 503) return res;
@@ -102,9 +103,9 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
   if (typeof request.model !== "string" || !call.models.includes(request.model)) return failure(400, `this job may only use ${call.models.join(" or ")}`);
   const stored = await asSystem(deps.db, (tx) => modelKey(tx, call.orgId, deps.keys));
   if (!stored) return failure(402, "the workspace has no model key");
-  if (stored.provider !== call.provider) return failure(402, "the workspace key now belongs to another provider; start a new run");
+  if (stored.provider !== call.provider || (call.provider === "custom" && stored.baseUrl !== call.providerBaseUrl)) return failure(402, "the workspace key changed to another provider or endpoint; start a new run");
   const endpoint = endpointFor(stored.provider, stored.key, { openRouterUrl: deps.openRouterUrl, customUrl: stored.baseUrl });
-  const price = await priceFor(stored.provider, request.model, deps.openRouterUrl, deps.fetch);
+  const price = call.price;
   const maxTokens = outputAllowance(price, request.max_tokens ?? request.max_completion_tokens, call);
   if (maxTokens < 1) return failure(402, "the run has spent its budget");
 

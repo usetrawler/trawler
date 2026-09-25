@@ -129,3 +129,39 @@ export async function safeFetchText(raw: string, options: { blocked?: BlockList;
   }
   throw new FetchRefused("redirects", "too many redirects");
 }
+
+const MAX_RESPONSE_BYTES = 16_000_000;
+
+export function guardedFetch(options: { allowLoopback?: boolean } = {}): typeof fetch {
+  const blocked = options.allowLoopback ? blockedAddresses({ allowLoopback: true }) : DEFAULT_BLOCKED;
+  return (async (input: RequestInfo | URL, init: RequestInit = {}) => {
+    const url = checkUrl(String(input instanceof Request ? input.url : input));
+    if (url.protocol !== "https:") throw new FetchRefused("address", "only https endpoints can be used");
+    const host = url.hostname.replace(/^\[|\]$/g, "");
+    const literal = isIP(host);
+    if (literal && isBlocked(host, literal, blocked)) throw new FetchRefused("private", "the address is not allowed");
+    const headers = Object.fromEntries(new Headers(init.headers).entries());
+    const body = typeof init.body === "string" ? init.body : undefined;
+    return new Promise<Response>((resolve, reject) => {
+      const req = https.request(url, { method: init.method ?? "GET", headers, agent: new https.Agent({ keepAlive: false }), lookup: guardedLookup(blocked), signal: init.signal ?? undefined }, (res) => {
+        const chunks: Buffer[] = [];
+        let size = 0;
+        res.on("data", (chunk: Buffer) => {
+          size += chunk.length;
+          if (size > MAX_RESPONSE_BYTES) return res.destroy(new FetchRefused("too_long", "the answer is too large"));
+          chunks.push(chunk);
+        });
+        res.on("end", () => {
+          const status = res.statusCode ?? 502;
+          const responseHeaders = new Headers();
+          for (const [k, v] of Object.entries(res.headers)) if (typeof v === "string") responseHeaders.set(k, v);
+          resolve(new Response(status === 204 || status === 304 ? null : Buffer.concat(chunks), { status, headers: responseHeaders }));
+        });
+        res.on("error", reject);
+      });
+      req.on("error", (err: NodeJS.ErrnoException) => reject(err.code === "EBLOCKED" ? new FetchRefused("private", "the address is not allowed") : err));
+      if (body) req.write(body);
+      req.end();
+    });
+  }) as typeof fetch;
+}

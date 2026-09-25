@@ -1,7 +1,7 @@
 "use client";
 import { startTransition, useActionState, useEffect, useState } from "react";
 import type { KeyHint } from "../../../credentials/credentials.ts";
-import { detectProvider, PROVIDER_LABEL, type Provider } from "../../../llm/providers.ts";
+import { detectProvider, PROVIDER_LABEL, type Provider } from "../../../llm/provider-kinds.ts";
 import { DEFAULT_RUN, estimateUsd } from "../../../runs/models.ts";
 import { modelsForKeyAction, startRunAction, type ModelList, type StartState } from "./actions.ts";
 
@@ -25,7 +25,7 @@ export function StartRun({ projectId, personas, keyHint: savedHint, canManageKey
   const keyHint = state.keyHint ?? savedHint;
   const [replacingKey, setReplacingKey] = useState(false);
   const [apiKey, setApiKey] = useState("");
-  const [chosenProvider, setChosenProvider] = useState<Provider>("custom");
+  const [chosenProvider, setChosenProvider] = useState<Provider | null>(null);
   const [baseUrl, setBaseUrl] = useState("");
   const [list, setList] = useState<ModelList | null>(null);
   const [loading, setLoading] = useState(false);
@@ -35,7 +35,7 @@ export function StartRun({ projectId, personas, keyHint: savedHint, canManageKey
 
   const typingKey = !keyHint || replacingKey;
   const detected = apiKey.trim() ? detectProvider(apiKey) : null;
-  const provider: Provider | null = typingKey ? (apiKey.trim().length >= 20 ? detected ?? chosenProvider : null) : keyHint!.provider;
+  const provider: Provider | null = typingKey ? (apiKey.trim().length >= 20 ? chosenProvider ?? detected ?? "custom" : null) : keyHint!.provider;
   const noKey = !keyHint && !canManageKey ? "Ask an owner of this workspace to add a model key." : undefined;
 
   useEffect(() => {
@@ -91,17 +91,17 @@ export function StartRun({ projectId, personas, keyHint: savedHint, canManageKey
               {keyHint && <button type="button" onClick={() => { setReplacingKey(false); setApiKey(""); }} className="h-12 px-3 text-sm text-muted hover:text-ink">Keep {keyHint.hint}</button>}
             </span>
           </label>
-          {detected && <p className="text-sm"><span className="text-muted">Recognised as an </span>{PROVIDER_LABEL[detected]}<span className="text-muted"> key.</span></p>}
-          {apiKey.trim().length >= 20 && !detected && (
+          {detected && !chosenProvider && <p className="text-sm"><span className="text-muted">Recognised as an </span>{PROVIDER_LABEL[detected]}<span className="text-muted"> key. Not right? Pick the provider below.</span></p>}
+          {apiKey.trim().length >= 20 && (
             <div className="grid gap-2 sm:grid-cols-[auto_1fr]">
-              <select name="provider" value={chosenProvider} onChange={(e) => setChosenProvider(e.target.value as Provider)} aria-label="Provider" className={field}>
+              <select name="provider" value={provider ?? "custom"} onChange={(e) => setChosenProvider(e.target.value as Provider)} aria-label="Provider" className={field}>
                 <option value="custom">OpenAI-compatible</option>
                 <option value="openai">OpenAI</option>
                 <option value="anthropic">Anthropic</option>
                 <option value="google">Google</option>
                 <option value="openrouter">OpenRouter</option>
               </select>
-              {chosenProvider === "custom" && <input name="baseUrl" type="url" placeholder="https://api.example.com/v1" aria-label="Base URL" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} className={field} />}
+              {provider === "custom" && <input name="baseUrl" type="url" placeholder="https://api.example.com/v1" aria-label="Base URL" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} className={field} />}
             </div>
           )}
           {provider && provider !== "openrouter" && <p className="text-xs text-muted">Calls go straight to {label ?? "that service"}, under its own data policy. Through OpenRouter, Trawler asks providers not to keep or train on your data.</p>}
@@ -132,15 +132,19 @@ export function StartRun({ projectId, personas, keyHint: savedHint, canManageKey
         ) : (
           <>
             <p className="text-2xl font-bold">Unknown</p>
-            <p className="text-sm text-muted">{modelId ? `Without a price the run stops after ${(DEFAULT_RUN.tokenCap / 1_000_000).toFixed(0)} million tokens, as well as at the cap below.` : "Choose a model to see an estimate."}</p>
+            <p className="text-sm text-muted">{modelId ? `Without a price Trawler cannot count dollars, so the run stops after ${(DEFAULT_RUN.tokenCap / 1_000_000).toFixed(0)} million tokens instead. Watch your provider's billing.` : "Choose a model to see an estimate."}</p>
           </>
         )}
       </div>
-      <label className="flex flex-col gap-2">
-        <span className="text-sm text-muted">Hard cap (USD). The run stops before going over it; findings so far are kept.</span>
-        <input name="budget" type="number" min={0.1} max={50} step={0.1} value={cap} onChange={(e) => setCap(Number(e.target.value))} className={`${field} w-40`} />
-        {estimate && cap > 0 && cap < estimate.high && <span className="text-sm text-warn">The cap is below the estimate, so the run may stop before everyone finishes.</span>}
-      </label>
+      {estimate || !modelId ? (
+        <label className="flex flex-col gap-2">
+          <span className="text-sm text-muted">Hard cap (USD). The run stops before going over it; findings so far are kept.</span>
+          <input name="budget" type="number" min={0.1} max={50} step={0.1} value={cap} onChange={(e) => setCap(Number(e.target.value))} className={`${field} w-40`} />
+          {estimate && cap > 0 && cap < estimate.high && <span className="text-sm text-warn">The cap is below the estimate, so the run may stop before everyone finishes.</span>}
+        </label>
+      ) : (
+        <input type="hidden" name="budget" value={DEFAULT_RUN.budgetUsd} />
+      )}
       <label className="flex items-start gap-3 text-sm">
         <input type="checkbox" name="authorised" required checked={authorised} onChange={(e) => setAuthorised(e.target.checked)} className="mt-1 accent-[var(--action)]" />
         <span>I am authorised to test this product. It is not a production system with real people&apos;s data.</span>

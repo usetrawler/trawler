@@ -42,7 +42,7 @@ async function endpointFrom(orgId: string, input: KeyInput): Promise<{ endpoint:
   }
   if (!keyLooksValid(key)) return { error: "That does not look like an API key. Copy it again from your provider." };
   const chosen = PROVIDERS.includes(input.provider as Provider) ? (input.provider as Provider) : null;
-  const provider = detectProvider(key) ?? chosen ?? "custom";
+  const provider = chosen ?? detectProvider(key) ?? "custom";
   if (provider === "custom") {
     const baseUrl = (input.baseUrl ?? "").trim();
     const problem = customUrlProblem(baseUrl);
@@ -52,6 +52,22 @@ async function endpointFrom(orgId: string, input: KeyInput): Promise<{ endpoint:
   return { endpoint: endpointFor(provider, key, { openRouterUrl }), fresh: true };
 }
 
+const LISTINGS_PER_WINDOW = 30;
+const LISTING_WINDOW_MS = 10 * 60 * 1000;
+const listings = new Map<string, number[]>();
+
+function withinListingLimit(userId: string, now = Date.now()): boolean {
+  const recent = (listings.get(userId) ?? []).filter((t) => now - t < LISTING_WINDOW_MS);
+  if (recent.length >= LISTINGS_PER_WINDOW) return false;
+  listings.set(userId, [...recent, now]);
+  return true;
+}
+
+function betaRefusal(email: string): string | null {
+  const beta = readEnv().betaEmails;
+  return beta && !beta.includes(email.toLowerCase()) ? "Hosted runs are in private beta. Write to contact@usetrawler.com to get access." : null;
+}
+
 async function activeOrg() {
   const requestHeaders = await headers();
   const session = await getAuth().api.getSession({ headers: requestHeaders });
@@ -59,8 +75,12 @@ async function activeOrg() {
 }
 
 export async function modelsForKeyAction(input: KeyInput): Promise<ModelList> {
-  const { orgId } = await activeOrg();
-  if (!orgId) return { ok: false, error: "Sign in again." };
+  const { session, requestHeaders, orgId } = await activeOrg();
+  if (!session || !orgId) return { ok: false, error: "Sign in again." };
+  const refusal = betaRefusal(session.user.email);
+  if (refusal) return { ok: false, error: refusal };
+  if ((input.key ?? "").trim() && !(await canManageBilling(requestHeaders))) return { ok: false, error: "Only an owner of this workspace can change its model key." };
+  if (!withinListingLimit(session.user.id)) return { ok: false, error: "Too many model lookups. Wait a few minutes, or type a model name." };
   const resolved = await endpointFrom(orgId, input);
   if ("error" in resolved) return { ok: false, error: resolved.error };
   const { endpoint } = resolved;
@@ -89,8 +109,8 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   const { session, requestHeaders, orgId } = await activeOrg();
   if (!session) redirect("/sign-in");
   if (!orgId) return { error: "Your account has no workspace yet." };
-  const beta = readEnv().betaEmails;
-  if (beta && !beta.includes(session.user.email.toLowerCase())) return { error: "Hosted runs are in private beta. Write to contact@usetrawler.com to get access." };
+  const refusal = betaRefusal(session.user.email);
+  if (refusal) return { error: refusal };
 
   const resolved = await endpointFrom(orgId, { key: String(form.get("apiKey") ?? ""), provider: String(form.get("provider") ?? ""), baseUrl: String(form.get("baseUrl") ?? "") });
   if ("error" in resolved) return { error: resolved.error };
@@ -114,7 +134,7 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
     const run = await withOrg(getDb(), orgId, (tx) =>
       startRun(tx, orgId, projectId, getKeyring(), {
         budgetUsd, agentModel: modelId, judgeModel: modelId, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: session.user.id,
-        provider: endpoint.provider, tokenCap: price ? null : DEFAULT_RUN.tokenCap,
+        provider: endpoint.provider, providerBaseUrl: endpoint.provider === "custom" ? endpoint.baseUrl : null, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap,
       }),
     );
     runId = run.id;

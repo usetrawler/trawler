@@ -6,6 +6,7 @@ import type { Database } from "../db/index.ts";
 import { asSystem, type Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
 import { loadProjectConfig } from "../projects/projects.ts";
+import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
 import type { ConfigSnapshot } from "./runs.ts";
 
@@ -255,6 +256,8 @@ export interface LlmCall {
   jobId: string;
   models: string[];
   provider: Provider;
+  providerBaseUrl: string | null;
+  price: Price | null;
   remainingUsd: number;
   remainingTokens: number | null;
 }
@@ -265,13 +268,15 @@ export async function llmCallFor(db: Database, token: string): Promise<LlmCall> 
   return asSystem(db, async (tx) => {
     const job = await jobForToken(tx, token);
     if (job.status !== "leased") throw new LlmRefused("the job is over");
-    const run = await tx.selectFrom("runs").select(["status", "cost_usd", "budget_usd", "agent_model", "judge_model", "provider", "token_cap", "tokens_used"]).where("id", "=", job.run_id).executeTakeFirstOrThrow();
+    const run = await tx.selectFrom("runs").select(["status", "cost_usd", "budget_usd", "agent_model", "judge_model", "provider", "provider_base_url", "prompt_usd_per_mtok", "completion_usd_per_mtok", "token_cap", "tokens_used"]).where("id", "=", job.run_id).executeTakeFirstOrThrow();
     if (!ACTIVE.includes(run.status)) throw new LlmRefused("the run is no longer active");
     const remainingUsd = Number(run.budget_usd) - Number(run.cost_usd);
     const remainingTokens = run.token_cap === null ? null : Number(run.token_cap) - Number(run.tokens_used);
     if (remainingUsd <= 0 || (remainingTokens !== null && remainingTokens <= 0)) throw new LlmRefused("the run has spent its budget");
     await tx.updateTable("jobs").set({ lease_until: sql<Date>`now() + make_interval(mins => ${LEASE_MINUTES})` }).where("id", "=", job.id).execute();
-    return { orgId: job.org_id, runId: job.run_id, jobId: job.id, models: [...new Set([run.agent_model, run.judge_model])], provider: run.provider as Provider, remainingUsd, remainingTokens };
+    return { orgId: job.org_id, runId: job.run_id, jobId: job.id, models: [...new Set([run.agent_model, run.judge_model])], provider: run.provider as Provider, providerBaseUrl: run.provider_base_url,
+      price: run.prompt_usd_per_mtok === null || run.completion_usd_per_mtok === null ? null : { promptUsdPerMtok: Number(run.prompt_usd_per_mtok), completionUsdPerMtok: Number(run.completion_usd_per_mtok) },
+      remainingUsd, remainingTokens };
   });
 }
 

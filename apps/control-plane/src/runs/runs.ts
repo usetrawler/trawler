@@ -2,6 +2,7 @@ import { sql } from "kysely";
 import type { ProjectConfig, RunEvent } from "@usetrawler/protocol";
 import type { Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
+import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
 import { loadProjectConfig } from "../projects/projects.ts";
 
@@ -13,6 +14,8 @@ export interface StartRunOptions {
   replaySteps: number;
   createdBy: string;
   provider?: Provider;
+  providerBaseUrl?: string | null;
+  price?: Price | null;
   tokenCap?: number | null;
 }
 
@@ -37,7 +40,8 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
       org_id: orgId, project_id: projectId, number: next, config_snapshot: JSON.stringify(withoutSecrets(config)),
       agent_model: options.agentModel, judge_model: options.judgeModel, budget_usd: options.budgetUsd.toFixed(4),
       max_steps: options.maxSteps, replay_steps: options.replaySteps, created_by: options.createdBy,
-      provider: options.provider ?? "openrouter", token_cap: options.tokenCap ? String(options.tokenCap) : null,
+      provider: options.provider ?? "openrouter", provider_base_url: options.providerBaseUrl ?? null, token_cap: options.tokenCap ? String(options.tokenCap) : null,
+      prompt_usd_per_mtok: options.price ? options.price.promptUsdPerMtok.toFixed(6) : null, completion_usd_per_mtok: options.price ? options.price.completionUsdPerMtok.toFixed(6) : null,
     })
     .returning(["id", "number"])
     .executeTakeFirstOrThrow();

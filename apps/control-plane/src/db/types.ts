@@ -201,6 +201,7 @@ export interface RunEvents {
 export interface Runs {
   agent_model: string;
   budget_usd: Numeric;
+  completion_usd_per_mtok: Numeric | null;
   config_snapshot: Json;
   cost_usd: Generated<Numeric>;
   created_at: Generated<Timestamp>;
@@ -212,7 +213,9 @@ export interface Runs {
   number: number;
   org_id: string;
   project_id: string;
+  prompt_usd_per_mtok: Numeric | null;
   provider: Generated<string>;
+  provider_base_url: string | null;
   replay_steps: number;
   started_at: Timestamp | null;
   status: Generated<string>;

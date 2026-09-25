@@ -1,7 +1,8 @@
-export const PROVIDERS = ["openrouter", "openai", "anthropic", "google", "custom"] as const;
-export type Provider = (typeof PROVIDERS)[number];
+import { guardedFetch } from "../setup/safe-fetch.ts";
 
-export const PROVIDER_LABEL: Record<Provider, string> = { openrouter: "OpenRouter", openai: "OpenAI", anthropic: "Anthropic", google: "Google", custom: "OpenAI-compatible" };
+import { PROVIDERS, type Provider } from "./provider-kinds.ts";
+
+export { detectProvider, PROVIDER_LABEL, PROVIDERS, type Provider } from "./provider-kinds.ts";
 
 const FIXED_URL: Record<Exclude<Provider, "openrouter" | "custom">, string> = {
   openai: "https://api.openai.com/v1",
@@ -19,19 +20,18 @@ export const PREFERRED_MODELS: Record<Provider, string[]> = {
   custom: [],
 };
 
-export function detectProvider(key: string): Exclude<Provider, "custom"> | null {
-  const k = key.trim();
-  if (k.startsWith("sk-or-")) return "openrouter";
-  if (k.startsWith("sk-ant-")) return "anthropic";
-  if (k.startsWith("AIza")) return "google";
-  if (k.startsWith("sk-")) return "openai";
-  return null;
-}
-
 export interface Endpoint {
   provider: Provider;
   baseUrl: string;
   key: string;
+}
+
+let customFetch: typeof fetch | undefined;
+
+export function fetchFor(endpoint: Endpoint, fallback: typeof fetch = fetch): typeof fetch {
+  if (endpoint.provider !== "custom") return fallback;
+  customFetch ??= guardedFetch({ allowLoopback: process.env.NODE_ENV !== "production" && process.env.TRAWLER_ALLOW_LOCAL_PROVIDERS === "1" });
+  return customFetch;
 }
 
 export function endpointFor(provider: Provider, key: string, opts: { openRouterUrl: string; customUrl?: string | null }): Endpoint {
@@ -51,17 +51,17 @@ export function customUrlProblem(url: string): string | null {
   return null;
 }
 
-function authHeaders(endpoint: Endpoint): Record<string, string> {
-  if (endpoint.provider === "anthropic") return { "x-api-key": endpoint.key, "anthropic-version": "2023-06-01", authorization: `Bearer ${endpoint.key}` };
+function listingHeaders(endpoint: Endpoint): Record<string, string> {
+  if (endpoint.provider === "anthropic") return { "x-api-key": endpoint.key, "anthropic-version": "2023-06-01" };
   return { authorization: `Bearer ${endpoint.key}` };
 }
 
 export function chatHeaders(endpoint: Endpoint): Record<string, string> {
-  return { "content-type": "application/json", ...authHeaders(endpoint), ...(endpoint.provider === "openrouter" ? { "x-title": "Trawler" } : {}) };
+  return { "content-type": "application/json", authorization: `Bearer ${endpoint.key}`, ...(endpoint.provider === "openrouter" ? { "x-title": "Trawler" } : {}) };
 }
 
-export async function listModels(endpoint: Endpoint, fetchImpl: typeof fetch = fetch): Promise<string[]> {
-  const res = await fetchImpl(`${endpoint.baseUrl}/models`, { headers: authHeaders(endpoint), signal: AbortSignal.timeout(10_000) });
+export async function listModels(endpoint: Endpoint, fetchImpl: typeof fetch = fetchFor(endpoint)): Promise<string[]> {
+  const res = await fetchImpl(`${endpoint.baseUrl}/models`, { headers: listingHeaders(endpoint), redirect: "error", signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new ProviderRefused(res.status);
   const body = (await res.json()) as { data?: Array<{ id?: unknown }> };
   const ids = (body.data ?? []).map((m) => (typeof m.id === "string" ? m.id.replace(/^models\//, "") : "")).filter((id) => id && id.length <= 200);
@@ -76,12 +76,13 @@ export class ProviderRefused extends Error {
 
 export type KeyCheck = { ok: true } | { ok: false; reason: "key" | "model" | "unavailable"; detail?: string };
 
-export async function checkModelCall(endpoint: Endpoint, model: string, fetchImpl: typeof fetch = fetch): Promise<KeyCheck> {
+export async function checkModelCall(endpoint: Endpoint, model: string, fetchImpl: typeof fetch = fetchFor(endpoint)): Promise<KeyCheck> {
   try {
     const res = await fetchImpl(`${endpoint.baseUrl}/chat/completions`, {
       method: "POST",
       headers: chatHeaders(endpoint),
       body: JSON.stringify({ model, messages: [{ role: "user", content: "Reply with OK." }], max_tokens: 5, ...(endpoint.provider === "openrouter" ? { provider: { data_collection: "deny" } } : {}) }),
+      redirect: "error",
       signal: AbortSignal.timeout(30_000),
     });
     if (res.ok) return { ok: true };

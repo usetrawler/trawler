@@ -44,7 +44,8 @@ export async function modelKey(tx: Tx, orgId: string, keys: Keyring): Promise<St
   let key: string;
   try {
     key = keys.decrypt(row.secret, context(orgId));
-  } catch {
+  } catch (err) {
+    if (row.kind !== "openrouter") throw err;
     key = keys.decrypt(row.secret, legacyContext(orgId));
   }
   return { provider: row.kind as Provider, key, baseUrl: row.base_url };
