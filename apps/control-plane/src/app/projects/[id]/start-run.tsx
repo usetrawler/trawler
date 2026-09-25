@@ -1,7 +1,7 @@
 "use client";
 import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { DEFAULT_RUN, estimateUsd, RUN_MODELS } from "../../../runs/models.ts";
+import { DEFAULT_RUN, estimateUsd, type RunModel } from "../../../runs/models.ts";
 import { startRunAction, type StartState } from "./actions.ts";
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
@@ -16,11 +16,12 @@ function Submit() {
   );
 }
 
-export function StartRun({ projectId, personas }: { projectId: string; personas: number }) {
+export function StartRun({ projectId, personas, models }: { projectId: string; personas: number; models: RunModel[] }) {
   const [state, action] = useActionState<StartState, FormData>(startRunAction, {});
-  const [modelId, setModelId] = useState(RUN_MODELS[0]!.id);
+  const [modelId, setModelId] = useState(models[0]?.id ?? "");
   const [cap, setCap] = useState(DEFAULT_RUN.budgetUsd);
-  const model = RUN_MODELS.find((m) => m.id === modelId) ?? RUN_MODELS[0]!;
+  const model = models.find((m) => m.id === modelId);
+  if (!model) return <p className="border border-line bg-panel p-5 text-sm text-muted">No models are available right now.</p>;
   const estimate = estimateUsd(model, personas);
   return (
     <form action={action} className="flex flex-col gap-5 border border-line bg-panel p-5">
@@ -28,7 +29,7 @@ export function StartRun({ projectId, personas }: { projectId: string; personas:
       <p className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Start</p>
       <fieldset className="flex flex-col gap-2">
         <legend className="mb-2 text-sm text-muted">Model</legend>
-        {RUN_MODELS.map((m) => (
+        {models.map((m) => (
           <label key={m.id} className="flex items-center gap-3">
             <input type="radio" name="model" value={m.id} checked={m.id === modelId} onChange={() => setModelId(m.id)} className="accent-[var(--action)]" />
             <span>{m.label}</span>

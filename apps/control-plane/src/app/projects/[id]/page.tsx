@@ -5,6 +5,7 @@ import { StartRun } from "./start-run.tsx";
 import { withOrg } from "../../../db/tenancy.ts";
 import { projectForEditing } from "../../../projects/projects.ts";
 import { getAuth } from "../../../server/auth.ts";
+import { refreshPricesInBackground, runModels } from "../../../runs/catalog.ts";
 import { getDb } from "../../../server/db.ts";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   const project = await withOrg(getDb(), orgId, (tx) => projectForEditing(tx, orgId, id));
   if (!project) notFound();
   const organization = await auth.api.getFullOrganization({ headers: requestHeaders });
+  const models = await runModels(getDb());
+  refreshPricesInBackground(getDb());
   return (
     <AppShell organization={organization?.name ?? "Workspace"} email={session.user.email} step={2}>
       <div className="flex flex-col gap-10">
@@ -53,7 +56,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
             ))}
           </ol>
         </section>
-        <StartRun projectId={project.id} personas={project.personas.length} />
+        <StartRun projectId={project.id} personas={project.personas.length} models={models} />
       </div>
     </AppShell>
   );

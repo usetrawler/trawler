@@ -2,7 +2,8 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { withOrg } from "../../../db/tenancy.ts";
-import { DEFAULT_RUN, RUN_MODELS } from "../../../runs/models.ts";
+import { runModel } from "../../../runs/catalog.ts";
+import { DEFAULT_RUN } from "../../../runs/models.ts";
 import { startRun } from "../../../runs/runs.ts";
 import { getAuth } from "../../../server/auth.ts";
 import { getDb, getKeyring } from "../../../server/db.ts";
@@ -16,7 +17,7 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   const modelId = String(form.get("model") ?? "");
   const budgetUsd = Number(form.get("budget"));
   if (form.get("authorised") !== "on") return { error: "Confirm that you may test this product." };
-  if (!RUN_MODELS.some((m) => m.id === modelId)) return { error: "Choose a model." };
+  if (!(await runModel(getDb(), modelId))) return { error: "Choose a model." };
   if (!Number.isFinite(budgetUsd) || budgetUsd < 0.1 || budgetUsd > 50) return { error: "Set a cap between $0.10 and $50." };
   const session = await getAuth().api.getSession({ headers: await headers() });
   if (!session) redirect("/sign-in");
