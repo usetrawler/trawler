@@ -30,8 +30,8 @@ export async function startReporting(env: Env, secrets: string[], overrides: Par
   for (const secret of secrets) {
     if (secret.length >= MIN_SECRET_LENGTH) runner.add(secret);
   }
-  let job: SecretScrubber | undefined;
-  const scrubber = { scrub: <T>(value: T): T => runner.scrub(job ? job.scrub(value) : value) };
+  let jobs: SecretScrubber[] = [];
+  const scrubber = { scrub: <T>(value: T): T => runner.scrub(jobs.reduce((masked, job) => job.scrub(masked), value)) };
   scrubConsole(scrubber);
   Sentry.init({
     dsn,
@@ -66,8 +66,8 @@ export async function startReporting(env: Env, secrets: string[], overrides: Par
         Sentry.captureException(new Error(scrubbed));
       });
     },
-    maskWith: (scrubber) => {
-      job = scrubber;
+    maskWith: (job) => {
+      jobs = [job, ...jobs].slice(0, 2);
     },
     close: async () => {
       await Sentry.close(2000);

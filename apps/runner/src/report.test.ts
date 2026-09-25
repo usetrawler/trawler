@@ -61,7 +61,7 @@ describe("the hosted runner", () => {
     Sentry.captureException(new Error(`an unexpected failure near ${RUNNER_TOKEN}`));
     await Sentry.flush(2000);
     expect(sent).toHaveLength(2);
-    const reported = sent.find((envelope) => envelope.includes("the control plane refused"))!;
+    const reported = sent.find((envelope) => JSON.parse(envelope)[1][0][1].exception.values[0].value.includes("the control plane refused"))!;
     expect(events().map((e) => e.exception.values[0]!.value)).toEqual(expect.arrayContaining([
       "role_session job-1 finished (error): the control plane refused •••",
       "an unexpected failure near •••",
@@ -77,19 +77,25 @@ describe("the hosted runner", () => {
   });
 
   test("sends no span or transaction, even with SENTRY_TRACES_SAMPLE_RATE set in the environment", async () => {
+    expect(Sentry.getClient()!.getOptions().tracesSampleRate).toBe(1);
     Sentry.startSpan({ name: `job with ${RUNNER_TOKEN}`, forceTransaction: true }, () => undefined);
     await Sentry.flush(2000);
     expect(everything.filter((envelope) => /"type":"(span|transaction)"/.test(envelope))).toEqual([]);
     expect(everything.join("\n")).not.toContain(RUNNER_TOKEN);
   });
 
-  test("masks an error Sentry catches by itself with the secrets of the job the runner is working on", async () => {
-    const job = new SecretScrubber();
-    job.add(JOB_PASSWORD);
-    reporting.maskWith(job);
+  test("masks an error Sentry catches by itself with the secrets of the job the runner is working on, and of the job before it", async () => {
+    const scrubberFor = (secret: string) => {
+      const scrubber = new SecretScrubber();
+      scrubber.add(secret);
+      return scrubber;
+    };
+    reporting.maskWith(scrubberFor(JOB_PASSWORD));
+    reporting.maskWith(scrubberFor("next-job-password"));
     Sentry.captureException(new Error(`the page crashed after typing ${JOB_PASSWORD}`));
+    Sentry.captureException(new Error("the next page crashed after typing next-job-password"));
     await Sentry.flush(2000);
-    expect(events().map((e) => e.exception.values[0]!.value)).toEqual(["the page crashed after typing •••"]);
+    expect(events().map((e) => e.exception.values[0]!.value).sort()).toEqual(["the next page crashed after typing •••", "the page crashed after typing •••"]);
     expect(sent.join("\n")).not.toContain(JOB_PASSWORD);
   });
 });
