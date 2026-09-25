@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { deploy, type DeployOptions } from "./deploy.ts";
 import { railway } from "./railway.ts";
 
-type Deployment = { status: string; deploymentStopped: boolean; image?: string };
+type Deployment = { status: string; deploymentStopped: boolean; image?: string; instances?: string[] };
 
 function fakeRailway(opts: { project: string; environment: string; services: Record<string, string>; deployments: Record<string, Deployment[]>; active?: string[][] }) {
   const calls: Array<{ op: string; variables: Record<string, unknown>; token: string | null }> = [];
@@ -28,8 +28,9 @@ function fakeRailway(opts: { project: string; environment: string; services: Rec
     if (op === "deployment(") {
       const name = deployed.get(String(variables.id))!;
       const queue = opts.deployments[name]!;
-      const { image, ...deployment } = (queue.length > 1 ? queue.shift() : queue[0])!;
-      return reply({ deployment: { ...deployment, meta: { image: image ?? source.get(opts.services[name]) } } });
+      const { image, instances, ...deployment } = (queue.length > 1 ? queue.shift() : queue[0])!;
+      const settled = deployment.status === "SUCCESS" ? [deployment.deploymentStopped ? "EXITED" : "RUNNING"] : [];
+      return reply({ deployment: { ...deployment, meta: { image: image ?? source.get(opts.services[name]) }, instances: (instances ?? settled).map((status) => ({ status })) } });
     }
     const ids = active.length > 1 ? active.shift()! : active[0] ?? [];
     return reply({ serviceInstance: { activeDeployments: ids.map((id) => ({ id })) } });
@@ -101,4 +102,22 @@ test("a deployment that runs some other image than the one released fails the re
   const workers = fakeRailway({ project: "p2", environment: "e2", services: { runner: "s-runner" }, deployments: { runner: [up] }, active: [["dep-runner"]] });
   await expect(deploy(options(core, workers))).rejects.toThrow("migrate deployment dep-migrate runs ghcr.io/x/migrate:latest, not ghcr.io/x/migrate@sha256:1");
   expect(core.calls.some((c) => c.op === "serviceInstanceUpdate" && c.variables.svc === "s-cp")).toBe(false);
+});
+
+test("a migration whose container crashed stops the release, even while Railway still calls the deployment a success", async () => {
+  const core = fakeRailway({ project: "p", environment: "e", services: { migrate: "s-migrate", "control-plane": "s-cp" }, deployments: {
+    migrate: [{ status: "SUCCESS", deploymentStopped: true, instances: ["RESTARTING"] }, { status: "SUCCESS", deploymentStopped: true, instances: ["CRASHED"] }],
+    "control-plane": [up],
+  } });
+  const workers = fakeRailway({ project: "p2", environment: "e2", services: { runner: "s-runner" }, deployments: { runner: [up] }, active: [["dep-runner"]] });
+  await expect(deploy(options(core, workers))).rejects.toThrow("migrate deployment dep-migrate crashed");
+  expect(core.calls.some((c) => c.op === "serviceInstanceUpdate" && c.variables.svc === "s-cp")).toBe(false);
+});
+
+test("a control plane that stopped right after it started is not taken for a running one", async () => {
+  const core = fakeRailway({ project: "p", environment: "e", services: { migrate: "s-migrate", "control-plane": "s-cp" }, deployments: {
+    migrate: [{ status: "SUCCESS", deploymentStopped: true }], "control-plane": [{ status: "SUCCESS", deploymentStopped: true }],
+  } });
+  const workers = fakeRailway({ project: "p2", environment: "e2", services: { runner: "s-runner" }, deployments: { runner: [up] }, active: [["dep-runner"]] });
+  await expect(deploy(options(core, workers))).rejects.toThrow(/control-plane deployment dep-control-plane is still SUCCESS \(EXITED\)/);
 });

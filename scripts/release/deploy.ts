@@ -20,6 +20,13 @@ export interface DeployOptions {
 
 export class DeployFailed extends Error {}
 
+interface Deployment {
+  status: string;
+  deploymentStopped: boolean;
+  meta: { image?: string } | null;
+  instances: Array<{ status: string }>;
+}
+
 const ENDED = new Set(["CRASHED", "FAILED", "REMOVED", "REMOVING", "SKIPPED", "NEEDS_APPROVAL"]);
 
 function clock(o: DeployOptions) {
@@ -44,18 +51,23 @@ async function release(o: DeployOptions, api: Railway, at: Target, service: stri
   log(`${service}: deploying ${image} as ${id}`);
   const deadline = now() + timeoutMs;
   while (true) {
-    const { deployment } = await api.query<{ deployment: { status: string; deploymentStopped: boolean; meta: { image?: string } | null } }>(
-      "query($id: String!) { deployment(id: $id) { status deploymentStopped meta } }",
+    const { deployment } = await api.query<{ deployment: Deployment }>(
+      "query($id: String!) { deployment(id: $id) { status deploymentStopped meta instances { status } } }",
       { id },
     );
+    const instances = deployment.instances.map((i) => i.status);
     if (ENDED.has(deployment.status)) throw new DeployFailed(`${service} deployment ${id} ended ${deployment.status}`);
-    if (deployment.status === "SUCCESS" && (until === "running" || deployment.deploymentStopped)) {
+    if (instances.includes("CRASHED")) throw new DeployFailed(`${service} deployment ${id} crashed`);
+    const settled = until === "exited"
+      ? deployment.deploymentStopped && instances.length > 0 && instances.every((status) => status === "EXITED")
+      : !deployment.deploymentStopped;
+    if (deployment.status === "SUCCESS" && settled) {
       const running = deployment.meta?.image;
       if (running !== image) throw new DeployFailed(`${service} deployment ${id} runs ${running ?? "an unknown image"}, not ${image}`);
       log(`${service}: ${until === "exited" ? "finished" : "running"}`);
       return id;
     }
-    if (now() >= deadline) throw new DeployFailed(`${service} deployment ${id} is still ${deployment.status}`);
+    if (now() >= deadline) throw new DeployFailed(`${service} deployment ${id} is still ${deployment.status}${instances.length ? ` (${instances.join(", ")})` : ""}`);
     await sleep(pollMs);
   }
 }
