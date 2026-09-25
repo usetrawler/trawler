@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { BrandMark } from "./brand-mark.tsx";
+import { DocsLink } from "./docs-link.tsx";
 
 const STEPS = ["Product", "Plan", "Run"] as const;
 
@@ -12,6 +13,7 @@ export function AppShell({ organization, email, step, children }: { organization
           trawler
         </a>
         <div className="flex min-w-0 items-center gap-3 text-sm">
+          <DocsLink className="-my-2 mr-3 shrink-0 py-2 font-mono text-xs tracking-[0.15em] text-muted uppercase hover:text-ink">Docs</DocsLink>
           <span className="hidden truncate text-muted sm:inline">{email}</span>
           <span className="truncate font-mono text-xs tracking-[0.15em] uppercase">{organization}</span>
         </div>

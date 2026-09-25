@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getAuth, signInProviders } from "../../server/auth.ts";
 import { BrandMark } from "../../components/brand-mark.tsx";
+import { DocsLink } from "../../components/docs-link.tsx";
 import { SignInButtons } from "./sign-in-buttons.tsx";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,9 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
         <h1 className="text-5xl leading-[0.95] font-bold tracking-tight md:text-6xl">From your app URL to real feedback.</h1>
         <p className="max-w-md text-lg text-muted">
           Agents use your product and report what they found. Every opinion and defect is reported to you.
+        </p>
+        <p className="text-sm text-muted">
+          New to Trawler? <DocsLink className="underline underline-offset-4 hover:text-ink">Read the docs</DocsLink>
         </p>
       </section>
       <section className="flex flex-col gap-4 border border-line bg-panel p-6">
