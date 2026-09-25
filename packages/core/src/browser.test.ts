@@ -55,9 +55,15 @@ beforeAll(async () => {
       case "/two":
         return html(`<h1>Second page</h1>`);
       case "/short":
-        return html(`<input aria-label="Password" type="password" maxlength="12"><button onclick="document.getElementById('echo').textContent = 'Your password is ' + document.querySelector('input').value">Echo</button><p id="echo"></p>`);
+        return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password" maxlength="12"><button type="submit">Save</button></form>`);
       case "/strip":
-        return html(`<input aria-label="Password" type="password" oninput="this.value = this.value.replace(/[^A-Za-z0-9]/g, '')"><button onclick="document.getElementById('echo').textContent = 'Your password is ' + document.querySelector('input').value">Echo</button><p id="echo"></p>`);
+        return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password" oninput="this.value = this.value.replace(/[^A-Za-z0-9]/g, '')"><button type="submit">Save</button></form>`);
+      case "/echo-password": {
+        let body = "";
+        req.on("data", (chunk) => (body += chunk));
+        req.on("end", () => html(`<h1>Saved</h1><p>Your password is ${new URLSearchParams(body).get("password")}</p>`));
+        return;
+      }
       case "/pin":
         return html(`<input aria-label="PIN" type="password" maxlength="6"><button onclick="document.getElementById('echo').textContent = 'Your PIN is ' + document.querySelector('input').value">Echo</button><p id="echo"></p>`);
       case "/signup": {
@@ -505,12 +511,12 @@ describe("password fields", () => {
         await navigate(b, `${origin}${page}`);
         const snap = await snapshot(b);
         expect(await b.fillField(refOf(snap, "Password"), "Kx7mPq2Rz9Lw!Aa7", "password")).toBe("typed the password");
-        await b.tools.browser_click!.execute!({ target: refOf(snap, "Echo"), element: "Echo" }, ctx);
+        const edit = (await b.tools.browser_type!.execute!({ target: refOf(snap, "Password"), text: "x", element: "password" }, ctx)) as { isError?: boolean };
+        expect(edit.isError).toBe(true);
+        await b.tools.browser_click!.execute!({ target: refOf(snap, "Save"), element: "Save" }, ctx);
         const shown = await snapshot(b);
         expect(shown).toContain("Your password is •••");
         expect(shown).not.toContain(kept);
-        const edit = (await b.tools.browser_type!.execute!({ target: refOf(snap, "Password"), text: "x", element: "password" }, ctx)) as { isError?: boolean };
-        expect(edit.isError).toBe(true);
       });
     }, 60_000);
   }
