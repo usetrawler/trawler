@@ -1,18 +1,25 @@
 import * as Sentry from "@sentry/nextjs";
 import type { Instrumentation } from "next";
-import { writeLog } from "./server/log.ts";
+import { scrubConsole, writeLog } from "./server/log.ts";
 import { serverSentryOptions } from "./server/sentry.ts";
 
 export function register(): void {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  scrubConsole();
   const options = serverSentryOptions();
   if (options) Sentry.init(options);
 }
 
 export const onRequestError: Instrumentation.onRequestError = async (err, request, context) => {
-  const id = request.headers["x-railway-request-id"] ?? request.headers["x-request-id"];
+  const header = request.headers["x-railway-request-id"] ?? request.headers["x-request-id"];
+  const requestId = Array.isArray(header) ? header[0] : header;
+  const path = request.path.split(/[?#]/)[0]!;
+  const digest = (err as { digest?: unknown }).digest;
   await writeLog("error", "request failed", {
-    err, requestId: Array.isArray(id) ? id[0] : id, path: request.path, method: request.method, route: context.routePath, route_type: context.routeType,
+    err, requestId, path, method: request.method, route: context.routePath, route_type: context.routeType, digest: typeof digest === "string" ? digest : undefined,
   });
-  Sentry.captureRequestError(err, request, context);
+  Sentry.withScope((scope) => {
+    if (requestId) scope.setTag("request_id", requestId);
+    Sentry.captureRequestError(err, { ...request, path }, context);
+  });
 };

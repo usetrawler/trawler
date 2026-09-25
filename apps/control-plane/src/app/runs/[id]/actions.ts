@@ -16,7 +16,8 @@ export async function cancelRunAction(runId: string): Promise<boolean> {
   try {
     await withOrg(getDb(), orgId, (tx) => cancelRun(tx, orgId, runId));
     return true;
-  } catch {
+  } catch (err) {
+    await logError("run could not be cancelled", { orgId, runId, err });
     return false;
   }
 }

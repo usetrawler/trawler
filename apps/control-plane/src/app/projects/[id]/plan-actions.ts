@@ -76,7 +76,8 @@ export async function removeAccountAction(projectId: string, ref: string): Promi
   try {
     await withOrg(getDb(), orgId, (tx) => removeAccount(tx, orgId, projectId, ref));
     return { ok: true, accounts: await accountsOf(orgId, projectId) };
-  } catch {
+  } catch (err) {
+    await logError("account could not be removed", { orgId, projectId, err });
     return { ok: false, error: "The account could not be removed." };
   }
 }

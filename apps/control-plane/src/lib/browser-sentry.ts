@@ -29,3 +29,30 @@ export function readBrowserSentryConfig(page: Page): BrowserSentryConfig | undef
     return undefined;
   }
 }
+
+export function withoutQuery(url: string): string {
+  const cut = url.search(/[?#]/);
+  return cut === -1 ? url : url.slice(0, cut);
+}
+
+export function browserSentryOptions(config: BrowserSentryConfig): BrowserOptions {
+  return {
+    ...config,
+    dataCollection: DATA_COLLECTION,
+    tracePropagationTargets: [],
+    integrations: (defaults) => defaults.filter((integration) => integration.name !== "BrowserSession"),
+    beforeSend: (event) => {
+      if (event.request?.url) event.request.url = withoutQuery(event.request.url);
+      return event;
+    },
+    beforeBreadcrumb: (breadcrumb) => {
+      const data = breadcrumb.data;
+      if (data) {
+        for (const key of ["url", "from", "to"]) {
+          if (typeof data[key] === "string") data[key] = withoutQuery(data[key]);
+        }
+      }
+      return breadcrumb;
+    },
+  };
+}

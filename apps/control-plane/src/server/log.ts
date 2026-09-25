@@ -1,3 +1,4 @@
+import { inspect } from "node:util";
 import * as Sentry from "@sentry/nextjs";
 import { MIN_SECRET_LENGTH, SecretScrubber } from "@usetrawler/core/secrets";
 
@@ -8,10 +9,15 @@ const SECRET_VARIABLES = [
   "TRAWLER_MASTER_KEY", "TRAWLER_RUNNER_TOKEN", "TRAWLER_SMOKE_TOKEN",
 ];
 
-function databasePassword(url: string | undefined): string | undefined {
-  if (!url || !URL.canParse(url)) return undefined;
+function databasePasswords(url: string | undefined): string[] {
+  if (!url || !URL.canParse(url)) return [];
   const { password } = new URL(url);
-  return password ? decodeURIComponent(password) : undefined;
+  if (!password) return [];
+  try {
+    return [password, decodeURIComponent(password)];
+  } catch {
+    return [password];
+  }
 }
 
 export function envScrubber(env: Env = process.env): SecretScrubber {
@@ -23,7 +29,7 @@ export function scrubberWith(extra: Array<string | undefined>, env: Env = proces
   const values = [
     ...SECRET_VARIABLES.map((name) => env[name]),
     ...(env.TRAWLER_PREVIOUS_MASTER_KEYS ?? "").split(","),
-    databasePassword(env.DATABASE_URL),
+    ...databasePasswords(env.DATABASE_URL),
     ...extra,
   ];
   for (const value of values) {
@@ -38,6 +44,31 @@ let shared: SecretScrubber | undefined;
 export function sharedScrubber(): SecretScrubber {
   shared ??= envScrubber();
   return shared;
+}
+
+function scrubbedError(original: Error, scrubber: SecretScrubber): Error {
+  const error = new Error(scrubber.scrub(original.message));
+  error.name = original.name;
+  error.stack = original.stack === undefined ? undefined : scrubber.scrub(original.stack);
+  return error;
+}
+
+const CONSOLE_LEVELS = ["log", "info", "warn", "error", "debug"] as const;
+let consoleScrubbed = false;
+
+export function scrubConsole(scrubber: SecretScrubber = sharedScrubber()): void {
+  if (consoleScrubbed) return;
+  consoleScrubbed = true;
+  for (const level of CONSOLE_LEVELS) {
+    const write = console[level].bind(console);
+    console[level] = (...args: unknown[]) =>
+      write(...args.map((arg) => {
+        if (typeof arg === "string") return scrubber.scrub(arg);
+        if (arg instanceof Error) return scrubbedError(arg, scrubber);
+        if (arg !== null && typeof arg === "object") return scrubber.scrub(inspect(arg, { depth: 6 }));
+        return arg;
+      }));
+  }
 }
 
 export interface LogFields {
@@ -85,9 +116,11 @@ export async function writeLog(level: "error" | "info", message: string, fields:
 export async function logError(message: string, fields: LogFields = {}, scrubber: SecretScrubber = sharedScrubber()): Promise<void> {
   const record = await writeLog("error", message, fields, scrubber);
   const tags = Object.fromEntries(["org_id", "run_id", "job_id", "request_id"].filter((k) => typeof record[k] === "string").map((k) => [k, record[k] as string]));
-  const original = fields.err instanceof Error ? fields.err : undefined;
-  const error = new Error(scrubber.scrub(original?.message ?? message));
-  error.name = original?.name ?? "Error";
-  if (original?.stack) error.stack = scrubber.scrub(original.stack);
-  Sentry.captureException(error, { tags, extra: { message } });
+  const error = fields.err instanceof Error ? scrubbedError(fields.err, scrubber) : new Error(scrubber.scrub(message));
+  Sentry.withScope((scope) => {
+    scope.setTags(tags);
+    if (!(fields.err instanceof Error)) scope.setFingerprint(["logged", message]);
+    scope.addEventProcessor((event) => scrubber.scrub(event));
+    Sentry.captureException(error);
+  });
 }
