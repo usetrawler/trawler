@@ -7,7 +7,7 @@ import { bearer, readBody } from "../runner-api/handlers.ts";
 import type { Price } from "../llm/prices.ts";
 import { chatHeaders, endpointFor, fetchFor, type Endpoint } from "../llm/providers.ts";
 import { InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage, type LlmCall } from "../runs/queue.ts";
-import { logError } from "../server/log.ts";
+import { logError, scrubberWith } from "../server/log.ts";
 
 export interface ProxyDeps {
   db: Database;
@@ -134,7 +134,7 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
     return failure(502, "the provider sent an unreadable answer");
   }
   if (!upstream.ok || parsed.error) {
-    const message = typeof parsed.error?.message === "string" ? parsed.error.message.slice(0, 300) : `the provider answered ${upstream.status}`;
+    const message = typeof parsed.error?.message === "string" ? scrubberWith([stored.key]).scrub(parsed.error.message).slice(0, 300) : `the provider answered ${upstream.status}`;
     return failure(upstream.ok ? 502 : upstream.status, message);
   }
   const usage = parsed.usage ?? {};

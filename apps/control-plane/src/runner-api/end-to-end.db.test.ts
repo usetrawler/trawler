@@ -248,6 +248,9 @@ test("the proxy bounds a call by what is left of the cap, prices calls OpenRoute
   expect(failed.status).toBe(502);
   expect(await failed.json()).toEqual({ error: { code: 502, message: "provider exploded" } });
 
+  replies = [{ error: { message: `${"x".repeat(280)} rejected ${ORG_KEY}`, code: 400 } }];
+  expect(await (await call()).json()).toEqual({ error: { code: 502, message: `${"x".repeat(280)} rejected •••` } });
+
   replies = [{ ...textReply("slow"), delayMs: 300 }];
   const first = call();
   await new Promise((r) => setTimeout(r, 50));
