@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 import YAML from "yaml";
 import { scriptedModel, text, toolCall } from "../../../packages/core/src/testing.ts";
 import { fetchPage, runCli, type CliDeps } from "./cli.ts";
+import type { LogFields } from "./worker.ts";
 
 function deps(over: Partial<CliDeps> = {}) {
   const out: string[] = [];
@@ -200,4 +201,43 @@ test("work refuses to send the runner token over plain http to another machine",
   const { d, err } = deps({ env: { OPENROUTER_API_KEY: "k", TRAWLER_RUNNER_TOKEN: "t".repeat(40) } });
   expect(await runCli(["work", "--control-plane", "http://cp.example.com"], d)).toBe(2);
   expect(err.join("\n")).toMatch(/https/);
+});
+
+test("work starts reporting with the runner token, reports a failed job with its ids and masks with its secrets, logs JSON lines when asked, and closes reporting at the end", async () => {
+  const job = {
+    kind: "role_session", personaKey: "ana", jobId: "11111111-1111-4111-8111-111111111111", runId: "22222222-2222-4222-8222-222222222222", token: "job-token-" + "x".repeat(40),
+    config: { name: "Acme", targetUrl: "https://a.test/", description: "", allowedOrigins: ["https://a.test"], personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "x" }], accounts: [], extraHeaders: {}, secretHeaders: {} },
+    maxSteps: 10, budgetUsd: 1, agentModel: "m/agent", judgeModel: "m/judge",
+  };
+  const controlPlane = (async (url: string | URL) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/api/runner/claim") return Response.json(job);
+    if (path.endsWith("/events")) return Response.json({ cancel: false });
+    return Response.json({ ok: true });
+  }) as typeof fetch;
+  const env = { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_LOG_FORMAT: "json" };
+  const started: Array<[unknown, string[]]> = [];
+  const reports: Array<[string, LogFields]> = [];
+  const masked: string[] = [];
+  let closed = false;
+  const { d, out, err } = deps({
+    env,
+    fetchImpl: controlPlane,
+    openBrowser: async () => { throw new Error("no chromium"); },
+    startReporting: async (reportingEnv, secrets) => {
+      started.push([reportingEnv, secrets]);
+      return {
+        report: (message, fields) => void reports.push([message, fields]),
+        maskWith: (scrubber) => void masked.push(scrubber.scrub(`token ${job.token}`)),
+        close: async () => { closed = true; },
+      };
+    },
+  });
+  expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(0);
+  expect(started).toEqual([[env, ["t".repeat(40)]]]);
+  expect(reports).toEqual([[expect.stringContaining("finished (error): no chromium"), { jobId: job.jobId, runId: job.runId, kind: "role_session" }]]);
+  expect(masked).toEqual(["token •••"]);
+  expect(closed).toBe(true);
+  expect(JSON.parse(out[0]!)).toMatchObject({ level: "info", msg: expect.stringContaining("started"), job_id: job.jobId, run_id: job.runId });
+  expect(JSON.parse(err.at(-1)!)).toMatchObject({ level: "error", msg: expect.stringContaining("no chromium"), job_id: job.jobId });
 });

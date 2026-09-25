@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import { afterEach, expect, test } from "vitest";
 import { PROTOCOL_HEADER } from "@usetrawler/protocol";
 import { scriptedModel, text, toolCall } from "../../../packages/core/src/testing.ts";
-import { workOnce, type WorkerDeps } from "./worker.ts";
+import { workLoop, workOnce, type LogFields, type WorkerDeps } from "./worker.ts";
 
 const token = "job-token-" + "x".repeat(40);
 const config = {
@@ -15,7 +15,7 @@ const baseJob = { jobId: "11111111-1111-4111-8111-111111111111", runId: "2222222
 let server: Server | undefined;
 afterEach(() => new Promise<void>((r) => (server ? server.close(() => r()) : r())));
 
-function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; failEvents?: number; eventsStatus?: number; completeStatus?: number } = {}) {
+function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; failEvents?: number; eventsStatus?: number; eventsBody?: string; completeStatus?: number; completeBody?: string } = {}) {
   const seen = { claims: 0, events: [] as Array<{ seq: number; type: string }>, completions: [] as unknown[], releases: 0, headers: [] as Array<string | undefined>, auth: [] as Array<string | undefined> };
   let batches = 0;
   let failures = opts.failEvents ?? 0;
@@ -32,7 +32,7 @@ function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; failEvents
       return res.end(JSON.stringify(job));
     }
     if (req.url?.endsWith("/events")) {
-      if (failures-- > 0) { res.statusCode = opts.eventsStatus ?? 503; return res.end("{}"); }
+      if (failures-- > 0) { res.statusCode = opts.eventsStatus ?? 503; return res.end(opts.eventsBody ?? "{}"); }
       batches++;
       seen.events.push(...body.events);
       return res.end(JSON.stringify({ cancel: opts.cancelAfter !== undefined && batches >= opts.cancelAfter }));
@@ -43,7 +43,7 @@ function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; failEvents
     }
     if (req.url?.endsWith("/complete")) {
       seen.completions.push(body);
-      if (opts.completeStatus) { res.statusCode = opts.completeStatus; return res.end("{}"); }
+      if (opts.completeStatus) { res.statusCode = opts.completeStatus; return res.end(opts.completeBody ?? "{}"); }
       return res.end(JSON.stringify({ ok: true }));
     }
     res.statusCode = 404;
@@ -145,14 +145,29 @@ const endless = () => scriptedModel(Array.from({ length: 40 }, () => toolCall("n
 test("events the control plane keeps refusing stop the job instead of crashing the runner, and usage is still reported", async () => {
   for (const eventsStatus of [401, 503]) {
     const { url, seen } = await fakeControlPlane(role, { failEvents: 1000, eventsStatus });
-    const lines: string[] = [];
-    expect(await workOnce(deps(url, endless(), { attempts: 2, log: (l) => lines.push(l) }))).toBe("done");
+    const lines: Array<[string, LogFields | undefined]> = [];
+    const reports: string[] = [];
+    expect(await workOnce(deps(url, endless(), { attempts: 2, log: (l, f) => lines.push([l, f]), report: (m) => void reports.push(m) }))).toBe("done");
     expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "error", error: expect.stringMatching(/could not report events/) })]);
     expect((seen.completions[0] as { usage: { steps: number } }).usage.steps).toBeLessThan(40);
-    expect(lines.some((l) => l.includes("could not report events"))).toBe(true);
+    expect(lines.find(([l]) => l.includes("could not report events"))?.[1]?.level).toBe("error");
+    expect(reports).toEqual([expect.stringMatching(/finished \(error\): the runner could not report events/)]);
     await new Promise<void>((r) => server!.close(() => r()));
     server = undefined;
   }
+});
+
+test("events refused with an answer that echoes the job's secrets are logged and reported masked", async () => {
+  const withPassword = { ...config, accounts: [{ ref: "account-1", username: "ana@a.test", password: "correct-horse-battery" }] };
+  const { url } = await fakeControlPlane({ ...baseJob, config: withPassword, kind: "role_session", personaKey: "ana", accountRef: "account-1" }, {
+    failEvents: 1000, eventsStatus: 400, eventsBody: `{"error":"refused correct-horse-battery for ${token}"}`,
+  });
+  const lines: string[] = [];
+  const reports: string[] = [];
+  await workOnce(deps(url, endless(), { attempts: 1, log: (l) => void lines.push(l), report: (m) => void reports.push(m) }));
+  expect(lines.find((l) => l.includes("could not report events"))).toContain('HTTP 400 {"error":"refused ••• for •••"}');
+  expect(JSON.stringify([lines, reports])).not.toContain("correct-horse-battery");
+  expect(JSON.stringify([lines, reports])).not.toContain(token);
 });
 
 test("a refused completion is logged, not reported as finished", async () => {
@@ -175,8 +190,10 @@ test("a very long model error is cut to what the protocol accepts", async () => 
 
 test("a job this runner cannot read is completed as an error, not left leased", async () => {
   const { url, seen } = await fakeControlPlane({ ...role, kind: "time_travel" });
-  expect(await workOnce(deps(url, scriptedModel([])))).toBe("done");
+  const reports: Array<[string, LogFields]> = [];
+  expect(await workOnce(deps(url, scriptedModel([]), { report: (m, f) => void reports.push([m, f]) }))).toBe("done");
   expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "error", error: expect.stringMatching(/cannot read the job/) })]);
+  expect(reports).toEqual([[expect.stringMatching(/cannot read the job/), { jobId: baseJob.jobId }]]);
 });
 
 test("stopping the runner abandons a claim that is still waiting", async () => {
@@ -193,12 +210,102 @@ test("a runner told to stop mid-session hands the job back instead of failing it
   const original = slow.doGenerate.bind(slow);
   slow.doGenerate = async (o) => { await new Promise((r) => setTimeout(r, 30)); return original(o); };
   const stop = new AbortController();
-  const lines: string[] = [];
-  const pending = workOnce(deps(url, slow, { log: (l) => lines.push(l) }), stop.signal);
+  const lines: Array<[string, LogFields | undefined]> = [];
+  const reports: string[] = [];
+  const pending = workOnce(deps(url, slow, { log: (l, f) => lines.push([l, f]), report: (m) => void reports.push(m) }), stop.signal);
   await new Promise((r) => setTimeout(r, 150));
   stop.abort();
   expect(await pending).toBe("done");
   expect(seen.releases).toBe(1);
   expect(seen.completions).toEqual([]);
-  expect(lines.some((l) => l.includes("handed back to the queue"))).toBe(true);
+  expect(lines.find(([l]) => l.includes("handed back to the queue"))?.[1]?.level).toBe("info");
+  expect(reports).toEqual([]);
+});
+
+test("a failed job is reported and logged as an error with its ids, without the job's secrets", async () => {
+  const withPassword = { ...config, accounts: [{ ref: "account-1", username: "ana@a.test", password: "correct-horse-battery" }] };
+  const { url } = await fakeControlPlane({ ...baseJob, config: withPassword, kind: "role_session", personaKey: "ana", accountRef: "account-1" });
+  const reports: Array<[string, LogFields]> = [];
+  const logs: Array<[string, LogFields | undefined]> = [];
+  await workOnce(deps(url, scriptedModel([]), {
+    openBrowser: async () => { throw new Error(`no chromium for correct-horse-battery with ${token}`); },
+    report: (message, fields) => void reports.push([message, fields]),
+    log: (line, fields) => void logs.push([line, fields]),
+  }));
+  const ids = { jobId: baseJob.jobId, runId: baseJob.runId, kind: "role_session" };
+  expect(reports).toEqual([[expect.stringContaining("no chromium for ••• with •••"), expect.objectContaining(ids)]]);
+  const finished = logs.find(([line]) => line.includes("finished"))!;
+  expect(finished[1]).toEqual({ ...ids, level: "error" });
+  expect(JSON.stringify([reports, logs])).not.toContain("correct-horse-battery");
+  expect(JSON.stringify([reports, logs])).not.toContain(token);
+});
+
+test("before the browser opens, reporting gets the job's scrubber, so what it catches by itself is masked too", async () => {
+  const withPassword = { ...config, accounts: [{ ref: "account-1", username: "ana@a.test", password: "correct-horse-battery" }] };
+  const { url } = await fakeControlPlane({ ...baseJob, config: withPassword, kind: "role_session", personaKey: "ana", accountRef: "account-1" });
+  const seen: string[] = [];
+  await workOnce(deps(url, scriptedModel([]), {
+    maskReportsWith: (scrubber) => void seen.push(scrubber.scrub(`correct-horse-battery ${token}`)),
+    openBrowser: async () => { seen.push("browser opened"); throw new Error("no chromium"); },
+  }));
+  expect(seen).toEqual(["••• •••", "browser opened"]);
+});
+
+test("a job that finishes normally is logged with its ids and not reported", async () => {
+  const { url } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" });
+  const reports: string[] = [];
+  const logs: Array<[string, LogFields | undefined]> = [];
+  const model = scriptedModel([toolCall("goal_status", { goal: "g", status: "reached", note: "" }), toolCall("finish", { summary: "done" })]);
+  await workOnce(deps(url, model, { report: (m) => void reports.push(m), log: (line, fields) => void logs.push([line, fields]) }));
+  expect(reports).toEqual([]);
+  expect(logs.map(([, fields]) => fields)).toEqual([
+    { jobId: baseJob.jobId, runId: baseJob.runId, kind: "role_session", level: "info" },
+    { jobId: baseJob.jobId, runId: baseJob.runId, kind: "role_session", level: "info" },
+  ]);
+});
+
+test("a control plane that keeps failing claims is reported once, and again after it recovered and failed anew", async () => {
+  const statuses = [503, 502, 503, 204, 502, 503];
+  let claims = 0;
+  server = createServer((req, res) => {
+    const status = statuses[claims++] ?? 204;
+    res.statusCode = status;
+    res.end(status === 204 ? undefined : "{}");
+  });
+  const url = await new Promise<string>((resolve) => server!.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${(server!.address() as { port: number }).port}`)));
+  const reports: string[] = [];
+  const stop = new AbortController();
+  const looping = workLoop(deps(url, scriptedModel([]), { attempts: 1, claimRetryMs: 1, report: (m) => void reports.push(m) }), stop.signal);
+  while (claims < statuses.length + 1) await new Promise((r) => setTimeout(r, 5));
+  stop.abort();
+  await looping;
+  expect(reports).toEqual(["claim failed: HTTP 503 from /api/runner/claim", "claim failed: HTTP 502 from /api/runner/claim"]);
+});
+
+test("a completion the control plane refuses is reported, masking the job's secrets its answer echoes", async () => {
+  const withPassword = { ...config, accounts: [{ ref: "account-1", username: "ana@a.test", password: "correct-horse-battery" }] };
+  const { url } = await fakeControlPlane({ ...baseJob, config: withPassword, kind: "role_session", personaKey: "ana", accountRef: "account-1" }, {
+    completeStatus: 400, completeBody: `{"error":"refused correct-horse-battery for ${token}"}`,
+  });
+  const reports: string[] = [];
+  const logs: string[] = [];
+  const model = scriptedModel([toolCall("goal_status", { goal: "g", status: "reached", note: "" }), toolCall("finish", { summary: "done" })]);
+  await workOnce(deps(url, model, { report: (m) => void reports.push(m), log: (l) => void logs.push(l) }));
+  expect(reports).toEqual([expect.stringContaining('could not report back: the control plane rejected the completion: HTTP 400 {"error":"refused ••• for •••"}')]);
+  expect(JSON.stringify([reports, logs])).not.toContain("correct-horse-battery");
+  expect(JSON.stringify([reports, logs])).not.toContain(token);
+});
+
+test("a claim failure is logged as an error and reported without the runner token", async () => {
+  const runnerToken = "runner-" + "r".repeat(40);
+  const reports: string[] = [];
+  const logs: Array<[string, LogFields | undefined]> = [];
+  const stop = new AbortController();
+  const failing = (async () => { throw new Error(`connection refused while sending ${runnerToken}`); }) as unknown as typeof fetch;
+  const looping = workLoop(deps("http://127.0.0.1:1", scriptedModel([]), {
+    fetch: failing, attempts: 1, claimRetryMs: 1, report: (m) => { reports.push(m); stop.abort(); }, log: (l, f) => void logs.push([l, f]),
+  }), stop.signal);
+  await looping;
+  expect(reports).toEqual(["claim failed: connection refused while sending •••"]);
+  expect(logs[0]).toEqual(["claim failed: connection refused while sending •••", { level: "error" }]);
 });

@@ -6,7 +6,8 @@
   "license": "FSL-1.1-ALv2",
   "exports": {
     ".": "./src/index.ts",
-    "./setup": "./src/setup-entry.ts"
+    "./setup": "./src/setup-entry.ts",
+    "./secrets": "./src/secrets.ts"
   },
   "scripts": {
     "typecheck": "tsc -p ."

@@ -1,10 +1,11 @@
 "use server";
 import { headers } from "next/headers";
 import { withOrg } from "../../../db/tenancy.ts";
-import { cancelRun, CannotJudgeAgain, judgeAgain } from "../../../runs/runs.ts";
+import { cancelRun, CannotJudgeAgain, judgeAgain, RunNotFound } from "../../../runs/runs.ts";
 import { getAuth } from "../../../server/auth.ts";
 import { betaRefusal } from "../../../server/beta.ts";
 import { getDb, getKeyring } from "../../../server/db.ts";
+import { logError } from "../../../server/log.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -15,7 +16,8 @@ export async function cancelRunAction(runId: string): Promise<boolean> {
   try {
     await withOrg(getDb(), orgId, (tx) => cancelRun(tx, orgId, runId));
     return true;
-  } catch {
+  } catch (err) {
+    if (!(err instanceof RunNotFound)) await logError("run could not be cancelled", { orgId, runId, err });
     return false;
   }
 }
@@ -32,7 +34,7 @@ export async function judgeAgainAction(runId: string, findingKey: string): Promi
     return {};
   } catch (err) {
     if (err instanceof CannotJudgeAgain) return { error: err.message };
-    console.error("judge again could not start", { runId, message: err instanceof Error ? err.message : String(err) });
+    await logError("judge again could not start", { orgId, runId, err });
     return { error: "The judge could not be started. Try again." };
   }
 }

@@ -7,6 +7,7 @@ import { bearer, readBody } from "../runner-api/handlers.ts";
 import type { Price } from "../llm/prices.ts";
 import { chatHeaders, endpointFor, fetchFor, type Endpoint } from "../llm/providers.ts";
 import { InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage, type LlmCall } from "../runs/queue.ts";
+import { logError, scrubberWith } from "../server/log.ts";
 
 export interface ProxyDeps {
   db: Database;
@@ -70,7 +71,7 @@ async function record(deps: ProxyDeps, call: LlmCall, usage: Parameters<typeof r
     try {
       return await recordLlmUsage(deps.db, call, usage);
     } catch (err) {
-      if (attempt === 1) console.error("model usage could not be recorded", { runId: call.runId, jobId: call.jobId, costUsd: usage.costUsd, message: err instanceof Error ? err.message : String(err) });
+      if (attempt === 1) await logError("model usage could not be recorded", { orgId: call.orgId, runId: call.runId, jobId: call.jobId, costUsd: usage.costUsd, err });
     }
   }
 }
@@ -133,7 +134,7 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
     return failure(502, "the provider sent an unreadable answer");
   }
   if (!upstream.ok || parsed.error) {
-    const message = typeof parsed.error?.message === "string" ? parsed.error.message.slice(0, 300) : `the provider answered ${upstream.status}`;
+    const message = typeof parsed.error?.message === "string" ? scrubberWith([stored.key]).scrub(parsed.error.message).slice(0, 300) : `the provider answered ${upstream.status}`;
     return failure(upstream.ok ? 502 : upstream.status, message);
   }
   const usage = parsed.usage ?? {};

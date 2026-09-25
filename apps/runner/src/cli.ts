@@ -9,6 +9,7 @@ import { ProjectConfigSchema, type RunEventInput } from "@usetrawler/protocol";
 import { localRun, type OpenBrowser } from "./local-run.ts";
 import { RunDir, renderReport } from "./run-dir.ts";
 import { workLoop, workOnce, type WorkerDeps } from "./worker.ts";
+import { startReporting, workerLog } from "./report.ts";
 
 export const DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
 const SETUP_BUDGET_USD = 0.25;
@@ -32,6 +33,7 @@ export interface CliDeps {
   openBrowser: (opts: Parameters<OpenBrowser>[0] & { project: ReturnType<typeof ProjectConfigSchema.parse>; outputDir: string; headless: boolean; survivesSignals?: boolean }) => ReturnType<OpenBrowser>;
   runsRoot: string;
   fetchImpl?: typeof fetch;
+  startReporting?: typeof startReporting;
 }
 
 class UsageError extends Error {}
@@ -128,6 +130,8 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
   if (protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(hostname)) throw new UsageError("work sends the runner token, so --control-plane must use https unless it is on this machine");
   const runnerToken = deps.env.TRAWLER_RUNNER_TOKEN?.trim();
   if (!runnerToken) throw new UsageError("TRAWLER_RUNNER_TOKEN is not set");
+  const log = workerLog(deps.env, { out: deps.out, err: deps.err });
+  const reporting = await (deps.startReporting ?? startReporting)(deps.env, [runnerToken]);
   const workerDeps: WorkerDeps = {
     controlPlane,
     runnerToken,
@@ -143,18 +147,22 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
         throw err;
       }
     },
-    log: deps.err,
+    log,
+    report: reporting.report,
+    maskReportsWith: reporting.maskWith,
     fetch: deps.fetchImpl,
     secrets: [runnerToken],
   };
   if (values.once) {
     await workOnce(workerDeps);
+    await reporting.close();
     return 0;
   }
   const stop = new AbortController();
   for (const signal of ["SIGTERM", "SIGINT"] as const) process.once(signal, () => stop.abort());
-  deps.err(`working for ${new URL(controlPlane).origin}`);
+  log(`working for ${new URL(controlPlane).origin}`);
   await workLoop(workerDeps, stop.signal);
+  await reporting.close();
   return 0;
 }
 

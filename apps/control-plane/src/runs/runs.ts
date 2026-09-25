@@ -51,9 +51,15 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
   return run;
 }
 
+export class RunNotFound extends Error {
+  constructor() {
+    super("run not found");
+  }
+}
+
 export async function cancelRun(tx: Tx, orgId: string, runId: string): Promise<void> {
   const run = await tx.selectFrom("runs").select("status").where("id", "=", runId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
-  if (!run) throw new Error("run not found");
+  if (!run) throw new RunNotFound();
   if (run.status !== "queued" && run.status !== "running") return;
   await tx.updateTable("runs").set({ status: "cancelled", finished_at: new Date() }).where("id", "=", runId).execute();
   await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date() }).where("run_id", "=", runId).where("status", "=", "queued").execute();

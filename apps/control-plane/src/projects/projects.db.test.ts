@@ -5,7 +5,7 @@ import { ProjectConfigSchema } from "@usetrawler/protocol";
 import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring, last4 } from "../lib/secrets.ts";
-import { AccountLimit, addAccount, createProject, listProjects, loadProjectConfig, projectForEditing, removeAccount, replacePlan, UnknownAccount } from "./projects.ts";
+import { AccountLimit, addAccount, createProject, listProjects, loadProjectConfig, projectForEditing, ProjectNotFound, removeAccount, replacePlan, UnknownAccount } from "./projects.ts";
 import { ProjectConfigSchema as Schema } from "@usetrawler/protocol";
 
 const t = await testDb();
@@ -56,7 +56,8 @@ test("secrets are stored encrypted and never come back from list or edit queries
 test("another organisation can neither see nor load the project", async () => {
   const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
   expect(await withOrg(t.db, "org-b", (tx) => projectForEditing(tx, "org-b", id))).toBeNull();
-  await expect(withOrg(t.db, "org-b", (tx) => loadProjectConfig(tx, "org-b", id, keys))).rejects.toThrow(/not found/);
+  await expect(withOrg(t.db, "org-b", (tx) => loadProjectConfig(tx, "org-b", id, keys))).rejects.toThrow(ProjectNotFound);
+  await expect(withOrg(t.db, "org-b", (tx) => replacePlan(tx, "org-b", id, { personas: config.personas, goals: config.goals }))).rejects.toThrow(ProjectNotFound);
   expect((await withOrg(t.db, "org-b", (tx) => listProjects(tx, "org-b"))).map((p) => p.id)).not.toContain(id);
   expect((await asSystem(t.db, (tx) => listProjects(tx, "org-b"))).map((p) => p.id)).not.toContain(id);
 });
@@ -145,8 +146,8 @@ test("test accounts are added encrypted, reach the runner, and removing one deta
   expect(editing!.accounts).toEqual([{ ref, username: "buyer@shop.test", password_hint: last4("buyer-password-9") }]);
 
   await expect(withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "x@shop.test", password: "short" }, keys))).rejects.toThrow();
-  await expect(withOrg(t.db, "org-b", (tx) => addAccount(tx, "org-b", id, { username: "x@shop.test", password: "long-enough-1" }, keys))).rejects.toThrow(/not found/);
-  await expect(withOrg(t.db, "org-b", (tx) => removeAccount(tx, "org-b", id, ref))).rejects.toThrow(/not found/);
+  await expect(withOrg(t.db, "org-b", (tx) => addAccount(tx, "org-b", id, { username: "x@shop.test", password: "long-enough-1" }, keys))).rejects.toThrow(ProjectNotFound);
+  await expect(withOrg(t.db, "org-b", (tx) => removeAccount(tx, "org-b", id, ref))).rejects.toThrow(ProjectNotFound);
 
   const second = await withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "two@shop.test", password: "second-pass-1" }, keys));
   await withOrg(t.db, "org-a", (tx) => removeAccount(tx, "org-a", id, ref));

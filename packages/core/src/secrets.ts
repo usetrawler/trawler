@@ -1,3 +1,5 @@
+import { format, inspect, type InspectOptions } from "node:util";
+
 const MASK = "•••";
 export const MIN_SECRET_LENGTH = 8;
 
@@ -17,7 +19,7 @@ function forms(s: string): string[] {
   const percent = [encodeURIComponent(s), encodeURI(s), new URLSearchParams({ x: s }).toString().slice(2)];
   const lowerPercent = percent.map((p) => p.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase()));
   const html = ["&#39;", "&#x27;", "&apos;"].map((a) => htmlEscaped(s, a));
-  return [s, jsonEscaped(s), jsonEscaped(jsonEscaped(s)), jsSingleQuoted(s), ...html, ...percent, ...lowerPercent];
+  return [s, jsonEscaped(s), jsonEscaped(jsonEscaped(s)), jsSingleQuoted(s), inspect(s).slice(1, -1), ...html, ...percent, ...lowerPercent];
 }
 
 function variants(secret: string): string[] {
@@ -102,4 +104,18 @@ export class SecretScrubber {
       ancestors.delete(value);
     }
   }
+}
+
+const CONSOLE_LEVELS = ["log", "info", "warn", "error", "debug"] as const;
+let consoleScrubbed = false;
+
+export function scrubConsole(scrubber: Pick<SecretScrubber, "scrub">): void {
+  if (consoleScrubbed) return;
+  consoleScrubbed = true;
+  for (const level of CONSOLE_LEVELS) {
+    const write = console[level].bind(console);
+    console[level] = (...args: unknown[]) => write(scrubber.scrub(format(...args)));
+  }
+  console.dir = (item: unknown, options?: InspectOptions) => console.log(inspect(item, { customInspect: false, ...options }));
+  console.dirxml = (...data: unknown[]) => console.log(...data);
 }

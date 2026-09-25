@@ -7,8 +7,8 @@ import { withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { setModelKey } from "../credentials/credentials.ts";
-import { createProject } from "../projects/projects.ts";
-import { cancelRun, CannotJudgeAgain, judgeAgain, runSummary, startRun, type StartRunOptions } from "./runs.ts";
+import { createProject, ProjectNotFound } from "../projects/projects.ts";
+import { cancelRun, CannotJudgeAgain, judgeAgain, RunNotFound, runSummary, startRun, type StartRunOptions } from "./runs.ts";
 import { claimJob, completeJob, ingestEvents, InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage, releaseJob } from "./queue.ts";
 
 const t = await testDb();
@@ -181,8 +181,8 @@ describe("safety", () => {
   test("another organisation cannot see or cancel the run, or start one on a foreign project", async () => {
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
     expect(await withOrg(t.db, "org-b", (tx) => runSummary(tx, "org-b", run.id))).toBeNull();
-    await expect(withOrg(t.db, "org-b", (tx) => cancelRun(tx, "org-b", run.id))).rejects.toThrow(/not found/);
-    await expect(withOrg(t.db, "org-b", (tx) => startRun(tx, "org-b", project, keys, options))).rejects.toThrow(/not found/);
+    await expect(withOrg(t.db, "org-b", (tx) => cancelRun(tx, "org-b", run.id))).rejects.toThrow(RunNotFound);
+    await expect(withOrg(t.db, "org-b", (tx) => startRun(tx, "org-b", project, keys, options))).rejects.toThrow(ProjectNotFound);
     void other;
     await drain();
   });

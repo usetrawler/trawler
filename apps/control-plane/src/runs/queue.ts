@@ -6,6 +6,7 @@ import type { Database } from "../db/index.ts";
 import { asSystem, type Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
 import { loadProjectConfig } from "../projects/projects.ts";
+import { logError } from "../server/log.ts";
 import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
 import { capSpent, type ConfigSnapshot } from "./runs.ts";
@@ -133,7 +134,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
       };
     } catch (err) {
       await sql`rollback to savepoint prepare_assignment`.execute(tx);
-      console.error("job could not be prepared", { jobId: picked.id, message: err instanceof Error ? err.message : String(err) });
+      await logError("job could not be prepared", { orgId: picked.org_id, runId: picked.run_id, jobId: picked.id, err });
       await tx.updateTable("jobs").set({ status: "failed", error: "the job could not be prepared from the project; it may have changed since the run started", token_hash: null, lease_until: null, finished_at: new Date() }).where("id", "=", picked.id).execute();
       if (!(await stopIfOverBudget(tx, picked.run_id))) await planNext(tx, picked, { usage: { model: "", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "error" });
       return { quarantined: true };
