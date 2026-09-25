@@ -12,20 +12,20 @@
 <p align="center">
   <a href="https://usetrawler.com"><b>Website</b></a>
   &nbsp;·&nbsp;
-  <a href="https://app.usetrawler.com"><b>Start testing</b></a>
+  <a href="https://app.usetrawler.com"><b>Start&nbsp;testing</b></a>
   &nbsp;·&nbsp;
   <a href="https://usetrawler.com/docs/"><b>Docs</b></a>
   &nbsp;·&nbsp;
-  <a href="#run-it-on-your-own-machine"><b>Run it locally</b></a>
+  <a href="#run-it-on-your-own-machine"><b>Run&nbsp;it&nbsp;locally</b></a>
   &nbsp;·&nbsp;
   <a href="mailto:contact@usetrawler.com"><b>Contact</b></a>
 </p>
 
 <p align="center">
   <a href="https://github.com/usetrawler/trawler/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/usetrawler/trawler/actions/workflows/ci.yml/badge.svg?branch=main"></a>
-  <a href="#use-it-in-the-app"><img alt="Hosted runs: private beta" src="https://img.shields.io/badge/hosted_runs-private_beta-FF6B3D"></a>
+  <a href="#use-it-in-the-app"><img alt="Hosted runs: private beta" src="https://img.shields.io/badge/hosted_runs-private_beta-B03711"></a>
   <img alt="Node.js 24 or later" src="https://img.shields.io/badge/node-%E2%89%A5_24-17191C">
-  <a href="#licence"><img alt="Licence: Apache-2.0 and FSL-1.1-ALv2" src="https://img.shields.io/badge/licence-Apache--2.0_%2B_FSL--1.1--ALv2-85A7B8"></a>
+  <a href="#licence"><img alt="Licence: Apache-2.0 and FSL-1.1-ALv2" src="https://img.shields.io/badge/licence-Apache--2.0_%2B_FSL--1.1--ALv2-2C4A57"></a>
 </p>
 
 ## Test your product the way people use it
@@ -45,17 +45,13 @@ Nothing a person reports reaches the top of your report on their word alone. Eve
 **04 · Act on what was confirmed.** The report opens with the defects a fresh agent reproduced, each with its steps, what the person saw and what the replay saw. The run was estimated before it started, and it stops spending at the cap you set.
 
 ```mermaid
-flowchart LR
-    url(["Your product's URL"]) --> setup["Setup<br/>proposes people and goals"]
-    setup --> plan["Plan<br/>yours to edit"]
-    plan --> use
-    subgraph run["A run, under a hard cap"]
-        direction LR
-        use["Use<br/>each person in a real browser"] -- defects --> replay["Replay<br/>a fresh agent, steps only"]
-        replay --> judge["Judge<br/>the claim against the replay"]
-        judge --> report(["Report<br/>confirmed first"])
-        use -- friction --> report
-    end
+flowchart TB
+    person["A person reports a defect<br/>the steps and what went wrong"] -- "the steps only" --> replay["A fresh agent<br/>follows them in a new browser"]
+    person -- "the claim" --> judge
+    replay -- "what it saw" --> judge["The judge<br/>compares the two"]
+    judge --> confirmed(["confirmed"])
+    judge --> refuted(["refuted"])
+    judge --> inconclusive(["inconclusive"])
 ```
 
 ## Who it is for
@@ -124,7 +120,9 @@ description: Shared workspaces for small teams.
 personas:
   - id: ana
     name: Ana
-    brief: You run a small bakery and have ten minutes between orders. You give up on anything that needs a manual.
+    brief: >-
+      You run a small bakery and have ten minutes between orders.
+      You give up on anything that needs a manual.
     accountRef: owner
 goals:
   - id: invite-teammate
@@ -188,24 +186,24 @@ So you don't go looking: comparing a run with an earlier one, people using the p
 ## Inside this repository
 
 ```mermaid
-flowchart LR
+flowchart TB
     you(["You, in a browser"]) --> cp["Control plane<br/>web app · API · model proxy"]
-    cp --- db[("Postgres")]
-    runner["Runner<br/>agent loop · Playwright"] -- "claims jobs, streams events,<br/>calls models with a job token" --> cp
-    cp -- "adds your key" --> llm(["Model provider"])
+    runner["Runner<br/>agent loop · Playwright"] -- "takes jobs, streams events,<br/>calls models through it" --> cp
     runner -- "a real browser" --> product(["Your product"])
+    cp --- db[("Postgres")]
+    cp -- "adds your key" --> llm(["Model provider"])
 ```
 
 That is a hosted run. Run locally, the runner needs neither the control plane nor Postgres: it reads `project.yaml` and calls OpenRouter itself.
 
-| Path | What it is | Licence |
+| Path | Licence | What it is |
 | --- | --- | --- |
-| [`apps/runner`](apps/runner) | `trawler-runner`: the people's sessions, blind replays and the judge — on your machine (`setup`, `run`) or for the hosted app (`work`) | Apache-2.0 |
-| [`packages/protocol`](packages/protocol) | The zod schemas both sides share: the project file, findings, run events and the runner API | Apache-2.0 |
-| [`packages/core`](packages/core) | The engine: the agent loop, the browser and its origin allowlist, secret masking, setup, replay and the judge | FSL-1.1-ALv2 |
-| [`apps/control-plane`](apps/control-plane) | The app at app.usetrawler.com: sign-in, workspaces, plans, runs, the runner API and the model proxy | FSL-1.1-ALv2 |
-| [`db`](db) | The Postgres schema as Flyway migrations, with row-level security per workspace | FSL-1.1-ALv2 |
-| [`scripts/release`](scripts/release) | Releases: staging, a smoke check, then production | FSL-1.1-ALv2 |
+| [`apps/runner`](apps/runner) | Apache-2.0 | `trawler-runner`: the people's sessions, blind replays and the judge — on your machine (`setup`, `run`) or for the hosted app (`work`) |
+| [`packages/protocol`](packages/protocol) | Apache-2.0 | The zod schemas both sides share: the project file, findings, run events and the runner API |
+| [`packages/core`](packages/core) | FSL-1.1-ALv2 | The engine: the agent loop, the browser and its origin allowlist, secret masking, setup, replay and the judge |
+| [`apps/control-plane`](apps/control-plane) | FSL-1.1-ALv2 | The app at app.usetrawler.com: sign-in, workspaces, plans, runs, the runner API and the model proxy |
+| [`db`](db) | FSL-1.1-ALv2 | The Postgres schema as Flyway migrations, with row-level security per workspace |
+| [`scripts/release`](scripts/release) | FSL-1.1-ALv2 | Releases: staging, a smoke check, then production |
 
 Built with TypeScript on Node.js 24, Next.js, Postgres with Flyway and Kysely, Better Auth, the Vercel AI SDK with Playwright MCP, zod and Vitest.
 
