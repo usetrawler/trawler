@@ -29,3 +29,9 @@ test("a runner token the runner could never send is refused at start", () => {
   expect(() => readEnv({ ...base, TRAWLER_RUNNER_TOKEN: "a".repeat(40) + "!@#" })).toThrow(/TRAWLER_RUNNER_TOKEN/);
   expect(() => readEnv({ ...base, TRAWLER_RUNNER_TOKEN: "short" })).toThrow(/TRAWLER_RUNNER_TOKEN/);
 });
+
+test("the OpenRouter address can point at a fake only outside production", () => {
+  expect(readEnv(base).openRouterUrl).toBe("https://openrouter.ai/api/v1");
+  expect(readEnv({ ...base, TRAWLER_OPENROUTER_URL: "http://localhost:4600/api/v1/" }).openRouterUrl).toBe("http://localhost:4600/api/v1");
+  expect(() => readEnv({ ...base, NODE_ENV: "production", BETTER_AUTH_URL: "https://app.usetrawler.com", TRAWLER_OPENROUTER_URL: "http://evil.test" })).toThrow(/outside production/);
+});

@@ -43,6 +43,16 @@ export interface Account {
   userId: string;
 }
 
+export interface Credentials {
+  created_at: Generated<Timestamp>;
+  created_by: string;
+  hint: string;
+  id: Generated<string>;
+  kind: string;
+  org_id: string;
+  secret: string;
+}
+
 export interface Findings {
   created_at: Generated<Timestamp>;
   goal: string;
@@ -256,6 +266,7 @@ export interface Verification {
 
 export interface DB {
   account: Account;
+  credentials: Credentials;
   findings: Findings;
   goal_outcomes: GoalOutcomes;
   goals: Goals;
