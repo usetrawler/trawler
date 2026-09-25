@@ -18,6 +18,10 @@ function Submit({ blocked, pending }: { blocked?: string; pending: boolean }) {
   );
 }
 
+export function Recognised({ provider }: { provider: Provider }) {
+  return <p className="text-sm"><span className="text-muted">Recognised as {providerArticle(provider)} </span>{PROVIDER_LABEL[provider]}<span className="text-muted"> key. Not right? Pick the provider below.</span></p>;
+}
+
 export function StartRun({ projectId, personas, keyHint: savedHint, canManageKey, blocked }: {
   projectId: string; personas: number; keyHint: KeyHint | null; canManageKey: boolean; blocked?: string;
 }) {
@@ -91,7 +95,7 @@ export function StartRun({ projectId, personas, keyHint: savedHint, canManageKey
               {keyHint && <button type="button" onClick={() => { setReplacingKey(false); setApiKey(""); }} className="h-12 px-3 text-sm text-muted hover:text-ink">Keep {keyHint.hint}</button>}
             </span>
           </label>
-          {detected && !chosenProvider && <p className="text-sm"><span className="text-muted">Recognised as {providerArticle(detected)} </span>{PROVIDER_LABEL[detected]}<span className="text-muted"> key. Not right? Pick the provider below.</span></p>}
+          {detected && !chosenProvider && <Recognised provider={detected} />}
           {apiKey.trim().length >= 20 && (
             <div className="grid gap-2 sm:grid-cols-[auto_1fr]">
               <select name="provider" value={provider ?? "custom"} onChange={(e) => setChosenProvider(e.target.value as Provider)} aria-label="Provider" className={field}>
