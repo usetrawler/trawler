@@ -490,6 +490,7 @@ describe("judge again", () => {
 
   test("two clicks at once queue one judge again", async () => {
     const run = await runWithFailedJudge();
+    await Promise.all([sql`select pg_sleep(0.05)`.execute(t.db), sql`select pg_sleep(0.05)`.execute(t.db)]);
     const outcomes = await Promise.allSettled([again(run.id), again(run.id)]);
     expect(outcomes.map((o) => o.status).sort()).toEqual(["fulfilled", "rejected"]);
     expect(((outcomes.find((o) => o.status === "rejected") as PromiseRejectedResult).reason as Error).message).toMatch(/already/);
@@ -499,10 +500,13 @@ describe("judge again", () => {
 
   test("is refused when a custom endpoint moved to another address", async () => {
     const run = await runWithFailedJudge({ provider: "custom", providerBaseUrl: "https://llm.example.com/v1", tokenCap: 1_000_000 });
-    await withOrg(t.db, "org-a", (tx) => setModelKey(tx, "org-a", { provider: "custom", key: `sk-${"c".repeat(40)}`, baseUrl: "https://llm.example.com/v1" }, "u1", keys));
     await withOrg(t.db, "org-a", (tx) => setModelKey(tx, "org-a", { provider: "custom", key: `sk-${"c".repeat(40)}`, baseUrl: "https://other.example.com/v1" }, "u1", keys));
     await refused(again(run.id), /key/);
     expect(await queuedJudges(run.id)).toBe(0);
+    await withOrg(t.db, "org-a", (tx) => setModelKey(tx, "org-a", { provider: "custom", key: `sk-${"c".repeat(40)}`, baseUrl: "https://llm.example.com/v1" }, "u1", keys));
+    await again(run.id);
+    expect(await queuedJudges(run.id)).toBe(1);
+    await drain();
   });
 
   test("another organisation cannot judge the run again", async () => {

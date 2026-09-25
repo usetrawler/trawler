@@ -287,6 +287,14 @@ describe("judge", () => {
     expect(error).toBe("the model ran out of room before it gave a verdict (2 tries)");
   });
 
+  test("a reply the provider's content filter stopped is named as such", async () => {
+    const filtered = () => ({ content: [], finishReason: { unified: "content-filter", raw: "content_filter" }, usage: judgeUsage(0), warnings: [] }) as never;
+    const model = new MockLanguageModelV4({ doGenerate: async () => filtered() });
+    const { promise, events } = judgeWith(model);
+    expect((await promise).verdict).toBeNull();
+    expect(events.at(-1)).toMatchObject({ stoppedBy: "error", error: "the provider's content filter stopped the model before it gave a verdict (2 tries)" });
+  });
+
   test("a model that answers without a verdict twice ends the judge with an error", async () => {
     const model = scriptedModel([text("not json"), text("still not json")]);
     const { promise, events } = judgeWith(model);

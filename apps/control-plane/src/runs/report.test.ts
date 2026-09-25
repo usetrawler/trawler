@@ -171,6 +171,12 @@ test("a judge that was still running when the run stopped is not shown as judgin
   expect(view.report.notJudged.map((f) => f.reason)).toEqual(["The run ended before it was judged."]);
 });
 
+test("a defect whose judge again failed too can be judged again", () => {
+  const view = finished({ jobs: [judged("failed", modelError), judged("failed", { ...modelError, requested: true })], findings: [finding("ana:f1", "ana", replayed)] });
+  expect(view.rejudging).toBe(false);
+  expect(view.report.couldNotJudge).toEqual([expect.objectContaining({ key: "ana:f1", reason: "Model error: the model ran out of room before it gave a verdict (2 tries)", action: "judge_again" })]);
+});
+
 test("a defect judged again takes its new verdict", () => {
   const view = finished({
     jobs: [judged("failed", modelError), judged("succeeded", { stopped_by: "done", requested: true })],
