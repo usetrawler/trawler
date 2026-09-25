@@ -75,7 +75,7 @@ export async function modelsForKeyAction(input: KeyInput): Promise<ModelList> {
   if (!session || !orgId) return { ok: false, error: "Sign in again." };
   const refusal = betaRefusal(session.user.email);
   if (refusal) return { ok: false, error: refusal };
-  if ((input.key ?? "").trim() && !(await canManageBilling(requestHeaders))) return { ok: false, error: "Only an owner of this workspace can change its model key." };
+  if ((input.key ?? "").trim() && !(await canManageBilling(requestHeaders))) return { ok: false, error: "Only an owner or admin of this workspace can change its model key." };
   if (!withinListingLimit(session.user.id)) return { ok: false, error: "Too many model lookups. Wait a few minutes, or type a model name." };
   const resolved = await endpointFrom(orgId, input);
   if ("error" in resolved) return { ok: false, error: resolved.error };
@@ -111,7 +111,7 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   const resolved = await endpointFrom(orgId, { key: String(form.get("apiKey") ?? ""), provider: String(form.get("provider") ?? ""), baseUrl: String(form.get("baseUrl") ?? "") });
   if ("error" in resolved) return { error: resolved.error };
   const { endpoint, fresh } = resolved;
-  if (fresh && !(await canManageBilling(requestHeaders))) return { error: "Only an owner of this workspace can change its model key." };
+  if (fresh && !(await canManageBilling(requestHeaders))) return { error: "Only an owner or admin of this workspace can change its model key." };
   const label = PROVIDER_LABEL[endpoint.provider];
   const check = await checkModelCall(endpoint, modelId);
   if (!check.ok) {

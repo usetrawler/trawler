@@ -1,6 +1,11 @@
 import { expect, test } from "vitest";
-import { checkModelCall, detectProvider, endpointFor, listModels, priceKey } from "./providers.ts";
+import { checkModelCall, detectProvider, endpointFor, listModels, priceKey, PROVIDER_LABEL, PROVIDERS } from "./providers.ts";
+import { providerArticle } from "./provider-kinds.ts";
 import { parseOpenRouterPrices } from "./prices.ts";
+
+test("each provider's name takes the article it is spoken with", () => {
+  expect(PROVIDERS.map((p) => `${providerArticle(p)} ${PROVIDER_LABEL[p]}`)).toEqual(["an OpenRouter", "an OpenAI", "an Anthropic", "a Google", "an OpenAI-compatible"]);
+});
 
 test("a key's provider is recognised from its format", () => {
   expect(detectProvider("sk-or-v1-abc")).toBe("openrouter");
