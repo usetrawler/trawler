@@ -9,6 +9,7 @@ import { loadProjectConfig } from "../projects/projects.ts";
 import type { ConfigSnapshot } from "./runs.ts";
 
 const LEASE_MINUTES = 10;
+const LATE_REPORT_MS = 60 * 60 * 1000;
 const ACTIVE = ["queued", "running"];
 
 export class InvalidJobToken extends Error {
@@ -223,11 +224,12 @@ export async function completeJob(db: Database, token: string, input: JobResult)
   const result = JobResultSchema.parse(input);
   await asSystem(db, async (tx) => {
     const job = await jobForToken(tx, token, { allowExpired: true });
-    await addCost(tx, job.run_id, job.id, result.usage.costUsd - Number(job.counted_cost));
     if (job.status !== "leased") {
-      await stopIfOverBudget(tx, job.run_id);
+      const reapedRecently = job.status === "failed" && job.finished_at !== null && Date.now() - job.finished_at.getTime() < LATE_REPORT_MS;
+      if (reapedRecently) await addCost(tx, job.run_id, job.id, result.usage.costUsd - Number(job.counted_cost));
       return;
     }
+    await addCost(tx, job.run_id, job.id, result.usage.costUsd - Number(job.counted_cost));
     const failed = result.stoppedBy === "error";
     await tx
       .updateTable("jobs")

@@ -302,3 +302,13 @@ describe("review round 2", () => {
     await drain();
   });
 });
+
+test("a finished job's token cannot raise the run's cost afterwards", async () => {
+  await drain();
+  const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+  const job = (await claimJob(t.db, keys))!;
+  await completeJob(t.db, job.token, { usage: usage(0.1), stoppedBy: "finish" });
+  await completeJob(t.db, job.token, { usage: usage(4.9), stoppedBy: "finish" });
+  expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.costUsd).toBeCloseTo(0.1, 6);
+  await drain();
+});
