@@ -156,6 +156,7 @@ export async function claimJob(db: Database, keys: Keyring): Promise<JobAssignme
 
 export async function releaseJob(db: Database, job: { jobId: string; runId: string; token: string }): Promise<void> {
   await asSystem(db, async (tx) => {
+    await tx.selectFrom("jobs").select("id").where("id", "=", job.jobId).forUpdate().executeTakeFirst();
     const run = await tx.selectFrom("runs").select("status").where("id", "=", job.runId).forUpdate().executeTakeFirstOrThrow();
     const release = ACTIVE.includes(run.status) ? { status: "queued", started_at: null } : { status: "cancelled", finished_at: new Date() };
     const released = await tx
@@ -264,6 +265,7 @@ export async function llmCallFor(db: Database, token: string): Promise<LlmCall> 
     if (!ACTIVE.includes(run.status)) throw new LlmRefused("the run is no longer active");
     const remainingUsd = Number(run.budget_usd) - Number(run.cost_usd);
     if (remainingUsd <= 0) throw new LlmRefused("the run has spent its budget");
+    await tx.updateTable("jobs").set({ lease_until: sql<Date>`now() + make_interval(mins => ${LEASE_MINUTES})` }).where("id", "=", job.id).execute();
     return { orgId: job.org_id, runId: job.run_id, jobId: job.id, models: [...new Set([run.agent_model, run.judge_model])], remainingUsd };
   });
 }

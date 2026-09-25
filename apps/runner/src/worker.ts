@@ -218,7 +218,7 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
   }
   if (!job) return "done";
   deps.log(`${job.kind} ${job.jobId} started`);
-  const scrubber = runnerScrubber(deps, job.config);
+  const scrubber = runnerScrubber({ ...deps, secrets: [...(deps.secrets ?? []), job.token] }, job.config);
   const budget = new Budget(Math.max(job.budgetUsd, 1e-6));
   if (job.budgetUsd <= 0) budget.add(1e-6);
   const events = new JobEvents(deps, job, () => budget.add(budget.limitUsd));

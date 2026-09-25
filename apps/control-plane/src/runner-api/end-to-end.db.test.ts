@@ -52,6 +52,7 @@ beforeAll(async () => {
     for await (const c of req) chunks.push(c as Buffer);
     seen.push({ auth: req.headers.authorization, body: JSON.parse(Buffer.concat(chunks).toString()) });
     const reply = replies.shift();
+    if (reply && typeof reply === "object" && "delayMs" in reply) await new Promise((r) => setTimeout(r, (reply as { delayMs: number }).delayMs));
     res.writeHead(reply ? 200 : 500, { "content-type": "application/json" });
     res.end(JSON.stringify(reply ?? { error: { message: "no scripted reply" } }));
   });
@@ -125,6 +126,38 @@ test("the proxy refuses a stranger, a model the run did not choose, and streamin
   expect((await call(job.token, { model: "openai/gpt-5-pro", messages: [] })).status).toBe(400);
   expect((await call(job.token, { model: "m/agent", stream: true, messages: [] })).status).toBe(400);
   expect(seen).toHaveLength(0);
+  replies = [textReply("ok")];
+  const smuggled = await call(job.token, { model: "m/agent", messages: [{ role: "user", content: "hi" }], models: ["openai/gpt-5-pro"], route: "fallback", plugins: [{ id: "web" }], provider: { data_collection: "allow", order: ["x"] }, n: 5, usage: { include: false } });
+  expect(smuggled.status).toBe(200);
+  expect(seen[0]!.body).toEqual({ model: "m/agent", messages: [{ role: "user", content: "hi" }], max_tokens: 16_000, usage: { include: true }, provider: { data_collection: "deny", allow_fallbacks: true } });
   await handleComplete(new Request(`${base}/api/jobs/${job.jobId}/complete`, { method: "POST", headers: { authorization: `Bearer ${job.token}`, "x-trawler-protocol": "1", "content-type": "application/json" }, body: JSON.stringify({ usage: { model: "m/agent", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "finish" }) }), job.jobId, deps);
   expect((await call(job.token, { model: "m/agent", messages: [] })).status).toBe(402);
+});
+
+test("the proxy bounds a call by what is left of the cap, prices calls OpenRouter reports as free, lets one call run at a time, and never passes a 200 error on", async () => {
+  const model = "deepseek/deepseek-v4.1-flash";
+  const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "bo", name: "Bo", brief: "b" }], goals: [{ id: "g", instruction: "x" }] });
+  const project = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { budgetUsd: 0.01, agentModel: model, judgeModel: model, maxSteps: 10, replaySteps: 10, createdBy: "u" }));
+  const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "1" } }), deps)).json();
+  expect(job.runId).toBe(run.id);
+  const call = (body: Record<string, unknown> = {}) => handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${job.token}`, "content-type": "application/json" }, body: JSON.stringify({ model, messages: [{ role: "user", content: "hi" }], ...body }) }), { db: t.db, keys, openRouterUrl: openRouterBase, retryBaseMs: 1 });
+
+  seen.length = 0;
+  replies = [{ ...textReply("ok"), usage: { prompt_tokens: 10_000, completion_tokens: 100 } }];
+  expect((await call({ max_tokens: 100_000 })).status).toBe(200);
+  expect(seen[0]!.body.max_tokens).toBe(Math.min(16_000, Math.floor((0.01 * 1e6) / 1.2)));
+  const cost = async () => Number((await sql<{ cost_usd: string }>`select cost_usd from runs where id = ${run.id}`.execute(t.db)).rows[0]!.cost_usd);
+  expect(await cost()).toBeCloseTo((10_000 * 0.3 + 100 * 1.2) / 1e6, 9);
+
+  replies = [{ error: { message: "provider exploded", code: 500 } }];
+  const failed = await call();
+  expect(failed.status).toBe(502);
+  expect(await failed.json()).toEqual({ error: { code: 502, message: "provider exploded" } });
+
+  replies = [{ ...textReply("slow"), delayMs: 300 }];
+  const first = call();
+  await new Promise((r) => setTimeout(r, 50));
+  expect((await call()).status).toBe(429);
+  expect((await first).status).toBe(200);
 });
