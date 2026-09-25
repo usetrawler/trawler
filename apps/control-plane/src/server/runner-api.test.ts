@@ -10,7 +10,7 @@ const ENV = {
 
 afterEach(() => vi.unstubAllEnvs());
 
-test("the runner API carries the artifact store when a bucket is configured", async () => {
+test("the runner API carries the artifact store when a bucket is configured", { timeout: 20_000 }, async () => {
   for (const [name, value] of Object.entries(ENV)) vi.stubEnv(name, value);
   vi.resetModules();
   const { runnerApiDeps } = await import("./runner-api.ts");

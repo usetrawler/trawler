@@ -243,7 +243,7 @@ test("a file whose answer never came back is discarded, logged and cleaned up la
   expect(await objectKeys()).not.toContain(row.storage_key);
 });
 
-test("a file the bucket may have kept after a failed upload holds its place in the job's share until the cleanup removes it, so an outage cannot grow a job past its cap", async () => {
+test("a failed upload holds its place in the job's share for the grace period, so an outage cannot grow a job past its cap, and gives it back after, cleanup or not", async () => {
   const job = await leasedJob();
   await fill(job, "org-a", MAX_ARTIFACTS_PER_JOB - 1);
   const unanswered: ArtifactStore = {
@@ -256,25 +256,31 @@ test("a file the bucket may have kept after a failed upload holds its place in t
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   expect((await handleArtifactUpload(upload(job, PNG), job.jobId, { ...deps, artifacts: unanswered })).status).toBe(503);
   expect((await handleArtifactUpload(upload(job, PNG), job.jobId, deps)).status).toBe(409);
-  await sql`update artifacts set discarded_at = now() - interval '11 minutes' where job_id = ${job.jobId} and discarded_at is not null`.execute(t.db);
-  expect(await removeExpiredArtifacts(t.db, store)).toBe(1);
+  await sql`update artifacts set created_at = now() - interval '9 minutes' where job_id = ${job.jobId} and discarded_at is not null`.execute(t.db);
+  expect((await handleArtifactUpload(upload(job, PNG), job.jobId, deps)).status).toBe(409);
+  await sql`update artifacts set created_at = now() - interval '11 minutes' where job_id = ${job.jobId} and discarded_at is not null`.execute(t.db);
   expect((await handleArtifactUpload(upload(job, PNG), job.jobId, deps)).status).toBe(201);
+  expect(await removeExpiredArtifacts(t.db, store)).toBe(1);
 });
 
-test("a file whose row was removed while the bucket took it is removed from the bucket too, and the runner is told to try again", async () => {
-  const job = await leasedJob();
-  const late: ArtifactStore = {
-    ...store,
-    put: async (key, bytes, type) => {
-      await sql`delete from artifacts where storage_key = ${key}`.execute(t.db);
-      await store.put(key, bytes, type);
-    },
-  };
-  const res = await handleArtifactUpload(upload(job, PNG), job.jobId, { ...deps, artifacts: late });
-  expect(res.status).toBe(503);
-  expect((await res.json()).error).toMatch(/try again/);
-  expect(await rowsOf(job.jobId)).toBe(0);
-  expect((await objectKeys()).filter((key) => key.includes(job.runId))).toEqual([]);
+test("a file whose row was removed while the bucket took it is removed from the bucket too, whether or not the bucket answered, and the runner is told to try again", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+  for (const answered of [true, false]) {
+    const job = await leasedJob();
+    const late: ArtifactStore = {
+      ...store,
+      put: async (key, bytes, type) => {
+        await sql`delete from artifacts where storage_key = ${key}`.execute(t.db);
+        await store.put(key, bytes, type);
+        if (!answered) throw new Error("the answer never came");
+      },
+    };
+    const res = await handleArtifactUpload(upload(job, PNG), job.jobId, { ...deps, artifacts: late });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toMatch(/try again/);
+    expect(await rowsOf(job.jobId)).toBe(0);
+    expect((await objectKeys()).filter((key) => key.includes(job.runId))).toEqual([]);
+  }
 });
 
 test("a file still on its way to the bucket counts toward the cap but has no link, and a row left on its way past the grace period is cleaned up", async () => {
@@ -292,15 +298,23 @@ test("a file still on its way to the bucket counts toward the cap but has no lin
   expect((await answer).status).toBe(201);
   expect((await rowOf(row.id)).stored_at).not.toBeNull();
   expect(await artifactLink(t.db, store, "org-a", row.id)).not.toBeNull();
+});
 
-  const stuck = await leasedJob();
-  await sql`insert into artifacts (id, org_id, run_id, job_id, kind, content_type, size_bytes, storage_key, created_at)
-    select k.id, 'org-a', ${stuck.runId}::uuid, ${stuck.jobId}::uuid, 'screenshot', 'image/png', 10, ${`orgs/org-a/runs/${stuck.runId}/`} || k.id || '.png', now() - interval '9 minutes'
-    from (select gen_random_uuid() as id) k`.execute(t.db);
-  expect(await removeExpiredArtifacts(t.db, store)).toBe(0);
-  await sql`update artifacts set created_at = now() - interval '11 minutes' where job_id = ${stuck.jobId}`.execute(t.db);
-  expect(await removeExpiredArtifacts(t.db, store)).toBe(1);
-  expect(await rowsOf(stuck.jobId)).toBe(0);
+test("a row stuck on its way to the bucket holds its place for the grace period, then gives it back and is cleaned up", async () => {
+  const job = await leasedJob();
+  await fill(job, "org-a", MAX_ARTIFACTS_PER_JOB - 1);
+  const stuck = await sql<{ id: string }>`insert into artifacts (id, org_id, run_id, job_id, kind, content_type, size_bytes, storage_key, created_at)
+    select k.id, 'org-a', ${job.runId}::uuid, ${job.jobId}::uuid, 'screenshot', 'image/png', 10, ${`orgs/org-a/runs/${job.runId}/`} || k.id || '.png', now() - interval '9 minutes'
+    from (select gen_random_uuid() as id) k returning id`.execute(t.db);
+  const stuckId = stuck.rows[0]!.id;
+  const stillThere = async () => (await sql`select id from artifacts where id = ${stuckId}`.execute(t.db)).rows.length === 1;
+  await removeExpiredArtifacts(t.db, store);
+  expect(await stillThere()).toBe(true);
+  expect((await handleArtifactUpload(upload(job, PNG), job.jobId, deps)).status).toBe(409);
+  await sql`update artifacts set created_at = now() - interval '11 minutes' where id = ${stuckId}`.execute(t.db);
+  expect((await handleArtifactUpload(upload(job, PNG), job.jobId, deps)).status).toBe(201);
+  await removeExpiredArtifacts(t.db, store);
+  expect(await stillThere()).toBe(false);
 });
 
 test("a job handed back while its file is on the way to the bucket keeps that file discarded once it lands, and the cleanup removes it", async () => {

@@ -5,6 +5,7 @@ import type { Database } from "../db/index.ts";
 import { asSystem, withOrg, type Tx } from "../db/tenancy.ts";
 import { leasedJobFor, storable } from "../runs/queue.ts";
 import { logError } from "../server/log.ts";
+import { DISCARD_GRACE_MINUTES } from "./cleanup.ts";
 import type { ArtifactStore } from "./store.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -29,11 +30,17 @@ async function jobWithRoom(tx: Tx, token: string, jobId: string) {
     .selectFrom("artifacts")
     .select(sql<number>`count(*)::int`.as("stored"))
     .where("job_id", "=", job.id)
-    .where((eb) => eb.or([eb("discarded_at", "is", null), eb("stored_at", "is", null)]))
+    .where((eb) => eb.or([
+      eb.and([eb("stored_at", "is not", null), eb("discarded_at", "is", null)]),
+      eb.and([eb("stored_at", "is", null), eb("created_at", ">", sql<Date>`now() - make_interval(mins => ${DISCARD_GRACE_MINUTES})`)]),
+    ]))
     .executeTakeFirstOrThrow();
   if (stored >= MAX_ARTIFACTS_PER_JOB) throw new ArtifactRefused(`a job stores at most ${MAX_ARTIFACTS_PER_JOB} files`);
   return job;
 }
+
+const removeFileWithoutRow = (store: ArtifactStore, key: string, job: { org_id: string; run_id: string; id: string }) =>
+  store.remove(key).catch((err: unknown) => logError("an artifact's file could not be removed", { orgId: job.org_id, runId: job.run_id, jobId: job.id, err }));
 
 export async function checkArtifactUpload(db: Database, token: string, jobId: string): Promise<void> {
   await asSystem(db, (tx) => jobWithRoom(tx, token, jobId));
@@ -62,13 +69,14 @@ export async function storeArtifact(
   try {
     await store.put(key, file.bytes, file.contentType);
   } catch (err) {
-    await asSystem(db, (tx) => tx.updateTable("artifacts").set({ discarded_at: new Date() }).where("id", "=", id).execute()).catch(() => undefined);
+    const discarded = await asSystem(db, (tx) => tx.updateTable("artifacts").set({ discarded_at: new Date() }).where("id", "=", id).executeTakeFirst()).catch(() => undefined);
+    if (discarded?.numUpdatedRows === 0n) await removeFileWithoutRow(store, key, job);
     await logError("an artifact could not be stored", { orgId: job.org_id, runId: job.run_id, jobId: job.id, err });
     throw new ArtifactNotStored("the bucket did not take the file; try again", { cause: err });
   }
   const { numUpdatedRows } = await asSystem(db, (tx) => tx.updateTable("artifacts").set({ stored_at: new Date() }).where("id", "=", id).executeTakeFirst());
   if (numUpdatedRows === 0n) {
-    await store.remove(key).catch((err: unknown) => logError("an artifact's file could not be removed", { orgId: job.org_id, runId: job.run_id, jobId: job.id, err }));
+    await removeFileWithoutRow(store, key, job);
     throw new ArtifactNotStored("the file was cleaned up while it was being stored; try again");
   }
   return { id };
