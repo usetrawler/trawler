@@ -1,5 +1,5 @@
 import type { LanguageModel } from "ai";
-import { Budget, proposeProject } from "@usetrawler/core";
+import { Budget, proposeProject } from "@usetrawler/core/setup";
 import { sql } from "kysely";
 import type { Database } from "../db/index.ts";
 import { withOrg } from "../db/tenancy.ts";

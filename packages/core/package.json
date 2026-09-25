@@ -5,7 +5,8 @@
   "type": "module",
   "license": "FSL-1.1-ALv2",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./setup": "./src/setup-entry.ts"
   },
   "scripts": {
     "typecheck": "tsc -p ."
