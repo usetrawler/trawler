@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ProjectConfigSchema, type Goal, type Persona, type ProjectConfig } from "@usetrawler/protocol";
+import { ProjectConfigSchema, TargetAccountSchema, type Goal, type Persona, type ProjectConfig } from "@usetrawler/protocol";
 import type { Tx } from "../db/tenancy.ts";
 import { last4, type Keyring } from "../lib/secrets.ts";
 
@@ -104,4 +104,29 @@ export async function replacePlan(tx: Tx, orgId: string, projectId: string, plan
   await tx.deleteFrom("goals").where("project_id", "=", projectId).execute();
   await insertPlan(tx, orgId, projectId, checked.data.personas, checked.data.goals);
   await tx.updateTable("projects").set({ updated_at: new Date() }).where("id", "=", projectId).execute();
+}
+
+const MAX_ACCOUNTS = 20;
+
+export async function addAccount(tx: Tx, orgId: string, projectId: string, input: { username: string; password: string }, keys: Keyring): Promise<string> {
+  const project = await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
+  if (!project) throw new Error("project not found");
+  const existing = await tx.selectFrom("target_accounts").select(["ref", "position"]).where("project_id", "=", projectId).execute();
+  if (existing.length >= MAX_ACCOUNTS) throw new Error(`a project can hold at most ${MAX_ACCOUNTS} test accounts`);
+  const taken = new Set(existing.map((a) => a.ref));
+  let n = existing.length + 1;
+  while (taken.has(`account-${n}`)) n++;
+  const account = TargetAccountSchema.parse({ ref: `account-${n}`, username: input.username.trim(), password: input.password });
+  await tx.insertInto("target_accounts").values({
+    org_id: orgId, project_id: projectId, ref: account.ref, username: account.username, position: Math.max(-1, ...existing.map((a) => a.position)) + 1,
+    password_secret: keys.encrypt(account.password, accountContext(orgId, projectId, account.ref)), password_hint: last4(account.password),
+  }).execute();
+  return account.ref;
+}
+
+export async function removeAccount(tx: Tx, orgId: string, projectId: string, ref: string): Promise<void> {
+  const project = await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
+  if (!project) throw new Error("project not found");
+  await tx.updateTable("personas").set({ account_ref: null }).where("project_id", "=", projectId).where("account_ref", "=", ref).execute();
+  await tx.deleteFrom("target_accounts").where("project_id", "=", projectId).where("ref", "=", ref).execute();
 }

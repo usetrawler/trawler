@@ -4,8 +4,8 @@ import { afterAll, beforeAll, expect, test } from "vitest";
 import { ProjectConfigSchema } from "@usetrawler/protocol";
 import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
-import { Keyring } from "../lib/secrets.ts";
-import { createProject, listProjects, loadProjectConfig, projectForEditing, replacePlan } from "./projects.ts";
+import { Keyring, last4 } from "../lib/secrets.ts";
+import { addAccount, createProject, listProjects, loadProjectConfig, projectForEditing, removeAccount, replacePlan } from "./projects.ts";
 import { ProjectConfigSchema as Schema } from "@usetrawler/protocol";
 
 const t = await testDb();
@@ -129,4 +129,29 @@ test("oversized text is refused by the schema before it reaches the database", (
   expect(Schema.safeParse({ ...config, personas: [{ id: "a", name: "A", brief: big }] }).success).toBe(false);
   expect(Schema.safeParse({ ...config, name: "n".repeat(201) }).success).toBe(false);
   expect(Schema.safeParse({ ...config, extraHeaders: { "X-Env": "a" }, secretHeaders: { "x-env": "bypass-token-123" } }).success).toBe(false);
+});
+
+test("test accounts are added encrypted, reach the runner, and removing one detaches its personas", async () => {
+  const simple = ProjectConfigSchema.parse({ name: "Shop", targetUrl: "https://shop.test/", personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "Buy." }] });
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", simple, keys));
+  const ref = await withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: " buyer@shop.test ", password: "buyer-password-9" }, keys));
+  expect(ref).toBe("account-1");
+  await withOrg(t.db, "org-a", (tx) => replacePlan(tx, "org-a", id, { personas: [{ id: "ana", name: "Ana", brief: "b", accountRef: ref }], goals: simple.goals }));
+  const loaded = await withOrg(t.db, "org-a", (tx) => loadProjectConfig(tx, "org-a", id, keys));
+  expect(loaded.accounts).toEqual([{ ref, username: "buyer@shop.test", password: "buyer-password-9" }]);
+  expect(loaded.personas[0]!.accountRef).toBe(ref);
+  const editing = await withOrg(t.db, "org-a", (tx) => projectForEditing(tx, "org-a", id));
+  expect(JSON.stringify(editing)).not.toContain("buyer-password-9");
+  expect(editing!.accounts).toEqual([{ ref, username: "buyer@shop.test", password_hint: last4("buyer-password-9") }]);
+
+  await expect(withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "x@shop.test", password: "short" }, keys))).rejects.toThrow();
+  await expect(withOrg(t.db, "org-b", (tx) => addAccount(tx, "org-b", id, { username: "x@shop.test", password: "long-enough-1" }, keys))).rejects.toThrow(/not found/);
+  await expect(withOrg(t.db, "org-b", (tx) => removeAccount(tx, "org-b", id, ref))).rejects.toThrow(/not found/);
+
+  expect(await withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "two@shop.test", password: "second-pass-1" }, keys))).toBe("account-2");
+  await withOrg(t.db, "org-a", (tx) => removeAccount(tx, "org-a", id, ref));
+  const after = await withOrg(t.db, "org-a", (tx) => loadProjectConfig(tx, "org-a", id, keys));
+  expect(after.accounts.map((a) => a.ref)).toEqual(["account-2"]);
+  expect(after.personas[0]!.accountRef).toBeUndefined();
+  expect(await withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "three@shop.test", password: "third-pass-1" }, keys))).toBe("account-3");
 });
