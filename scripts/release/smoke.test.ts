@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { smokeCheck, type SmokeOptions } from "./smoke.ts";
+import { smokeCheck, smokeToken, type SmokeOptions } from "./smoke.ts";
 
 const BASE = "https://staging.test";
 const COMMIT = "c0ffee";
@@ -41,7 +41,9 @@ test("waits for staging to run the commit, checks sign-in, and passes a finished
   expect(await smokeCheck(opts)).toMatchObject({ runId: RUN, status: "succeeded" });
   expect(calls.filter((c) => c.path === "/healthz")).toHaveLength(3);
   expect(calls.filter((c) => c.path.startsWith("/api/smoke")).every((c) => c.auth === `Bearer ${TOKEN}`)).toBe(true);
-  expect(calls.findIndex((c) => c.path === "/api/smoke/runs")).toBeGreaterThan(calls.findIndex((c) => c.path === "/sign-in"));
+  const signIn = calls.findIndex((c) => c.path === "/sign-in");
+  expect(signIn).toBeGreaterThanOrEqual(0);
+  expect(calls.findIndex((c) => c.path === "/api/smoke/runs")).toBeGreaterThan(signIn);
 });
 
 test("fails when staging never runs the commit, without starting a run", async () => {
@@ -88,4 +90,37 @@ test("fails a run that does not finish in time", async () => {
     "GET /api/smoke/runs/:id": [{ status: 200, body: result({ status: "running", finished: false }) }],
   });
   await expect(smokeCheck(opts)).rejects.toThrow(/did not finish in time.*running/);
+});
+
+function fakeControlPlaneVariables(token: string | undefined) {
+  let calls = 0;
+  const fakeFetch = (async (_url: string | URL, init?: RequestInit) => {
+    calls++;
+    const { query } = JSON.parse(String(init?.body)) as { query: string };
+    const data = query.includes("projectToken") ? { projectToken: { projectId: "p", environmentId: "e" } }
+      : query.includes("services") ? { project: { services: { edges: [{ node: { id: "s-cp", name: "control-plane" } }] } } }
+      : { variables: token === undefined ? {} : { TRAWLER_SMOKE_TOKEN: token } };
+    return new Response(JSON.stringify({ data }), { status: 200 });
+  }) as typeof globalThis.fetch;
+  return { fetch: fakeFetch, calls: () => calls };
+}
+
+test("a smoke token given directly is used without asking Railway", async () => {
+  const railway = fakeControlPlaneVariables(TOKEN);
+  expect(await smokeToken({ TRAWLER_SMOKE_TOKEN: "given-" + "g".repeat(40), RAILWAY_CORE_TOKEN: "core" }, railway.fetch, () => {})).toBe("given-" + "g".repeat(40));
+  expect(railway.calls()).toBe(0);
+});
+
+test("the smoke token read from the control plane is masked in GitHub Actions and never printed elsewhere", async () => {
+  const printed: string[] = [];
+  expect(await smokeToken({ RAILWAY_CORE_TOKEN: "core", GITHUB_ACTIONS: "true" }, fakeControlPlaneVariables(TOKEN).fetch, (line) => printed.push(line))).toBe(TOKEN);
+  expect(printed).toEqual([`::add-mask::${TOKEN}`]);
+  printed.length = 0;
+  expect(await smokeToken({ RAILWAY_CORE_TOKEN: "core" }, fakeControlPlaneVariables(TOKEN).fetch, (line) => printed.push(line))).toBe(TOKEN);
+  expect(printed).toEqual([]);
+});
+
+test("without a way to get the smoke token the check says what to set", async () => {
+  await expect(smokeToken({}, fakeControlPlaneVariables(TOKEN).fetch, () => {})).rejects.toThrow(/set TRAWLER_SMOKE_TOKEN, or RAILWAY_CORE_TOKEN/);
+  await expect(smokeToken({ RAILWAY_CORE_TOKEN: "core" }, fakeControlPlaneVariables(undefined).fetch, () => {})).rejects.toThrow(/has no TRAWLER_SMOKE_TOKEN/);
 });

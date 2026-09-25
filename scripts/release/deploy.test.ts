@@ -60,7 +60,7 @@ test("finishes the migration before the control plane and the runner, then waits
   const controlPlaneUpdate = core.calls.findIndex((c) => c.op === "serviceInstanceUpdate" && c.variables.svc === "s-cp");
   expect(lastMigratePoll).toBeLessThan(controlPlaneUpdate);
   expect(core.calls.filter((c) => c.variables.id === "dep-migrate")).toHaveLength(3);
-  expect(workers.calls.filter((c) => c.op === "serviceInstanceUpdate").map((c) => c.variables.input)).toEqual([{ source: { image: images.runner } }]);
+  expect(workers.calls.filter((c) => c.op === "serviceInstanceUpdate").map((c) => [c.variables.svc, c.variables.env, c.variables.input])).toEqual([["s-runner", "e-workers", { source: { image: images.runner } }]]);
   expect(workers.calls.filter((c) => c.op === "serviceInstance(")).toHaveLength(2);
   expect(core.calls.every((c) => c.token === "core-token")).toBe(true);
   expect(workers.calls.every((c) => c.token === "workers-token")).toBe(true);
@@ -120,4 +120,34 @@ test("a control plane that stopped right after it started is not taken for a run
   } });
   const workers = fakeRailway({ project: "p2", environment: "e2", services: { runner: "s-runner" }, deployments: { runner: [up] }, active: [["dep-runner"]] });
   await expect(deploy(options(core, workers))).rejects.toThrow(/control-plane deployment dep-control-plane is still SUCCESS \(EXITED\)/);
+});
+
+test("a workers token for a project without the runner is refused before the migration runs", async () => {
+  const core = fakeRailway({ project: "p", environment: "e", services: { migrate: "s-migrate", "control-plane": "s-cp" }, deployments: { migrate: [{ status: "SUCCESS", deploymentStopped: true }], "control-plane": [up] } });
+  const workers = fakeRailway({ project: "p2", environment: "e2", services: { web: "s-web" }, deployments: {} });
+  await expect(deploy(options(core, workers))).rejects.toThrow(/no service named runner/);
+  expect([...core.calls, ...workers.calls].some((c) => c.op === "serviceInstanceUpdate")).toBe(false);
+});
+
+test("a migration Railway reports as stopped without any container is not taken for a finished one", async () => {
+  const core = fakeRailway({ project: "p", environment: "e", services: { migrate: "s-migrate", "control-plane": "s-cp" }, deployments: { migrate: [{ status: "SUCCESS", deploymentStopped: true, instances: [] }] } });
+  const workers = fakeRailway({ project: "p2", environment: "e2", services: { runner: "s-runner" }, deployments: { runner: [up] } });
+  await expect(deploy(options(core, workers))).rejects.toThrow(/migrate deployment dep-migrate is still SUCCESS$/);
+  expect(core.calls.some((c) => c.op === "serviceInstanceUpdate" && c.variables.svc === "s-cp")).toBe(false);
+});
+
+test("a control plane whose container crashed fails the release", async () => {
+  const core = fakeRailway({ project: "p", environment: "e", services: { migrate: "s-migrate", "control-plane": "s-cp" }, deployments: {
+    migrate: [{ status: "SUCCESS", deploymentStopped: true }], "control-plane": [{ status: "SUCCESS", deploymentStopped: false, instances: ["CRASHED"] }],
+  } });
+  const workers = fakeRailway({ project: "p2", environment: "e2", services: { runner: "s-runner" }, deployments: { runner: [up] }, active: [["dep-runner"]] });
+  await expect(deploy(options(core, workers))).rejects.toThrow("control-plane deployment dep-control-plane crashed");
+});
+
+test("a control plane that keeps restarting is not taken for a running one", async () => {
+  const core = fakeRailway({ project: "p", environment: "e", services: { migrate: "s-migrate", "control-plane": "s-cp" }, deployments: {
+    migrate: [{ status: "SUCCESS", deploymentStopped: true }], "control-plane": [{ status: "SUCCESS", deploymentStopped: false, instances: ["RESTARTING"] }],
+  } });
+  const workers = fakeRailway({ project: "p2", environment: "e2", services: { runner: "s-runner" }, deployments: { runner: [up] }, active: [["dep-runner"]] });
+  await expect(deploy(options(core, workers))).rejects.toThrow("control-plane deployment dep-control-plane is still SUCCESS (RESTARTING)");
 });

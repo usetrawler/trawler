@@ -58,9 +58,8 @@ async function release(o: DeployOptions, api: Railway, at: Target, service: stri
     const instances = deployment.instances.map((i) => i.status);
     if (ENDED.has(deployment.status)) throw new DeployFailed(`${service} deployment ${id} ended ${deployment.status}`);
     if (instances.includes("CRASHED")) throw new DeployFailed(`${service} deployment ${id} crashed`);
-    const settled = until === "exited"
-      ? deployment.deploymentStopped && instances.length > 0 && instances.every((status) => status === "EXITED")
-      : !deployment.deploymentStopped;
+    const expected = until === "exited" ? { stopped: true, instance: "EXITED" } : { stopped: false, instance: "RUNNING" };
+    const settled = deployment.deploymentStopped === expected.stopped && instances.length > 0 && instances.every((status) => status === expected.instance);
     if (deployment.status === "SUCCESS" && settled) {
       const running = deployment.meta?.image;
       if (running !== image) throw new DeployFailed(`${service} deployment ${id} runs ${running ?? "an unknown image"}, not ${image}`);
