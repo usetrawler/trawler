@@ -20,7 +20,7 @@ export function StartRun({ projectId, personas, models }: { projectId: string; p
   const [state, action] = useActionState<StartState, FormData>(startRunAction, {});
   const [modelId, setModelId] = useState(models[0]?.id ?? "");
   const [cap, setCap] = useState(DEFAULT_RUN.budgetUsd);
-  const model = models.find((m) => m.id === modelId);
+  const model = models.find((m) => m.id === modelId) ?? models[0];
   if (!model) return <p className="border border-line bg-panel p-5 text-sm text-muted">No models are available right now.</p>;
   const estimate = estimateUsd(model, personas);
   return (
@@ -31,7 +31,7 @@ export function StartRun({ projectId, personas, models }: { projectId: string; p
         <legend className="mb-2 text-sm text-muted">Model</legend>
         {models.map((m) => (
           <label key={m.id} className="flex items-center gap-3">
-            <input type="radio" name="model" value={m.id} checked={m.id === modelId} onChange={() => setModelId(m.id)} className="accent-[var(--action)]" />
+            <input type="radio" name="model" value={m.id} checked={m.id === model.id} onChange={() => setModelId(m.id)} className="accent-[var(--action)]" />
             <span>{m.label}</span>
             {m.note && <span className="font-mono text-xs text-muted uppercase">{m.note}</span>}
           </label>

@@ -6,8 +6,10 @@ import type { RunModel } from "./models.ts";
 
 const OPENROUTER_MODELS = "https://openrouter.ai/api/v1/models";
 const STALE_MS = 24 * 60 * 60 * 1000;
+const RETRY_MS = 60 * 60 * 1000;
+const MAX_USD_PER_MTOK = 100_000;
 
-const Price = z.coerce.number().nonnegative().finite();
+const Price = z.union([z.number(), z.string().trim().min(1).transform(Number)]).pipe(z.number().nonnegative().finite());
 const OpenRouterModels = z.object({ data: z.array(z.object({ id: z.string() }).loose()) });
 const OpenRouterPricing = z.object({ prompt: Price, completion: Price, overrides: z.array(z.object({ prompt: Price, completion: Price }).loose()).optional() }).loose();
 
@@ -36,7 +38,10 @@ export async function refreshPrices(db: Database, fetchImpl: typeof fetch = fetc
   if (!res.ok) throw new Error(`OpenRouter answered ${res.status}`);
   const { data } = OpenRouterModels.parse(await res.json());
   const byId = new Map(data.map((m) => [m.id, m.pricing]));
-  const priced = (id: string) => (byId.has(id) ? OpenRouterPricing.parse(byId.get(id)) : undefined);
+  const priced = (id: string) => {
+    const parsed = OpenRouterPricing.safeParse(byId.get(id));
+    return parsed.success ? parsed.data : undefined;
+  };
   return asSystem(db, async (tx) => {
     const catalog = await tx.selectFrom("model_catalog").select("id").execute();
     let updated = 0;
@@ -44,6 +49,7 @@ export async function refreshPrices(db: Database, fetchImpl: typeof fetch = fetc
     for (const { id, pricing } of prices) {
       if (!pricing) continue;
       const peak = (key: "prompt" | "completion") => Math.max(pricing[key], ...(pricing.overrides ?? []).map((o) => o[key])) * 1_000_000;
+      if (peak("prompt") > MAX_USD_PER_MTOK || peak("completion") > MAX_USD_PER_MTOK) continue;
       await tx.updateTable("model_catalog").set({ prompt_usd_per_mtok: peak("prompt").toFixed(6), completion_usd_per_mtok: peak("completion").toFixed(6), prices_refreshed_at: new Date() }).where("id", "=", id).execute();
       updated++;
     }
@@ -52,10 +58,14 @@ export async function refreshPrices(db: Database, fetchImpl: typeof fetch = fetc
 }
 
 let refreshing: Promise<unknown> | undefined;
+let lastAttempt = 0;
 
-export function refreshPricesInBackground(db: Database): void {
-  refreshing ??= pricesAreStale(db)
+export function refreshPricesInBackground(db: Database, now = Date.now()): Promise<unknown> | undefined {
+  if (refreshing || now - lastAttempt < RETRY_MS) return refreshing;
+  lastAttempt = now;
+  refreshing = pricesAreStale(db, now)
     .then((stale) => (stale ? refreshPrices(db) : 0))
     .catch((err: unknown) => console.error("model prices could not be refreshed", { message: err instanceof Error ? err.message : String(err) }))
     .finally(() => (refreshing = undefined));
+  return refreshing;
 }

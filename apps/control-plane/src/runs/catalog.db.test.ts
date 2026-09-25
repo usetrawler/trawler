@@ -1,7 +1,7 @@
 import { sql } from "kysely";
 import { afterAll, expect, test } from "vitest";
 import { testDb } from "../db/test-db.ts";
-import { pricesAreStale, refreshPrices, runModel, runModels } from "./catalog.ts";
+import { pricesAreStale, refreshPrices, refreshPricesInBackground, runModel, runModels } from "./catalog.ts";
 
 const t = await testDb();
 afterAll(() => t.drop());
@@ -35,11 +35,32 @@ test("prices refresh from OpenRouter at their peak, and unknown or disabled mode
   expect(await runModel(t.db, "google/gemini-3.5-flash")).toBeNull();
 });
 
-test("a broken or failing price list changes nothing", async () => {
+test("a failing list changes nothing, and bad catalog prices are skipped rather than stored as free", async () => {
   const before = await runModels(t.db);
   await expect(refreshPrices(t.db, answer({ error: "down" }, 503))).rejects.toThrow(/503/);
-  await expect(refreshPrices(t.db, answer({ data: [{ id: "anthropic/claude-haiku-4.5", pricing: { prompt: "-1", completion: "x" } }] }))).rejects.toThrow();
+  const updated = await refreshPrices(t.db, answer({ data: [
+    { id: "anthropic/claude-haiku-4.5", pricing: { prompt: null, completion: "" } },
+    { id: "deepseek/deepseek-v4.1-flash", pricing: { prompt: "-1", completion: "x" } },
+    { id: "google/gemini-3.5-flash", pricing: { prompt: "1", completion: "1" } },
+  ] }));
+  expect(updated).toBe(0);
   expect(await runModels(t.db)).toEqual(before);
+});
+
+test("background refreshes are attempted at most once an hour, even when a model can never be priced", async () => {
+  let calls = 0;
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => { calls++; return new Response(JSON.stringify({ data: [] })); }) as typeof fetch;
+  try {
+    const now = Date.now() + 10 * 24 * 60 * 60 * 1000;
+    await refreshPricesInBackground(t.db, now);
+    await refreshPricesInBackground(t.db, now + 60_000);
+    expect(calls).toBe(1);
+    await refreshPricesInBackground(t.db, now + 61 * 60_000);
+    expect(calls).toBe(2);
+  } finally {
+    globalThis.fetch = original;
+  }
 });
 
 test("the application role can read the catalog but never change it", async () => {
