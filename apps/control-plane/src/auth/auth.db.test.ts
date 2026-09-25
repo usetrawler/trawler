@@ -218,3 +218,13 @@ test("a member the owner removes through Better Auth still names the workspace i
   expect(await auth.workspaceOf(found!.session)).toBeNull();
   expect(await auth.api.getSession({ headers: cookieFor(other.token) })).toBeNull();
 });
+
+test("a link to Better Auth's workspace lookups cannot empty a session's workspace", async () => {
+  await signIn("mallory@acme.test");
+  const victim = sessionOf((await signIn("clicker@acme.test")).session);
+  for (const path of ["get-organization", "get-full-organization"]) {
+    const res = await auth.handler(new Request(`http://localhost:3000/api/auth/organization/${path}?organizationSlug=mallory-org`, { headers: cookieFor(victim.token) }));
+    expect(res.status, path).toBe(404);
+  }
+  expect(await activeOf(victim.id)).toEqual([{ active: victim.activeOrganizationId }]);
+});

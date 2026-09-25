@@ -107,6 +107,7 @@ export function createAuth(options: AuthOptions) {
       ...(options.google ? { google: options.google } : {}),
     },
     plugins: [organizationPlugin(), ...devSignIn(options.devOidc), nextCookies()],
+    disabledPaths: ["/organization/get-organization", "/organization/get-full-organization"],
     databaseHooks: {
       session: {
         create: {
