@@ -1,5 +1,5 @@
 "use client";
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useEffect, useReducer, useRef, useState } from "react";
 import { KeyFields } from "../../components/key-fields.tsx";
 import { LocalTime } from "../../components/local-time.tsx";
 import { detectProvider, PROVIDER_LABEL, type Provider } from "../../llm/provider-kinds.ts";
@@ -27,11 +27,40 @@ export function removedStatus(state: SettingsState): string {
   return state.stoppedRuns ? `Key removed. ${runs(state.stoppedRuns)}` : "Key removed.";
 }
 
+export interface Panel {
+  step: Step;
+  status: string;
+  error: string;
+  focus: Target | null;
+}
+
+export type PanelEvent = { type: "go"; step: Step } | { type: "back"; to: Target; status?: string } | { type: "refused"; error: string } | { type: "focused" };
+
+export function nextPanel(panel: Panel, event: PanelEvent): Panel {
+  switch (event.type) {
+    case "go":
+      return { step: event.step, status: "", error: "", focus: null };
+    case "back":
+      return { step: "view", status: event.status ?? "", error: "", focus: event.to };
+    case "refused":
+      return { ...panel, error: event.error };
+    case "focused":
+      return { ...panel, focus: null };
+  }
+}
+
+export function afterReplace(state: SettingsState): PanelEvent | null {
+  if (state.saved) return { type: "back", to: "replace", status: savedStatus(state) };
+  return state.error ? { type: "refused", error: state.error } : null;
+}
+
+export function afterRemove(state: SettingsState): PanelEvent | null {
+  if (state.saved) return { type: "back", to: "heading", status: removedStatus(state) };
+  return state.error ? { type: "refused", error: state.error } : null;
+}
+
 export function ModelKey({ saved, addedBy, canManage }: { saved: SavedKey | null; addedBy: string | null; canManage: boolean }) {
-  const [step, setStep] = useState<Step>("view");
-  const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
-  const [focus, setFocus] = useState<Target | null>(null);
+  const [{ step, status, error, focus }, dispatch] = useReducer(nextPanel, { step: "view", status: "", error: "", focus: null });
   const [replaced, replace, checking] = useActionState<SettingsState, FormData>(replaceModelKeyAction, {});
   const [removed, remove, removing] = useActionState<SettingsState, FormData>(removeModelKeyAction, {});
   const targets = { heading: useRef<HTMLHeadingElement>(null), replace: useRef<HTMLButtonElement>(null), remove: useRef<HTMLButtonElement>(null) };
@@ -39,27 +68,15 @@ export function ModelKey({ saved, addedBy, canManage }: { saved: SavedKey | null
   useEffect(() => {
     if (!focus) return;
     targets[focus].current?.focus();
-    setFocus(null);
+    dispatch({ type: "focused" });
   });
-
-  const go = (next: Step) => {
-    setStatus("");
-    setError("");
-    setStep(next);
-  };
-  const back = (to: Target, said = "") => {
-    setStatus(said);
-    setError("");
-    setStep("view");
-    setFocus(to);
-  };
   useEffect(() => {
-    if (replaced.saved) back("replace", savedStatus(replaced));
-    else if (replaced.error) setError(replaced.error);
+    const event = afterReplace(replaced);
+    if (event) dispatch(event);
   }, [replaced]);
   useEffect(() => {
-    if (removed.saved) back("heading", removedStatus(removed));
-    else if (removed.error) setError(removed.error);
+    const event = afterRemove(removed);
+    if (event) dispatch(event);
   }, [removed]);
   const editing = canManage && (step === "replacing" || !saved);
 
@@ -81,13 +98,13 @@ export function ModelKey({ saved, addedBy, canManage }: { saved: SavedKey | null
       {!canManage ? (
         saved && <p className="text-sm text-muted">Only an owner or admin of this workspace can change the key.</p>
       ) : editing ? (
-        <ReplaceForm saved={saved} action={replace} pending={checking} error={error} onKeep={() => back("replace")} />
+        <ReplaceForm saved={saved} action={replace} pending={checking} error={error} onKeep={() => dispatch({ type: "back", to: "replace" })} />
       ) : step === "confirming" ? (
-        <RemoveForm action={remove} pending={removing} error={error} onKeep={() => back("remove")} />
+        <RemoveForm action={remove} pending={removing} error={error} onKeep={() => dispatch({ type: "back", to: "remove" })} />
       ) : (
         <div className="flex flex-wrap gap-3">
-          <button type="button" ref={targets.replace} onClick={() => go("replacing")} className={button}>Replace</button>
-          <button type="button" ref={targets.remove} onClick={() => go("confirming")} className={button}>Remove</button>
+          <button type="button" ref={targets.replace} onClick={() => dispatch({ type: "go", step: "replacing" })} className={button}>Replace</button>
+          <button type="button" ref={targets.remove} onClick={() => dispatch({ type: "go", step: "confirming" })} className={button}>Remove</button>
         </div>
       )}
       <p role="status" className="text-sm text-ok empty:-mt-4">{status}</p>

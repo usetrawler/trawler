@@ -4,7 +4,7 @@ import { expect, test, vi } from "vitest";
 
 vi.mock("./actions.ts", () => ({ renameWorkspaceAction: async () => ({}), replaceModelKeyAction: async () => ({}), removeModelKeyAction: async () => ({}) }));
 
-const { ModelKey, RemoveForm, removedStatus, ReplaceForm, savedStatus } = await import("./model-key.tsx");
+const { afterRemove, afterReplace, ModelKey, nextPanel, RemoveForm, removedStatus, ReplaceForm, savedStatus } = await import("./model-key.tsx");
 const { WorkspaceName } = await import("./workspace-name.tsx");
 const saved = { provider: "openrouter" as const, hint: "…a1b2", baseUrl: null, addedAt: "2026-09-25T18:50:00.000Z" };
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
@@ -77,4 +77,22 @@ test("an owner or admin edits the workspace name; a member reads it as text, wit
   const member = render(createElement(WorkspaceName, { name: "Acme", canManage: false }));
   expect(member).not.toMatch(/<form|<input|<button/);
   expect(member).toMatch(/<p class="text-lg font-bold wrap-anywhere">Acme<\/p><p class="text-sm text-muted">Only an owner or admin of this workspace can rename it\.<\/p>/);
+});
+
+test("starting a step clears what the last one said, so an old error never comes back", () => {
+  const refused = { step: "replacing" as const, status: "", error: "OpenRouter refused this key.", focus: null };
+  expect(nextPanel(refused, { type: "back", to: "replace" })).toEqual({ step: "view", status: "", error: "", focus: "replace" });
+  expect(nextPanel({ ...refused, step: "view", status: "Key saved." }, { type: "go", step: "replacing" })).toEqual({ step: "replacing", status: "", error: "", focus: null });
+  expect(nextPanel({ ...refused, step: "confirming" }, { type: "go", step: "confirming" })).toMatchObject({ error: "" });
+  expect(nextPanel({ step: "replacing", status: "", error: "", focus: null }, { type: "refused", error: "E" })).toEqual({ step: "replacing", status: "", error: "E", focus: null });
+  expect(nextPanel({ step: "view", status: "Key saved.", error: "", focus: "replace" }, { type: "focused" })).toEqual({ step: "view", status: "Key saved.", error: "", focus: null });
+});
+
+test("a saved key returns to Replace and says so; a removal lands on the section heading with the runs it stopped; a refusal stays on its step", () => {
+  expect(afterReplace({ saved: true, unchecked: false })).toEqual({ type: "back", to: "replace", status: "Key saved." });
+  expect(afterReplace({ error: "E" })).toEqual({ type: "refused", error: "E" });
+  expect(afterReplace({})).toBeNull();
+  expect(afterRemove({ saved: true, stoppedRuns: 1 })).toEqual({ type: "back", to: "heading", status: "Key removed. The run that was going is stopped." });
+  expect(afterRemove({ error: "E" })).toEqual({ type: "refused", error: "E" });
+  expect(afterRemove({})).toBeNull();
 });
