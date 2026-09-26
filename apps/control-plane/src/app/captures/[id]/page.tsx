@@ -30,17 +30,19 @@ export default async function CapturePage({ params }: { params: Promise<{ id: st
       </nav>
       <h1 className="text-2xl font-bold break-words">{title}</h1>
       <p className="mt-2 font-mono text-[11px] tracking-[0.15em] text-muted uppercase">Screen capture · {capture.replay ? "where the replay ended" : "when reported"}</p>
-      <img
-        src={`/api/artifacts/${capture.id}`}
-        alt={capture.replay ? `The page where the replay of “${title}” ended` : `The page when “${title}” was reported`}
-        width={1280}
-        height={720}
-        className="mt-4 block h-auto w-full max-w-[1280px] border border-line"
-      />
+      <a href={`/api/artifacts/${capture.id}`} target="_blank" rel="noreferrer" tabIndex={-1} className="mt-4 block max-w-[1282px]">
+        <img
+          src={`/api/artifacts/${capture.id}`}
+          alt={capture.replay ? `The page where the replay of “${title}” ended` : `The page when “${title}” was reported`}
+          width={1280}
+          height={720}
+          className="block h-auto w-full border border-line"
+        />
+      </a>
       <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
         <span>Passwords and other secrets are blacked out in screen captures.</span>
         <a href={`/api/artifacts/${capture.id}`} target="_blank" rel="noreferrer" className="text-ink underline underline-offset-4 hover:text-action">
-          Open the original (1280 × 720)<span aria-hidden="true"> ↗</span><span className="sr-only"> (opens in a new tab)</span>
+          Open the original, 1280 × 720<span aria-hidden="true"> ↗</span><span className="sr-only"> (opens in a new tab)</span>
         </a>
       </p>
     </AppShell>

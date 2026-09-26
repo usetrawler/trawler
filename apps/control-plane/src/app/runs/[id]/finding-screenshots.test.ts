@@ -19,10 +19,12 @@ test("a replayed defect shows the page when it was reported next to where the re
   expect(replayed).toContain('alt="The page where the replay of “Save fails” ended"');
 });
 
-test("each capture keeps its 16:9 place while it loads, nothing covers it, and it opens a page that stays valid in a new tab", () => {
+test("each capture keeps its 16:9 place while it loads, nothing covers it, and the whole frame opens a page that stays valid in a new tab", () => {
   const [reported] = figures(render(REPORTED, null));
   expect(reported).toMatch(new RegExp(`<a href="/captures/${REPORTED}" target="_blank" rel="noreferrer"[^>]*><img src="/api/artifacts/${REPORTED}" alt="The page when “Save fails” was reported" width="1280" height="720" loading="lazy"[^>]*/><span class="sr-only"> \\(opens in a new tab\\)</span></a>`));
-  expect(reported).not.toMatch(/\babsolute\b/);
+  expect(reported).toMatch(/^<figure class="relative\b/);
+  expect(reported).toMatch(/<a href="\/captures\/[^"]*" [^>]*class="[^"]*\bafter:absolute after:inset-0\b/);
+  expect(reported).not.toMatch(/class="[^"]*(?<!after:)\babsolute\b/);
 });
 
 test("the captures say that passwords and other secrets are blacked out, a single capture takes the whole width, and a finding without any shows nothing", () => {
