@@ -33,6 +33,10 @@ function moving(motion: string): string {
   return `<style>body{margin:0;font:20px monospace} #echo{position:absolute;top:80px;left:20px;margin:0;color:#ff0000} @keyframes fly{from{transform:translateY(0)}to{transform:translateY(300px)}} .fly{animation:fly .2s linear infinite alternate}</style><input aria-label="Password" type="password" oninput="document.getElementById('echo').textContent = this.value"><button onclick="const echo = document.getElementById('echo'); ${MOTIONS[motion]!.replace(/"/g, "&quot;")}">Move</button><p id="echo"></p>`;
 }
 
+function narrowColumn(inner: string): string {
+  return `<div style="width:120px;font:16px sans-serif"><p>Account</p><p>Plan: Team</p>${inner}<p>Billing: monthly</p><p>Seats: 5</p><p>Region: EU</p></div>`;
+}
+
 function card(c: { heading: string; name: string; secret: string }): string {
   return `<div style="font:20px sans-serif;padding:16px;border:1px solid #999;width:640px"><h2>${c.heading}</h2><span>Password: </span><span style="color:#ff0000">${c.secret}</span><p>Plan: Team</p><label>Name <input aria-label="Name" value="${c.name}"></label></div>`;
 }
@@ -198,11 +202,11 @@ beforeAll(async () => {
       case "/clip-one-axis":
         return html(`<div style="height:32px;overflow-x:clip;width:220px;font:20px/24px monospace;color:#ff0000">first-line card-secret-1111</div><p>Plan: Team</p><p>Billing: monthly</p>`);
       case "/contents-hidden":
-        return html(`<div style="display:contents;overflow:hidden"><p style="width:80px;white-space:nowrap;font:20px monospace;color:#ff0000">card-secret-1111 is here</p></div><p>Plan: Team</p>`);
+        return html(narrowColumn(`<div style="display:contents;overflow:hidden"><p style="width:80px;white-space:nowrap;font:20px monospace;color:#ff0000">card-secret-1111 is here</p></div>`));
       case "/inline-hidden":
-        return html(`<p><a href="#" style="overflow:hidden"><span style="display:inline-block;width:80px;white-space:nowrap;font:20px monospace;color:#ff0000">card-secret-1111 is here</span></a></p><p>Plan: Team</p>`);
+        return html(narrowColumn(`<p style="width:100px"><a href="#" style="overflow:hidden"><span style="display:inline-block;width:80px;white-space:nowrap;font:20px monospace;color:#ff0000">card-secret-1111 is here</span></a></p>`));
       case "/clip-margin":
-        return html(`<div style="width:90px;overflow:clip;overflow-clip-margin:200px;white-space:nowrap;font:20px monospace;color:#ff0000">card-secret-1111 and more</div><p>Plan: Team</p>`);
+        return html(narrowColumn(`<div style="width:90px;overflow:clip;overflow-clip-margin:200px;white-space:nowrap;font:20px monospace;color:#ff0000">card-secret-1111 and more</div>`));
       case "/moves-when-masked":
         return html(`<p id="echo" style="font:20px monospace;color:#ff0000">card-secret-1111</p><script>new MutationObserver((records) => { if (records.some((r) => [...r.addedNodes].some((n) => n.nodeType === 1))) document.getElementById("echo").style.transform = "translateY(120px)"; }).observe(document.documentElement, { childList: true });</script>`);
       case "/fixed-below":
