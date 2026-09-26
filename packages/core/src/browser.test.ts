@@ -186,10 +186,20 @@ beforeAll(async () => {
         return html(card({ heading: "Billing overview", name: "Ana", secret: "card-secret-1111" }));
       case "/card-other-field":
         return html(card({ heading: "Account settings", name: "Bea", secret: "card-secret-1111" }));
-      case "/boxes-refused":
-        return html(`<p>Your key is card-secret-1111</p><script>Element.prototype.getBoundingClientRect = () => { throw new Error("no boxes here"); };</script>`);
+      case "/overflowing":
+        return html(`<div style="font:20px sans-serif;padding:16px;border:1px solid #999;width:640px"><h2>Account settings</h2><p style="width:80px;white-space:nowrap;color:#ff0000">card-secret-1111 is the key</p><p>Plan: Team</p></div>`);
+      case "/zero-height":
+        return html(`<div style="font:20px sans-serif;padding:16px;border:1px solid #999;width:640px"><h2>Account settings</h2><div style="height:0;color:#ff0000">card-secret-1111</div><p>Plan: Team</p><p>Billing: monthly</p></div>`);
+      case "/clock":
+        return html(`<style>@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}} #spinner{width:20px;height:20px;background:#333;animation:spin 1s linear infinite}</style><div id="spinner"></div><button onclick="document.getElementById('drift').textContent = 'behind by ' + Math.round(performance.now() - document.timeline.currentTime) + ' ms'">Clock</button><p id="drift">not read</p>`);
+      case "/boxes-faked":
+        return html(`<p style="font:20px monospace;color:#ff0000">Your key is card-secret-1111</p><script>Element.prototype.getBoundingClientRect = () => { throw new Error("no boxes here"); }; Element.prototype.getClientRects = () => [];</script>`);
+      case "/hooked":
+        return html(`<script>window.seen = []; const decode = TextDecoder.prototype.decode; TextDecoder.prototype.decode = function (...a) { const out = decode.apply(this, a); window.seen.push(String(out)); return out; }; const decodeBase64 = window.atob; window.atob = (s) => { const out = decodeBase64(s); window.seen.push(out); return out; }; window.RegExp = new Proxy(RegExp, { construct: (target, args) => (window.seen.push(String(args[0])), new target(...args)), apply: (target, self, args) => (window.seen.push(String(args[0])), target(...args)) });</script><input aria-label="Password" type="password"><button onclick="const o=document.querySelector('input');const n=document.createElement('input');n.setAttribute('aria-label','Password');n.value=o.value;o.replaceWith(n)">Show password</button><p>Your key is hook-header-secret-1</p><button onclick="document.getElementById('seen').textContent = 'seen ' + window.seen.filter((s) => s.includes('hook-') || s.includes('aG9vay')).length">Report</button><p id="seen">not reported</p>`);
+      case "/shadow-reveal":
+        return html(`<trawler-card></trawler-card><script>customElements.define("trawler-card", class extends HTMLElement { constructor() { super(); const root = this.attachShadow({ mode: "open" }); root.innerHTML = '<input aria-label="Password" type="password"><button>Reveal</button>'; root.querySelector("button").onclick = () => { const o = root.querySelector("input"); const n = document.createElement("input"); n.setAttribute("aria-label", "Password"); n.style.cssText = "width:600px;font:20px monospace;color:#ff0000"; n.value = o.value; o.replaceWith(n); }; } });</script>`);
       case "/frames-keep-coming":
-        return html(`<p>Frames</p><script>let n = 0; const add = () => { const f = document.createElement("iframe"); f.style.cssText = "width:300px;height:40px;border:0"; f.srcdoc = '<p style="margin:0;font:20px monospace;color:#ff0000">card-secret-1111</p>'; document.body.append(f); if (++n < 60) setTimeout(add, 25); }; add();</script>`);
+        return html(`<p>Frames</p><script>let n = 0; const add = () => { const f = document.createElement("iframe"); f.style.cssText = "width:300px;height:40px;border:0"; f.srcdoc = '<p style="margin:0;font:20px monospace;color:#ff0000">card-secret-1111</p>'; document.body.append(f); if (++n < 60) setTimeout(add, 25); else document.body.insertAdjacentHTML("beforeend", "<p>All frames added</p>"); }; add();</script>`);
       case "/held-animation":
         return html(`<style>@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}} #spinner{width:20px;height:20px;background:#333;animation:spin 1s linear infinite} #spinner.hold{animation-play-state:paused}</style><div id="spinner"></div><button onclick="const a = document.getAnimations()[0]; const before = a.currentTime; setTimeout(() => document.getElementById('state').textContent = a.currentTime > before ? 'spinning' : 'still', 150)">Check</button><button onclick="document.getElementById('spinner').classList.add('hold'); setTimeout(() => document.getElementById('state').textContent = 'held: ' + document.getAnimations()[0].playState, 50)">Hold</button><p id="state">unknown</p>`);
       case "/visible-password-a":
@@ -1210,8 +1220,51 @@ describe("screenshots", () => {
     expect(Buffer.compare(Buffer.from(base.bytes), Buffer.from((await shotOf("/card-other-field")).bytes))).not.toBe(0);
   }, 120_000);
 
-  test("when the page will not say where its secrets are, no screenshot is taken", async () => {
-    expect(await shotsOf("/boxes-refused", 1, async () => undefined, knowing("card-secret-1111"))).toEqual([null]);
+  test.each([
+    ["/overflowing", "runs outside its box"],
+    ["/zero-height", "sits in a box with no height"],
+  ])("a secret whose text %s is masked where it is drawn (%s)", async (path) => {
+    const [shot] = await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
+
+  test("screenshots leave the page's animation clock where it would have been, neither behind by the time it held still nor running fast", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/clock`);
+      for (let i = 0; i < 5; i++) expect(await b.screenshot()).not.toBeNull();
+      await new Promise((r) => setTimeout(r, 500));
+      await b.tools.browser_click!.execute!({ target: refOf(await snapshot(b), "Clock"), element: "clock" }, ctx);
+      const behind = Number(/behind by (-?\d+) ms/.exec(await snapshot(b))?.[1]);
+      expect(Math.abs(behind)).toBeLessThan(60);
+    });
+  }, 60_000);
+
+  test("a page that fakes where its elements are neither stops the screenshot nor moves a mask off a secret", async () => {
+    const [shot] = await shotsOf("/boxes-faked", 1, async () => undefined, knowing("card-secret-1111"));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
+
+  test("what the run looks for never reaches the page's own scripts, even ones that watch everything decoded or matched", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/hooked`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "hook-secret-1", "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Show password"), element: "show" }, ctx);
+      expect(await b.screenshot()).not.toBeNull();
+      await b.tools.browser_click!.execute!({ target: refOf(await snapshot(b), "Report"), element: "report" }, ctx);
+      expect(await snapshot(b)).toContain("seen 0");
+    }, knowing("hook-header-secret-1"));
+  }, 60_000);
+
+  test("a password revealed inside a component's shadow root is masked", async () => {
+    const [shot] = await shotsOf("/shadow-reveal", 1, async (b, snap) => {
+      expect(await b.fillField(refOf(snap, "Password"), "shadow-secret-1", "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Reveal"), element: "reveal" }, ctx);
+    });
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
   }, 60_000);
 
   test("frames that appear while the screenshot is taken never show a secret unmasked, and once they stop coming every one is masked", async () => {
@@ -1219,7 +1272,11 @@ describe("screenshots", () => {
       await navigate(b, `${origin}/frames-keep-coming`);
       const coming = [await b.screenshot(), await b.screenshot(), await b.screenshot()].filter((shot): shot is Screenshot => shot !== null);
       expect(await Promise.all(coming.map(redPixels))).toEqual(coming.map(() => 0));
-      await new Promise((r) => setTimeout(r, 2_500));
+      const started = Date.now();
+      while (!(await snapshot(b)).includes("All frames added")) {
+        if (Date.now() - started > 30_000) throw new Error("the frames never stopped coming");
+        await new Promise((r) => setTimeout(r, 100));
+      }
       const settled = await b.screenshot();
       expect(settled).not.toBeNull();
       expect(await redPixels(settled!)).toBe(0);

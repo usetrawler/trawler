@@ -338,12 +338,14 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
   };
   if (signal?.aborted) handOver();
   else signal?.addEventListener("abort", handOver, { once: true });
-  let completion: JobCompletion;
-  try {
-    completion = await run(deps, job, events, budget, scrubber, screenshots);
-    if (events.cancelled && completion.stoppedBy !== "error") completion = { ...completion, stoppedBy: "budget" };
-  } catch (err) {
-    completion = { usage: zeroUsage(job.agentModel), stoppedBy: "error", error: clip(scrubber.scrub(err instanceof Error ? err.message : String(err))) };
+  let completion: JobCompletion = { usage: zeroUsage(job.agentModel), stoppedBy: "budget" };
+  if (!released) {
+    try {
+      completion = await run(deps, job, events, budget, scrubber, screenshots);
+      if (events.cancelled && completion.stoppedBy !== "error") completion = { ...completion, stoppedBy: "budget" };
+    } catch (err) {
+      completion = { usage: zeroUsage(job.agentModel), stoppedBy: "error", error: clip(scrubber.scrub(err instanceof Error ? err.message : String(err))) };
+    }
   }
   signal?.removeEventListener("abort", handOver);
   if (released) {

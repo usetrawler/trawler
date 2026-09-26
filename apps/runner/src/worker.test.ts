@@ -227,7 +227,7 @@ test("a stop that comes while uploads are pending completes the job at once inst
   await within(() => seen.order.includes("upload dropped"));
 });
 
-test("a stop that comes before the job has started hands it back instead of running it", async () => {
+test("a stop that comes before the job has started hands it back without opening a browser", async () => {
   const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" });
   const stop = new AbortController();
   const stopAfterClaim: typeof fetch = async (input, init) => {
@@ -237,9 +237,11 @@ test("a stop that comes before the job has started hands it back instead of runn
     stop.abort();
     return new Response(body, { status: res.status, headers: res.headers });
   };
-  await workOnce(deps(url, reportsDefect(), { openBrowser: shooting, fetch: stopAfterClaim }), stop.signal);
+  let browsers = 0;
+  await workOnce(deps(url, reportsDefect(), { openBrowser: async () => (browsers++, shooting()), fetch: stopAfterClaim }), stop.signal);
   expect(seen.releases).toBe(1);
   expect(seen.completions).toEqual([]);
+  expect(browsers).toBe(0);
 });
 
 test("a job handed back because the runner is stopping drops its pending uploads without complaint", async () => {

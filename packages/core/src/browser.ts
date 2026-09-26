@@ -1,7 +1,7 @@
 import { createMCPClient } from "@ai-sdk/mcp";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createConnection } from "@playwright/mcp";
-import { chromium, selectors, type CDPSession, type ElementHandle, type Frame, type Locator, type Page, type Route } from "playwright";
+import { chromium, selectors, type CDPSession, type ElementHandle, type Frame, type Locator, type Route } from "playwright";
 import { jsonSchema, type Tool, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
 import { MAX_ARTIFACT_BYTES } from "@usetrawler/protocol";
@@ -66,13 +66,21 @@ const SELECTOR_ENGINES = {
       const style = getComputedStyle(root);
       const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2 || 0;
       const reach = root.getBoundingClientRect().height + 2 * line;
-      let widest = root;
+      const text = document.createRange();
+      text.selectNodeContents(root);
+      const shown = text.getBoundingClientRect();
+      const slack = line / 2;
+      const covers = (el) => {
+        const box = el.getBoundingClientRect();
+        return box.left - slack <= shown.left && box.top - slack <= shown.top && box.right + slack >= shown.right && box.bottom + slack >= shown.bottom;
+      };
+      let widest = covers(root) ? root : null;
       for (let el = root.parentElement ?? root.parentNode?.host; el; el = el.parentElement ?? el.parentNode?.host) {
         if (getComputedStyle(el).display === "contents") continue;
-        if (el.getBoundingClientRect().height > reach) break;
-        widest = el;
+        if (widest && el.getBoundingClientRect().height > reach) break;
+        if (covers(el)) widest = el;
       }
-      return [widest];
+      return [widest ?? document.documentElement];
     },
   })`,
 };
@@ -85,7 +93,6 @@ const registerEngines = () =>
       }),
     ),
   ));
-const BOXES = (els: any[]) => els.map((el) => Object.values(el.getBoundingClientRect().toJSON()).join(",")).join(" ");
 const escapedForRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 function fieldStateOf(el: any, mark: string) {
   return {
@@ -324,7 +331,18 @@ export async function openBrowser(opts: {
       const text = frame.getByText(secrets);
       return [...masks, text, text.locator(`${LINE_AROUND}=line`), frame.locator(`${SECRET_FIELDS}=${Buffer.from(secrets.source).toString("base64")}`)];
     };
-    const boxesOf = async (mask: Locator[]) => (await Promise.all(mask.map((m) => m.evaluateAll(BOXES)))).join("|");
+    const catchUp = async (animations: CDPSession, frozenMs: number) => {
+      await animations.send("Animation.setPlaybackRate", { playbackRate: 2 });
+      await new Promise((resolve) => setTimeout(resolve, frozenMs));
+    };
+    const boxOf = async (element: ElementHandle) => {
+      try {
+        return JSON.stringify(await element.boundingBox());
+      } finally {
+        await element.dispose();
+      }
+    };
+    const boxesOf = async (mask: Locator[]) => (await Promise.all(mask.map(async (m) => (await Promise.all((await m.elementHandles()).map(boxOf))).join(" ")))).join("|");
     const inTime = async <T>(work: () => Promise<T>): Promise<T> => {
       let timer: NodeJS.Timeout | undefined;
       const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error("the page did not answer in time to be masked")), opts.maskCheckMs ?? MASK_CHECK_MS)));
@@ -333,14 +351,6 @@ export async function openBrowser(opts: {
       } finally {
         clearTimeout(timer);
       }
-    };
-    const animationSessions = async (page: Page, frames: Frame[]) => {
-      const sessions: CDPSession[] = [await context.newCDPSession(page)];
-      for (const frame of frames.slice(1)) {
-        const own = await context.newCDPSession(frame).catch(() => null);
-        if (own) sessions.push(own);
-      }
-      return sessions;
     };
     const findMarked = async (mark: string) => {
       for (const page of context.pages()) {
@@ -440,9 +450,11 @@ export async function openBrowser(opts: {
         if (!page || disconnected || dialogOpen || page.url() === "about:blank") return null;
         const shoot = async (): Promise<Screenshot | null> => {
           const frames = page.frames();
-          const sessions = await animationSessions(page, frames);
+          const animations = await context.newCDPSession(page);
+          let frozenSince: number | undefined;
           try {
-            await Promise.all(sessions.map((s) => s.send("Animation.setPlaybackRate", { playbackRate: 0 })));
+            await animations.send("Animation.setPlaybackRate", { playbackRate: 0 });
+            frozenSince = performance.now();
             const { mask, placed } = await inTime(async () => {
               const secrets = await secretsOnPage();
               const mask = frames.flatMap((frame) => masksIn(frame, secrets));
@@ -454,7 +466,8 @@ export async function openBrowser(opts: {
             if (!unmoved || !sameFrames || bytes.byteLength > MAX_ARTIFACT_BYTES) return null;
             return { bytes: new Uint8Array(bytes), contentType: "image/png" };
           } finally {
-            await Promise.all(sessions.map((s) => s.detach().catch(() => undefined)));
+            if (frozenSince !== undefined) await catchUp(animations, performance.now() - frozenSince).catch(() => undefined);
+            await animations.detach().catch(() => undefined);
           }
         };
         let timer: NodeJS.Timeout | undefined;
