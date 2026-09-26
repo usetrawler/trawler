@@ -101,7 +101,7 @@ export function Members({ members, invitations, canManage, signInAt }: { members
   const removeButtons = useRef(new Map<string, HTMLButtonElement>());
   const busy = changing || removing || revoking || inviting;
   const shown = said(flow, { change: changed, remove: removed, revoke: revoked, invite: invited }, busy);
-  const listDone = shown.change === "invite" ? undefined : shown.done;
+  const listDone = shown.done;
   const listRefusal = shown.change === "change" || shown.change === "revoke" ? shown.error : undefined;
 
   useEffect(() => {

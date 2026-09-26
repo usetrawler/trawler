@@ -76,6 +76,8 @@ test("while a removal is sent it says so, and every button in the panel holds", 
   expect(rowOf(html, "bo@acme.test").match(/aria-disabled="true"/g)).toHaveLength(2);
   expect(rowOf(html, "max@acme.test")).toContain('aria-disabled="true"');
   expect(inviteForm(html)).toMatch(/<button type="submit" aria-disabled="true"[^>]*>Invite<\/button>/);
+  answered("invite", {}, { pending: true, confirming: "m-2" });
+  expect(rowOf(render(), "lee@acme.test")).toMatch(/<button type="submit" aria-describedby="remove-m-2" aria-disabled="true"[^>]*>Remove<span class="sr-only"> Lee<\/span><\/button>/);
 });
 
 test("a refused removal stays open with its refusal under its buttons, and nothing else is said", () => {
