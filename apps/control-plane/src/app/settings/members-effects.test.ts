@@ -160,6 +160,35 @@ test("the confirmation says what it sent and remembers itself, and Keep goes bac
   expect(react.dispatched).toEqual([{ type: "sent", change: "remove", before: results[1]![0] }, { type: "keep", id: "m-2" }]);
 });
 
+test("the confirmation's own form says it was sent, with its event", () => {
+  const onSent = vi.fn();
+  const form = nodes(ConfirmRemoval({ member: lee, action: () => {}, held: false, removing: false, onSent, onKeep: () => {} })).find((n) => n.type === "form")!;
+  const event = { currentTarget: { form: "confirm" } };
+  (form.props!.onSubmit as (e: unknown) => void)(event);
+  expect(onSent).toHaveBeenCalledWith(event);
+});
+
+test("a held button stops its click, and a free one lets it through", () => {
+  const stops = (button: Node) => {
+    const event = { preventDefault: vi.fn() };
+    (button.props!.onClick as (e: unknown) => void)(event);
+    return event.preventDefault.mock.calls.length > 0;
+  };
+  const submitsOf = (held: boolean) => {
+    const results = idle();
+    if (held) results[3] = [{}, true];
+    return draw(results)
+      .filter((n) => typeof n.type === "function" && n.props?.working)
+      .map((n) => (n.type as (props: unknown) => Node)(n.props));
+  };
+  expect(submitsOf(true).map(stops)).toEqual([true, true]);
+  expect(submitsOf(false).map(stops)).toEqual([false, false]);
+  const removeOf = (held: boolean) => nodes(ConfirmRemoval({ member: lee, action: () => {}, held, removing: false, onSent: () => {}, onKeep: () => {} })).find((n) => n.type === "button" && n.props?.type === "submit")!;
+  expect([stops(removeOf(true)), stops(removeOf(false))]).toEqual([true, false]);
+  const inviteOf = (held: boolean) => nodes(InviteForm({ state: {}, shown: {}, action: () => {}, held, inviting: false, onSent: () => {}, signInAt: "app.usetrawler.test" })).find((n) => n.type === "button")!;
+  expect([stops(inviteOf(true)), stops(inviteOf(false))]).toEqual([true, false]);
+});
+
 test("the confirmation puts focus on Keep when it opens, and Keep waits while something is sent", () => {
   const keep = { focus: vi.fn() };
   const onKeep = vi.fn();

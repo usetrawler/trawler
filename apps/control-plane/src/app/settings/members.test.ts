@@ -100,7 +100,8 @@ test("a refusal whose own place is gone with the refresh is said under the headi
   answered("invite", { error: OWNERS_AND_ADMINS });
   expect(alerts(render(false))).toEqual([OWNERS_AND_ADMINS]);
   answered("invite", { error: "That address is already in this workspace." });
-  expect(render().indexOf('role="alert"')).toBeGreaterThan(render().indexOf("Invite someone"));
+  const inPlace = render();
+  expect(inPlace.indexOf('role="alert"')).toBeGreaterThan(inPlace.indexOf("Invite someone"));
 });
 
 test("what a change did is said once its answer arrives, a refusal is an alert, and nothing is said before the answer or while anything is sent", () => {
