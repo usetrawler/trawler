@@ -88,6 +88,21 @@ test("a refused removal stays open with its refusal under its buttons, and nothi
   expect(html.match(/role="alert"/g)).toHaveLength(1);
 });
 
+test("a refusal whose own place is gone with the refresh is said under the heading instead", () => {
+  const OWNERS_AND_ADMINS = "Only an owner or admin of this workspace can invite people or change who is in it.";
+  const alerts = (html: string) => [...html.matchAll(/<p role="alert"[^>]*>([^<]*)<\/p>/g)].map((m) => m[1]);
+  answered("remove", { error: OWNERS_AND_ADMINS }, { confirming: "m-2" });
+  expect(alerts(render(false))).toEqual([OWNERS_AND_ADMINS]);
+  answered("remove", { error: "An owner is not removed here." }, { confirming: "m-4" });
+  const ownerNow = render();
+  expect(alerts(ownerNow)).toEqual(["An owner is not removed here."]);
+  expect(ownerNow.indexOf('role="alert"')).toBeLessThan(ownerNow.indexOf("<ul"));
+  answered("invite", { error: OWNERS_AND_ADMINS });
+  expect(alerts(render(false))).toEqual([OWNERS_AND_ADMINS]);
+  answered("invite", { error: "That address is already in this workspace." });
+  expect(render().indexOf('role="alert"')).toBeGreaterThan(render().indexOf("Invite someone"));
+});
+
 test("what a change did is said once its answer arrives, a refusal is an alert, and nothing is said before the answer or while anything is sent", () => {
   answered("change", { done: "Lee is now an admin." });
   expect(listStatus(render())).toBe("Lee is now an admin.");

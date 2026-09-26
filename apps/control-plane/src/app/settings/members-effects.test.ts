@@ -9,6 +9,7 @@ const react = vi.hoisted(() => ({
   dispatched: [] as unknown[],
   set: [] as unknown[],
   formPending: false,
+  inTransition: false,
 }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
@@ -17,7 +18,11 @@ vi.mock("react", async (original) => ({
   useEffect: (effect: () => void, deps?: unknown[]) => { react.deps.push(deps); effect(); },
   useRef: (initial: unknown) => react.refs.shift() ?? { current: initial },
   useState: (initial: unknown) => [initial, (value: unknown) => { react.set.push(value); }],
-  startTransition: (work: () => void) => work(),
+  startTransition: (work: () => void) => {
+    react.inTransition = true;
+    work();
+    react.inTransition = false;
+  },
 }));
 vi.mock("react-dom", async (original) => ({ ...(await original<typeof import("react-dom")>()), useFormStatus: () => ({ pending: react.formPending }) }));
 vi.mock("./actions.ts", () => ({ inviteMemberAction: async () => ({}), revokeInvitationAction: async () => ({}), removeMemberAction: async () => ({}), changeRoleAction: async () => ({}) }));
@@ -36,14 +41,21 @@ const nodes = (node: unknown): Node[] => {
   const element = node as Node;
   return [element, ...nodes(element.props?.children)];
 };
+const CHANGES = ["change", "remove", "revoke", "invite"] as const;
+let buttons = new Map<string, { focus: () => void }>();
+let sentFrom: Ref = { current: null };
 const draw = (results: Array<[unknown, boolean]>, flow: Record<string, unknown> = {}) => {
   react.results = [...results];
   react.flow = { sent: null, confirming: null, focus: null, ...flow };
-  react.refs = [{ current: heading }, { current: buttons }];
+  react.refs = [{ current: heading }, { current: buttons }, sentFrom];
   return nodes(Members({ members: [lee], invitations: [{ id: "inv-1", email: "max@acme.test", role: "member", expiresAt: "2026-10-03T10:00:00.000Z" }], canManage: true, signInAt: "app.usetrawler.test" }));
 };
-const idle = (): Array<[unknown, boolean]> => [[{}, false], [{}, false], [{}, false], [{}, false]];
-let buttons = new Map<string, { focus: () => void }>();
+const idle = (): Array<[unknown, boolean]> => CHANGES.map(() => [{}, false]);
+const answering = (change: (typeof CHANGES)[number], result: unknown) => {
+  const results = idle();
+  results[CHANGES.indexOf(change)] = [result, false];
+  return results;
+};
 
 beforeEach(() => {
   react.dispatched = [];
@@ -51,23 +63,33 @@ beforeEach(() => {
   react.set = [];
   heading.focus.mockClear();
   buttons = new Map();
+  sentFrom = { current: null };
   page.activeElement = body;
 });
 
-test("the answer to what was sent is handled once, when it arrives, with whether it left focus nowhere", () => {
-  const before = {};
-  const removed = { done: "Lee is removed from this workspace." };
+test("each answer is handled once, when it arrives, and focus is looked at after every render", () => {
   const results = idle();
-  results[1] = [removed, false];
-  draw(results, { sent: { change: "remove", before } });
-  expect(react.dispatched).toEqual([{ type: "answered", change: "remove", result: removed, focusLost: true }]);
-  expect(react.deps).toEqual([undefined, [results[0]![0]], [removed], [results[2]![0]]]);
-  page.activeElement = { tagName: "INPUT" };
-  react.dispatched = [];
-  const again = idle();
-  again[1] = [removed, false];
-  draw(again, { sent: { change: "remove", before } });
-  expect(react.dispatched).toEqual([{ type: "answered", change: "remove", result: removed, focusLost: false }]);
+  draw(results);
+  expect(react.deps).toEqual([undefined, ...results.map(([result]) => [result])]);
+  expect(react.deps.slice(1).every((deps, i) => deps![0] === results[i]![0])).toBe(true);
+  expect(react.dispatched).toEqual([]);
+});
+
+test("the answer to what was sent says focus was lost only when the form that sent it is gone and nothing else has focus", () => {
+  const before = {};
+  const lost = (change: (typeof CHANGES)[number], form: unknown, active: unknown) => {
+    react.dispatched = [];
+    sentFrom = { current: form };
+    page.activeElement = active;
+    draw(answering(change, { done: "x" }), { sent: { change, before } });
+    return react.dispatched;
+  };
+  for (const change of CHANGES) {
+    expect(lost(change, { isConnected: false }, body), change).toEqual([{ type: "answered", change, result: { done: "x" }, focusLost: true }]);
+    expect((lost(change, { isConnected: false }, null)[0] as { focusLost: boolean }).focusLost, change).toBe(true);
+    expect((lost(change, { isConnected: true }, body)[0] as { focusLost: boolean }).focusLost, change).toBe(false);
+    expect((lost(change, { isConnected: false }, { tagName: "INPUT" })[0] as { focusLost: boolean }).focusLost, change).toBe(false);
+  }
 });
 
 test("an answer that is not new, or not to what was sent, is not handled", () => {
@@ -89,11 +111,14 @@ test("focus moves to the heading, or back to the Remove button Keep came from, a
   expect(react.dispatched).toEqual([{ type: "focused" }, { type: "focused" }]);
 });
 
-test("each list form says what it sent, with the answer it replaces, and Remove opens the confirmation unless something is being sent", () => {
+test("each list form says what it sent and remembers itself, and Remove opens the confirmation unless something is being sent", () => {
   const results = idle();
   const tree = draw(results);
-  const forms = tree.filter((n) => n.type === "form");
-  for (const form of forms) (form.props!.onSubmit as () => void)();
+  for (const [i, form] of tree.filter((n) => n.type === "form").entries()) {
+    const element = { form: i };
+    (form.props!.onSubmit as (e: unknown) => void)({ currentTarget: element });
+    expect(sentFrom.current).toBe(element);
+  }
   const remove = tree.find((n) => n.type === "button" && typeof n.props?.ref === "function")!;
   (remove.props!.onClick as () => void)();
   expect(react.dispatched).toEqual([
@@ -125,11 +150,13 @@ test("the button of the form being sent says what it is doing, and the others ke
   react.formPending = false;
 });
 
-test("the confirmation says what it sent, and Keep goes back to that row", () => {
+test("the confirmation says what it sent and remembers itself, and Keep goes back to that row", () => {
   const results = idle();
   const confirm = draw(results, { confirming: "m-2" }).find((n) => n.type === ConfirmRemoval)!;
-  (confirm.props!.onSent as () => void)();
+  const element = { form: "confirm" };
+  (confirm.props!.onSent as (e: unknown) => void)({ currentTarget: element });
   (confirm.props!.onKeep as () => void)();
+  expect(sentFrom.current).toBe(element);
   expect(react.dispatched).toEqual([{ type: "sent", change: "remove", before: results[1]![0] }, { type: "keep", id: "m-2" }]);
 });
 
@@ -143,21 +170,24 @@ test("the confirmation puts focus on Keep when it opens, and Keep waits while so
   expect(onKeep).not.toHaveBeenCalled();
 });
 
-test("the invite form sends through a transition, so React does not reset what was typed, and not while something else is sent", () => {
-  const action = vi.fn();
+test("the invite form sends inside a transition, so React does not reset what was typed, and not while something else is sent", () => {
+  const inTransition: boolean[] = [];
+  const action = vi.fn(() => { inTransition.push(react.inTransition); });
   const onSent = vi.fn();
   const submit = (held: boolean) => {
     const form = nodes(InviteForm({ state: {}, shown: {}, action, held, inviting: false, onSent, signInAt: "app.usetrawler.test" })).find((n) => n.type === "form")!;
     const event = { preventDefault: vi.fn(), currentTarget: undefined };
     (form.props!.onSubmit as (e: unknown) => void)(event);
-    return event.preventDefault;
+    return event;
   };
-  expect(submit(true)).toHaveBeenCalled();
+  expect(submit(true).preventDefault).toHaveBeenCalled();
   expect(action).not.toHaveBeenCalled();
   expect(onSent).not.toHaveBeenCalled();
-  expect(submit(false)).toHaveBeenCalled();
-  expect(onSent).toHaveBeenCalledTimes(1);
+  const sent = submit(false);
+  expect(sent.preventDefault).toHaveBeenCalled();
+  expect(onSent).toHaveBeenCalledWith(sent);
   expect(action).toHaveBeenCalledWith(expect.any(FormData));
+  expect(inTransition).toEqual([true]);
 });
 
 test("a successful invitation clears the address and sets the role back to Member; a refused one leaves both", () => {

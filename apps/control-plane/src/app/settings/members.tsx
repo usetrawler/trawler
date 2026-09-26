@@ -76,7 +76,7 @@ export const roleLabel = (role: string) => role.split(",").map((r) => ROLE_LABEL
 const roles = (role: string) => role.split(",").map((r) => r.trim());
 const nameOf = (row: MemberRow) => row.name.trim() || row.email;
 export const canChange = (row: MemberRow) => !row.you && !roles(row.role).includes("owner");
-const focusIsLost = () => !document.activeElement || document.activeElement === document.body;
+const focusLostWith = (form: HTMLFormElement | null) => !form?.isConnected && (!document.activeElement || document.activeElement === document.body);
 
 export function invitedStatus(email: string, signInAt: string): string {
   return `Invited ${email}. Ask them to sign in at ${signInAt} with this address; no email is sent.`;
@@ -99,10 +99,15 @@ export function Members({ members, invitations, canManage, signInAt }: { members
   const [flow, dispatch] = useReducer(nextFlow, QUIET);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const removeButtons = useRef(new Map<string, HTMLButtonElement>());
+  const sentFrom = useRef<HTMLFormElement | null>(null);
   const busy = changing || removing || revoking || inviting;
   const shown = said(flow, { change: changed, remove: removed, revoke: revoked, invite: invited }, busy);
-  const listDone = shown.done;
-  const listRefusal = shown.change === "change" || shown.change === "revoke" ? shown.error : undefined;
+  const confirmingRow = canManage ? members.find((m) => m.id === flow.confirming && canChange(m)) : undefined;
+  const refusalHasItsPlace = (shown.change === "remove" && confirmingRow) || (shown.change === "invite" && canManage);
+  const send = (change: Change, before: MembersState) => (e: React.FormEvent<HTMLFormElement>) => {
+    sentFrom.current = e.currentTarget;
+    dispatch({ type: "sent", change, before });
+  };
 
   useEffect(() => {
     if (!flow.focus) return;
@@ -110,23 +115,27 @@ export function Members({ members, invitations, canManage, signInAt }: { members
     dispatch({ type: "focused" });
   });
   useEffect(() => {
-    const event = afterAnswer(flow, "change", changed, focusIsLost());
+    const event = afterAnswer(flow, "change", changed, focusLostWith(sentFrom.current));
     if (event) dispatch(event);
   }, [changed]);
   useEffect(() => {
-    const event = afterAnswer(flow, "remove", removed, focusIsLost());
+    const event = afterAnswer(flow, "remove", removed, focusLostWith(sentFrom.current));
     if (event) dispatch(event);
   }, [removed]);
   useEffect(() => {
-    const event = afterAnswer(flow, "revoke", revoked, focusIsLost());
+    const event = afterAnswer(flow, "revoke", revoked, focusLostWith(sentFrom.current));
     if (event) dispatch(event);
   }, [revoked]);
+  useEffect(() => {
+    const event = afterAnswer(flow, "invite", invited, focusLostWith(sentFrom.current));
+    if (event) dispatch(event);
+  }, [invited]);
 
   return (
     <section aria-labelledby="members-heading" className={panel}>
       <h2 id="members-heading" ref={headingRef} tabIndex={-1} className={heading}>Members</h2>
-      <p role="status" className="text-sm wrap-anywhere text-ok empty:-mt-4">{listDone ?? ""}</p>
-      {listRefusal && <p role="alert" className={alert}>{listRefusal}</p>}
+      <p role="status" className="text-sm wrap-anywhere text-ok empty:-mt-4">{shown.done ?? ""}</p>
+      {shown.error && !refusalHasItsPlace && <p role="alert" className={alert}>{shown.error}</p>}
 
       <ul className="flex flex-col">
         {members.map((m) => (
@@ -148,12 +157,12 @@ export function Members({ members, invitations, canManage, signInAt }: { members
                 held={busy}
                 removing={removing}
                 error={shown.change === "remove" ? shown.error : undefined}
-                onSent={() => dispatch({ type: "sent", change: "remove", before: removed })}
+                onSent={send("remove", removed)}
                 onKeep={() => dispatch({ type: "keep", id: m.id })}
               />
             ) : (
               <div className="flex flex-wrap gap-2">
-                <form action={change} onSubmit={() => dispatch({ type: "sent", change: "change", before: changed })}>
+                <form action={change} onSubmit={send("change", changed)}>
                   <input type="hidden" name="memberId" value={m.id} />
                   <input type="hidden" name="role" value={roles(m.role).includes("admin") ? "member" : "admin"} />
                   <Submit held={busy} working="Changing…">{roles(m.role).includes("admin") ? "Make member" : "Make admin"}<span className="sr-only"> {nameOf(m)}</span></Submit>
@@ -185,7 +194,7 @@ export function Members({ members, invitations, canManage, signInAt }: { members
                 <span className="ml-auto flex items-center gap-3">
                   <span className="text-xs text-muted">Expires <LocalTime iso={i.expiresAt} /></span>
                   {canManage && (
-                    <form action={revoke} onSubmit={() => dispatch({ type: "sent", change: "revoke", before: revoked })}>
+                    <form action={revoke} onSubmit={send("revoke", revoked)}>
                       <input type="hidden" name="invitationId" value={i.id} />
                       <Submit held={busy} working="Revoking…">Revoke<span className="sr-only"> the invitation for {i.email}</span></Submit>
                     </form>
@@ -204,7 +213,7 @@ export function Members({ members, invitations, canManage, signInAt }: { members
           action={invite}
           held={busy}
           inviting={inviting}
-          onSent={() => dispatch({ type: "sent", change: "invite", before: invited })}
+          onSent={send("invite", invited)}
           signInAt={signInAt}
         />
       ) : (
@@ -215,7 +224,7 @@ export function Members({ members, invitations, canManage, signInAt }: { members
 }
 
 export function ConfirmRemoval({ member, action, held, removing, error, onSent, onKeep }: {
-  member: MemberRow; action: (form: FormData) => void; held: boolean; removing: boolean; error?: string; onSent: () => void; onKeep: () => void;
+  member: MemberRow; action: (form: FormData) => void; held: boolean; removing: boolean; error?: string; onSent: (e: React.FormEvent<HTMLFormElement>) => void; onKeep: () => void;
 }) {
   const keep = useRef<HTMLButtonElement>(null);
   const who = nameOf(member);
@@ -236,7 +245,7 @@ export function ConfirmRemoval({ member, action, held, removing, error, onSent, 
 }
 
 export function InviteForm({ state, shown, action, held, inviting, onSent, signInAt }: {
-  state: MembersState; shown: MembersState; action: (form: FormData) => void; held: boolean; inviting: boolean; onSent: () => void; signInAt: string;
+  state: MembersState; shown: MembersState; action: (form: FormData) => void; held: boolean; inviting: boolean; onSent: (e: React.FormEvent<HTMLFormElement>) => void; signInAt: string;
 }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("member");
@@ -252,7 +261,7 @@ export function InviteForm({ state, shown, action, held, inviting, onSent, signI
       onSubmit={(e) => {
         e.preventDefault();
         if (held) return;
-        onSent();
+        onSent(e);
         const data = new FormData(e.currentTarget);
         startTransition(() => action(data));
       }}
