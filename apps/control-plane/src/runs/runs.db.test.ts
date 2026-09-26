@@ -145,12 +145,12 @@ describe("safety", () => {
     await drain();
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
     const job = (await claimJob(t.db, keys))!;
-    await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id));
+    await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id, "stopped"));
     seq = 0;
     expect(await ingestEvents(t.db, job.token, [ev({ type: "note", jobId: job.jobId, text: "x" })])).toEqual({ cancel: true });
     await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "error", error: "cancelled" });
     expect(await claimJob(t.db, keys)).toBeNull();
-    expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.status).toBe("cancelled");
+    expect(await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id))).toMatchObject({ status: "cancelled", cancelReason: "stopped" });
   });
 
   test("stopping a workspace's live runs cancels the queued and the going ones, and leaves finished runs and other workspaces alone, even without row security", async () => {
@@ -165,20 +165,38 @@ describe("safety", () => {
     expect(claimed.runId).toBe(going.id);
     const waiting = await withOrg(t.db, org, (tx) => startRun(tx, org, own, keys, options));
     const elsewhere = await withOrg(t.db, "org-b", (tx) => startRun(tx, "org-b", other, keys, options));
-    const status = async (orgId: string, id: string) => (await withOrg(t.db, orgId, (tx) => runSummary(tx, orgId, id)))!.status;
+    const status = async (orgId: string, id: string) => {
+      const run = (await withOrg(t.db, orgId, (tx) => runSummary(tx, orgId, id)))!;
+      return { status: run.status, cancelReason: run.cancelReason };
+    };
     const before = await status(org, finished.id);
 
-    expect(await asSystem(t.db, (tx) => cancelLiveRuns(tx, org))).toBe(2);
+    expect(await asSystem(t.db, (tx) => cancelLiveRuns(tx, org, "key_removed"))).toBe(2);
 
-    expect([await status(org, finished.id), await status(org, going.id), await status(org, waiting.id), await status("org-b", elsewhere.id)]).toEqual([before, "cancelled", "cancelled", "queued"]);
+    expect([await status(org, finished.id), await status(org, going.id), await status(org, waiting.id), await status("org-b", elsewhere.id)]).toEqual([
+      before,
+      { status: "cancelled", cancelReason: "key_removed" },
+      { status: "cancelled", cancelReason: "key_removed" },
+      { status: "queued", cancelReason: null },
+    ]);
     const jobs = await t.db.selectFrom("jobs").select(["run_id", "status"]).where("run_id", "in", [going.id, waiting.id]).execute();
     expect(jobs.filter((j) => j.run_id === waiting.id).every((j) => j.status === "cancelled")).toBe(true);
     expect(jobs.filter((j) => j.run_id === going.id).map((j) => j.status).sort()).toEqual(["cancelled", "leased"]);
     seq = 0;
     expect(await ingestEvents(t.db, claimed.token, [ev({ type: "note", jobId: claimed.jobId, text: "x" })])).toEqual({ cancel: true });
     await completeJob(t.db, claimed.token, { usage: usage(0), stoppedBy: "error", error: "cancelled" });
-    await withOrg(t.db, "org-b", (tx) => cancelRun(tx, "org-b", elsewhere.id));
+    await withOrg(t.db, "org-b", (tx) => cancelRun(tx, "org-b", elsewhere.id, "stopped"));
     await drain();
+  });
+
+  test("the database keeps a cancel reason only on a cancelled run, and only one it knows", async () => {
+    await drain();
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    await expect(sql`update runs set cancel_reason = 'stopped' where id = ${run.id}`.execute(t.db)).rejects.toThrow(/runs_cancel_reason_only_when_cancelled/);
+    await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id, "stopped"));
+    await expect(sql`update runs set cancel_reason = 'someone' where id = ${run.id}`.execute(t.db)).rejects.toThrow(/runs_cancel_reason_check/);
+    await expect(sql`update runs set status = 'running' where id = ${run.id}`.execute(t.db)).rejects.toThrow(/runs_cancel_reason_only_when_cancelled/);
+    expect(await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id))).toMatchObject({ status: "cancelled", cancelReason: "stopped" });
   });
 
   test("two claimers never get two jobs of the same run", async () => {
@@ -209,7 +227,7 @@ describe("safety", () => {
   test("another organisation cannot see or cancel the run, or start one on a foreign project", async () => {
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
     expect(await withOrg(t.db, "org-b", (tx) => runSummary(tx, "org-b", run.id))).toBeNull();
-    await expect(withOrg(t.db, "org-b", (tx) => cancelRun(tx, "org-b", run.id))).rejects.toThrow(RunNotFound);
+    await expect(withOrg(t.db, "org-b", (tx) => cancelRun(tx, "org-b", run.id, "stopped"))).rejects.toThrow(RunNotFound);
     await expect(withOrg(t.db, "org-b", (tx) => startRun(tx, "org-b", project, keys, options))).rejects.toThrow(ProjectNotFound);
     void other;
     await drain();
@@ -291,7 +309,7 @@ describe("review round 1", () => {
     await drain();
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
     const job = (await claimJob(t.db, keys))!;
-    await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id));
+    await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id, "stopped"));
     seq = 0;
     expect(await ingestEvents(t.db, job.token, [ev({ type: "finding", jobId: job.jobId, finding: defect })])).toEqual({ cancel: true });
     expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.findings).toEqual([]);
@@ -322,7 +340,7 @@ describe("review round 2", () => {
     await ingestEvents(t.db, ana.token, [ev({ type: "finding", jobId: ana.jobId, finding: defect })]);
     await completeJob(t.db, ana.token, { usage: usage(0), stoppedBy: "finish" });
     const lee = (await claimJob(t.db, keys))!;
-    await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id));
+    await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id, "stopped"));
     await sql`update jobs set lease_until = now() - interval '1 minute' where id = ${lee.jobId}`.execute(t.db);
     await claimJob(t.db, keys);
     const summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
@@ -352,7 +370,7 @@ describe("review round 2", () => {
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
     const job = (await claimJob(t.db, keys))!;
     expect(await llmCallFor(t.db, job.token)).toMatchObject({ orgId: "org-a", runId: run.id, jobId: job.jobId, models: ["m/agent", "m/judge"] });
-    await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id));
+    await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id, "stopped"));
     await expect(llmCallFor(t.db, job.token)).rejects.toBeInstanceOf(LlmRefused);
     await drain();
   });
@@ -597,7 +615,7 @@ describe("judge again", () => {
 
   test("stopping a run still stops the judge that was running in it", async () => {
     const { run, judge } = await runUpToTheJudge();
-    await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id));
+    await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id, "stopped"));
     seq = 0;
     expect(await ingestEvents(t.db, judge.token, [ev({ type: "verdict", jobId: judge.jobId, findingId: "ana:f1", verdict: "confirmed", observed: "x" })])).toEqual({ cancel: true });
     await expect(llmCallFor(t.db, judge.token)).rejects.toBeInstanceOf(LlmRefused);

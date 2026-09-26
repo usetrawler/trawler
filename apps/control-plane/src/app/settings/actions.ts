@@ -71,7 +71,7 @@ export async function removeModelKeyAction(_previous: SettingsState, form: FormD
   if ("error" in member) return member;
   const addedAt = new Date(String(form.get("addedAt") ?? ""));
   const outcome = await withOrg(getDb(), member.orgId, async (tx) => {
-    if (!Number.isNaN(addedAt.getTime()) && (await removeModelKey(tx, member.orgId, addedAt))) return { stoppedRuns: await cancelLiveRuns(tx, member.orgId) };
+    if (!Number.isNaN(addedAt.getTime()) && (await removeModelKey(tx, member.orgId, addedAt))) return { stoppedRuns: await cancelLiveRuns(tx, member.orgId, "key_removed") };
     return (await modelKeyHint(tx, member.orgId)) ? { changed: true } : { alreadyRemoved: true };
   });
   revalidatePath("/", "layout");

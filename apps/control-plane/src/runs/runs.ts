@@ -57,19 +57,21 @@ export class RunNotFound extends Error {
   }
 }
 
-export async function cancelRun(tx: Tx, orgId: string, runId: string): Promise<boolean> {
+export type CancelReason = "stopped" | "key_removed";
+
+export async function cancelRun(tx: Tx, orgId: string, runId: string, reason: CancelReason): Promise<boolean> {
   const run = await tx.selectFrom("runs").select("status").where("id", "=", runId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
   if (!run) throw new RunNotFound();
   if (run.status !== "queued" && run.status !== "running") return false;
-  await tx.updateTable("runs").set({ status: "cancelled", finished_at: new Date() }).where("id", "=", runId).execute();
+  await tx.updateTable("runs").set({ status: "cancelled", cancel_reason: reason, finished_at: new Date() }).where("id", "=", runId).execute();
   await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date() }).where("run_id", "=", runId).where("status", "=", "queued").execute();
   return true;
 }
 
-export async function cancelLiveRuns(tx: Tx, orgId: string): Promise<number> {
+export async function cancelLiveRuns(tx: Tx, orgId: string, reason: CancelReason): Promise<number> {
   const live = await tx.selectFrom("runs").select("id").where("org_id", "=", orgId).where("status", "in", ["queued", "running"]).forUpdate().execute();
   let cancelled = 0;
-  for (const run of live) if (await cancelRun(tx, orgId, run.id)) cancelled++;
+  for (const run of live) if (await cancelRun(tx, orgId, run.id, reason)) cancelled++;
   return cancelled;
 }
 
@@ -114,7 +116,7 @@ export async function judgeAgain(tx: Tx, orgId: string, runId: string, findingKe
 export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const run = await tx
     .selectFrom("runs")
-    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used"])
+    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "cancel_reason"])
     .where("id", "=", runId)
     .where("org_id", "=", orgId)
     .executeTakeFirst();
@@ -137,7 +139,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   ]);
   const findingTitle = new Map(findings.map((f) => [f.key, f.title]));
   return {
-    id: run.id, number: run.number, status: run.status, projectId: run.project_id,
+    id: run.id, number: run.number, status: run.status, cancelReason: run.cancel_reason as CancelReason | null, projectId: run.project_id,
     costUsd: Number(run.cost_usd), budgetUsd: Number(run.budget_usd), agentModel: run.agent_model, judgeModel: run.judge_model,
     provider: run.provider, tokenCap: run.token_cap === null ? null : Number(run.token_cap), tokensUsed: Number(run.tokens_used),
     createdAt: run.created_at, startedAt: run.started_at, finishedAt: run.finished_at,

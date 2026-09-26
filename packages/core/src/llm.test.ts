@@ -164,9 +164,9 @@ const busy = () => new Response(JSON.stringify({ error: { code: 429, message: "o
 test("only a 402 the proxy marks as the job being stopped counts as the budget running out", async () => {
   expect(stoppedByRun(await refusal(402, { code: 402, message: "the run has spent its budget", type: JOB_STOPPED }))).toBe(true);
   expect(stoppedByRun(await refusal(402, { code: 402, message: "the run is no longer active", type: JOB_STOPPED }))).toBe(true);
-  const keyRefused = await refusal(402, { code: 402, message: "the provider refused the workspace key; replace it on the plan page" });
+  const keyRefused = await refusal(402, { code: 402, message: "the provider refused the workspace key; an owner or admin can replace it in Settings" });
   expect(stoppedByRun(keyRefused)).toBe(false);
-  expect((keyRefused as Error).message).toBe("the provider refused the workspace key; replace it on the plan page");
+  expect((keyRefused as Error).message).toBe("the provider refused the workspace key; an owner or admin can replace it in Settings");
   expect(stoppedByRun(await refusal(402, { code: 402, message: "Insufficient credits. Add more using https://openrouter.ai/settings/credits" }))).toBe(false);
   expect(stoppedByRun(await refusal(400, { code: 400, message: "bad request", type: JOB_STOPPED }))).toBe(false);
 });
@@ -175,9 +175,9 @@ test("a refusal that comes back on a retried call keeps its meaning and its reas
   const stopped = await refusal(402, { code: 402, message: "the run is no longer active", type: JOB_STOPPED }, [busy()]);
   expect(RetryError.isInstance(stopped)).toBe(true);
   expect(stoppedByRun(stopped)).toBe(true);
-  const keyRefused = await refusal(402, { code: 402, message: "the provider refused the workspace key; replace it on the plan page" }, [busy()]);
+  const keyRefused = await refusal(402, { code: 402, message: "the provider refused the workspace key; an owner or admin can replace it in Settings" }, [busy()]);
   expect(stoppedByRun(keyRefused)).toBe(false);
-  expect(failureMessage(keyRefused)).toBe("the provider refused the workspace key; replace it on the plan page");
+  expect(failureMessage(keyRefused)).toBe("the provider refused the workspace key; an owner or admin can replace it in Settings");
 });
 
 test("a job_stopped refusal on the last allowed attempt still stops the job", async () => {

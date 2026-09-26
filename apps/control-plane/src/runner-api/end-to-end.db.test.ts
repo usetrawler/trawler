@@ -154,13 +154,13 @@ test("a key the provider starts refusing mid-run fails each session with the pro
   const summary = (await withOrg(t.db, "org-k", (tx) => runSummary(tx, "org-k", run.id)))!;
   expect(summary.status).toBe("failed");
   expect(summary.jobs.map((j) => ({ status: j.status, stopped_by: j.stopped_by, error: j.error }))).toEqual([
-    { status: "failed", stopped_by: "error", error: "the provider refused the workspace key; replace it on the plan page" },
+    { status: "failed", stopped_by: "error", error: "the provider refused the workspace key; an owner or admin can replace it in Settings" },
     { status: "failed", stopped_by: "error", error: "the provider account behind the workspace key is out of credits" },
   ]);
   const view = runView(summary);
   expect(view.headline).toBe("This run could not finish.");
   expect(view.personas.map((p) => ({ name: p.name, state: p.state, error: p.error }))).toEqual([
-    { name: "Noor", state: "failed", error: "the provider refused the workspace key; replace it on the plan page" },
+    { name: "Noor", state: "failed", error: "the provider refused the workspace key; an owner or admin can replace it in Settings" },
     { name: "Tao", state: "failed", error: "the provider account behind the workspace key is out of credits" },
   ]);
 });
@@ -197,7 +197,7 @@ test("the proxy marks the 402s that mean the run stopped the job, and only those
   };
 
   replies = [upstreamError(401, "User not found.")];
-  expect(await refusal()).toEqual({ code: 402, message: "the provider refused the workspace key; replace it on the plan page" });
+  expect(await refusal()).toEqual({ code: 402, message: "the provider refused the workspace key; an owner or admin can replace it in Settings" });
   replies = [upstreamError(402, "Insufficient credits.")];
   expect(await refusal()).toEqual({ code: 402, message: "the provider account behind the workspace key is out of credits" });
   await withOrg(t.db, "org-m", (tx) => setModelKey(tx, "org-m", { provider: "openai", key: "sk-proj-" + "m".repeat(40) }, "u", keys));

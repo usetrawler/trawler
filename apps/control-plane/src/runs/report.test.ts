@@ -9,7 +9,7 @@ const finding = (key: string, persona: string, extra: Partial<RunSummary["findin
 
 function summary(over: Partial<RunSummary>): RunSummary {
   return {
-    id: "r", number: 1, status: "running", projectId: "p", costUsd: 0.1, budgetUsd: 2, agentModel: "m", judgeModel: "m",
+    id: "r", number: 1, status: "running", cancelReason: null, projectId: "p", costUsd: 0.1, budgetUsd: 2, agentModel: "m", judgeModel: "m",
     provider: "openrouter", tokenCap: null, tokensUsed: 0,
     createdAt: new Date(), startedAt: new Date(), finishedAt: null, jobs: [], findings: [], goals: [], target: "https://a.test/",
     personas: [{ id: "ana", name: "Ana" }, { id: "lee", name: "Lee" }], goalTexts: [{ id: "g", instruction: "Get in." }], activity: [],
@@ -62,6 +62,11 @@ test("a run stopped while someone was still exploring settles instead of looking
   expect(view.live).toBe(false);
   expect(view.personas.map((p) => p.state)).toEqual(["finished", "cancelled"]);
   expect(view.stages.map((s) => s.state)).toEqual(["done", "skipped", "skipped", "done"]);
+});
+
+test("a stopped run says why it stopped, and never that the person reading it stopped it", () => {
+  const headline = (cancelReason: RunSummary["cancelReason"]) => runView(summary({ status: "cancelled", cancelReason })).headline;
+  expect([headline("stopped"), headline("key_removed"), headline(null)]).toEqual(["This run was stopped.", "Stopped when the model key was removed.", "This run was stopped."]);
 });
 
 test("replays that were all cancelled by the cap count as skipped, not done", () => {
@@ -117,8 +122,8 @@ test("only the model's own failures are called model errors", () => {
 });
 
 test("a judge the provider refused the key for says so, and can be judged again", () => {
-  const view = finished({ jobs: [judged("failed", { stopped_by: "error", error: "the provider refused the workspace key; replace it on the plan page" })], findings: [finding("ana:f1", "ana", replayed)] });
-  expect(view.report.couldNotJudge).toEqual([expect.objectContaining({ reason: "Failed: the provider refused the workspace key; replace it on the plan page", action: "judge_again" })]);
+  const view = finished({ jobs: [judged("failed", { stopped_by: "error", error: "the provider refused the workspace key; an owner or admin can replace it in Settings" })], findings: [finding("ana:f1", "ana", replayed)] });
+  expect(view.report.couldNotJudge).toEqual([expect.objectContaining({ reason: "Failed: the provider refused the workspace key; an owner or admin can replace it in Settings", action: "judge_again" })]);
 });
 
 test("a judge stopped by the proxy or the cap says why, and offers judging again only while the cap has room", () => {
@@ -126,8 +131,13 @@ test("a judge stopped by the proxy or the cap says why, and offers judging again
   expect(recordedBeforeKeyRefusalsFailed.report.couldNotJudge).toEqual([expect.objectContaining({ reason: "Stopped: the provider account behind the workspace key is out of credits", action: "judge_again" })]);
   const capped = finished({ status: "stopped_budget", costUsd: 2.01, jobs: [judged("succeeded", { stopped_by: "budget" })], findings: [finding("ana:f1", "ana", replayed)] });
   expect(capped.report.couldNotJudge).toEqual([expect.objectContaining({ reason: "The run's cap ran out before the judge answered.", action: "cap_spent" })]);
-  const stopped = finished({ status: "cancelled", jobs: [judged("succeeded", { stopped_by: "budget", error: "the run is no longer active" })], findings: [finding("ana:f1", "ana", replayed)] });
-  expect(stopped.report.couldNotJudge.map((f) => f.reason)).toEqual(["You stopped the run before the judge answered."]);
+  const stopped = (cancelReason: RunSummary["cancelReason"]) =>
+    finished({ status: "cancelled", cancelReason, jobs: [judged("succeeded", { stopped_by: "budget", error: "the run is no longer active" })], findings: [finding("ana:f1", "ana", replayed)] }).report.couldNotJudge.map((f) => f.reason);
+  expect([stopped("stopped"), stopped("key_removed"), stopped(null)]).toEqual([
+    ["The run was stopped before the judge answered."],
+    ["The model key was removed before the judge answered."],
+    ["The run was stopped before the judge answered."],
+  ]);
   const spent = finished({ status: "stopped_budget", costUsd: 2, jobs: [judged("succeeded", { stopped_by: "budget", error: "the run has spent its budget" })], findings: [finding("ana:f1", "ana", replayed)] });
   expect(spent.report.couldNotJudge.map((f) => f.reason)).toEqual(["The run's cap ran out before the judge answered."]);
 });

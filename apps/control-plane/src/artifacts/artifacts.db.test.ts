@@ -200,7 +200,7 @@ test("a job that is over, whose lease ran out, or whose run was cancelled can no
   expect((await handleArtifactUpload(upload(expired, PNG), expired.jobId, deps)).status).toBe(401);
 
   const cancelled = await leasedJob();
-  await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", cancelled.runId));
+  await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", cancelled.runId, "stopped"));
   const res = await handleArtifactUpload(upload(cancelled, PNG), cancelled.jobId, deps);
   expect(res.status).toBe(409);
   expect((await res.json()).error).toBe("the run is no longer active");
@@ -358,7 +358,7 @@ test("a job handed back while its file is on the way to the bucket keeps that fi
   await removeExpiredArtifacts(t.db, store);
   expect(await rowsOf(job.jobId)).toBe(0);
   expect(await objectKeys()).not.toContain(row.storage_key);
-  await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", job.runId));
+  await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", job.runId, "stopped"));
 });
 
 test("the database refuses a row whose key is not its own, also for a type the key rule does not know, or a size over the limit", async () => {
