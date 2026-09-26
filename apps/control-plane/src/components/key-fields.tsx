@@ -26,7 +26,7 @@ export function KeyFields({ apiKey, onKey, detected, chosen, onChoose, provider,
       {detected && !chosen && <Recognised provider={detected} />}
       {apiKey.trim().length >= 20 && (
         <div className="grid gap-2 sm:grid-cols-[auto_1fr]">
-          <select name="provider" value={provider ?? "custom"} onChange={(e) => onChoose(e.target.value as Provider)} aria-label="Provider" className={field}>
+          <select name="provider" value={provider ?? "custom"} onChange={(e) => { if (!readOnly) onChoose(e.target.value as Provider); }} aria-label="Provider" aria-disabled={readOnly || undefined} className={`${field} aria-disabled:cursor-wait`}>
             <option value="custom">OpenAI-compatible</option>
             <option value="openai">OpenAI</option>
             <option value="anthropic">Anthropic</option>

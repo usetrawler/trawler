@@ -6,6 +6,7 @@ vi.mock("./actions.ts", () => ({ renameWorkspaceAction: async () => ({}), replac
 
 const { afterRemove, afterReplace, ModelKey, nextPanel, RemoveForm, removedStatus, ReplaceForm, savedStatus } = await import("./model-key.tsx");
 const { WorkspaceName } = await import("./workspace-name.tsx");
+const { KeyFields } = await import("../../components/key-fields.tsx");
 const saved = { provider: "openrouter" as const, hint: "…a1b2", baseUrl: null, addedAt: "2026-09-25T18:50:00.000Z" };
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 const render = (element: Parameters<typeof renderToStaticMarkup>[0]) => renderToStaticMarkup(element);
@@ -77,6 +78,17 @@ test("a refused key points the key field at the reason; a base URL problem point
   const unreachable = render(createElement(ReplaceForm, { saved, action: nothing, pending: false, refusal: refusal(), onSent: nothing, onKeep: nothing }));
   expect(unreachable.match(/<input [^>]*name="apiKey"[^>]*>/)?.[0]).not.toContain("aria-invalid");
   expect(unreachable).toContain('role="alert"');
+});
+
+test("a base URL problem marks the Base URL field and not the key; while a check runs, the key, the base URL and the provider hold", () => {
+  const html = render(createElement(KeyFields, {
+    apiKey: "k-" + "q".repeat(40), onKey: nothing, detected: null, chosen: "custom", onChoose: nothing, provider: "custom",
+    baseUrl: "https://10.0.0.8/v1", onBaseUrl: nothing, required: true, readOnly: true, baseUrlErrorId: "key-error",
+  }));
+  expect(html.match(/<input [^>]*name="baseUrl"[^>]*>/)?.[0]).toMatch(/readOnly="" aria-invalid="true" aria-describedby="key-error"/);
+  expect(html.match(/<input [^>]*name="apiKey"[^>]*>/)?.[0]).toMatch(/readOnly=""/);
+  expect(html.match(/<input [^>]*name="apiKey"[^>]*>/)?.[0]).not.toContain("aria-invalid");
+  expect(html.match(/<select [^>]*>/)?.[0]).toContain('aria-disabled="true"');
 });
 
 test("a saved or removed key is reported, with any runs it stopped, and a key no models could be listed for says when it is checked", () => {

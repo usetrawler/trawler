@@ -15,10 +15,12 @@ vi.mock("react", async (original) => ({
   useEffect: (effect: () => void, deps?: unknown[]) => { react.deps.push(deps); effect(); },
   useRef: () => react.refs.shift() ?? { current: null },
   useState: (initial: unknown) => [initial, () => {}],
+  useId: () => "key",
 }));
 vi.mock("./actions.ts", () => ({ renameWorkspaceAction: async () => ({}), replaceModelKeyAction: async () => ({}), removeModelKeyAction: async () => ({}) }));
 
 const { ModelKey, RemoveForm, ReplaceForm } = await import("./model-key.tsx");
+const { KeyFields } = await import("../../components/key-fields.tsx");
 const saved = { provider: "openrouter" as const, hint: "…a1b2", baseUrl: null, addedAt: "2026-09-25T18:50:00.000Z" };
 const focusable = () => ({ current: { focus: vi.fn() } });
 const draw = (replaced: unknown, removed: unknown) => {
@@ -26,7 +28,7 @@ const draw = (replaced: unknown, removed: unknown) => {
   ModelKey({ saved, addedBy: null, canManage: true });
 };
 
-type Node = { type?: unknown; props?: { children?: unknown; aside?: unknown; ref?: unknown; onClick?: () => void; onSubmit?: () => void } };
+type Node = { type?: unknown; props?: { children?: unknown; aside?: unknown; ref?: unknown; onClick?: () => void; onSubmit?: () => void; onChange?: (event: unknown) => void } };
 const nodes = (node: unknown): Node[] => {
   if (Array.isArray(node)) return node.flatMap(nodes);
   if (!node || typeof node !== "object") return [];
@@ -120,4 +122,24 @@ test("a removal's refusal never shows in the key form, and a key refusal never i
   react.results = [{}, {}];
   const withKey = ModelKey({ saved, addedBy: null, canManage: true });
   expect(nodes(withKey).find((node) => node.type === RemoveForm)?.props).toMatchObject({ error: "" });
+});
+
+test("a key refusal is pinned on the key field, a base URL refusal on the Base URL field, and an unreachable provider on neither", () => {
+  const fields = (field?: "key" | "baseUrl") =>
+    nodes(ReplaceForm({ saved, action: () => {}, pending: false, refusal: { from: "replace", error: "E", ...(field ? { field } : {}) }, onSent: () => {}, onKeep: () => {} })).find((node) => node.type === KeyFields)?.props;
+  expect(fields("key")).toMatchObject({ errorId: "key-error", baseUrlErrorId: undefined });
+  expect(fields("baseUrl")).toMatchObject({ errorId: undefined, baseUrlErrorId: "key-error" });
+  expect(fields()).toMatchObject({ errorId: undefined, baseUrlErrorId: undefined });
+});
+
+test("while a check runs, picking another provider changes nothing; once it is over, the pick counts", () => {
+  const chose = vi.fn();
+  const pick = (readOnly: boolean) => {
+    const tree = KeyFields({ apiKey: "k-" + "q".repeat(40), onKey: () => {}, detected: null, chosen: null, onChoose: chose, provider: "custom", baseUrl: "", onBaseUrl: () => {}, required: true, readOnly });
+    nodes(tree).find((node) => node.type === "select")!.props!.onChange!({ target: { value: "openai" } });
+  };
+  pick(true);
+  expect(chose).not.toHaveBeenCalled();
+  pick(false);
+  expect(chose).toHaveBeenCalledExactlyOnceWith("openai");
 });
