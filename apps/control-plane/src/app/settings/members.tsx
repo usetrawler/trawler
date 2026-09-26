@@ -41,24 +41,36 @@ export function Members({ members, invitations, canManage, signInAt }: { members
   const [changed, change, changing] = useActionState<MembersState, FormData>(changeRoleAction, {});
   const [removed, remove, removing] = useActionState<MembersState, FormData>(removeMemberAction, {});
   const [revoked, revoke, revoking] = useActionState<MembersState, FormData>(revokeInvitationAction, {});
+  const [invited, invite, inviting] = useActionState<MembersState, FormData>(inviteMemberAction, {});
   const [message, setMessage] = useState<MembersState>({});
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [latest, setLatest] = useState<"list" | "invite">("invite");
   const headingRef = useRef<HTMLHeadingElement>(null);
   const busy = changing || removing || revoking;
+  const said = latest === "list" && !busy ? message : {};
 
-  useEffect(() => setMessage(changed), [changed]);
+  useEffect(() => {
+    setMessage(changed);
+    setLatest("list");
+  }, [changed]);
   useEffect(() => {
     setMessage(removed);
+    setLatest("list");
     setConfirming(null);
     if (removed.done) headingRef.current?.focus();
   }, [removed]);
-  useEffect(() => setMessage(revoked), [revoked]);
+  useEffect(() => {
+    setMessage(revoked);
+    setLatest("list");
+    if (revoked.done) headingRef.current?.focus();
+  }, [revoked]);
+  useEffect(() => setLatest("invite"), [invited]);
 
   return (
     <section aria-labelledby="members-heading" className={panel}>
       <h2 id="members-heading" ref={headingRef} tabIndex={-1} className={heading}>Members</h2>
-      <p role="status" className="text-sm text-ok empty:-mt-4">{!busy && message.done ? message.done : ""}</p>
-      {!busy && message.error && <p role="alert" className={alert}>{message.error}</p>}
+      <p role="status" className="text-sm text-ok empty:-mt-4">{said.done ?? ""}</p>
+      {said.error && <p role="alert" className={alert}>{said.error}</p>}
 
       <ul className="flex flex-col">
         {members.map((m) => (
@@ -111,7 +123,7 @@ export function Members({ members, invitations, canManage, signInAt }: { members
         </div>
       )}
 
-      {canManage ? <InviteForm signInAt={signInAt} /> : <p className="text-sm text-muted">Only an owner or admin of this workspace can invite people or change who is in it.</p>}
+      {canManage ? <InviteForm state={invited} action={invite} pending={inviting} current={latest === "invite"} signInAt={signInAt} /> : <p className="text-sm text-muted">Only an owner or admin of this workspace can invite people or change who is in it.</p>}
     </section>
   );
 }
@@ -134,8 +146,7 @@ function ConfirmRemoval({ member, action, pending, onKeep }: { member: MemberRow
   );
 }
 
-function InviteForm({ signInAt }: { signInAt: string }) {
-  const [state, action, pending] = useActionState<MembersState, FormData>(inviteMemberAction, {});
+function InviteForm({ state, action, pending, current, signInAt }: { state: MembersState; action: (form: FormData) => void; pending: boolean; current: boolean; signInAt: string }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("member");
   useEffect(() => {
@@ -143,7 +154,7 @@ function InviteForm({ signInAt }: { signInAt: string }) {
     setEmail("");
     setRole("member");
   }, [state]);
-  const failed = Boolean(state.error) && !pending;
+  const failed = current && Boolean(state.error) && !pending;
   return (
     <form
       action={action}
@@ -170,7 +181,7 @@ function InviteForm({ signInAt }: { signInAt: string }) {
       <p className="text-xs text-muted">An admin can also rename the workspace, manage its model key and change who is in it.</p>
       <div className="flex flex-wrap items-center gap-3">
         <button type="submit" {...hold(pending)} className={button}>{pending ? "Inviting…" : "Invite"}</button>
-        <span role="status" className="text-sm text-ok">{state.invited && !pending ? invitedStatus(state.invited, signInAt) : ""}</span>
+        <span role="status" className="text-sm text-ok">{current && state.invited && !pending ? invitedStatus(state.invited, signInAt) : ""}</span>
       </div>
       {failed && <p id="invite-error" role="alert" className={alert}>{state.error}</p>}
     </form>
