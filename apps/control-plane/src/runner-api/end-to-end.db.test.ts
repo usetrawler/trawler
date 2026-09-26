@@ -251,6 +251,12 @@ test("the proxy bounds a call by what is left of the cap, prices calls OpenRoute
   replies = [{ error: { message: `${"x".repeat(280)} rejected ${ORG_KEY}`, code: 400 } }];
   expect(await (await call()).json()).toEqual({ error: { code: 502, message: `${"x".repeat(280)} rejected •••` } });
 
+  const longest = `${ORG_KEY} ${"x".repeat(4_000 - ORG_KEY.length - 1)}`;
+  replies = [upstreamError(400, longest)];
+  expect(await (await call()).json()).toEqual({ error: { code: 400, message: `••• ${"x".repeat(296)}` } });
+  replies = [upstreamError(400, `${longest}x`)];
+  expect(await (await call()).json()).toEqual({ error: { code: 400, message: "the provider answered 400" } });
+
   replies = [{ ...textReply("slow"), delayMs: 300 }];
   const first = call();
   await new Promise((r) => setTimeout(r, 50));

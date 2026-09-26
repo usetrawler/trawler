@@ -77,7 +77,7 @@ export class ProviderRefused extends Error {
 
 export type KeyCheck = { ok: true } | { ok: false; reason: "key" | "model" | "unavailable"; detail?: string };
 
-const LONGEST_EXPLANATION_READ = 4_000;
+export const LONGEST_EXPLANATION_READ = 4_000;
 
 export async function checkModelCall(endpoint: Endpoint, model: string, fetchImpl: typeof fetch = fetchFor(endpoint)): Promise<KeyCheck> {
   try {
