@@ -57,3 +57,11 @@ test("models are listed with the key, and a start check tells a bad key from a b
   expect(await checkModelCall(google, "x", fake(404, { error: { message: "model not found" } }))).toMatchObject({ ok: false, reason: "model" });
   expect(await checkModelCall(google, "x", fake(503, {}))).toMatchObject({ ok: false, reason: "unavailable" });
 });
+
+test("a provider's refusal comes back with the key it was sent masked, also where the message is cut", async () => {
+  const key = "sk-or-v1-" + "0123456789abcdef".repeat(4);
+  const endpoint = endpointFor("openrouter", key, { openRouterUrl: "https://or" });
+  const refusing = (status: number, message: string): typeof fetch => async () => new Response(JSON.stringify({ error: { message } }), { status });
+  expect(await checkModelCall(endpoint, "x", refusing(401, `${"a".repeat(180)}${key}${"b".repeat(100)}`))).toEqual({ ok: false, reason: "key", detail: `${"a".repeat(180)}•••${"b".repeat(17)}` });
+  expect(await checkModelCall(endpoint, "x", refusing(404, `No endpoints found for x with the key ${key}.`))).toEqual({ ok: false, reason: "model", detail: "No endpoints found for x with the key •••." });
+});
