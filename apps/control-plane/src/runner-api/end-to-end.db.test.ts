@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { sql } from "kysely";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { ProjectConfigSchema } from "@usetrawler/protocol";
 import { createModel } from "@usetrawler/core";
 import { tool } from "ai";
@@ -16,7 +16,13 @@ import { handleChatCompletions } from "../llm-proxy/proxy.ts";
 import { createProject } from "../projects/projects.ts";
 import { runView } from "../runs/report.ts";
 import { runSummary, startRun } from "../runs/runs.ts";
+import { scrubberWith } from "../server/log.ts";
 import { handleClaim, handleComplete, handleEvents, handleRelease, type RunnerApiDeps } from "./handlers.ts";
+
+vi.mock("../server/log.ts", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../server/log.ts")>();
+  return { ...real, scrubberWith: vi.fn(real.scrubberWith) };
+});
 
 const t = await testDb();
 afterAll(() => t.drop());
@@ -64,9 +70,9 @@ beforeAll(async () => {
     const reply = replies.shift();
     if (reply && typeof reply === "object" && "delayMs" in reply) await new Promise((r) => setTimeout(r, (reply as { delayMs: number }).delayMs));
     if (reply && typeof reply === "object" && "status" in reply) {
-      const { status, body } = reply as { status: number; body: unknown };
+      const { status, body, raw } = reply as { status: number; body?: unknown; raw?: string };
       res.writeHead(status, { "content-type": "application/json" });
-      return res.end(JSON.stringify(body));
+      return res.end(raw ?? JSON.stringify(body));
     }
     res.writeHead(reply ? 200 : 500, { "content-type": "application/json" });
     res.end(JSON.stringify(reply ?? { error: { message: "no scripted reply" } }));
@@ -250,6 +256,26 @@ test("the proxy bounds a call by what is left of the cap, prices calls OpenRoute
 
   replies = [{ error: { message: `${"x".repeat(280)} rejected ${ORG_KEY}`, code: 400 } }];
   expect(await (await call()).json()).toEqual({ error: { code: 502, message: `${"x".repeat(280)} rejected •••` } });
+
+  const longest = `${ORG_KEY} ${"x".repeat(4_000 - ORG_KEY.length - 1)}`;
+  replies = [upstreamError(400, longest)];
+  vi.mocked(scrubberWith).mockClear();
+  expect(await (await call()).json()).toEqual({ error: { code: 400, message: `••• ${"x".repeat(296)}` } });
+  expect(scrubberWith).toHaveBeenCalledTimes(1);
+  replies = [upstreamError(400, `${longest}x`)];
+  vi.mocked(scrubberWith).mockClear();
+  expect(await (await call()).json()).toEqual({ error: { code: 400, message: "the provider answered 400; its explanation was too long to show" } });
+  expect(scrubberWith).not.toHaveBeenCalled();
+
+  const unreadable: Array<[number, { body?: unknown; raw?: string }, number]> = [[200, { body: null }, 502], [400, { body: null }, 400], [404, { body: 123 }, 404], [200, { raw: "not json" }, 502], [400, { raw: "not json" }, 400]];
+  for (const [status, reply, code] of unreadable) {
+    replies = [{ status, ...reply }];
+    expect(await (await call()).json()).toEqual({ error: { code, message: "the provider sent an unreadable answer" } });
+  }
+  replies = [{ status: 404, body: { error: { message: ["x"] } } }];
+  vi.mocked(scrubberWith).mockClear();
+  expect(await (await call()).json()).toEqual({ error: { code: 404, message: "the provider answered 404" } });
+  expect(scrubberWith).not.toHaveBeenCalled();
 
   replies = [{ ...textReply("slow"), delayMs: 300 }];
   const first = call();

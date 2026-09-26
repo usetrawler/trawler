@@ -64,7 +64,11 @@ export class SecretScrubber {
     const text = input;
     const ranges: Array<[number, number]> = [];
     for (const needle of this.#needles) {
-      for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) ranges.push([at, at + needle.length]);
+      let found: [number, number] | undefined;
+      for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) {
+        if (found && at <= found[1]) found[1] = at + needle.length;
+        else ranges.push((found = [at, at + needle.length]));
+      }
     }
     if (ranges.length === 0) return text;
     ranges.sort((a, b) => a[0] - b[0]);
