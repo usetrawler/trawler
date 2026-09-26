@@ -1089,8 +1089,8 @@ describe("screenshots", () => {
   let decoder: PlaywrightBrowser;
   beforeAll(async () => {
     decoder = await chromium.launch();
-  });
-  afterAll(() => decoder.close());
+  }, 60_000);
+  afterAll(() => decoder.close(), 60_000);
 
   async function redPixels(shot: Screenshot): Promise<number> {
     const page = await decoder.newPage();
