@@ -203,6 +203,8 @@ beforeAll(async () => {
         return html(`<p><a href="#" style="overflow:hidden"><span style="display:inline-block;width:80px;white-space:nowrap;font:20px monospace;color:#ff0000">card-secret-1111 is here</span></a></p><p>Plan: Team</p>`);
       case "/clip-margin":
         return html(`<div style="width:90px;overflow:clip;overflow-clip-margin:200px;white-space:nowrap;font:20px monospace;color:#ff0000">card-secret-1111 and more</div><p>Plan: Team</p>`);
+      case "/moves-when-masked":
+        return html(`<p id="echo" style="font:20px monospace;color:#ff0000">card-secret-1111</p><script>new MutationObserver((records) => { if (records.some((r) => [...r.addedNodes].some((n) => n.nodeType === 1))) document.getElementById("echo").style.transform = "translateY(120px)"; }).observe(document.documentElement, { childList: true });</script>`);
       case "/fixed-below":
         return html(`<p>Short page</p><div style="position:fixed;left:20px;bottom:120px;height:0;font:20px monospace;color:#ff0000">card-secret-1111</div>`);
       case "/flicker":
@@ -1287,6 +1289,10 @@ describe("screenshots", () => {
 
   test("a secret drawn where nothing on the page contains it gives no screenshot", async () => {
     expect(await shotsOf("/fixed-below", 1, async () => undefined, knowing("card-secret-1111"))).toEqual([null]);
+  }, 60_000);
+
+  test("a secret that starts moving while the screenshot is taken gives no screenshot", async () => {
+    expect(await shotsOf("/moves-when-masked", 1, async () => undefined, knowing("card-secret-1111"))).toEqual([null]);
   }, 60_000);
 
   test("a secret that jumps back and forth is never shown: each screenshot is dropped or masks it", async () => {
