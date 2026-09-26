@@ -1,3 +1,4 @@
+import { scrubberWith } from "../server/log.ts";
 import { guardedFetch } from "../setup/safe-fetch.ts";
 
 import { PROVIDERS, type Provider } from "./provider-kinds.ts";
@@ -76,6 +77,8 @@ export class ProviderRefused extends Error {
 
 export type KeyCheck = { ok: true } | { ok: false; reason: "key" | "model" | "unavailable"; detail?: string };
 
+const LONGEST_EXPLANATION_READ = 4_000;
+
 export async function checkModelCall(endpoint: Endpoint, model: string, fetchImpl: typeof fetch = fetchFor(endpoint)): Promise<KeyCheck> {
   try {
     const res = await fetchImpl(`${endpoint.baseUrl}/chat/completions`, {
@@ -86,7 +89,8 @@ export async function checkModelCall(endpoint: Endpoint, model: string, fetchImp
       signal: AbortSignal.timeout(30_000),
     });
     if (res.ok) return { ok: true };
-    const detail = await res.text().then((t) => { try { return String(JSON.parse(t)?.error?.message ?? "").slice(0, 200); } catch { return ""; } });
+    const message = await res.text().then((t) => { try { return String(JSON.parse(t)?.error?.message ?? ""); } catch { return ""; } });
+    const detail = message.length > LONGEST_EXPLANATION_READ ? "" : scrubberWith([endpoint.key]).scrub(message).slice(0, 200);
     if (res.status === 401 || res.status === 403) return { ok: false, reason: "key", detail };
     if (res.status === 400 || res.status === 404 || res.status === 422) return { ok: false, reason: "model", detail };
     return { ok: false, reason: "unavailable", detail };
