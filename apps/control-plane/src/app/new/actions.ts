@@ -1,7 +1,7 @@
 "use server";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { createModel } from "@usetrawler/core/setup";
+import { createModel, SetupModelFailed } from "@usetrawler/core/setup";
 import { signedInMember } from "../../server/auth.ts";
 import { getDb, getKeyring } from "../../server/db.ts";
 import { readEnv } from "../../server/env.ts";
@@ -33,6 +33,7 @@ const MESSAGES: Record<RefusalReason, string> = {
 function friendly(err: unknown): string {
   if (err instanceof FetchRefused) return err.reason === "status" ? `The page answered with an error (${err.message}).` : MESSAGES[err.reason];
   if (err instanceof SetupLimited) return "You have started many new projects recently. Try again in a few minutes.";
+  if (err instanceof SetupModelFailed) return "Trawler's setup model could not write a plan this time. Try again in a moment.";
   return "We could not build a plan for this page. Try again in a moment.";
 }
 

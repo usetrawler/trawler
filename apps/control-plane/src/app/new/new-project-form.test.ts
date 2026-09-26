@@ -18,5 +18,5 @@ test("while setup works it says what setup does: one page read, then people and 
   form.pending = true;
   const html = render();
   expect(html).toContain("Reading the product…");
-  expect(html).toContain("Reading the page, then proposing who should try the product and what they want to get done. This takes about half a minute.");
+  expect(html).toContain("Reading the page, then proposing who should try the product and what they want to get done. This can take a minute or two.");
 });
