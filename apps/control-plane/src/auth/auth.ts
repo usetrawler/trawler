@@ -28,6 +28,23 @@ export function authPool(connectionString: string, max = 10): pg.Pool {
   return new pg.Pool({ connectionString, max, options: "-c role=trawler_auth" });
 }
 
+const CLOSED_ORGANIZATION_PATHS = [
+  "get-organization",
+  "get-full-organization",
+  "check-slug",
+  "set-active",
+  "invite-member",
+  "cancel-invitation",
+  "accept-invitation",
+  "reject-invitation",
+  "get-invitation",
+  "list-invitations",
+  "list-user-invitations",
+  "remove-member",
+  "update-member-role",
+  "leave",
+];
+
 export function createAuth(options: AuthOptions) {
   const db = new Kysely<AuthTables>({ dialect: new PostgresDialect({ pool: options.pool }) });
   const storeFor = (ex: Kysely<AuthTables> | Transaction<AuthTables>): OnboardingStore => ({
@@ -58,6 +75,12 @@ export function createAuth(options: AuthOptions) {
         .insertInto("member")
         .values({ id: crypto.randomUUID(), organizationId: invitation.organizationId, userId, role: invitation.role, createdAt: new Date() })
         .onConflict((oc) => oc.columns(["organizationId", "userId"]).doNothing())
+        .execute();
+      await ex
+        .updateTable("invitation")
+        .set({ status: "canceled" })
+        .where("status", "=", "pending")
+        .where(sql<boolean>`lower(email) = (select lower(email) from invitation where id = ${invitation.id})`)
         .execute();
       return true;
     },
@@ -95,6 +118,37 @@ export function createAuth(options: AuthOptions) {
     await db.deleteFrom("session").where("id", "=", session.id).execute();
     return null;
   };
+  const workspaceMembers = async (orgId: string): Promise<Array<{ id: string; userId: string; role: string; joinedAt: Date; name: string; email: string }>> =>
+    db
+      .selectFrom("member")
+      .innerJoin("user", "user.id", "member.userId")
+      .select(["member.id", "member.userId", "member.role", "member.createdAt as joinedAt", "user.name", "user.email"])
+      .where("member.organizationId", "=", orgId)
+      .orderBy("member.createdAt")
+      .orderBy("member.id")
+      .execute();
+  const pendingInvitations = async (orgId: string): Promise<Array<{ id: string; email: string; role: string; expiresAt: Date }>> =>
+    (
+      await db
+        .selectFrom("invitation")
+        .select(["id", "email", "role", "expiresAt"])
+        .where("organizationId", "=", orgId)
+        .where("status", "=", "pending")
+        .where("expiresAt", ">", new Date())
+        .orderBy("expiresAt")
+        .orderBy("id")
+        .execute()
+    ).map((row) => ({ ...row, role: row.role ?? "member" }));
+  const workspaceOfEmail = async (email: string): Promise<string | null> =>
+    (
+      await db
+        .selectFrom("user")
+        .innerJoin("member", "member.userId", "user.id")
+        .select("member.organizationId")
+        .where("user.email", "=", email)
+        .orderBy("member.createdAt")
+        .executeTakeFirst()
+    )?.organizationId ?? null;
   const memberEmail = async (orgId: string, userId: string): Promise<string | null> => {
     const member = await db
       .selectFrom("member")
@@ -116,8 +170,8 @@ export function createAuth(options: AuthOptions) {
       ...(options.github ? { github: options.github } : {}),
       ...(options.google ? { google: options.google } : {}),
     },
-    plugins: [organizationPlugin(), ...devSignIn(options.devOidc), nextCookies()],
-    disabledPaths: ["/organization/get-organization", "/organization/get-full-organization"],
+    plugins: [organizationPlugin(async (email) => (await workspaceOfEmail(email)) !== null), ...devSignIn(options.devOidc), nextCookies()],
+    disabledPaths: CLOSED_ORGANIZATION_PATHS.map((path) => `/organization/${path}`),
     databaseHooks: {
       session: {
         create: {
@@ -134,7 +188,7 @@ export function createAuth(options: AuthOptions) {
       },
     },
   });
-  return Object.assign(auth, { workspaceOf, memberEmail });
+  return Object.assign(auth, { workspaceOf, memberEmail, workspaceMembers, pendingInvitations });
 }
 
 export type Auth = ReturnType<typeof createAuth>;

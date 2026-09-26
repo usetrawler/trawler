@@ -191,7 +191,7 @@ In case you go looking:
 - comparing a run with an earlier one;
 - people using the product together;
 - screenshots on findings;
-- inviting teammates to a workspace, or switching between workspaces;
+- switching between workspaces, or belonging to more than one;
 - deleting a project or a run;
 - handing runs from the app to a runner inside your own network;
 - reaching staging behind basic auth or a secret header from the app — the local runner covers private addresses and protected staging today.
