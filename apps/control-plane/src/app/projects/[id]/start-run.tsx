@@ -127,7 +127,7 @@ export function StartRun({ projectId, projectName, personas, keyHint: savedHint,
         <input type="hidden" name="budget" value={DEFAULT_RUN.budgetUsd} />
       )}
       {authorisedBefore ? (
-        <p className="text-sm text-muted">Confirmed before this product&apos;s first run: you are authorised to test it, and it is not a production system with real people&apos;s data.</p>
+        <p className="text-sm text-muted">Confirmed when this product&apos;s first run started: it may be tested, and it is not a production system with real people&apos;s data.</p>
       ) : (
         <label className="flex items-start gap-3 text-sm">
           <input type="checkbox" name="authorised" required checked={authorised} onChange={(e) => setAuthorised(e.target.checked)} className="mt-1 accent-[var(--action)]" />
