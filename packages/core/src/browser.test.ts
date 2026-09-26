@@ -284,6 +284,14 @@ beforeAll(async () => {
       case "/contents-relative":
       case "/contents-sticky":
         return html(`<div style="overflow:hidden;width:100px;height:30px;font:20px monospace;color:#ff0000"><span style="display:contents;position:${req.url === "/contents-relative" ? "relative" : "sticky"}"><p style="position:absolute;top:120px;left:20px;white-space:nowrap;margin:0">card-secret-1111</p></span></div><p>Plan: Team</p>`);
+      case "/zero-width":
+        return html(`<p style="font:20px monospace;color:#ff0000">Key: card-&#8203;secret-&#8203;1111</p><p>Plan: Team</p>`);
+      case "/soft-hyphen":
+        return html(`<p style="font:20px monospace;color:#ff0000">Key: card-sec&shy;ret-1111</p><p>Plan: Team</p>`);
+      case "/zero-width-field":
+        return html(`<input aria-label="Key" style="width:400px;font:20px monospace;color:#ff0000" value="card-&#8203;secret-1111"><p>Plan: Team</p>`);
+      case "/head-shown":
+        return html(`<style>head, title { display: block; font: 20px monospace; color: #ff0000 }</style><p>Plan: Team</p><script>document.head.append(Object.assign(document.createElement("title"), { textContent: "card-secret-1111" }));</script>`);
       case "/shadow-moving-part":
         return html(`<key-view></key-view><p>Plan: Team</p><script>customElements.define("key-view", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<style>:host{display:block;font:20px monospace;color:#ff0000} @keyframes hop{to{transform:translateY(120px)}} .hop{display:inline-block;animation:hop 20s steps(2) infinite}</style><span>card-</span><span class="hop">secret-</span><span>1111</span>'; } });</script>`);
       case "/nested-moving-part":
@@ -362,6 +370,8 @@ beforeAll(async () => {
         return html(closedCard("", "correct&nbsp;horse battery-42"));
       case "/closed-long-text":
         return html(closedCard("", `<p style="margin:0">${" ".repeat(10500)}card-secret-1111</p>`));
+      case "/closed-zero-width":
+        return html(closedCard("", "card-&#8203;secret-&#8203;1111"));
       case "/closed-password":
         return html(closedCard("", '<input aria-label="Password" type="password" value="closed-pass-1">'));
       case "/closed-typed":
@@ -1471,6 +1481,10 @@ describe("screenshots", () => {
     ["/shadow-slot-nested", "ends in a part a component shows through a slot inside its own element, placed far away"],
     ["/contents-relative", "is placed outside a box that cuts off overflow, through a wrapper with no box of its own that says it is positioned"],
     ["/contents-sticky", "is placed outside a box that cuts off overflow, through a wrapper with no box of its own that says it sticks"],
+    ["/zero-width", "has zero-width spaces between its parts"],
+    ["/soft-hyphen", "has a soft hyphen in it"],
+    ["/head-shown", "is in the page's title, which the page's styles show"],
+    ["/zero-width-field", "is the value of a field, with a zero-width space in it"],
   ])("a secret whose text %s is masked where it is drawn (%s)", async (path) => {
     const [shot] = await shotsOf(path, 1, async () => undefined, knowing(path === "/overflow-edge" ? "card-secret-11112" : "card-secret-1111"));
     expect(shot).not.toBeNull();
@@ -1545,7 +1559,7 @@ describe("screenshots", () => {
     expect(await redPixels(shot!)).toBe(0);
   }, 60_000);
 
-  test.each(["/closed-text", "/closed-groups", "/closed-split", "/closed-slotted", "/closed-slot-after", "/closed-slot-named", "/closed-slot-manual", "/closed-sibling-hosts", "/closed-after-light", "/closed-password", "/closed-typed", "/closed-in-frame", "/closed-long-text"])("a secret or password field inside a closed shadow root gives no screenshot (%s)", async (path) => {
+  test.each(["/closed-text", "/closed-groups", "/closed-split", "/closed-slotted", "/closed-slot-after", "/closed-slot-named", "/closed-slot-manual", "/closed-sibling-hosts", "/closed-after-light", "/closed-password", "/closed-typed", "/closed-in-frame", "/closed-long-text", "/closed-zero-width"])("a secret or password field inside a closed shadow root gives no screenshot (%s)", async (path) => {
     expect(await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"))).toEqual([null]);
   }, 60_000);
 
@@ -1571,7 +1585,7 @@ describe("screenshots", () => {
     expect(await shotsOf("/closed-phrase", 1, async () => undefined, knowing("correct horse battery-42"))).toEqual([null]);
   }, 60_000);
 
-  test("a secret in the page's title, which a screen capture does not show, neither stops the screenshot nor blacks anything out", async () => {
+  test("a secret in the page's title, which a screen capture does not show, does not stop the screenshot", async () => {
     const [shot] = await shotsOf("/title-secret", 1, async () => undefined, knowing("card-secret-1111"));
     expect(shot).not.toBeNull();
   }, 60_000);

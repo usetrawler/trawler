@@ -46,11 +46,13 @@ const SECRET_FIELDS = "trawler-secret-fields";
 const FLAT_TEXT = "trawler-flat-text";
 const LINE_AROUND = "trawler-line-around";
 const MOVING = "trawler-moving";
+const INVISIBLE = "[\\u00ad\\u200b-\\u200d\\u2060\\ufeff]";
 const DECODED_SECRETS = `(encoded) => new RegExp(new TextDecoder().decode(Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0))), "i")`;
 const FLAT_CHILDREN_OF = `(node) => (node.localName === "slot" && node.getRootNode() instanceof ShadowRoot ? node.assignedNodes({ flatten: true }) : [...(node.shadowRoot ?? node).childNodes])`;
 const FLAT_TEXT_OF = `(cache) => {
+      const invisible = new RegExp("${INVISIBLE}", "g");
       const flatTextOf = (node) => {
-        if (node.nodeType === Node.TEXT_NODE) return node.data;
+        if (node.nodeType === Node.TEXT_NODE) return node.data.replace(invisible, "");
         if (node.nodeType === Node.ELEMENT_NODE && node.matches("script, noscript, style")) return "";
         let text = cache.get(node);
         if (text === undefined) cache.set(node, (text = flatChildrenOf(node).map(flatTextOf).join("")));
@@ -78,7 +80,9 @@ const SHADOW_ROOTS_UNDER = `(scope) => {
 const SELECTOR_ENGINES = {
   [SECRET_FIELDS]: `({
     queryAll(root, encoded) {
-      const secrets = (${DECODED_SECRETS})(encoded);
+      const decoded = (${DECODED_SECRETS})(encoded);
+      const invisible = new RegExp("${INVISIBLE}", "g");
+      const secrets = { test: (value) => decoded.test(value.replace(invisible, "")) };
       const found = [];
       const visit = (scope) => {
         for (const el of scope.querySelectorAll("*")) {
@@ -104,10 +108,10 @@ const SELECTOR_ENGINES = {
       const flatTextOf = (${FLAT_TEXT_OF})(new Map());
       const shows = (node) => secrets.test(flatTextOf(node));
       const shadowRoots = (${SHADOW_ROOTS_UNDER})(root);
-      if (shadowRoots.length === 0) return [];
+      if (shadowRoots.length === 0 && !document.head?.checkVisibility() && !new RegExp("${INVISIBLE}").test(document.documentElement.textContent ?? "")) return [];
       return [root, ...shadowRoots]
         .flatMap((tree) => [...tree.querySelectorAll("*")])
-        .filter((el) => !document.head?.contains(el) && shows(el) && !flatChildrenOf(el).some((child) => child.nodeType === Node.ELEMENT_NODE && shows(child)));
+        .filter((el) => (!document.head?.contains(el) || el.checkVisibility()) && shows(el) && !flatChildrenOf(el).some((child) => child.nodeType === Node.ELEMENT_NODE && shows(child)));
     },
   })`,
   [LINE_AROUND]: `({
@@ -253,6 +257,7 @@ function closedRootHides(root: DomNode, secrets: RegExp | null): boolean {
   const flatChildrenOf = (node: DomNode): DomNode[] =>
     node.distributedNodes?.length ? node.distributedNodes.flatMap((slotted) => byId.get(slotted.backendNodeId) ?? []) : node.shadowRoots?.length ? node.shadowRoots : (node.children ?? []);
   const everyMatch = new RegExp(secrets.source, "gi");
+  const invisible = new RegExp(INVISIBLE, "g");
   return nodes
     .filter((node) => node.nodeType === 9)
     .some((document) => {
@@ -261,9 +266,10 @@ function closedRootHides(root: DomNode, secrets: RegExp | null): boolean {
       const closedParts: Array<[number, number]> = [];
       const read = (node: DomNode, closed: boolean) => {
         if (node.nodeType === 3) {
-          if (closed) closedParts.push([shown.length, shown.length + node.nodeValue.length]);
+          const text = node.nodeValue.replace(invisible, "");
+          if (closed) closedParts.push([shown.length, shown.length + text.length]);
           cutShort ||= node.nodeValue.length > CDP_TEXT_LIMIT && node.nodeValue.endsWith("\u2026");
-          shown += node.nodeValue;
+          shown += text;
         } else if (!/^(HEAD|SCRIPT|NOSCRIPT|STYLE)$/i.test(node.nodeName)) {
           for (const child of flatChildrenOf(node)) read(child, closed || child.shadowRootType === "closed");
         }
