@@ -56,8 +56,8 @@ test("Remove asks first, naming who goes and what they lose, and only for that r
   const html = render();
   const lee = rowOf(html, "lee@acme.test");
   expect(text(lee)).toContain("Remove Lee? They lose access to this workspace at once, in every browser they use. Remove Lee Keep Lee");
-  expect(lee).toMatch(/<input type="hidden" name="memberId" value="m-2"\/><p id="remove-m-2">/);
-  expect(lee).toMatch(/<button type="submit" aria-describedby="remove-m-2"[^>]*>Remove Lee<\/button><button type="button" aria-describedby="remove-m-2"[^>]*>Keep Lee<\/button>/);
+  expect(lee).toMatch(/<input type="hidden" name="memberId" value="m-2"\/><p id="remove-m-2" class="wrap-anywhere">/);
+  expect(lee).toMatch(/<button type="submit" aria-describedby="remove-m-2"[^>]*>Remove<span class="sr-only"> Lee<\/span><\/button><button type="button" aria-describedby="remove-m-2"[^>]*>Keep<span class="sr-only"> Lee<\/span><\/button>/);
   expect(lee).not.toContain("Make admin");
   expect(text(rowOf(html, "bo@acme.test"))).toContain("Make member bo@acme.test Remove bo@acme.test");
 });
@@ -65,7 +65,7 @@ test("Remove asks first, naming who goes and what they lose, and only for that r
 test("a refused removal stays open with the refusal under its buttons, and Keep gives focus back to Remove", () => {
   react.states = [{}, { id: "m-2", error: "They could not be removed. Try again." }];
   const refused = render();
-  expect(rowOf(refused, "lee@acme.test")).toMatch(/Keep Lee<\/button><\/div><p role="alert"[^>]*>They could not be removed. Try again.<\/p><\/form>/);
+  expect(rowOf(refused, "lee@acme.test")).toMatch(/Keep<span class="sr-only"> Lee<\/span><\/button><\/div><p role="alert"[^>]*>They could not be removed. Try again.<\/p><\/form>/);
   expect(listStatus(refused)).toBe("");
   react.actions = [IDLE, [{}, true], IDLE];
   react.states = [{}, { id: "m-2", error: "They could not be removed. Try again." }];
@@ -81,7 +81,7 @@ test("while a removal is sent, both of its buttons hold and it says so", () => {
   react.states = [{}, { id: "m-2" }];
   const lee = rowOf(render(), "lee@acme.test");
   expect(lee).toMatch(/<button type="submit" aria-describedby="remove-m-2" aria-disabled="true"[^>]*>Removing…<\/button>/);
-  expect(lee).toMatch(/<button type="button" aria-describedby="remove-m-2" aria-disabled="true"[^>]*>Keep Lee<\/button>/);
+  expect(lee).toMatch(/<button type="button" aria-describedby="remove-m-2" aria-disabled="true"[^>]*>Keep<span class="sr-only"> Lee<\/span><\/button>/);
 });
 
 test("what a change did is said once it is done, a refusal is an alert, and neither shows while something is sent", () => {

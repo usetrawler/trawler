@@ -74,7 +74,7 @@ export function Members({ members, invitations, canManage, signInAt }: { members
   return (
     <section aria-labelledby="members-heading" className={panel}>
       <h2 id="members-heading" ref={headingRef} tabIndex={-1} className={heading}>Members</h2>
-      <p role="status" className="text-sm text-ok empty:-mt-4">{said.done ?? ""}</p>
+      <p role="status" className="text-sm wrap-anywhere text-ok empty:-mt-4">{said.done ?? ""}</p>
       {said.error && <p role="alert" className={alert}>{said.error}</p>}
 
       <ul className="flex flex-col">
@@ -85,7 +85,7 @@ export function Members({ members, invitations, canManage, signInAt }: { members
                 <p className="font-bold break-words">{m.name.trim() || m.email}{m.you && <span className="font-normal text-muted"> (you)</span>}</p>
                 <p className="text-sm break-all text-muted">{m.email}</p>
               </div>
-              <div className="flex flex-col items-end gap-1 text-right">
+              <div className="ml-auto flex flex-col items-end gap-1 text-right">
                 <span className={tag}>{roleLabel(m.role)}</span>
                 <span className="text-xs text-muted">Joined <LocalTime iso={m.joinedAt} /></span>
               </div>
@@ -113,7 +113,7 @@ export function Members({ members, invitations, canManage, signInAt }: { members
             {invitations.map((i) => (
               <li key={i.id} className="flex flex-wrap items-center justify-between gap-3 text-sm">
                 <span className="min-w-0 break-all">{i.email} <span className={tag}>{roleLabel(i.role)}</span></span>
-                <span className="flex items-center gap-3">
+                <span className="ml-auto flex items-center gap-3">
                   <span className="text-xs text-muted">Expires <LocalTime iso={i.expiresAt} /></span>
                   {canManage && (
                     <form action={revoke}>
@@ -142,10 +142,10 @@ function ConfirmRemoval({ member, action, pending, error, onKeep }: { member: Me
   return (
     <form action={action} className="flex flex-col gap-3 text-sm">
       <input type="hidden" name="memberId" value={member.id} />
-      <p id={`remove-${member.id}`}>Remove {who}? They lose access to this workspace at once, in every browser they use.</p>
+      <p id={`remove-${member.id}`} className="wrap-anywhere">Remove {who}? They lose access to this workspace at once, in every browser they use.</p>
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" aria-describedby={`remove-${member.id}`} {...hold(pending)} className="h-10 border border-bad px-4 text-bad aria-disabled:cursor-wait aria-disabled:opacity-60">{pending ? "Removing…" : `Remove ${who}`}</button>
-        <button type="button" ref={keep} aria-describedby={`remove-${member.id}`} aria-disabled={pending || undefined} onClick={() => { if (!pending) onKeep(); }} className="h-10 px-2 text-muted hover:text-ink aria-disabled:cursor-wait aria-disabled:opacity-60">Keep {who}</button>
+        <button type="submit" aria-describedby={`remove-${member.id}`} {...hold(pending)} className="h-10 border border-bad px-4 text-bad aria-disabled:cursor-wait aria-disabled:opacity-60">{pending ? "Removing…" : <>Remove<span className="sr-only"> {who}</span></>}</button>
+        <button type="button" ref={keep} aria-describedby={`remove-${member.id}`} aria-disabled={pending || undefined} onClick={() => { if (!pending) onKeep(); }} className="h-10 px-2 text-muted hover:text-ink aria-disabled:cursor-wait aria-disabled:opacity-60">Keep<span className="sr-only"> {who}</span></button>
       </div>
       {error && !pending && <p role="alert" className={alert}>{error}</p>}
     </form>
@@ -187,7 +187,7 @@ function InviteForm({ state, action, pending, current, signInAt }: { state: Memb
       <p className="text-xs text-muted">An admin can also rename the workspace, manage its model key and change who is in it.</p>
       <div className="flex flex-wrap items-center gap-3">
         <button type="submit" {...hold(pending)} className={button}>{pending ? "Inviting…" : "Invite"}</button>
-        <span role="status" className="text-sm text-ok">{current && state.invited && !pending ? invitedStatus(state.invited, signInAt) : ""}</span>
+        <span role="status" className="min-w-0 text-sm wrap-anywhere text-ok">{current && state.invited && !pending ? invitedStatus(state.invited, signInAt) : ""}</span>
       </div>
       {failed && <p id="invite-error" role="alert" className={alert}>{state.error}</p>}
     </form>
