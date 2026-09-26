@@ -89,3 +89,22 @@ export async function artifactLink(db: Database, store: ArtifactStore, orgId: st
   );
   return artifact ? store.link(artifact.storage_key) : null;
 }
+
+export async function screenCapture(db: Database, orgId: string, id: string) {
+  if (!UUID.test(id)) return null;
+  const found = await withOrg(db, orgId, (tx) =>
+    tx
+      .selectFrom("artifacts as a")
+      .innerJoin("jobs as j", "j.id", "a.job_id")
+      .innerJoin("runs as r", "r.id", "a.run_id")
+      .leftJoin("findings as f", (join) => join.onRef("f.run_id", "=", "a.run_id").onRef("f.key", "=", "a.finding_key"))
+      .select(["a.id", "a.run_id", "r.number", "r.project_id", "j.kind", "f.title"])
+      .where("a.id", "=", id)
+      .where("a.org_id", "=", orgId)
+      .where("a.kind", "=", "screenshot")
+      .where("a.stored_at", "is not", null)
+      .where("a.discarded_at", "is", null)
+      .executeTakeFirst(),
+  );
+  return found ? { id: found.id, runId: found.run_id, runNumber: found.number, projectId: found.project_id, replay: found.kind === "replay", findingTitle: found.title } : null;
+}

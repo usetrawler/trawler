@@ -179,7 +179,7 @@ test("a confirmed defect's card shows both screenshots after its steps, and a ca
     ],
   }));
   const [saved, loaded] = rows(html, "Confirmed");
-  expect(saved).toMatch(/Click Save<\/li><\/ol><\/div><div class="grid gap-3 sm:grid-cols-2">/);
+  expect(saved).toMatch(/Click Save<\/li><\/ol><\/div><div class="@container [^"]*"><div class="grid gap-3 @xl:grid-cols-2">/);
   expect(saved).toContain('src="/api/artifacts/11111111-1111-4111-8111-111111111111"');
   expect(saved).toContain('src="/api/artifacts/22222222-2222-4222-8222-222222222222"');
   expect(loaded).toContain("Load fails");

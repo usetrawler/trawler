@@ -151,7 +151,7 @@ export async function handleRelease(req: Request, jobId: string, deps: RunnerApi
 export async function handleArtifactUpload(req: Request, jobId: string, deps: RunnerApiDeps): Promise<Response> {
   const wrongProtocol = protocolProblem(req);
   if (wrongProtocol) return wrongProtocol;
-  if (!deps.artifacts) return problem(503, "artifact storage is not configured on this server");
+  if (!deps.artifacts) return problem(501, "artifact storage is not configured on this server");
   const token = bearer(req);
   if (!token || !UUID.test(jobId)) return problem(401, "invalid job token");
   const upload = ArtifactUploadSchema.safeParse(Object.fromEntries(new URL(req.url).searchParams));

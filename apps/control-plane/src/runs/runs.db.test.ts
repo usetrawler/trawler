@@ -643,8 +643,8 @@ describe("screenshots", () => {
       ev({ type: "finding", jobId: session.jobId, finding: defect }),
       ev({ type: "finding", jobId: session.jobId, finding: { ...defect, id: "f2", title: "Broken load" } }),
     ]);
-    await screenshot(session, run.id, "ana:f1", { age: "3 minutes" });
     const reported = await screenshot(session, run.id, "ana:f1", { age: "2 minutes" });
+    await screenshot(session, run.id, "ana:f1", { age: "3 minutes" });
     await screenshot(session, run.id, "ana:f1", { age: "1 minute", stored: false });
     await screenshot(session, run.id, "ana:f1", { discarded: true });
     await completeJob(t.db, session.token, { usage: usage(0), stoppedBy: "finish" });
@@ -658,6 +658,15 @@ describe("screenshots", () => {
       ["ana:f1", { reported, replayed }],
       ["ana:f2", { reported: null, replayed: null }],
     ]);
+    await drain();
+
+    const next = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const again = (await claimJob(t.db, keys))!;
+    seq = 0;
+    await ingestEvents(t.db, again.token, [ev({ type: "job_started", jobId: again.jobId, kind: "role_session" }), ev({ type: "finding", jobId: again.jobId, finding: defect })]);
+    const own = await screenshot(again, next.id, "ana:f1");
+    expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", next.id)))!.findings.map((f) => f.screenshots)).toEqual([{ reported: own, replayed: null }]);
+    expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.findings[0]!.screenshots).toEqual({ reported, replayed });
     await drain();
   });
 });

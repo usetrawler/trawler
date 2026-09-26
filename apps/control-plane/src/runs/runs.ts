@@ -145,6 +145,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
       .where("a.stored_at", "is not", null)
       .where("a.discarded_at", "is", null)
       .orderBy("a.created_at")
+      .orderBy("a.id")
       .execute(),
   ]);
   const findingTitle = new Map(findings.map((f) => [f.key, f.title]));
