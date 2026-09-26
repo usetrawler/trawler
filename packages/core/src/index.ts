@@ -7,4 +7,4 @@ export { runRoleSession } from "./role-session.ts";
 export { judgePrompt, replayPrompt, rolePrompt, sessionStatus, setupPrompt } from "./prompts.ts";
 export { judge, runReplay } from "./replay.ts";
 export { browserQueue, runAgentLoop } from "./agent-loop.ts";
-export { pageText, proposeProject } from "./setup.ts";
+export { pageText, proposeProject, SetupModelFailed } from "./setup.ts";

@@ -1,2 +1,2 @@
 export { Budget, createModel } from "./llm.ts";
-export { pageText, proposeProject } from "./setup.ts";
+export { pageText, proposeProject, SetupModelFailed } from "./setup.ts";
