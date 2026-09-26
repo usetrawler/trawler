@@ -41,9 +41,9 @@ beforeAll(async () => {
 
 async function leasedJob(org = "org-a"): Promise<JobAssignment> {
   const project = await withOrg(t.db, org, (tx) => createProject(tx, org, config, keys));
-  await withOrg(t.db, org, (tx) => startRun(tx, org, project, keys, { budgetUsd: 1, agentModel: "a", judgeModel: "j", maxSteps: 5, replaySteps: 5, createdBy: "u" }));
+  const run = await withOrg(t.db, org, (tx) => startRun(tx, org, project, keys, { budgetUsd: 1, agentModel: "a", judgeModel: "j", maxSteps: 5, replaySteps: 5, createdBy: "u" }));
   const job = await claimJob(t.db, keys);
-  if (!job) throw new Error("no job to claim");
+  if (job?.runId !== run.id) throw new Error("the claimed job is not this run's; an earlier test left a job queued");
   return job;
 }
 
@@ -260,7 +260,8 @@ test("a failed upload holds its place in the job's share for the grace period, s
   expect((await handleArtifactUpload(upload(job, PNG), job.jobId, deps)).status).toBe(409);
   await sql`update artifacts set created_at = now() - interval '11 minutes' where job_id = ${job.jobId} and discarded_at is not null`.execute(t.db);
   expect((await handleArtifactUpload(upload(job, PNG), job.jobId, deps)).status).toBe(201);
-  expect(await removeExpiredArtifacts(t.db, store)).toBe(1);
+  await removeExpiredArtifacts(t.db, store);
+  expect((await sql`select id from artifacts where job_id = ${job.jobId} and discarded_at is not null`.execute(t.db)).rows).toEqual([]);
 });
 
 test("a file whose row was removed while the bucket took it is removed from the bucket too, whether or not the bucket answered, and the runner is told to try again", async () => {
@@ -283,12 +284,33 @@ test("a file whose row was removed while the bucket took it is removed from the 
   }
 });
 
+test("a file whose row vanished and that the bucket will not remove is logged, and the runner still gets 503", async () => {
+  const job = await leasedJob();
+  const logged: string[] = [];
+  vi.spyOn(console, "error").mockImplementation((line: unknown) => void logged.push(String(line)));
+  const stubborn: ArtifactStore = {
+    ...store,
+    put: async (key, bytes, type) => {
+      await sql`delete from artifacts where storage_key = ${key}`.execute(t.db);
+      await store.put(key, bytes, type);
+    },
+    remove: async () => {
+      throw new Error("the bucket is unavailable");
+    },
+  };
+  expect((await handleArtifactUpload(upload(job, PNG), job.jobId, { ...deps, artifacts: stubborn })).status).toBe(503);
+  expect(JSON.parse(logged.find((l) => l.includes("an artifact's file could not be removed"))!)).toMatchObject({ org_id: "org-a", run_id: job.runId, job_id: job.jobId, error: { message: "the bucket is unavailable" } });
+  const left = (await objectKeys()).filter((key) => key.includes(job.runId));
+  expect(left).toHaveLength(1);
+  await store.remove(left[0]!);
+});
+
 test("a file still on its way to the bucket counts toward the cap but has no link, and a row left on its way past the grace period is cleaned up", async () => {
   const job = await leasedJob();
   await fill(job, "org-a", MAX_ARTIFACTS_PER_JOB - 1);
   const { slow, entered, arrive } = heldBucket();
   const answer = handleArtifactUpload(upload(job, PNG), job.jobId, { ...deps, artifacts: slow });
-  await entered;
+  expect(await Promise.race([entered.then(() => "the bucket"), answer.then((res) => `an answer of ${res.status}`)])).toBe("the bucket");
   const pending = await sql<{ id: string }>`select id from artifacts where job_id = ${job.jobId} and stored_at is null`.execute(t.db);
   expect(pending.rows).toHaveLength(1);
   const row = pending.rows[0]!;
@@ -321,7 +343,7 @@ test("a job handed back while its file is on the way to the bucket keeps that fi
   const job = await leasedJob();
   const { slow, entered, arrive } = heldBucket();
   const answer = handleArtifactUpload(upload(job, PNG), job.jobId, { ...deps, artifacts: slow });
-  await entered;
+  expect(await Promise.race([entered.then(() => "the bucket"), answer.then((res) => `an answer of ${res.status}`)])).toBe("the bucket");
   await releaseJobForShutdown(t.db, job.token, job.jobId);
   arrive();
   expect((await answer).status).toBe(201);
@@ -331,9 +353,12 @@ test("a job handed back while its file is on the way to the bucket keeps that fi
   expect(row.stored_at).not.toBeNull();
   expect(row.discarded_at).not.toBeNull();
   expect(await artifactLink(t.db, store, "org-a", row.id)).toBeNull();
+  expect(await objectKeys()).toContain(row.storage_key);
   await sql`update artifacts set discarded_at = now() - interval '11 minutes' where id = ${row.id}`.execute(t.db);
-  expect(await removeExpiredArtifacts(t.db, store)).toBe(1);
+  await removeExpiredArtifacts(t.db, store);
+  expect(await rowsOf(job.jobId)).toBe(0);
   expect(await objectKeys()).not.toContain(row.storage_key);
+  await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", job.runId));
 });
 
 test("the database refuses a row whose key is not its own, also for a type the key rule does not know, or a size over the limit", async () => {

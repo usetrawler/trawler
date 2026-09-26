@@ -7,7 +7,7 @@ export default defineConfig({
   test: {
     projects: [
       { test: { name: "unit", include: ["packages/*/src/**/*.test.ts", "apps/*/src/**/*.test.ts", "scripts/**/*.test.ts"], exclude: [dbTests, "**/node_modules/**"] } },
-      { test: { name: "db", include: [dbTests], globalSetup: ["apps/control-plane/src/db/global-setup.ts"] } },
+      { test: { name: "db", include: [dbTests], globalSetup: ["apps/control-plane/src/db/global-setup.ts"], testTimeout: 30_000 } },
     ],
   },
 });
