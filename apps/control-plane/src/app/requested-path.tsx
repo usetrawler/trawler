@@ -1,5 +1,8 @@
 "use client";
 import { usePathname } from "next/navigation";
+import { useSyncExternalStore } from "react";
+
+const neverChanges = () => () => {};
 
 function readable(path: string): string {
   try {
@@ -10,6 +13,7 @@ function readable(path: string): string {
 }
 
 export function RequestedPath() {
-  const path = readable(usePathname());
-  return <code title={path} className="block truncate font-mono text-sm text-ink">{path}</code>;
+  const pathname = usePathname();
+  const path = useSyncExternalStore(neverChanges, () => readable(pathname), () => "");
+  return <code title={path || undefined} className="block min-h-5 truncate font-mono text-sm text-ink">{path}</code>;
 }
