@@ -7,6 +7,9 @@ const state = vi.hoisted(() => ({
   members: {} as Record<string, string>,
   lookedUp: [] as Array<[string, string]>,
   tenants: [] as string[],
+  listed: [] as string[],
+  people: [] as Array<{ id: string; userId: string; role: string; joinedAt: Date; name: string; email: string }>,
+  invited: [] as Array<{ id: string; email: string; role: string; expiresAt: Date }>,
 }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
@@ -19,15 +22,21 @@ vi.mock("../../server/auth.ts", () => ({
       state.lookedUp.push([orgId, userId]);
       return state.members[`${orgId}/${userId}`] ?? null;
     },
+    workspaceMembers: async (orgId: string) => { state.listed.push(`members:${orgId}`); return state.people; },
+    pendingInvitations: async (orgId: string) => { state.listed.push(`invitations:${orgId}`); return state.invited; },
   }),
 }));
 vi.mock("../../server/shell.ts", () => ({
   shellFor: async (member: { name: string; email: string; orgName: string }) => ({ user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [], runs: 0 } }),
 }));
 vi.mock("../../server/db.ts", () => ({ getDb: () => ({}) }));
+vi.mock("../../server/env.ts", () => ({ readEnv: () => ({ baseURL: "https://app.usetrawler.test" }) }));
 vi.mock("../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
 vi.mock("../../credentials/credentials.ts", () => ({ modelKeyDetails: async () => state.key }));
-vi.mock("./actions.ts", () => ({ renameWorkspaceAction: async () => ({}), replaceModelKeyAction: async () => ({}), removeModelKeyAction: async () => ({}) }));
+vi.mock("./actions.ts", () => ({
+  renameWorkspaceAction: async () => ({}), replaceModelKeyAction: async () => ({}), removeModelKeyAction: async () => ({}),
+  inviteMemberAction: async () => ({}), revokeInvitationAction: async () => ({}), removeMemberAction: async () => ({}), changeRoleAction: async () => ({}),
+}));
 
 const { default: SettingsPage } = await import("./page.tsx");
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
@@ -35,7 +44,14 @@ const owner = { userId: "user-1", name: "Ana", email: "ana@acme.test", orgId: "o
 const addedAt = new Date("2026-09-25T18:50:00.000Z");
 
 beforeEach(() => {
-  Object.assign(state, { member: owner, key: null, members: { "org-1/user-2": "lee@acme.test" }, lookedUp: [], tenants: [] });
+  Object.assign(state, {
+    member: owner, key: null, members: { "org-1/user-2": "lee@acme.test" }, lookedUp: [], tenants: [], listed: [],
+    people: [
+      { id: "m-1", userId: "user-1", role: "owner", joinedAt: new Date("2026-09-20T10:00:00Z"), name: "Ana", email: "ana@acme.test" },
+      { id: "m-2", userId: "user-2", role: "member", joinedAt: new Date("2026-09-21T10:00:00Z"), name: "Lee", email: "lee@acme.test" },
+    ],
+    invited: [{ id: "inv-1", email: "max@acme.test", role: "admin", expiresAt: new Date("2026-10-03T10:00:00Z") }],
+  });
 });
 
 test("settings name who added the key among this workspace's members, and mark Settings in the panel as the page you are on", async () => {
@@ -49,7 +65,7 @@ test("settings name who added the key among this workspace's members, and mark S
 });
 
 test("the page is headed like the app's other pages", async () => {
-  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("Settings Workspace and model key. The name and the model key every run of this workspace uses.");
+  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("Settings Workspace, members and model key. The name, the people in it, and the model key every run of this workspace uses.");
 });
 
 test("a key added by someone who is no longer in this workspace says so, and a workspace without a key looks nobody up", async () => {
@@ -73,4 +89,14 @@ test("a member gets the name and the key to read, with who can change them", asy
 test("someone signed out, or no longer in the workspace, is sent to sign in", async () => {
   state.member = null;
   await expect(SettingsPage()).rejects.toMatchObject({ to: "/sign-in" });
+});
+
+test("the members of this workspace and its invitations are listed, marking you, and invitations tell where to sign in", async () => {
+  const html = renderToStaticMarkup(await SettingsPage());
+  expect(state.listed.sort()).toEqual(["invitations:org-1", "members:org-1"]);
+  expect(text(html)).toContain("Ana (you) ana@acme.test Owner Joined 2026-09-20 10:00 UTC");
+  expect(text(html)).toContain("Lee lee@acme.test Member Joined 2026-09-21 10:00 UTC");
+  expect(text(html)).toContain("Invited max@acme.test Admin Expires 2026-10-03 10:00 UTC");
+  expect(html.indexOf('id="workspace-heading"')).toBeLessThan(html.indexOf('id="members-heading"'));
+  expect(html.indexOf('id="members-heading"')).toBeLessThan(html.indexOf('id="key-heading"'));
 });
