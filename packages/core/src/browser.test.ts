@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { chromium, type Browser as PlaywrightBrowser } from "playwright";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { BROWSER_TOOLS, openBrowser, type Browser, type Screenshot } from "./browser.ts";
-import { SecretScrubber } from "./secrets.ts";
+import { MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
 import { newSessionState, ownPasswordTool, type FillField } from "./session-tools.ts";
 
 const ctx = { toolCallId: "t", messages: [], context: {} };
@@ -275,6 +275,15 @@ beforeAll(async () => {
         return html(`<div style="position:relative;height:260px"><div style="overflow:hidden;height:24px;font:20px monospace;color:#ff0000">card-sec<span style="position:absolute;left:300px;top:200px">ret-1111</span></div></div><p>Plan: Team</p>`);
       case "/slotted-escaping":
         return html(`<div style="position:relative;height:260px"><slotted-away style="display:block;overflow:hidden;height:24px;font:20px monospace;color:#ff0000">card-secret-1111</slotted-away></div><p>Plan: Team</p><script>customElements.define("slotted-away", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<div style="position:absolute;left:300px;top:200px"><slot></slot></div>'; } });</script>`);
+      case "/shadow-slot-after":
+        return html(`<slot-after style="display:block;font:20px monospace;color:#ff0000">ret-1111</slot-after><p>Plan: Team</p><script>customElements.define("slot-after", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = "card-sec<slot></slot>"; } });</script>`);
+      case "/shadow-slot-named":
+        return html(`<slot-named style="display:block;font:20px monospace;color:#ff0000"><span slot="tail">ret-1111</span></slot-named><p>Plan: Team</p><script>customElements.define("slot-named", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = 'card-sec<slot name="tail"></slot>'; } });</script>`);
+      case "/shadow-slot-nested":
+        return html(`<div style="position:relative;height:260px"><slot-nest style="display:block;font:20px monospace;color:#ff0000"><span style="position:absolute;left:300px;top:200px">ret-1111</span></slot-nest></div><p>Plan: Team</p><script>customElements.define("slot-nest", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = "<div>card-sec<slot></slot></div>"; } });</script>`);
+      case "/contents-relative":
+      case "/contents-sticky":
+        return html(`<div style="overflow:hidden;width:100px;height:30px;font:20px monospace;color:#ff0000"><span style="display:contents;position:${req.url === "/contents-relative" ? "relative" : "sticky"}"><p style="position:absolute;top:120px;left:20px;white-space:nowrap;margin:0">card-secret-1111</p></span></div><p>Plan: Team</p>`);
       case "/shadow-moving-part":
         return html(`<key-view></key-view><p>Plan: Team</p><script>customElements.define("key-view", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<style>:host{display:block;font:20px monospace;color:#ff0000} @keyframes hop{to{transform:translateY(120px)}} .hop{display:inline-block;animation:hop 20s steps(2) infinite}</style><span>card-</span><span class="hop">secret-</span><span>1111</span>'; } });</script>`);
       case "/nested-moving-part":
@@ -282,10 +291,9 @@ beforeAll(async () => {
       case "/moving-component":
         return html(`<style>@keyframes hop{to{transform:translateY(120px)}} key-tail{display:inline-block;animation:hop 20s steps(2) infinite}</style><p style="font:20px monospace;color:#ff0000">card-<key-tail></key-tail></p><p>Plan: Team</p><script>customElements.define("key-tail", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).textContent = "secret-1111"; } });</script>`);
       case "/slotted-carried":
-      case "/slotted-carried-element": {
-        const light = req.url === "/slotted-carried" ? "card-secret-1111" : "<p>card-secret-1111</p>";
-        return html(`<carry-host style="display:block;font:20px monospace;color:#ff0000">${light}</carry-host><p>Plan: Team</p><script>customElements.define("carry-host", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<style>@keyframes carry{to{transform:translateY(120px)}} .carry{animation:carry 20s steps(2) infinite}</style><div class="carry"><slot></slot></div>'; } });</script>`);
-      }
+        return html(`<carry-host style="display:block;font:20px monospace;color:#ff0000">secret-1111</carry-host><p>Plan: Team</p><script>customElements.define("carry-host", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<style>@keyframes carry{to{transform:translateY(120px)}} .carry{display:inline-block;animation:carry 20s steps(2) infinite}</style>card-<span class="carry"><slot></slot></span>'; } });</script>`);
+      case "/slotted-carried-element":
+        return html(`<carry-host style="display:block;font:20px monospace;color:#ff0000"><p>card-secret-1111</p></carry-host><p>Plan: Team</p><script>customElements.define("carry-host", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<style>@keyframes carry{to{transform:translateY(120px)}} .carry{animation:carry 20s steps(2) infinite}</style><div class="carry"><slot></slot></div>'; } });</script>`);
       case "/sibling-pusher":
         return html(`<style>@keyframes push{from{height:0}to{height:160px}} .pusher{animation:push 20s steps(2) infinite}</style><div class="pusher"></div><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><p>Plan: Team</p>`);
       case "/pusher-elsewhere":
@@ -299,6 +307,16 @@ beforeAll(async () => {
         return html(`<key-card></key-card><script>customElements.define("key-card", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<div style="font:20px sans-serif;width:640px"><h2>${req.url === "/shadow-card" ? "Settings" : "Preferences"}</h2><p>Plan: Team</p><p>Key: <span style="color:#ff0000">card-secret-1111</span></p><p>Billing: monthly</p><p>Seats: 5</p></div>'; } });</script>`);
       case "/animated-underline":
         return html(`<style>@keyframes underline{from{width:0}to{width:100%}} .card{position:relative;width:420px;padding:8px} .card::after{content:"";position:absolute;left:0;bottom:0;height:2px;background:#333;animation:underline 1s linear infinite alternate}</style><div class="card"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div><p>Plan: Team</p>`);
+      case "/svg-status-dot":
+        return html(`<style>@keyframes pulse{from{r:3px}to{r:7px}} circle{animation:pulse 600ms ease-in-out infinite alternate}</style><p><svg width="16" height="16"><circle cx="8" cy="8" r="5" fill="#2a2"></circle></svg> Online</p><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><p>Plan: Team</p>`);
+      case "/frame-nested-carried":
+        return html(`<style>@keyframes carry{to{transform:translateY(120px)}} .carrier{animation:carry 20s steps(2) infinite}</style><div class="carrier"><iframe style="width:640px;height:120px;border:0" srcdoc="${`<iframe style='width:600px;height:80px;border:0' srcdoc='&lt;p style=&quot;font:20px monospace;color:#ff0000&quot;&gt;card-secret-1111&lt;/p&gt;'></iframe>`.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"></iframe></div>`);
+      case "/clip-reveal":
+        return html(`<style>@keyframes reveal{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}} .banner{animation:reveal 1s linear infinite}</style><p class="banner">New plans available</p><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><p>Plan: Team</p>`);
+      case "/backdrop-pulse":
+        return html(`<style>@keyframes glass{from{backdrop-filter:blur(0)}to{backdrop-filter:blur(4px)}} .glass{padding:8px;animation:glass 800ms linear infinite alternate}</style><div class="glass">Status</div><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><p>Plan: Team</p>`);
+      case "/zindex-step":
+        return html(`<style>@keyframes lift{from{z-index:1}to{z-index:5}} .tile{position:relative;animation:lift 400ms steps(2) infinite}</style><div class="tile">Tile</div><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><p>Plan: Team</p>`);
       case "/fixed-progress":
         return html(`<style>@keyframes load{from{width:0}to{width:100%}} .bar{position:fixed;top:0;left:0;height:4px;background:#333;animation:load 1s linear infinite}</style><div class="bar"></div><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><p>Plan: Team</p>`);
       case "/popover-growing":
@@ -313,6 +331,18 @@ beforeAll(async () => {
         return html(closedCard("card-sec", "<slot></slot><span>ret-1111</span>"));
       case "/closed-slotted":
         return html(`<div style="position:relative;height:260px"><closed-away style="display:block;overflow:hidden;height:24px;font:20px monospace;color:#ff0000">card-secret-1111</closed-away></div><p>Plan: Team</p><script>customElements.define("closed-away", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = '<div style="position:absolute;left:300px;top:200px"><slot></slot></div>'; } });</script>`);
+      case "/closed-slot-after":
+        return html(closedCard("ret-1111", "card-sec<slot></slot>"));
+      case "/closed-slot-named":
+        return html(closedCard('<span slot="tail">ret-1111</span>', 'card-sec<slot name="tail"></slot>'));
+      case "/closed-slot-manual":
+        return html(`<closed-manual style="display:block;font:20px monospace;color:#ff0000">ret-1111</closed-manual><p>Plan: Team</p><script>customElements.define("closed-manual", class extends HTMLElement { constructor() { super(); const root = this.attachShadow({ mode: "closed", slotAssignment: "manual" }); root.innerHTML = "card-sec<slot></slot>"; root.querySelector("slot").assign(this.firstChild); } });</script>`);
+      case "/closed-sibling-hosts":
+        return html(`<p style="font:20px monospace;color:#ff0000"><closed-a></closed-a><closed-b></closed-b></p><p>Plan: Team</p><script>customElements.define("closed-a", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "card-secret-"; } }); customElements.define("closed-b", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "1111"; } });</script>`);
+      case "/closed-after-light":
+        return html(`<p style="font:20px monospace;color:#ff0000">card-secret-<closed-b></closed-b></p><p>Plan: Team</p><script>customElements.define("closed-b", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "1111"; } });</script>`);
+      case "/closed-password-tail":
+        return html(`<p style="font:20px monospace;color:#ff0000">moving-s<closed-tail></closed-tail></p><p>Plan: Team</p><script>customElements.define("closed-tail", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "ecret-1"; } });</script>`);
       case "/closed-password":
         return html(closedCard("", '<input aria-label="Password" type="password" value="closed-pass-1">'));
       case "/closed-typed":
@@ -1417,6 +1447,11 @@ describe("screenshots", () => {
     ["/shadow-escaping-part", "is split between a component's own text and a part of its shadow root placed outside the component"],
     ["/escaping-part", "has a part placed outside the box that cuts off the rest"],
     ["/slotted-escaping", "is placed by a component outside its own box, which cuts off everything else"],
+    ["/shadow-slot-after", "starts in a component's shadow root and ends in the text it shows through a slot"],
+    ["/shadow-slot-named", "starts in a component's shadow root and ends in an element it shows through a named slot"],
+    ["/shadow-slot-nested", "ends in a part a component shows through a slot inside its own element, placed far away"],
+    ["/contents-relative", "is placed outside a box that cuts off overflow, through a wrapper with no box of its own that says it is positioned"],
+    ["/contents-sticky", "is placed outside a box that cuts off overflow, through a wrapper with no box of its own that says it sticks"],
   ])("a secret whose text %s is masked where it is drawn (%s)", async (path) => {
     const [shot] = await shotsOf(path, 1, async () => undefined, knowing(path === "/overflow-edge" ? "card-secret-11112" : "card-secret-1111"));
     expect(shot).not.toBeNull();
@@ -1474,7 +1509,7 @@ describe("screenshots", () => {
     expect(await shotsOf(path, 2, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null]);
   }, 60_000);
 
-  test.each(["/frame-pushed", "/frame-carried"])("a secret in a frame that an animation in the page around the frame can move gives no screenshot (%s)", async (path) => {
+  test.each(["/frame-pushed", "/frame-carried", "/frame-nested-carried"])("a secret in a frame that an animation in the page around the frame can move gives no screenshot (%s)", async (path) => {
     expect(await shotsOf(path, 2, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null]);
   }, 60_000);
 
@@ -1485,14 +1520,20 @@ describe("screenshots", () => {
     expect(Buffer.compare(Buffer.from(shot.bytes), Buffer.from((await shotOf("/shadow-card-other")).bytes))).not.toBe(0);
   }, 60_000);
 
-  test.each(["/fixed-progress", "/popover-growing", "/shaking-sibling", "/animated-underline"])("an animation that cannot move the secret keeps the screenshot (%s)", async (path) => {
+  test.each(["/fixed-progress", "/popover-growing", "/shaking-sibling", "/animated-underline", "/svg-status-dot", "/clip-reveal", "/backdrop-pulse", "/zindex-step"])("an animation that cannot move the secret keeps the screenshot (%s)", async (path) => {
     const [shot] = await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"));
     expect(shot).not.toBeNull();
     expect(await redPixels(shot!)).toBe(0);
   }, 60_000);
 
-  test.each(["/closed-text", "/closed-groups", "/closed-split", "/closed-slotted", "/closed-password", "/closed-typed", "/closed-in-frame"])("a secret or password field inside a closed shadow root gives no screenshot (%s)", async (path) => {
+  test.each(["/closed-text", "/closed-groups", "/closed-split", "/closed-slotted", "/closed-slot-after", "/closed-slot-named", "/closed-slot-manual", "/closed-sibling-hosts", "/closed-after-light", "/closed-password", "/closed-typed", "/closed-in-frame"])("a secret or password field inside a closed shadow root gives no screenshot (%s)", async (path) => {
     expect(await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"))).toEqual([null]);
+  }, 60_000);
+
+  test("a made-up password that starts on the page and ends inside a closed shadow root gives no screenshot", async () => {
+    const scrubber = new SecretScrubber();
+    for (let length = MIN_SECRET_LENGTH; length <= "moving-secret-1".length; length++) scrubber.add("moving-secret-1".slice(0, length));
+    expect(await shotsOf("/closed-password-tail", 1, async () => undefined, { scrubber })).toEqual([null]);
   }, 60_000);
 
   test("a closed shadow root without a secret keeps the screenshot", async () => {
