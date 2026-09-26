@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
 import { Budget } from "./llm.ts";
 import { setupPrompt } from "./prompts.ts";
-import { pageText, proposeProject } from "./setup.ts";
+import { pageText, proposeProject, SetupModelFailed } from "./setup.ts";
 import { scriptedModel, text } from "./testing.ts";
 
 describe("pageText", () => {
@@ -69,6 +69,39 @@ const proposal = {
   ],
 };
 
+const PLAN_TOKENS = 600;
+const thought = { type: "reasoning", text: "Who opens an invoicing tool first, and what do they want done?" };
+const planUsage = (output: number, reasoning: number) => ({
+  inputTokens: { total: 400, noCache: 400, cacheRead: undefined, cacheWrite: undefined },
+  outputTokens: { total: output, text: output - reasoning, reasoning },
+});
+const paid = (cost: number) => ({ providerMetadata: { openrouter: { usage: { cost } } }, warnings: [] });
+const cutOff = (content: object[], cost = 0.001) => ({ content, finishReason: { unified: "length", raw: "length" }, usage: planUsage(16_000, 15_400), ...paid(cost) });
+const answered = (reply: string) => ({ content: [{ type: "text", text: reply }], finishReason: { unified: "stop", raw: "stop" }, usage: planUsage(PLAN_TOKENS, 0), ...paid(0.001) });
+
+function replies(...results: object[]) {
+  let next = 0;
+  return new MockLanguageModelV4({
+    doGenerate: async () => {
+      const result = results[next++];
+      if (!result) throw new Error(`replies has only ${results.length}; call ${next} has none`);
+      return result as never;
+    },
+  });
+}
+
+function thinkingModel(reasoningTokens: number) {
+  return new MockLanguageModelV4({
+    doGenerate: async ({ maxOutputTokens }) => {
+      const room = maxOutputTokens ?? Number.POSITIVE_INFINITY;
+      if (room <= reasoningTokens) return { content: [thought], finishReason: { unified: "length", raw: "length" }, usage: planUsage(room, room), ...paid(0.001) } as never;
+      const plan = JSON.stringify(proposal);
+      if (room < reasoningTokens + PLAN_TOKENS) return { content: [thought, { type: "text", text: plan.slice(0, 100) }], finishReason: { unified: "length", raw: "length" }, usage: planUsage(room, reasoningTokens), ...paid(0.001) } as never;
+      return { content: [thought, { type: "text", text: plan }], finishReason: { unified: "stop", raw: "stop" }, usage: planUsage(reasoningTokens + PLAN_TOKENS, reasoningTokens), ...paid(0.001) } as never;
+    },
+  });
+}
+
 function propose(model: ReturnType<typeof scriptedModel> | MockLanguageModelV4, over: Partial<Parameters<typeof proposeProject>[0]> = {}) {
   const fetched: string[] = [];
   const promise = proposeProject({
@@ -123,7 +156,6 @@ describe("proposeProject", () => {
     const model = scriptedModel([text(JSON.stringify(proposal))]);
     const { project } = await propose(model, { focus: "the new team-invite flow" }).promise;
     expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toContain("the new team-invite flow");
-    expect(model.doGenerateCalls[0]!.maxOutputTokens).toBe(4000);
     const long = scriptedModel([text(JSON.stringify(proposal))]);
     await propose(long, { focus: "f".repeat(2000) }).promise;
     expect(JSON.stringify(long.doGenerateCalls[0]!.prompt)).not.toContain("f".repeat(501));
@@ -154,7 +186,9 @@ describe("proposeProject", () => {
   });
 
   test("says clearly when there are no personas", async () => {
-    await expect(propose(scriptedModel([text(JSON.stringify({ ...proposal, personas: [{ id: "x", name: " ", brief: "b" }] }))])).promise).rejects.toThrow(/no personas/);
+    const { promise } = propose(scriptedModel([text(JSON.stringify({ ...proposal, personas: [{ id: "x", name: " ", brief: "b" }] }))]));
+    await expect(promise).rejects.toThrow(/no personas/);
+    await expect(promise).rejects.toBeInstanceOf(SetupModelFailed);
   });
 
   test("goes on without the docs when they cannot be read", async () => {
@@ -165,7 +199,9 @@ describe("proposeProject", () => {
 
   test("says clearly when the product page cannot be read", async () => {
     const model = scriptedModel([text(JSON.stringify(proposal))]);
-    await expect(propose(model, { fetchText: async () => { throw new Error("ECONNREFUSED"); } }).promise).rejects.toThrow(/could not read https:\/\/app\.acme\.test\/: ECONNREFUSED/);
+    const { promise } = propose(model, { fetchText: async () => { throw new Error("ECONNREFUSED"); } });
+    await expect(promise).rejects.toThrow(/could not read https:\/\/app\.acme\.test\/: ECONNREFUSED/);
+    await expect(promise).rejects.not.toBeInstanceOf(SetupModelFailed);
     expect(model.doGenerateCalls).toHaveLength(0);
   });
 
@@ -188,11 +224,70 @@ describe("proposeProject", () => {
 
   test("fails with a readable reason when the proposal has no personas or goals", async () => {
     const model = scriptedModel([text(JSON.stringify({ ...proposal, goals: [] }))]);
-    await expect(propose(model).promise).rejects.toThrow(/no goals/);
+    const { promise } = propose(model);
+    await expect(promise).rejects.toThrow(/no goals/);
+    await expect(promise).rejects.toBeInstanceOf(SetupModelFailed);
   });
 
-  test("fails with a readable reason when the model answers with garbage", async () => {
-    await expect(propose(scriptedModel([text("not json")])).promise).rejects.toThrow(/could not propose a project/);
+  test("a model that thinks at length before it writes the plan still gets the plan in", async () => {
+    const model = thinkingModel(7800);
+    const { project, usage } = await propose(model).promise;
+    expect(project.personas.map((p) => p.name)).toEqual(["Ana", "Tom", "Lee", "Mo"]);
+    expect(model.doGenerateCalls).toHaveLength(1);
+    expect(model.doGenerateCalls[0]!.maxOutputTokens).toBe(16_000);
+    expect(usage.steps).toBe(1);
+  });
+
+  test("a reply without a usable plan is asked for once more", async () => {
+    const unusable = [
+      cutOff([thought, { type: "text", text: JSON.stringify(proposal).slice(0, 200) }]),
+      cutOff([thought]),
+      answered("not json at all"),
+      answered(JSON.stringify({ name: "Acme", personas: "Ana" })),
+    ];
+    for (const first of unusable) {
+      const model = replies(first, answered(JSON.stringify(proposal)));
+      const { project, usage } = await propose(model).promise;
+      expect(project.name).toBe("Acme");
+      expect(model.doGenerateCalls).toHaveLength(2);
+      expect(usage.steps).toBe(2);
+      expect(usage.costUsd).toBeCloseTo(0.002, 10);
+    }
+  });
+
+  test("a model that never finishes the plan fails with the reason after two tries", async () => {
+    const model = replies(cutOff([thought]), cutOff([thought, { type: "text", text: '{"name":"Ac' }]));
+    const { promise } = propose(model);
+    await expect(promise).rejects.toThrow("the setup model ran out of room before it finished the plan (2 tries)");
+    await expect(promise).rejects.toBeInstanceOf(SetupModelFailed);
+    expect(model.doGenerateCalls).toHaveLength(2);
+  });
+
+  test("a reply the provider's content filter stopped is named as such", async () => {
+    const filtered = { content: [], finishReason: { unified: "content-filter", raw: "content_filter" }, usage: planUsage(0, 0), warnings: [] };
+    await expect(propose(replies(filtered, filtered)).promise).rejects.toThrow("the provider's content filter stopped the setup model before it finished the plan (2 tries)");
+  });
+
+  test("a model that answers without a plan twice fails with a readable reason", async () => {
+    const model = scriptedModel([text("not json"), text("still not json")]);
+    const { promise } = propose(model);
+    await expect(promise).rejects.toThrow("the setup model gave no usable plan (2 tries)");
+    await expect(promise).rejects.toBeInstanceOf(SetupModelFailed);
+  });
+
+  test("does not ask again once the first reply spent the budget", async () => {
+    const model = replies(cutOff([thought], 0.3), answered(JSON.stringify(proposal)));
+    await expect(propose(model, { budget: new Budget(0.25) }).promise).rejects.toThrow("the setup model ran out of room before it finished the plan (1 try); the setup budget is spent");
+    expect(model.doGenerateCalls).toHaveLength(1);
+  });
+
+  test("a failed model call is not asked again and says what failed", async () => {
+    const model = new MockLanguageModelV4({ doGenerate: async () => { throw new Error("upstream 502"); } });
+    const { promise } = propose(model);
+    await expect(promise).rejects.toThrow("the setup model could not propose a project: upstream 502");
+    await expect(promise).rejects.toBeInstanceOf(SetupModelFailed);
+    await expect(promise).rejects.toHaveProperty("cause.message", "upstream 502");
+    expect(model.doGenerateCalls).toHaveLength(1);
   });
 
   test("spends nothing once the budget is gone", async () => {

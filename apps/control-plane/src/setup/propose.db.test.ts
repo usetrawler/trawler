@@ -55,7 +55,7 @@ test("a workspace cannot start unlimited setups, even all at once, and failed at
   const results = await Promise.allSettled(Array.from({ length: 30 }, attempt));
   const limited = results.filter((r) => r.status === "rejected" && r.reason instanceof SetupLimited).length;
   expect(limited).toBe(30 - SETUP_LIMITS.perTenMinutes);
-  expect(model.doGenerateCalls.length).toBe(SETUP_LIMITS.perTenMinutes);
+  expect(model.doGenerateCalls.length).toBe(2 * SETUP_LIMITS.perTenMinutes);
 });
 
 test("the reason for a refusal survives address normalisation", async () => {

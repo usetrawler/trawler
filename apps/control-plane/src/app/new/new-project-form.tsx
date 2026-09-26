@@ -19,7 +19,7 @@ function Progress() {
   return (
     <div role="status" className="flex flex-col gap-2 border border-line bg-panel p-4 text-sm">
       <p className="font-mono text-xs tracking-[0.15em] text-action uppercase">Building your test plan</p>
-      <p className="text-muted">Reading the page, then proposing who should try the product and what they want to get done. This takes about half a minute.</p>
+      <p className="text-muted">Reading the page, then proposing who should try the product and what they want to get done. This can take a minute or two.</p>
     </div>
   );
 }

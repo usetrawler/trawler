@@ -1,4 +1,4 @@
-import { generateText, Output, type LanguageModel } from "ai";
+import { generateText, NoObjectGeneratedError, NoOutputGeneratedError, Output, type LanguageModel } from "ai";
 import { z } from "zod";
 import { ProjectConfigSchema, type JobUsage, type ProjectConfig } from "@usetrawler/protocol";
 import { type Budget, tallyStep } from "./llm.ts";
@@ -9,7 +9,8 @@ const MAX_GOALS = 6;
 const PAGE_CHARS = 12_000;
 const DOCS_CHARS = 8_000;
 const MAX_FOCUS_CHARS = 500;
-const SETUP_OUTPUT_TOKENS = 4_000;
+const SETUP_OUTPUT_TOKENS = 16_000;
+const SETUP_REPLIES = 2;
 
 const MAX_HTML_CHARS = 2_000_000;
 const DROPPED_ELEMENTS = new Set(["script", "style", "noscript", "svg", "template"]);
@@ -139,6 +140,38 @@ const ProposalSchema = z.object({
   personas: z.array(z.object({ id: z.string(), name: z.string(), brief: z.string() })),
   goals: z.array(z.object({ id: z.string(), instruction: z.string() })),
 });
+type Proposal = z.infer<typeof ProposalSchema>;
+
+export class SetupModelFailed extends Error {}
+
+function noPlan(finishReason: string | undefined, tries: number): string {
+  const count = tries === 1 ? "1 try" : `${tries} tries`;
+  if (finishReason === "length") return `the setup model ran out of room before it finished the plan (${count})`;
+  if (finishReason === "content-filter") return `the provider's content filter stopped the setup model before it finished the plan (${count})`;
+  return `the setup model gave no usable plan (${count})`;
+}
+
+async function askForProposal(opts: { model: LanguageModel; budget: Budget }, prompt: string, usage: JobUsage): Promise<{ proposal: Proposal | null; finishReason?: string }> {
+  let result;
+  try {
+    result = await generateText({
+      model: opts.model,
+      output: Output.object({ schema: ProposalSchema }),
+      prompt,
+      maxOutputTokens: SETUP_OUTPUT_TOKENS,
+      onStepEnd: (step) => void tallyStep(usage, opts.budget, step),
+    });
+  } catch (err) {
+    if (NoObjectGeneratedError.isInstance(err)) return { proposal: null, finishReason: err.finishReason };
+    throw err;
+  }
+  try {
+    return { proposal: result.output, finishReason: result.finishReason };
+  } catch (err) {
+    if (NoOutputGeneratedError.isInstance(err)) return { proposal: null, finishReason: result.finishReason };
+    throw err;
+  }
+}
 
 export async function proposeProject(opts: {
   model: LanguageModel;
@@ -164,24 +197,25 @@ export async function proposeProject(opts: {
   if (opts.budget.exceeded) throw spent();
 
   const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
-  let proposal: z.infer<typeof ProposalSchema>;
+  const prompt = setupPrompt({ url, page, docs, focus });
+  let proposal: Proposal | null = null;
+  let finishReason: string | undefined;
+  let tries = 0;
   try {
-    ({ output: proposal } = await generateText({
-      model: opts.model,
-      output: Output.object({ schema: ProposalSchema }),
-      prompt: setupPrompt({ url, page, docs, focus }),
-      maxOutputTokens: SETUP_OUTPUT_TOKENS,
-      onStepEnd: (step) => void tallyStep(usage, opts.budget, step),
-    }));
+    while (proposal === null && tries < SETUP_REPLIES && !opts.budget.exceeded) {
+      tries++;
+      ({ proposal, finishReason } = await askForProposal(opts, prompt, usage));
+    }
   } catch (err) {
-    throw new Error(`the setup model could not propose a project: ${err instanceof Error ? err.message : String(err)}`);
+    throw new SetupModelFailed(`the setup model could not propose a project: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
+  if (proposal === null) throw new SetupModelFailed(`${noPlan(finishReason, tries)}${tries < SETUP_REPLIES ? "; the setup budget is spent" : ""}`);
   const personas = uniqueIds(proposal.personas.filter((p) => p.name.trim() && p.brief.trim()).slice(0, MAX_PERSONAS), "persona")
     .map((p) => ({ id: p.id, name: clip(p.name, 100), brief: clip(p.brief, 800) }));
   const goals = uniqueIds(proposal.goals.filter((g) => g.instruction.trim()).slice(0, MAX_GOALS), "goal")
     .map((g) => ({ id: g.id, instruction: clip(g.instruction, 300) }));
-  if (personas.length === 0) throw new Error("the setup model proposed no personas");
-  if (goals.length === 0) throw new Error("the setup model proposed no goals");
+  if (personas.length === 0) throw new SetupModelFailed("the setup model proposed no personas");
+  if (goals.length === 0) throw new SetupModelFailed("the setup model proposed no goals");
 
   const project = ProjectConfigSchema.parse({
     name: clip(proposal.name, 100) || new URL(url).hostname,
