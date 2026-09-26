@@ -106,14 +106,14 @@ describe("AppShell", () => {
     expect(html).not.toMatch(/\bmd:sticky\b/);
   });
 
-  it("keeps the phone header within 320 px: the initials give way below 400 px, the wordmark below 360 px", () => {
-    const top = render().match(/<header.*<\/header>/)?.[0] ?? "";
-    expect(top).toMatch(/<span class="max-\[359px\]:sr-only">trawler<\/span><\/a>/);
-    expect(top).toMatch(/<span aria-hidden="true" class="[^"]*\bmax-\[399px\]:hidden\b[^"]*">BO<\/span>/);
+  it("makes room on a phone's header by hiding the initials below 400 px and the wordmark, for screen readers only, below 360 px", () => {
+    const top = header(render());
+    expect(top).toMatch(/<span class="max-\[360px\]:sr-only">trawler<\/span><\/a>/);
+    expect(top).toMatch(/<span aria-hidden="true" class="[^"]*\bmax-\[400px\]:hidden\b[^"]*">BO<\/span>/);
   });
 
-  it("offers the theme switch at the end of the header on every page", () => {
-    expect(render().match(/<header.*<\/header>/)?.[0]).toMatch(/<button type="button" aria-label="Theme: System\. Switch to Dark\."[^>]*><span aria-hidden="true">◐<\/span><\/button><\/div><\/header>$/);
+  it("offers the theme switch at the end of the header", () => {
+    expect(header(render())).toMatch(/<button type="button" title="Theme: System\. Switch to Dark\."[^>]*>(?:(?!<\/button>).)*<\/button><\/div><\/header>$/);
   });
 
   it("lets a keyboard skip the header and the panel", () => {

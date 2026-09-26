@@ -60,12 +60,12 @@ export function AppShell({ shell, current, parent = false, wide = false, childre
       <header className="flex h-16 items-center justify-between gap-4 border-b border-line bg-[var(--header)] px-4 backdrop-blur-md tall:sticky tall:top-0 tall:z-20 md:h-[76px] md:px-[clamp(20px,4.2vw,72px)]">
         <a href="/" className="flex shrink-0 items-center gap-2.5 text-[22px] font-bold tracking-tight">
           <BrandMark className="h-7 w-7" />
-          <span className="max-[359px]:sr-only">trawler</span>
+          <span className="max-[360px]:sr-only">trawler</span>
         </a>
         <div className="flex items-center gap-3">
           <DocsLink className="-my-2 shrink-0 py-2 font-mono text-xs tracking-[0.15em] text-muted uppercase hover:text-ink">Docs</DocsLink>
           <span className="sr-only md:hidden">Signed in as {user.name || user.email}</span>
-          <span aria-hidden className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-full bg-ink font-mono text-[10px] text-paper max-[399px]:hidden md:hidden">{initials(user.name || user.email)}</span>
+          <span aria-hidden className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-full bg-ink font-mono text-[10px] text-paper max-[400px]:hidden md:hidden">{initials(user.name || user.email)}</span>
           <SignOutButton className="-my-2 shrink-0 py-2 font-mono text-xs tracking-[0.15em] text-muted uppercase hover:text-ink md:hidden" />
           <ThemeToggle />
         </div>
