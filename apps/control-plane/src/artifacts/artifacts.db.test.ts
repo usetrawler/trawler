@@ -167,7 +167,7 @@ test("a screen capture opens with its run and finding in its own workspace only,
   expect(await screenCapture(t.db, "org-a", reported)).toBeNull();
   await sql`update artifacts set stored_at = now(), discarded_at = now() where id = ${reported}`.execute(t.db);
   expect(await screenCapture(t.db, "org-a", reported)).toBeNull();
-  await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", session.runId));
+  await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", session.runId, "stopped"));
 });
 
 test("an upload is refused, leaving no file and no row, without the job's own live token, with a wrong type or signature, or when too large", async () => {
