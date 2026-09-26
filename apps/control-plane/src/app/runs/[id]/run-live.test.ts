@@ -22,7 +22,7 @@ test("a finished run offers Run again beside its heading, and Start another run 
   for (const status of ["succeeded", "stopped_budget", "failed", "cancelled"]) {
     const html = render(status);
     const head = html.slice(0, html.indexOf('<div class="grid gap-3'));
-    expect(head).toMatch(/<\/h1>[\s\S]*<button type="button"[^>]*>Run again<span aria-hidden="true">→<\/span><\/button>/);
+    expect(head).toMatch(/<\/h1>[\s\S]*<form[^>]*><input type="hidden" name="runId" value="run-1"\/><button type="submit"[^>]*>Run again<span aria-hidden="true">→<\/span><\/button><\/form>/);
     expect(html).toContain(">Start another run</a>");
   }
   for (const status of ["queued", "running"]) {
