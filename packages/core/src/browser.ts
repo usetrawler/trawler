@@ -43,12 +43,38 @@ const MASK_COLOR = "#17191c";
 const MASK_CHECK_MS = 2500;
 const STEADY_MS = 20;
 const SECRET_FIELDS = "trawler-secret-fields";
+const SHADOW_TEXT = "trawler-shadow-text";
 const LINE_AROUND = "trawler-line-around";
 const MOVING = "trawler-moving";
+const DECODED_SECRETS = `(encoded) => new RegExp(new TextDecoder().decode(Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0))), "i")`;
+const TEXT_OF = `(node) => {
+      if (node.nodeType === Node.TEXT_NODE) return node.data;
+      if (node.nodeType === Node.ELEMENT_NODE && node.matches("script, noscript, style")) return "";
+      let text = "";
+      for (let child = node.firstChild; child; child = child.nextSibling) text += textOf(child);
+      return node.shadowRoot ? text + textOf(node.shadowRoot) : text;
+    }`;
+const SHADOW_ROOTS_UNDER = `(scope) => {
+      const roots = [];
+      const visit = (tree) => {
+        for (const el of tree.querySelectorAll("*")) {
+          if (el.shadowRoot) {
+            roots.push(el.shadowRoot);
+            visit(el.shadowRoot);
+          }
+        }
+      };
+      if (scope.shadowRoot) {
+        roots.push(scope.shadowRoot);
+        visit(scope.shadowRoot);
+      }
+      visit(scope);
+      return roots;
+    }`;
 const SELECTOR_ENGINES = {
   [SECRET_FIELDS]: `({
     queryAll(root, encoded) {
-      const secrets = new RegExp(new TextDecoder().decode(Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0))), "i");
+      const secrets = (${DECODED_SECRETS})(encoded);
       const found = [];
       const visit = (scope) => {
         for (const el of scope.querySelectorAll("*")) {
@@ -67,9 +93,19 @@ const SELECTOR_ENGINES = {
       return found;
     },
   })`,
+  [SHADOW_TEXT]: `({
+    queryAll(root, encoded) {
+      const secrets = (${DECODED_SECRETS})(encoded);
+      const textOf = ${TEXT_OF};
+      return (${SHADOW_ROOTS_UNDER})(root)
+        .filter((shadow) => secrets.test(textOf(shadow)) && ![...shadow.children].some((child) => secrets.test(textOf(child))))
+        .map((shadow) => shadow.host);
+    },
+  })`,
   [LINE_AROUND]: `({
     queryAll(root, mode) {
       const up = (el) => el.parentElement ?? el.parentNode?.host;
+      const layoutUp = (node) => node.assignedSlot ?? up(node);
       const shows = (el) => getComputedStyle(el).display === "contents" || el.checkVisibility({ visibilityProperty: true, contentVisibilityAuto: true });
       let boxed = root;
       while (boxed && getComputedStyle(boxed).display === "contents") boxed = up(boxed);
@@ -79,38 +115,48 @@ const SELECTOR_ENGINES = {
       const style = getComputedStyle(root);
       const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2 || 0;
       const reach = root.getBoundingClientRect().height + 2 * line;
-      let shown = null;
-      const texts = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      for (let node = texts.nextNode(); node; node = texts.nextNode()) {
-        if (!node.data.trim()) continue;
-        const text = document.createRange();
-        text.selectNodeContents(node);
-        for (const box of text.getClientRects()) {
-          if (box.width === 0 && box.height === 0) continue;
-          shown = shown ? { left: Math.min(shown.left, box.left), top: Math.min(shown.top, box.top), right: Math.max(shown.right, box.right), bottom: Math.max(shown.bottom, box.bottom) } : { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
-        }
-      }
-      if (!shown) return [];
       const cuts = (overflow, margin) => overflow !== "visible" && !(overflow === "clip" && parseFloat(margin) !== 0);
-      let escaping = false;
-      for (let el = root; el && el !== document.body && el !== document.documentElement; el = up(el)) {
-        const css = getComputedStyle(el);
-        if (escaping && css.position !== "static") escaping = false;
-        if (!escaping && !neverClips.has(css.display)) {
-          const box = el.getBoundingClientRect();
-          if (cuts(css.overflowX, css.overflowClipMargin)) {
-            shown.left = Math.max(shown.left, box.left);
-            shown.right = Math.min(shown.right, box.right);
+      const clipOf = (node) => {
+        const clip = { left: -Infinity, top: -Infinity, right: Infinity, bottom: Infinity };
+        let escaping = false;
+        for (let el = layoutUp(node); el && el !== document.body && el !== document.documentElement; el = layoutUp(el)) {
+          const css = getComputedStyle(el);
+          if (escaping && css.position !== "static") escaping = false;
+          if (!escaping && !neverClips.has(css.display)) {
+            const box = el.getBoundingClientRect();
+            if (cuts(css.overflowX, css.overflowClipMargin)) {
+              clip.left = Math.max(clip.left, box.left);
+              clip.right = Math.min(clip.right, box.right);
+            }
+            if (cuts(css.overflowY, css.overflowClipMargin)) {
+              clip.top = Math.max(clip.top, box.top);
+              clip.bottom = Math.min(clip.bottom, box.bottom);
+            }
           }
-          if (cuts(css.overflowY, css.overflowClipMargin)) {
-            shown.top = Math.max(shown.top, box.top);
-            shown.bottom = Math.min(shown.bottom, box.bottom);
+          if (css.position === "fixed") break;
+          if (css.position === "absolute") escaping = true;
+        }
+        return clip;
+      };
+      let shown = null;
+      const measure = (scope) => {
+        const nodes = document.createTreeWalker(scope, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+        for (let node = nodes.currentNode; node; node = nodes.nextNode()) {
+          if (node.shadowRoot) measure(node.shadowRoot);
+          if (node.nodeType !== Node.TEXT_NODE || !node.data.trim()) continue;
+          const text = document.createRange();
+          text.selectNodeContents(node);
+          const clip = clipOf(node);
+          for (const box of text.getClientRects()) {
+            if (box.width === 0 && box.height === 0) continue;
+            const left = Math.max(box.left, clip.left), top = Math.max(box.top, clip.top), right = Math.min(box.right, clip.right), bottom = Math.min(box.bottom, clip.bottom);
+            if (right < left || bottom < top) continue;
+            shown = shown ? { left: Math.min(shown.left, left), top: Math.min(shown.top, top), right: Math.max(shown.right, right), bottom: Math.max(shown.bottom, bottom) } : { left, top, right, bottom };
           }
         }
-        if (css.position === "fixed") break;
-        if (css.position === "absolute") escaping = true;
-      }
-      if (shown.right <= shown.left || shown.bottom <= shown.top) return [];
+      };
+      measure(root);
+      if (!shown || shown.right <= shown.left || shown.bottom <= shown.top) return [];
       const covers = (el) => {
         const box = el.getBoundingClientRect();
         return box.left - 1 <= shown.left && box.top - 1 <= shown.top && box.right + 1 >= shown.right && box.bottom + 1 >= shown.bottom;
@@ -128,20 +174,36 @@ const SELECTOR_ENGINES = {
   [MOVING]: `({
     queryAll(root) {
       const looksOnly = /^(opacity|color|background|boxShadow|textShadow|outline|border\\w*(Color|Radius)|fill|stroke|filter|visibility|caretColor|accentColor|textDecorationColor|columnRuleColor)/;
-      const movesOnlyItself = /^(transform|translate|rotate|scale|offset(Path|Distance|Rotate|Anchor|Position))$/;
+      const movesOnlyItself = /^(transform|translate|rotate|scale|offset(Path|Distance|Rotate|Anchor|Position)|top|right|bottom|left|inset\\w*)$/;
       const keyframeFields = new Set(["offset", "computedOffset", "easing", "composite"]);
       const up = (el) => el.parentElement ?? el.parentNode?.host;
-      const drawsText = (target) => target === root || (target?.textContent ?? "").trim() !== "";
-      for (let el = root; el; el = up(el)) {
-        for (const animation of el.getAnimations({ subtree: true }).filter((a) => el === root || a.effect?.target === el)) {
-          if (animation.playState !== "running" || !(animation.timeline instanceof DocumentTimeline) || animation.effect?.getComputedTiming?.().progress == null) continue;
-          const properties = (animation.effect?.getKeyframes?.() ?? []).flatMap((frame) => Object.keys(frame)).filter((key) => !keyframeFields.has(key));
+      const layoutUp = (node) => node.assignedSlot ?? up(node);
+      const textOf = ${TEXT_OF};
+      const shadowRootsUnder = ${SHADOW_ROOTS_UNDER};
+      const hasText = (node) => textOf(node).trim() !== "";
+      const drawsText = (target) =>
+        target === root || (!!target && (hasText(target) || [target, ...target.querySelectorAll("slot")].some((slot) => slot.localName === "slot" && slot.assignedNodes({ flatten: true }).some(hasText))));
+      const running = (animation) => animation.playState === "running" && animation.timeline instanceof DocumentTimeline && animation.effect?.getComputedTiming?.().progress != null;
+      const propertiesOf = (animation) => (animation.effect?.getKeyframes?.() ?? []).flatMap((frame) => Object.keys(frame)).filter((key) => !keyframeFields.has(key));
+      for (let el = root; el; el = layoutUp(el)) {
+        const animations = el === root ? [...el.getAnimations({ subtree: true }), ...shadowRootsUnder(el).flatMap((shadow) => shadow.getAnimations())] : el.getAnimations({ subtree: true }).filter((a) => a.effect?.target === el);
+        for (const animation of animations) {
           const drawnOnly = animation.effect?.pseudoElement || (el === root && !drawsText(animation.effect?.target));
-          const moves = drawnOnly ? (key) => !looksOnly.test(key) && !movesOnlyItself.test(key) : (key) => !looksOnly.test(key);
-          if (properties.some(moves)) return [root];
+          if (!drawnOnly && running(animation) && propertiesOf(animation).some((key) => !looksOnly.test(key))) return [root];
         }
       }
-      return [];
+      const relayouts = (key) => !looksOnly.test(key) && !movesOnlyItself.test(key);
+      const around = new Set();
+      for (let el = root; el; el = layoutUp(el)) around.add(el);
+      const outOfFlow = (el, pseudo) => /^(absolute|fixed)$/.test(getComputedStyle(el, pseudo).position);
+      const canPush = (animation) => {
+        const target = animation.effect?.target;
+        if (!target || (animation.effect.pseudoElement && outOfFlow(target, animation.effect.pseudoElement))) return false;
+        for (let el = target; el && !around.has(el); el = layoutUp(el)) if (outOfFlow(el)) return false;
+        return true;
+      };
+      const everywhere = [...document.getAnimations(), ...shadowRootsUnder(document).flatMap((shadow) => shadow.getAnimations())];
+      return everywhere.some((animation) => running(animation) && propertiesOf(animation).some(relayouts) && canPush(animation)) ? [root] : [];
     },
   })`,
 };
@@ -155,6 +217,18 @@ const registerEngines = () =>
     ),
   ));
 const escapedForRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+type DomNode = { nodeType: number; nodeName: string; nodeValue: string; attributes?: string[]; children?: DomNode[]; shadowRoots?: DomNode[]; shadowRootType?: string; contentDocument?: DomNode };
+const composedChildrenOf = (node: DomNode) => [...(node.children ?? []), ...(node.shadowRoots ?? [])];
+const composedTextOf = (node: DomNode): string =>
+  node.nodeType === 3 ? node.nodeValue : /^(SCRIPT|NOSCRIPT|STYLE)$/i.test(node.nodeName) ? "" : composedChildrenOf(node).map(composedTextOf).join("");
+const composedNodesOf = (node: DomNode): DomNode[] => [node, ...composedChildrenOf(node).flatMap(composedNodesOf)];
+const isPasswordField = (node: DomNode) =>
+  node.nodeName.toUpperCase() === "INPUT" && (node.attributes ?? []).some((name, i, all) => i % 2 === 0 && name.toLowerCase() === "type" && all[i + 1]?.toLowerCase() === "password");
+function closedRootHides(node: DomNode, secrets: RegExp | null): boolean {
+  const closed = (node.shadowRoots ?? []).filter((shadow) => shadow.shadowRootType === "closed");
+  if (closed.flatMap(composedNodesOf).some(isPasswordField) || (secrets !== null && closed.length > 0 && secrets.test(composedTextOf(node)))) return true;
+  return [...composedChildrenOf(node), ...(node.contentDocument ? [node.contentDocument] : [])].some((child) => closedRootHides(child, secrets));
+}
 function fieldStateOf(el: any, mark: string) {
   return {
     marked: !!el && (el.hasAttribute?.(mark) || (el instanceof HTMLInputElement && el.type.toLowerCase() === "password")),
@@ -389,24 +463,55 @@ export async function openBrowser(opts: {
     const secretsIn = (frame: Frame, secrets: RegExp | null) => {
       const passwords = frame.locator(`input[type=password i], [${SECRET_MARK}]`);
       if (!secrets) return { passwords, text: null, fields: null };
-      return { passwords, text: frame.getByText(secrets), fields: frame.locator(`${SECRET_FIELDS}=${Buffer.from(secrets.source).toString("base64")}`) };
+      const encoded = Buffer.from(secrets.source).toString("base64");
+      return { passwords, text: frame.getByText(secrets).or(frame.locator(`${SHADOW_TEXT}=${encoded}`)), fields: frame.locator(`${SECRET_FIELDS}=${encoded}`) };
     };
     const masksIn = (frame: Frame, secrets: RegExp | null) => {
       const { passwords, text, fields } = secretsIn(frame, secrets);
       return text && fields ? [passwords, text.locator(`${LINE_AROUND}=line`), fields] : [passwords];
     };
     const anyIn = async (locators: Locator[]) => (await Promise.all(locators.map((l) => l.count()))).some((n) => n > 0);
+    const frameMovedAround = async (frame: Frame) => {
+      for (let child = frame, parent = frame.parentFrame(); parent; child = parent, parent = parent.parentFrame()) {
+        const owner = await child.frameElement();
+        try {
+          const moving = await owner.$(`${MOVING}=1`);
+          await moving?.dispose();
+          if (moving) return true;
+        } finally {
+          await owner.dispose();
+        }
+      }
+      return false;
+    };
+    const hiddenInClosedRoot = async (page: Page, secrets: RegExp | null) => {
+      for (const target of [page, ...page.frames().filter((frame) => frame !== page.mainFrame())]) {
+        const session = target === page ? await context.newCDPSession(page) : await context.newCDPSession(target).catch(() => null);
+        if (!session) continue;
+        try {
+          const { root } = (await session.send("DOM.getDocument", { depth: -1, pierce: true })) as { root: DomNode };
+          if (closedRootHides(root, secrets)) return true;
+        } finally {
+          await session.detach().catch(() => undefined);
+        }
+      }
+      return false;
+    };
     const capture = async (page: Page): Promise<Screenshot | null> => {
       const frames = page.frames();
-      const { mask, placed, uncovered, moving } = await inTime(async () => {
+      const { mask, placed, uncovered, moving, hidden } = await inTime(async () => {
         const secrets = await secretsOnPage();
         const mask = frames.flatMap((frame) => masksIn(frame, secrets));
         const shown = frames.map((frame) => secretsIn(frame, secrets));
+        const bearing = shown.map(({ passwords, text, fields }) => [passwords, text, fields].filter((l): l is Locator => l !== null));
         const uncovered = await anyIn(shown.flatMap(({ text }) => (text ? [text.locator(`${LINE_AROUND}=uncovered`)] : [])));
-        const moving = await anyIn(shown.flatMap(({ passwords, text, fields }) => [passwords, text, fields].flatMap((l) => (l ? [l.locator(`${MOVING}=1`)] : []))));
-        return { mask, placed: await steadyBoxesOf(mask), uncovered, moving };
+        const moving =
+          (await anyIn(bearing.flat().map((l) => l.locator(`${MOVING}=1`)))) ||
+          (await Promise.all(frames.map(async (frame, i) => frame.parentFrame() !== null && (await anyIn(bearing[i]!)) && (await frameMovedAround(frame))))).some(Boolean);
+        const hidden = await hiddenInClosedRoot(page, secrets);
+        return { mask, placed: await steadyBoxesOf(mask), uncovered, moving, hidden };
       });
-      if (uncovered || moving || placed === null) return null;
+      if (uncovered || moving || hidden || placed === null) return null;
       const bytes = await page.screenshot({ type: "png", mask, maskColor: MASK_COLOR, caret: "hide", scale: "css", timeout: SCREENSHOT_MS });
       const unmoved = (await inTime(() => boxesOf(mask))) === placed;
       const sameFrames = page.frames().length === frames.length && page.frames().every((frame, i) => frame === frames[i]);
