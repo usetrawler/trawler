@@ -17,6 +17,7 @@ const ENV = {
   GITHUB_CLIENT_SECRET: "g".repeat(40),
   GOOGLE_CLIENT_SECRET: "o".repeat(40),
   TRAWLER_ARTIFACTS_SECRET_ACCESS_KEY: "k".repeat(40),
+  NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: "YWN0aW9ucy1rZXktZm9yLXRlc3RzLTMyLWJ5dGVzISE=",
 };
 
 let lines: string[];
