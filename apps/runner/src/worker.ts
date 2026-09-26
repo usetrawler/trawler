@@ -1,6 +1,6 @@
 import type { LanguageModel } from "ai";
 import { z } from "zod";
-import { Budget, judge, MIN_SECRET_LENGTH, runReplay, runRoleSession, SecretScrubber, type Browser } from "@usetrawler/core";
+import { Budget, judge, MIN_SECRET_LENGTH, runReplay, runRoleSession, SecretScrubber, type Browser, type Screenshot } from "@usetrawler/core";
 import {
   JobAssignmentSchema, MAX_EVENTS_PER_BATCH, MAX_URL, PROTOCOL_HEADER, PROTOCOL_VERSION,
   type JobAssignment, type JobCompletion, type JobStopReason, type JobUsage, type ProjectConfig, type RunEvent, type RunEventInput,
@@ -27,16 +27,21 @@ export interface WorkerDeps {
   retryBaseMs?: number;
   attempts?: number;
   claimRetryMs?: number;
+  uploadWaitMs?: number;
   secrets?: string[];
 }
 
 const CLOSE_TIMEOUT_MS = 10_000;
+const UPLOAD_ATTEMPTS = 3;
+const UPLOAD_TIMEOUT_MS = 20_000;
+const UPLOAD_WAIT_MS = 30_000;
 const MAX_ERROR = 2000;
 const MAX_BATCH_BYTES = 1_500_000;
 
 const clip = (s: string) => Array.from(s).slice(0, MAX_ERROR).join("");
 
 class Unauthorized extends Error {}
+class Refused extends Error {}
 
 function pause(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -142,6 +147,46 @@ class JobEvents {
   }
 }
 
+class Screenshots {
+  #pending: Promise<void>[] = [];
+
+  constructor(private deps: WorkerDeps, private job: JobAssignment, private warn: (line: string) => void) {}
+
+  keep = (findingId: string, shot: Screenshot) => {
+    this.#pending.push(this.#upload(findingId, shot).catch((err: unknown) => this.warn(`the screenshot of ${findingId} could not be uploaded: ${err instanceof Error ? err.message : String(err)}`)));
+  };
+
+  async #upload(findingId: string, shot: Screenshot): Promise<void> {
+    const url = new URL(`/api/jobs/${this.job.jobId}/artifacts?${new URLSearchParams({ kind: "screenshot", finding: findingId })}`, this.deps.controlPlane);
+    let last: unknown;
+    for (let i = 0; i < UPLOAD_ATTEMPTS; i++) {
+      try {
+        const res = await (this.deps.fetch ?? fetch)(url, {
+          method: "POST",
+          headers: { "content-type": shot.contentType, authorization: `Bearer ${this.job.token}`, [PROTOCOL_HEADER]: String(PROTOCOL_VERSION) },
+          body: shot.bytes,
+          signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+        });
+        if (res.ok) return;
+        const failure = `HTTP ${res.status} ${(await res.text()).slice(0, 300)}`;
+        if (res.status < 500 && res.status !== 429) throw new Refused(failure);
+        last = new Error(failure);
+      } catch (err) {
+        if (err instanceof Refused) throw err;
+        last = err;
+      }
+      if (i < UPLOAD_ATTEMPTS - 1) await pause((this.deps.retryBaseMs ?? 500) * 2 ** i);
+    }
+    throw last instanceof Error ? last : new Error(String(last));
+  }
+
+  async settled(): Promise<void> {
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([Promise.all(this.#pending), new Promise((r) => (timer = setTimeout(r, this.deps.uploadWaitMs ?? UPLOAD_WAIT_MS)))]);
+    clearTimeout(timer);
+  }
+}
+
 const zeroUsage = (model: string): JobUsage => ({ model, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 });
 
 async function withBrowser<T>(deps: WorkerDeps, config: ProjectConfig, scrubber: SecretScrubber, events: JobEvents, jobId: string, fn: (b: Browser) => Promise<T>): Promise<T> {
@@ -155,7 +200,7 @@ async function withBrowser<T>(deps: WorkerDeps, config: ProjectConfig, scrubber:
   }
 }
 
-async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budget: Budget, scrubber: SecretScrubber): Promise<JobCompletion> {
+async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budget: Budget, scrubber: SecretScrubber, screenshots: Screenshots): Promise<JobCompletion> {
   const { config } = job;
   if (job.kind === "role_session") {
     const persona = config.personas.find((p) => p.id === job.personaKey);
@@ -165,6 +210,7 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
       runRoleSession({
         model: deps.model(job.agentModel, job.token), modelId: job.agentModel, persona, project: config, browserTools: b.tools, fillField: b.fillField,
         scrubber, budget, maxSteps: job.maxSteps, emit: events.emit, newFindingId: () => `f${++n}`,
+        screenshot: () => b.screenshot(), keepScreenshot: screenshots.keep,
       }),
     );
     return { usage, stoppedBy: result.stoppedBy, ...(result.error ? { error: clip(result.error) } : {}) };
@@ -176,6 +222,7 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
       runReplay({
         model: deps.model(job.agentModel, job.token), modelId: job.agentModel, finding, project: config, accountRef: job.accountRef,
         browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: job.maxSteps, emit: events.emit,
+        screenshot: () => b.screenshot(), keepScreenshot: screenshots.keep,
       }),
     );
     return { usage, stoppedBy: events.finished?.stoppedBy ?? "error", observation, ...(events.finished?.error ? { error: clip(events.finished.error) } : {}) };
@@ -253,9 +300,10 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
     budget.add(budget.limitUsd);
   };
   signal?.addEventListener("abort", handOver, { once: true });
+  const screenshots = new Screenshots(deps, job, warn);
   let completion: JobCompletion;
   try {
-    completion = await run(deps, job, events, budget, scrubber);
+    completion = await run(deps, job, events, budget, scrubber, screenshots);
     if (events.cancelled && completion.stoppedBy !== "error") completion = { ...completion, stoppedBy: "budget" };
   } catch (err) {
     completion = { usage: zeroUsage(job.agentModel), stoppedBy: "error", error: clip(scrubber.scrub(err instanceof Error ? err.message : String(err))) };
@@ -268,6 +316,7 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
     else fail(`${job.kind} ${job.jobId} could not be handed back; it will be retried when its lease expires`);
     return "done";
   }
+  await screenshots.settled();
   events.stop();
   await events.flush();
   if (events.failure) {

@@ -83,7 +83,7 @@ async function focusIsOnSecretIn(frame: Frame, filled: ElementHandle[], holdsSec
 }
 
 export interface Screenshot {
-  bytes: Uint8Array;
+  bytes: Uint8Array<ArrayBuffer>;
   contentType: "image/png";
 }
 
