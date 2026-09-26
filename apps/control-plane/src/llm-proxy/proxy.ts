@@ -133,9 +133,14 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
   } catch {
     return failure(502, "the provider sent an unreadable answer");
   }
+  if (!parsed || typeof parsed !== "object") return failure(502, "the provider sent an unreadable answer");
   if (!upstream.ok || parsed.error) {
     const explanation = parsed.error?.message;
-    const message = typeof explanation === "string" && explanation.length <= LONGEST_EXPLANATION_READ ? scrubberWith([stored.key]).scrub(explanation).slice(0, 300) : `the provider answered ${upstream.status}`;
+    const message = typeof explanation !== "string"
+      ? `the provider answered ${upstream.status}`
+      : explanation.length > LONGEST_EXPLANATION_READ
+        ? `the provider answered ${upstream.status}; its explanation was too long to show`
+        : scrubberWith([stored.key]).scrub(explanation).slice(0, 300);
     return failure(upstream.ok ? 502 : upstream.status, message);
   }
   const usage = parsed.usage ?? {};

@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { sql } from "kysely";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { ProjectConfigSchema } from "@usetrawler/protocol";
 import { createModel } from "@usetrawler/core";
 import { tool } from "ai";
@@ -16,7 +16,13 @@ import { handleChatCompletions } from "../llm-proxy/proxy.ts";
 import { createProject } from "../projects/projects.ts";
 import { runView } from "../runs/report.ts";
 import { runSummary, startRun } from "../runs/runs.ts";
+import { scrubberWith } from "../server/log.ts";
 import { handleClaim, handleComplete, handleEvents, handleRelease, type RunnerApiDeps } from "./handlers.ts";
+
+vi.mock("../server/log.ts", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../server/log.ts")>();
+  return { ...real, scrubberWith: vi.fn(real.scrubberWith) };
+});
 
 const t = await testDb();
 afterAll(() => t.drop());
@@ -253,9 +259,18 @@ test("the proxy bounds a call by what is left of the cap, prices calls OpenRoute
 
   const longest = `${ORG_KEY} ${"x".repeat(4_000 - ORG_KEY.length - 1)}`;
   replies = [upstreamError(400, longest)];
+  vi.mocked(scrubberWith).mockClear();
   expect(await (await call()).json()).toEqual({ error: { code: 400, message: `••• ${"x".repeat(296)}` } });
+  expect(scrubberWith).toHaveBeenCalledTimes(1);
   replies = [upstreamError(400, `${longest}x`)];
-  expect(await (await call()).json()).toEqual({ error: { code: 400, message: "the provider answered 400" } });
+  vi.mocked(scrubberWith).mockClear();
+  expect(await (await call()).json()).toEqual({ error: { code: 400, message: "the provider answered 400; its explanation was too long to show" } });
+  expect(scrubberWith).not.toHaveBeenCalled();
+
+  for (const status of [200, 400]) {
+    replies = [{ status, body: null }];
+    expect(await (await call()).json()).toEqual({ error: { code: 502, message: "the provider sent an unreadable answer" } });
+  }
 
   replies = [{ ...textReply("slow"), delayMs: 300 }];
   const first = call();
