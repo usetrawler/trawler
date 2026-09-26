@@ -18,11 +18,11 @@ const account = (html: string) => html.match(/<\/nav><section aria-label="Accoun
 const marked = (html: string) => nav(html).match(/<a [^>]*aria-current="[^"]*"[^>]*>(?:(?!<\/a>).)*<\/a>/g) ?? [];
 
 describe("AppShell", () => {
-  it("leads home from the brand, and to the overview, all runs, each project and a new project from the nav", () => {
+  it("leads home from the brand, and to the overview, all runs, each project, a new project and the settings from the nav", () => {
     const html = render();
     expect(link(html, "trawler")).toContain('href="/"');
     const items = [...nav(html).matchAll(/<a href="([^"]*)"[^>]*>(?:(?!<\/a>).)*?<span class="min-w-0" title="[^"]*"><span class="block truncate">([^<]*)/g)].map((m) => [m[1], m[2]]);
-    expect(items).toEqual([["/", "Overview"], ["/runs", "All runs"], ["/projects/p1", "Acme Invoices"], ["/projects/p2", "Globex Store"], ["/new", "New project"]]);
+    expect(items).toEqual([["/", "Overview"], ["/runs", "All runs"], ["/projects/p1", "Acme Invoices"], ["/projects/p2", "Globex Store"], ["/new", "New project"], ["/settings", "Settings"]]);
     expect(html).not.toContain("aria-current");
   });
 
@@ -36,6 +36,7 @@ describe("AppShell", () => {
     expect(html).toContain('title="Acme Invoices · app.acme.test"><span class="block truncate">Acme Invoices</span><span class="block truncate text-[10px] text-muted">app.acme.test</span></span>');
     expect(html).toMatch(/<ul aria-labelledby="nav-projects".*href="\/new".*<\/ul>/);
     expect(html).not.toMatch(/<ul aria-labelledby="nav-projects".*href="\/runs".*<\/ul>/);
+    expect(html).not.toMatch(/<ul aria-labelledby="nav-projects"(?:(?!<\/ul>).)*href="\/settings"/);
   });
 
   it("marks only the page the person is on, with a bar on its edge as well as colour", () => {
@@ -44,6 +45,7 @@ describe("AppShell", () => {
     expect(only({ current: "runs" })).toEqual([expect.stringContaining('href="/runs"')]);
     expect(only({ current: { project: "p2" } })).toEqual([expect.stringContaining('href="/projects/p2"')]);
     expect(only({ current: "new" })).toEqual([expect.stringContaining('href="/new"')]);
+    expect(only({ current: "settings" })).toEqual([expect.stringContaining('href="/settings"')]);
     expect(only({ current: { project: "gone" } })).toEqual([]);
     expect(only({ current: "runs" })[0]).toContain('aria-current="page"');
     expect(only({ current: "runs" })[0]).toMatch(/class="[^"]*\bshadow-\[inset_2px_0_var\(--action\)\]/);

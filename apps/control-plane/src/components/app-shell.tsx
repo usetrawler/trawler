@@ -5,7 +5,7 @@ import { DocsLink } from "./docs-link.tsx";
 import { SignOutButton } from "./sign-out-button.tsx";
 import { ThemeToggle } from "./theme-toggle.tsx";
 
-export type ShellPage = "overview" | "runs" | "new" | { project: string };
+export type ShellPage = "overview" | "runs" | "new" | "settings" | { project: string };
 
 export function initials(text: string): string {
   const words = text.replace(/@.*$/, "").split(/[\s._-]+/).filter(Boolean).map((word) => Array.from(word));
@@ -88,6 +88,9 @@ export function AppShell({ shell, current, parent = false, wide = false, childre
             <ul aria-labelledby="nav-projects" className="flex shrink-0 gap-[3px] md:flex-col">
               {workspace.projects.map((p) => <NavItem key={p.id} href={`/projects/${p.id}`} icon="◇" label={p.name} detail={p.address} active={marked({ project: p.id })} parent={parent} />)}
               <NavItem href="/new" icon="+" label="New project" active={marked("new")} parent={parent} />
+            </ul>
+            <ul className="flex shrink-0 gap-[3px] md:mt-6 md:flex-col">
+              <NavItem href="/settings" icon="⚙" label="Settings" active={marked("settings")} parent={parent} />
             </ul>
           </nav>
           <Account user={user} />
