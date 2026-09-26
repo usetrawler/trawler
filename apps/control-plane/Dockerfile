@@ -9,7 +9,7 @@ COPY apps/runner/package.json apps/runner/
 RUN npm ci
 COPY packages packages
 COPY apps/control-plane apps/control-plane
-RUN npm run build -w @usetrawler/control-plane
+RUN --mount=type=secret,id=next_server_actions_encryption_key,env=NEXT_SERVER_ACTIONS_ENCRYPTION_KEY npm run build -w @usetrawler/control-plane
 
 FROM node:24-slim
 ARG TRAWLER_COMMIT
