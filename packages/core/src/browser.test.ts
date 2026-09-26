@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { BROWSER_TOOLS, openBrowser, type Browser } from "./browser.ts";
+import { BROWSER_TOOLS, openBrowser, type Browser, type Screenshot } from "./browser.ts";
 import { SecretScrubber } from "./secrets.ts";
 import { newSessionState, ownPasswordTool, type FillField } from "./session-tools.ts";
 
@@ -129,6 +129,10 @@ beforeAll(async () => {
         return res.end(JSON.stringify({ prefetch: [{ source: "list", urls: [`${foreignOrigin}/header-prefetch`] }] }));
       case "/neuter":
         return html(`<input aria-label="Password" type="password"><button onclick="const p=document.querySelector('input');p.type='text';p.removeAttribute('data-trawler-secret')">Show</button><button onclick="const p=document.querySelector('input');p.type='text';p.removeAttribute('data-trawler-secret');p.value=p.value.slice(0,6)+'X'+p.value.slice(6)">Tamper</button>`);
+      case "/visible-password-a":
+        return html(`<input aria-label="Password" type="password" value="short-pw-1">`);
+      case "/visible-password-b":
+        return html(`<input aria-label="Password" type="password" value="a-much-longer-password-2">`);
       case "/remount":
         return html(`<input aria-label="Password" type="password"><button onclick="const o=document.querySelector('input');const n=document.createElement('input');n.type=o.type==='password'?'text':'password';n.setAttribute('aria-label','Password');n.value=o.value;o.replaceWith(n)">Show password</button>`);
       case "/enter":
@@ -846,5 +850,77 @@ describe("context", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  }, 60_000);
+});
+
+describe("screenshots", () => {
+  const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+  async function screenshotAfter(password: string, path: string, then: (b: Browser, snap: string) => Promise<unknown>): Promise<Screenshot> {
+    const taken: { shot: Screenshot | null } = { shot: null };
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}${path}`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), password, "password")).toBe("typed the password");
+      await then(b, snap);
+      taken.shot = await b.screenshot();
+    });
+    if (!taken.shot) throw new Error("no screenshot was taken");
+    return taken.shot;
+  }
+
+  test("a password shown in plain text, in a field that replaced the password field, is masked", async () => {
+    const show = (b: Browser, snap: string) => b.tools.browser_click!.execute!({ target: refOf(snap, "Show password"), element: "show" }, ctx);
+    const first = await screenshotAfter("first-secret-1", "/remount", show);
+    const second = await screenshotAfter("other-secret-2", "/remount", show);
+    expect(first.contentType).toBe("image/png");
+    expect(Buffer.from(first.bytes).subarray(0, 8)).toEqual(PNG_SIGNATURE);
+    expect(Buffer.compare(Buffer.from(first.bytes), Buffer.from(second.bytes))).toBe(0);
+  }, 120_000);
+
+  test("a password the page repeats as text is masked", async () => {
+    const save = (b: Browser, snap: string) => b.tools.browser_click!.execute!({ target: refOf(snap, "Save"), element: "save" }, ctx);
+    const first = await screenshotAfter("first-secret-1", "/space-out", save);
+    const second = await screenshotAfter("other-secret-2", "/space-out", save);
+    expect(Buffer.compare(Buffer.from(first.bytes), Buffer.from(second.bytes))).toBe(0);
+  }, 120_000);
+
+  test("a password field is masked even when Trawler typed nothing into it, so not even its length shows", async () => {
+    const shotOf = async (path: string) => {
+      const taken: { shot: Screenshot | null } = { shot: null };
+      await withBrowser(async (b) => {
+        await navigate(b, `${origin}${path}`);
+        taken.shot = await b.screenshot();
+      });
+      return Buffer.from(taken.shot?.bytes ?? []);
+    };
+    const first = await shotOf("/visible-password-a");
+    expect(first.byteLength).toBeGreaterThan(0);
+    expect(Buffer.compare(first, await shotOf("/visible-password-b"))).toBe(0);
+  }, 120_000);
+
+  test("a page not opened yet, or one waiting on a dialog, gives no screenshot rather than hanging", async () => {
+    await withBrowser(async (b) => {
+      expect(await b.screenshot()).toBeNull();
+      await snapshot(b);
+      expect(await b.screenshot()).toBeNull();
+      await navigate(b, `${origin}/dialog`);
+      const snap = await snapshot(b);
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Delete"), element: "delete" }, ctx);
+      const started = Date.now();
+      expect(await b.screenshot()).toBeNull();
+      expect(Date.now() - started).toBeLessThan(1_000);
+      await b.tools.browser_handle_dialog!.execute!({ accept: false }, ctx);
+    });
+  }, 60_000);
+
+  test("an ordinary page gives a PNG of what is on screen", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/two`);
+      const shot = await b.screenshot();
+      expect(shot?.contentType).toBe("image/png");
+      expect(Buffer.from(shot!.bytes).subarray(0, 8)).toEqual(PNG_SIGNATURE);
+      expect(shot!.bytes.byteLength).toBeGreaterThan(1_000);
+    });
   }, 60_000);
 });

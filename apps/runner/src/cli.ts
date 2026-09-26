@@ -141,7 +141,7 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
       const removeOutput = () => rmSync(outputDir, { recursive: true, force: true });
       try {
         const browser = await deps.openBrowser({ project, outputDir, headless: true, onBlocked, scrubber, survivesSignals: true });
-        return { tools: browser.tools, fillField: (ref, text, kind) => browser.fillField(ref, text, kind), close: () => browser.close().finally(removeOutput) };
+        return { tools: browser.tools, fillField: (ref, text, kind) => browser.fillField(ref, text, kind), screenshot: () => browser.screenshot(), close: () => browser.close().finally(removeOutput) };
       } catch (err) {
         removeOutput();
         throw err;

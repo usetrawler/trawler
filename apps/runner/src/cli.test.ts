@@ -16,7 +16,7 @@ function deps(over: Partial<CliDeps> = {}) {
     err: (l) => err.push(l),
     model: () => scriptedModel([]),
     fetchText: async () => "<h1>Acme</h1>",
-    openBrowser: async () => ({ tools: {}, fillField: async () => "typed", close: async () => {} }),
+    openBrowser: async () => ({ tools: {}, fillField: async () => "typed", screenshot: async () => null, close: async () => {} }),
     runsRoot: mkdtempSync(join(tmpdir(), "runs-")),
     ...over,
   };
@@ -124,7 +124,7 @@ test("run passes --judge-model, --headed and the budget through", async () => {
   const agent = scriptedModel([toolCall("goal_status", { goal: "g", status: "reached", note: "" }), toolCall("finish", { summary: "done" })]);
   const run = deps({
     model: (id) => (models.push(id), agent),
-    openBrowser: async (o) => (headless.push(o.headless), { tools: {}, fillField: async () => "typed", close: async () => {} }),
+    openBrowser: async (o) => (headless.push(o.headless), { tools: {}, fillField: async () => "typed", screenshot: async () => null, close: async () => {} }),
   });
   expect(await runCli(["run", "--config", join(dir, "p.yaml"), "--model", "m/a", "--judge-model", "m/j", "--headed"], run.d)).toBe(0);
   expect(models).toEqual(["m/a", "m/j"]);

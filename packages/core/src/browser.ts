@@ -4,6 +4,7 @@ import { createConnection } from "@playwright/mcp";
 import { chromium, type ElementHandle, type Frame, type Route } from "playwright";
 import { jsonSchema, type Tool, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
+import { MAX_ARTIFACT_BYTES } from "@usetrawler/protocol";
 import { MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
 import type { FieldKind } from "./session-tools.ts";
 
@@ -37,6 +38,8 @@ const MAX_HELD_FIELDS = 20;
 const KEYS_SAFE_ON_SECRETS = new Set(["Enter", "Tab", "Shift+Tab", "Escape"]);
 const FOCUS_CHECK_MS = 2000;
 const HANDLE_READ_MS = 500;
+const SCREENSHOT_MS = 5000;
+const EDITABLE = "input, textarea, [contenteditable]";
 function fieldStateOf(el: any, mark: string) {
   return {
     marked: !!el && (el.hasAttribute?.(mark) || (el instanceof HTMLInputElement && el.type.toLowerCase() === "password")),
@@ -79,9 +82,15 @@ async function focusIsOnSecretIn(frame: Frame, filled: ElementHandle[], holdsSec
   return false;
 }
 
+export interface Screenshot {
+  bytes: Uint8Array;
+  contentType: "image/png";
+}
+
 export interface Browser {
   tools: ToolSet;
   fillField(ref: string, text: string, kind: FieldKind): Promise<string>;
+  screenshot(): Promise<Screenshot | null>;
   close(): Promise<void>;
 }
 
@@ -251,6 +260,20 @@ export async function openBrowser(opts: {
       if (verdict !== "slow") return verdict;
       return !dialogOpen;
     };
+    const markFieldsHoldingSecrets = async (frame: Frame) => {
+      const fields = frame.locator(EDITABLE);
+      const values = await fields.evaluateAll((els: any[]) => els.map((el) => (el.isContentEditable ? String(el.textContent ?? "") : typeof el.value === "string" ? el.value : "")));
+      const holders = values.flatMap((value, i) => (holdsSecret(value) ? [i] : []));
+      if (holders.length > 0) await fields.evaluateAll((els: Element[], { mark, holders }: { mark: string; holders: number[] }) => holders.forEach((i) => els[i]?.setAttribute(mark, "shown")), { mark: SECRET_MARK, holders });
+    };
+    const masksFor = async (frames: Frame[]) => {
+      const masks = [];
+      for (const frame of frames) {
+        await within(markFieldsHoldingSecrets(frame).catch(() => undefined), HANDLE_READ_MS, undefined);
+        masks.push(frame.locator(`input[type=password i], [${SECRET_MARK}]`), ...[...typedSecrets].map((secret) => frame.getByText(secret)));
+      }
+      return masks;
+    };
     const findMarked = async (mark: string) => {
       for (const page of context.pages()) {
         for (const frame of page.frames()) {
@@ -343,6 +366,16 @@ export async function openBrowser(opts: {
         }
         if (out?.isError) return `failed: ${opts.scrubber.scrub(textOf(out))}`;
         return kind === "password" ? "typed the password" : "typed the username";
+      },
+      async screenshot() {
+        const page = context.pages()[0];
+        if (!page || disconnected || dialogOpen || page.url() === "about:blank") return null;
+        const shoot = async (): Promise<Screenshot | null> => {
+          const mask = await masksFor(page.frames());
+          const bytes = await page.screenshot({ type: "png", mask, animations: "disabled", caret: "hide", scale: "css", timeout: SCREENSHOT_MS });
+          return bytes.byteLength <= MAX_ARTIFACT_BYTES ? { bytes: new Uint8Array(bytes), contentType: "image/png" } : null;
+        };
+        return within(shoot().catch(() => null), 2 * SCREENSHOT_MS, null);
       },
       async close() {
         try {

@@ -88,7 +88,7 @@ afterAll(() => new Promise<void>((r) => server.close(() => openRouter.close(() =
 const worker = () => ({
   controlPlane: base, runnerToken, log: () => {}, flushMs: 5, retryBaseMs: 5,
   model: (modelId: string, jobToken: string) => createModel({ modelId, apiKey: jobToken, baseURL: `${base}/api/llm/v1` }),
-  openBrowser: async () => ({ tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => "the invoice form" }) }, fillField: async () => "typed", close: async () => {} }),
+  openBrowser: async () => ({ tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => "the invoice form" }) }, fillField: async () => "typed", screenshot: async () => null, close: async () => {} }),
 });
 
 test("a run goes from start to a confirmed defect through the real runner API and worker", async () => {

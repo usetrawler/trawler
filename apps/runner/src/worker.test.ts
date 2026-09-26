@@ -52,7 +52,7 @@ function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; failEvents
   return new Promise<{ url: string; seen: typeof seen }>((resolve) => server!.listen(0, "127.0.0.1", () => resolve({ url: `http://127.0.0.1:${(server!.address() as { port: number }).port}`, seen })));
 }
 
-const browser = async () => ({ tools: {}, fillField: async () => "typed", close: async () => {} });
+const browser = async () => ({ tools: {}, fillField: async () => "typed", screenshot: async () => null, close: async () => {} });
 
 function deps(url: string, model: ReturnType<typeof scriptedModel>, over: Partial<WorkerDeps> = {}): WorkerDeps {
   return { controlPlane: url, runnerToken: "runner-" + "r".repeat(40), model: () => model, openBrowser: browser, log: () => {}, flushMs: 20, retryBaseMs: 10, ...over };

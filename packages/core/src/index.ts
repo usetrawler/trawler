@@ -2,7 +2,7 @@ export { Budget, createModel, stepCost, tallyStep } from "./llm.ts";
 export { pruneMessages } from "./context.ts";
 export { MIN_SECRET_LENGTH, scrubConsole, SecretScrubber } from "./secrets.ts";
 export { newSessionState, sessionTools, type FieldKind, type FillField, type SessionState, type SessionTools } from "./session-tools.ts";
-export { BROWSER_TOOLS, openBrowser, type Browser } from "./browser.ts";
+export { BROWSER_TOOLS, openBrowser, type Browser, type Screenshot } from "./browser.ts";
 export { runRoleSession } from "./role-session.ts";
 export { judgePrompt, replayPrompt, rolePrompt, sessionStatus, setupPrompt } from "./prompts.ts";
 export { judge, runReplay } from "./replay.ts";
