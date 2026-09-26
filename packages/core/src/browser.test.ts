@@ -255,6 +255,8 @@ beforeAll(async () => {
         return html(`<style>@keyframes spin{to{transform:rotate(360deg)}} .icon{display:inline-block;width:12px;height:12px;border:2px solid #333;border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite}</style><p style="font:20px monospace;color:#ff0000">Key: card-secret-1111 <span class="icon"></span></p><p>Plan: Team</p>`);
       case "/shadow-split":
         return html(`<split-key style="visibility:hidden;font:20px monospace;color:#ff0000">card-sec</split-key><p>Plan: Team</p><script>customElements.define("split-key", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<slot></slot><span style="visibility:visible">ret-1111</span>'; } });</script>`);
+      case "/shadow-split-nested":
+        return html(`<div style="visibility:hidden;font:20px monospace;color:#ff0000">card-sec<split-tail></split-tail> and more</div><p>Plan: Team</p><script>customElements.define("split-tail", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<span style="visibility:visible">ret-1111</span>'; } });</script>`);
       case "/pusher":
         return html(`<style>@keyframes push{from{height:0}to{height:160px}} .pusher{display:inline-block;width:4px;animation:push 20s steps(2) infinite}</style><p style="font:20px monospace;color:#ff0000"><span class="pusher"></span>card-secret-1111</p>`);
       case "/big-icon":
@@ -1343,6 +1345,7 @@ describe("screenshots", () => {
     ["/slot-fallback", "is a component slot's fallback"],
     ["/hidden-parent-split", "is partly in a hidden element and partly in a visible child"],
     ["/shadow-split", "is partly in a hidden element and partly in a visible child of its shadow root"],
+    ["/shadow-split-nested", "is partly in a hidden element and partly in a visible part of a component inside it"],
   ])("a secret whose text %s is masked where it is drawn (%s)", async (path) => {
     const [shot] = await shotsOf(path, 1, async () => undefined, knowing(path === "/overflow-edge" ? "card-secret-11112" : "card-secret-1111"));
     expect(shot).not.toBeNull();
