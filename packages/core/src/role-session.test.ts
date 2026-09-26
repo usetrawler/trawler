@@ -312,12 +312,12 @@ describe("runRoleSession", () => {
   });
 
   test("a model call the proxy refuses for the key ends the session with the proxy's reason", async () => {
-    const model = scriptedModel([look, proxyRefusal("the provider refused the workspace key; replace it on the plan page")]);
+    const model = scriptedModel([look, proxyRefusal("the provider refused the workspace key; an owner or admin can replace it in Settings")]);
     const { promise, events } = run(model);
     const { result, usage } = await promise;
-    expect(result).toMatchObject({ stoppedBy: "error", error: "the provider refused the workspace key; replace it on the plan page" });
+    expect(result).toMatchObject({ stoppedBy: "error", error: "the provider refused the workspace key; an owner or admin can replace it in Settings" });
     expect(usage.steps).toBe(1);
-    expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "error", error: "the provider refused the workspace key; replace it on the plan page" });
+    expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "error", error: "the provider refused the workspace key; an owner or admin can replace it in Settings" });
   });
 
   test("a model call the proxy refuses because the run stopped the job ends the session as stopped by the budget", async () => {
@@ -340,9 +340,9 @@ describe("runRoleSession", () => {
 
   test("a key refused on a retried model call ends the session with the proxy's reason, not the retry's wording", async () => {
     const busy = new APICallError({ message: "one model call at a time per job", url: "https://cp.test/api/llm/v1/chat/completions", requestBodyValues: {}, statusCode: 429, responseHeaders: { "retry-after-ms": "1" } });
-    const model = scriptedModel([look, busy, proxyRefusal("the provider refused the workspace key; replace it on the plan page")]);
+    const model = scriptedModel([look, busy, proxyRefusal("the provider refused the workspace key; an owner or admin can replace it in Settings")]);
     const { result } = await run(model).promise;
-    expect(result).toMatchObject({ stoppedBy: "error", error: "the provider refused the workspace key; replace it on the plan page" });
+    expect(result).toMatchObject({ stoppedBy: "error", error: "the provider refused the workspace key; an owner or admin can replace it in Settings" });
   });
 
   test("a person without an account is told to sign up with an example.com address and type_own_password, and never sees the password, even when the page shows it", async () => {

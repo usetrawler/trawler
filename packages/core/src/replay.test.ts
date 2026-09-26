@@ -391,9 +391,9 @@ describe("judge", () => {
 
   test("a key refused on a retried call ends the judge with the proxy's reason, not the retry's wording", async () => {
     const busy = new APICallError({ message: "one model call at a time per job", url: "https://cp.test/api/llm/v1/chat/completions", requestBodyValues: {}, statusCode: 429, responseHeaders: { "retry-after-ms": "1" } });
-    const { promise, events } = judgeWith(scriptedModel([busy, proxyRefusal("the provider refused the workspace key; replace it on the plan page")]));
-    expect((await promise).error).toBe("the provider refused the workspace key; replace it on the plan page");
-    expect(events.at(-1)).toMatchObject({ stoppedBy: "error", error: "the provider refused the workspace key; replace it on the plan page" });
+    const { promise, events } = judgeWith(scriptedModel([busy, proxyRefusal("the provider refused the workspace key; an owner or admin can replace it in Settings")]));
+    expect((await promise).error).toBe("the provider refused the workspace key; an owner or admin can replace it in Settings");
+    expect(events.at(-1)).toMatchObject({ stoppedBy: "error", error: "the provider refused the workspace key; an owner or admin can replace it in Settings" });
   });
 
   test("a model call the proxy refuses because the run stopped the job ends the judge as stopped by the budget, with the reason", async () => {
