@@ -209,6 +209,9 @@ beforeAll(async () => {
         return html(narrowColumn(`<div style="width:90px;overflow:clip;overflow-clip-margin:200px;white-space:nowrap;font:20px monospace;color:#ff0000">card-secret-1111 and more</div>`));
       case "/moves-when-masked":
         return html(`<p id="echo" style="font:20px monospace;color:#ff0000">card-secret-1111</p><script>new MutationObserver((records) => { if (records.some((r) => [...r.addedNodes].some((n) => n.nodeType === 1))) document.getElementById("echo").style.transform = "translateY(120px)"; }).observe(document.documentElement, { childList: true });</script>`);
+      case "/collapsed":
+      case "/collapsed-plain":
+        return html(`<p>Keys</p><div style="max-height:0;overflow:hidden"><p style="font:20px monospace;color:#ff0000">Your key is ${req.url === "/collapsed" ? "card-secret-1111" : "not-a-secret-00"}</p></div><p style="font:20px monospace;color:#0000ff">Plan: Team, billed monthly</p>`);
       case "/fixed-below":
         return html(`<p>Short page</p><div style="position:fixed;left:20px;bottom:120px;height:0;font:20px monospace;color:#ff0000">card-secret-1111</div>`);
       case "/flicker":
@@ -1289,6 +1292,11 @@ describe("screenshots", () => {
   test("text that spills out of its box blacks out only what contains it, not the rest of the page", async () => {
     const shotOf = async (at: string) => (await shotsOf(at, 1, async () => undefined, knowing("card-secret-1111")))[0]!;
     expect(Buffer.compare(Buffer.from((await shotOf("/overflowing")).bytes), Buffer.from((await shotOf("/overflowing-other")).bytes))).not.toBe(0);
+  }, 60_000);
+
+  test("a secret the page hides entirely, like one in a collapsed panel, blacks out nothing that is on screen", async () => {
+    const shotOf = async (at: string) => (await shotsOf(at, 1, async () => undefined, knowing("card-secret-1111")))[0]!;
+    expect(Buffer.compare(Buffer.from((await shotOf("/collapsed")).bytes), Buffer.from((await shotOf("/collapsed-plain")).bytes))).toBe(0);
   }, 60_000);
 
   test("a secret drawn where nothing on the page contains it gives no screenshot", async () => {

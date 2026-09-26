@@ -91,7 +91,7 @@ const SELECTOR_ENGINES = {
         if (css.position === "fixed") break;
         if (css.position === "absolute") escaping = true;
       }
-      if (shown.right <= shown.left || shown.bottom <= shown.top) return mode === "uncovered" ? [] : [root];
+      if (shown.right <= shown.left || shown.bottom <= shown.top) return [];
       const covers = (el) => {
         const box = el.getBoundingClientRect();
         return box.left - 1 <= shown.left && box.top - 1 <= shown.top && box.right + 1 >= shown.right && box.bottom + 1 >= shown.bottom;
@@ -351,8 +351,7 @@ export async function openBrowser(opts: {
     const masksIn = (frame: Frame, secrets: RegExp | null) => {
       const masks = [frame.locator(`input[type=password i], [${SECRET_MARK}]`)];
       if (!secrets) return masks;
-      const text = frame.getByText(secrets);
-      return [...masks, text, text.locator(`${LINE_AROUND}=line`), frame.locator(`${SECRET_FIELDS}=${Buffer.from(secrets.source).toString("base64")}`)];
+      return [...masks, frame.getByText(secrets).locator(`${LINE_AROUND}=line`), frame.locator(`${SECRET_FIELDS}=${Buffer.from(secrets.source).toString("base64")}`)];
     };
     const capture = async (page: Page): Promise<Screenshot | null> => {
       const frames = page.frames();
