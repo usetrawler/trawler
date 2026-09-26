@@ -19,6 +19,8 @@
     "oauth2-mock-server": "^9.2.0"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1141.0",
+    "@aws-sdk/s3-request-presigner": "^3.1141.0",
     "@sentry/nextjs": "^11.0.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@usetrawler/core": "^0.0.0",

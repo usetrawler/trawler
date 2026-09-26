@@ -16,6 +16,7 @@ const ENV = {
   TRAWLER_SMOKE_TOKEN: "s".repeat(40),
   GITHUB_CLIENT_SECRET: "g".repeat(40),
   GOOGLE_CLIENT_SECRET: "o".repeat(40),
+  TRAWLER_ARTIFACTS_SECRET_ACCESS_KEY: "k".repeat(40),
 };
 
 let lines: string[];

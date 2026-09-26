@@ -4,11 +4,13 @@ import type { Instrumentation } from "next";
 import { sharedScrubber, writeLog } from "./server/log.ts";
 import { serverSentryOptions } from "./server/sentry.ts";
 
-export function register(): void {
+export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   scrubConsole(sharedScrubber());
   const options = serverSentryOptions();
   if (options) Sentry.init(options);
+  const { startArtifactCleanup } = await import("./server/artifacts.ts");
+  startArtifactCleanup();
 }
 
 export const onRequestError: Instrumentation.onRequestError = async (err, request, context) => {

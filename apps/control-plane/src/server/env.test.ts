@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { readEnv } from "./env.ts";
+import { artifactStorage, readEnv } from "./env.ts";
 
 const base = { DATABASE_URL: "postgres://x", BETTER_AUTH_SECRET: "s".repeat(32), BETTER_AUTH_URL: "http://localhost:3000" };
 
@@ -45,4 +45,24 @@ test("a smoke token that does not look like one is refused wherever the environm
   expect(readEnv(base).smokeToken).toBeUndefined();
   expect(readEnv({ ...base, TRAWLER_SMOKE_TOKEN: ` ${"s".repeat(48)} ` }).smokeToken).toBe("s".repeat(48));
   expect(() => readEnv({ ...base, TRAWLER_SMOKE_TOKEN: "short" })).toThrow(/TRAWLER_SMOKE_TOKEN/);
+});
+
+test("artifact storage is read from its five variables together, path style only when asked, and needs https in production", () => {
+  const bucket = {
+    TRAWLER_ARTIFACTS_BUCKET: "trawler-artifacts", TRAWLER_ARTIFACTS_ENDPOINT: "https://storage.railway.app", TRAWLER_ARTIFACTS_REGION: "auto",
+    TRAWLER_ARTIFACTS_ACCESS_KEY_ID: "key-id", TRAWLER_ARTIFACTS_SECRET_ACCESS_KEY: "key-secret",
+  };
+  expect(artifactStorage(base)).toBeUndefined();
+  expect(artifactStorage({ ...base, ...bucket })).toEqual({ bucket: "trawler-artifacts", endpoint: "https://storage.railway.app", region: "auto", accessKeyId: "key-id", secretAccessKey: "key-secret", pathStyle: false });
+  expect(artifactStorage({ ...base, ...bucket, TRAWLER_ARTIFACTS_PATH_STYLE: "true" })?.pathStyle).toBe(true);
+  expect(artifactStorage({ ...base, ...bucket, TRAWLER_ARTIFACTS_PATH_STYLE: "false" })?.pathStyle).toBe(false);
+  expect(() => artifactStorage({ ...base, ...bucket, TRAWLER_ARTIFACTS_REGION: " ", TRAWLER_ARTIFACTS_SECRET_ACCESS_KEY: "" })).toThrow("artifact storage also needs TRAWLER_ARTIFACTS_REGION, TRAWLER_ARTIFACTS_SECRET_ACCESS_KEY");
+  expect(() => artifactStorage({ ...base, ...bucket, TRAWLER_ARTIFACTS_ENDPOINT: "storage.railway.app" })).toThrow(/TRAWLER_ARTIFACTS_ENDPOINT/);
+  const production = { ...base, NODE_ENV: "production", BETTER_AUTH_URL: "https://app.usetrawler.com" };
+  expect(() => artifactStorage({ ...production, ...bucket, TRAWLER_ARTIFACTS_ENDPOINT: "http://127.0.0.1:54339" })).toThrow(/https in production/);
+  expect(artifactStorage({ ...production, ...bucket })?.endpoint).toBe("https://storage.railway.app");
+});
+
+test("a half-configured bucket never stops the rest of the app from reading its environment", () => {
+  expect(readEnv({ ...base, TRAWLER_ARTIFACTS_BUCKET: "trawler-artifacts" }).databaseUrl).toBe("postgres://x");
 });
