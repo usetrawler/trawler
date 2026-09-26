@@ -145,6 +145,7 @@ test("a switch hears every change of the page's theme and of the system's, until
 
 test("the theme's script runs as the server's page is parsed, and stays inert when React renders it in the browser", () => {
   expect(mountScript()).toBe(`<script type="text/plain">${THEME_SCRIPT}</script>`);
+  expect(ThemeScript().props.suppressHydrationWarning).toBe(true);
   vi.stubGlobal("window", undefined);
   expect(mountScript()).toBe(`<script type="text/javascript">${THEME_SCRIPT}</script>`);
 });
