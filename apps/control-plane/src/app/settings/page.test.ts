@@ -10,6 +10,12 @@ const state = vi.hoisted(() => ({
   listed: [] as string[],
   people: [] as Array<{ id: string; userId: string; role: string; joinedAt: Date; name: string; email: string }>,
   invited: [] as Array<{ id: string; email: string; role: string; expiresAt: Date }>,
+  actionResult: null as null | Record<string, unknown>,
+}));
+
+vi.mock("react", async (original) => ({
+  ...(await original<typeof import("react")>()),
+  useActionState: (_action: unknown, initial: unknown) => [state.actionResult ?? initial, () => {}, false],
 }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
@@ -45,7 +51,7 @@ const addedAt = new Date("2026-09-25T18:50:00.000Z");
 
 beforeEach(() => {
   Object.assign(state, {
-    member: owner, key: null, members: { "org-1/user-2": "lee@acme.test" }, lookedUp: [], tenants: [], listed: [],
+    member: owner, key: null, members: { "org-1/user-2": "lee@acme.test" }, lookedUp: [], tenants: [], listed: [], actionResult: null,
     people: [
       { id: "m-1", userId: "user-1", role: "owner", joinedAt: new Date("2026-09-20T10:00:00Z"), name: "Ana", email: "ana@acme.test" },
       { id: "m-2", userId: "user-2", role: "member", joinedAt: new Date("2026-09-21T10:00:00Z"), name: "Lee", email: "lee@acme.test" },
@@ -99,4 +105,6 @@ test("the members of this workspace and its invitations are listed, marking you,
   expect(text(html)).toContain("Invited max@acme.test Admin Expires 2026-10-03 10:00 UTC");
   expect(html.indexOf('id="workspace-heading"')).toBeLessThan(html.indexOf('id="members-heading"'));
   expect(html.indexOf('id="members-heading"')).toBeLessThan(html.indexOf('id="key-heading"'));
+  state.actionResult = { invited: "new@acme.test" };
+  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("Invited new@acme.test. Ask them to sign in at app.usetrawler.test with this address; no email is sent.");
 });
