@@ -43,7 +43,8 @@ export function Members({ members, invitations, canManage, signInAt }: { members
   const [revoked, revoke, revoking] = useActionState<MembersState, FormData>(revokeInvitationAction, {});
   const [invited, invite, inviting] = useActionState<MembersState, FormData>(inviteMemberAction, {});
   const [message, setMessage] = useState<MembersState>({});
-  const [confirming, setConfirming] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<{ id: string; error?: string } | null>(null);
+  const [kept, setKept] = useState<string | null>(null);
   const [latest, setLatest] = useState<"list" | "invite">("invite");
   const headingRef = useRef<HTMLHeadingElement>(null);
   const busy = changing || removing || revoking;
@@ -54,6 +55,10 @@ export function Members({ members, invitations, canManage, signInAt }: { members
     setLatest("list");
   }, [changed]);
   useEffect(() => {
+    if (removed.error) {
+      setConfirming((open) => open && { ...open, error: removed.error });
+      return;
+    }
     setMessage(removed);
     setLatest("list");
     setConfirming(null);
@@ -85,8 +90,8 @@ export function Members({ members, invitations, canManage, signInAt }: { members
                 <span className="text-xs text-muted">Joined <LocalTime iso={m.joinedAt} /></span>
               </div>
             </div>
-            {canManage && canChange(m) && (confirming === m.id ? (
-              <ConfirmRemoval member={m} action={remove} pending={removing} onKeep={() => setConfirming(null)} />
+            {canManage && canChange(m) && (confirming?.id === m.id ? (
+              <ConfirmRemoval member={m} action={remove} pending={removing} error={confirming.error} onKeep={() => { setConfirming(null); setKept(m.id); }} />
             ) : (
               <div className="flex flex-wrap gap-2">
                 <form action={change}>
@@ -94,7 +99,7 @@ export function Members({ members, invitations, canManage, signInAt }: { members
                   <input type="hidden" name="role" value={roles(m.role).includes("admin") ? "member" : "admin"} />
                   <button type="submit" {...hold(busy)} className={button}>{roles(m.role).includes("admin") ? "Make member" : "Make admin"}<span className="sr-only"> {m.name.trim() || m.email}</span></button>
                 </form>
-                <button type="button" {...hold(busy)} onClick={() => { if (!busy) setConfirming(m.id); }} className={button}>Remove<span className="sr-only"> {m.name.trim() || m.email}</span></button>
+                <button type="button" autoFocus={kept === m.id} {...hold(busy)} onClick={() => { if (!busy) setConfirming({ id: m.id }); }} className={button}>Remove<span className="sr-only"> {m.name.trim() || m.email}</span></button>
               </div>
             ))}
           </li>
@@ -128,7 +133,7 @@ export function Members({ members, invitations, canManage, signInAt }: { members
   );
 }
 
-function ConfirmRemoval({ member, action, pending, onKeep }: { member: MemberRow; action: (form: FormData) => void; pending: boolean; onKeep: () => void }) {
+function ConfirmRemoval({ member, action, pending, error, onKeep }: { member: MemberRow; action: (form: FormData) => void; pending: boolean; error?: string; onKeep: () => void }) {
   const keep = useRef<HTMLButtonElement>(null);
   const who = member.name.trim() || member.email;
   useEffect(() => {
@@ -142,6 +147,7 @@ function ConfirmRemoval({ member, action, pending, onKeep }: { member: MemberRow
         <button type="submit" aria-describedby={`remove-${member.id}`} {...hold(pending)} className="h-10 border border-bad px-4 text-bad aria-disabled:cursor-wait aria-disabled:opacity-60">{pending ? "Removing…" : `Remove ${who}`}</button>
         <button type="button" ref={keep} aria-describedby={`remove-${member.id}`} aria-disabled={pending || undefined} onClick={() => { if (!pending) onKeep(); }} className="h-10 px-2 text-muted hover:text-ink aria-disabled:cursor-wait aria-disabled:opacity-60">Keep {who}</button>
       </div>
+      {error && !pending && <p role="alert" className={alert}>{error}</p>}
     </form>
   );
 }

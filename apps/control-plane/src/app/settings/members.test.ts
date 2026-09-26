@@ -52,7 +52,7 @@ test("an owner or admin can switch a member or an admin and remove them, but not
 });
 
 test("Remove asks first, naming who goes and what they lose, and only for that row", () => {
-  react.states = [{}, "m-2"];
+  react.states = [{}, { id: "m-2" }];
   const html = render();
   const lee = rowOf(html, "lee@acme.test");
   expect(text(lee)).toContain("Remove Lee? They lose access to this workspace at once, in every browser they use. Remove Lee Keep Lee");
@@ -62,26 +62,40 @@ test("Remove asks first, naming who goes and what they lose, and only for that r
   expect(text(rowOf(html, "bo@acme.test"))).toContain("Make member bo@acme.test Remove bo@acme.test");
 });
 
+test("a refused removal stays open with the refusal under its buttons, and Keep gives focus back to Remove", () => {
+  react.states = [{}, { id: "m-2", error: "They could not be removed. Try again." }];
+  const refused = render();
+  expect(rowOf(refused, "lee@acme.test")).toMatch(/Keep Lee<\/button><\/div><p role="alert"[^>]*>They could not be removed. Try again.<\/p><\/form>/);
+  expect(listStatus(refused)).toBe("");
+  react.actions = [IDLE, [{}, true], IDLE];
+  react.states = [{}, { id: "m-2", error: "They could not be removed. Try again." }];
+  expect(render()).not.toContain('role="alert"');
+  react.states = [{}, null, "m-2"];
+  const kept = render();
+  expect(rowOf(kept, "lee@acme.test")).toMatch(/<button type="button" autofocus=""[^>]*>Remove<span class="sr-only"> Lee<\/span>/);
+  expect(rowOf(kept, "bo@acme.test")).not.toContain("autofocus");
+});
+
 test("while a removal is sent, both of its buttons hold and it says so", () => {
   react.actions = [IDLE, [{}, true], IDLE];
-  react.states = [{}, "m-2"];
+  react.states = [{}, { id: "m-2" }];
   const lee = rowOf(render(), "lee@acme.test");
   expect(lee).toMatch(/<button type="submit" aria-describedby="remove-m-2" aria-disabled="true"[^>]*>Removing…<\/button>/);
   expect(lee).toMatch(/<button type="button" aria-describedby="remove-m-2" aria-disabled="true"[^>]*>Keep Lee<\/button>/);
 });
 
 test("what a change did is said once it is done, a refusal is an alert, and neither shows while something is sent", () => {
-  react.states = [{ done: "Lee is now an admin." }, null, "list"];
+  react.states = [{ done: "Lee is now an admin." }, null, null, "list"];
   expect(listStatus(render())).toBe("Lee is now an admin.");
-  react.states = [{ error: "An owner's role is not changed here." }, null, "list"];
+  react.states = [{ error: "An owner's role is not changed here." }, null, null, "list"];
   const refused = render();
   expect(listStatus(refused)).toBe("");
   expect(refused).toMatch(/<p role="alert"[^>]*>An owner&#x27;s role is not changed here.<\/p>/);
   react.actions = [[{}, true], IDLE, IDLE];
-  react.states = [{ done: "Lee is now an admin." }, null, "list"];
+  react.states = [{ done: "Lee is now an admin." }, null, null, "list"];
   expect(listStatus(render())).toBe("");
   react.actions = [[{}, true], IDLE, IDLE];
-  react.states = [{ error: "An owner's role is not changed here." }, null, "list"];
+  react.states = [{ error: "An owner's role is not changed here." }, null, null, "list"];
   const sending = render();
   expect(sending).not.toContain('role="alert"');
   expect(rowOf(sending, "lee@acme.test").match(/aria-disabled="true"/g)).toHaveLength(2);
@@ -91,12 +105,12 @@ test("what a change did is said once it is done, a refusal is an alert, and neit
 test("only what the latest change did is said, so a revoked invitation no longer says to sign in", () => {
   const revokedThenInvited: Array<[unknown, boolean]> = [IDLE, IDLE, [{ done: "The invitation for max@acme.test is revoked." }, false], [{ invited: "max@acme.test" }, false]];
   react.actions = [...revokedThenInvited];
-  react.states = [{ done: "The invitation for max@acme.test is revoked." }, null, "list"];
+  react.states = [{ done: "The invitation for max@acme.test is revoked." }, null, null, "list"];
   const afterRevoke = render();
   expect(listStatus(afterRevoke)).toBe("The invitation for max@acme.test is revoked.");
   expect(text(inviteForm(afterRevoke))).not.toContain("Ask them to sign in");
   react.actions = [...revokedThenInvited];
-  react.states = [{ done: "The invitation for max@acme.test is revoked." }, null, "invite"];
+  react.states = [{ done: "The invitation for max@acme.test is revoked." }, null, null, "invite"];
   const afterInvite = render();
   expect(listStatus(afterInvite)).toBe("");
   expect(text(inviteForm(afterInvite))).toContain("Invited max@acme.test. Ask them to sign in");
@@ -119,7 +133,7 @@ test("after an invitation the page says where the invited person signs in, and a
   react.actions = [IDLE, IDLE, IDLE, [{ invited: "max@acme.test" }, false]];
   expect(text(inviteForm(render()))).toContain("Invite Invited max@acme.test. Ask them to sign in at app.usetrawler.test with this address; no email is sent.");
   react.actions = [IDLE, IDLE, IDLE, [{ error: "That address is already in this workspace." }, false]];
-  react.states = [{}, null, "invite", "max@acme.test", "admin"];
+  react.states = [{}, null, null, "invite", "max@acme.test", "admin"];
   const refused = inviteForm(render());
   expect(refused).toMatch(/<input type="email" required=""[^>]*aria-invalid="true" aria-describedby="invite-error"[^>]*name="email" value="max@acme.test"\/>/);
   expect(refused).toMatch(/<option value="admin" selected="">Admin<\/option>/);
