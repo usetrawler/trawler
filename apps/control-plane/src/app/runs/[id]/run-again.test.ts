@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 import type { KeyCheck } from "../../../llm/providers.ts";
 
-type Previous = { project_id: string; status: string; agent_model: string; judge_model: string; budget_usd: string; max_steps: number; replay_steps: number; provider: string; provider_base_url: string | null };
+type Previous = { project_id: string; status: string; agent_model: string; judge_model: string; budget_usd: string; max_steps: number; replay_steps: number; provider: string; provider_base_url: string | null; prompt_usd_per_mtok: string | null; completion_usd_per_mtok: string | null };
 const state = vi.hoisted(() => ({
   signedIn: true,
   refusal: null as string | null,
@@ -63,13 +63,18 @@ vi.mock("../../../runs/runs.ts", () => ({
   },
 }));
 
-const { runAgainAction } = await import("./actions.ts");
+const { runAgainAction: action } = await import("./actions.ts");
 const RUN = "0f8fad5b-d9cb-469f-a165-70867728950e";
+const runAgainAction = (runId: string) => {
+  const form = new FormData();
+  form.set("runId", runId);
+  return action({}, form);
+};
 
 beforeEach(() => {
   Object.assign(state, {
     signedIn: true, refusal: null, checks: {}, checked: [], price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }, started: [], asked: [], keyHeld: true, held: [], startFails: null, logged: [],
-    previous: { project_id: "project-1", status: "succeeded", agent_model: "deepseek/deepseek-v4.1-flash", judge_model: "deepseek/deepseek-v4.1-flash", budget_usd: "3.5000", max_steps: 90, replay_steps: 30, provider: "openrouter", provider_base_url: null },
+    previous: { project_id: "project-1", status: "succeeded", agent_model: "deepseek/deepseek-v4.1-flash", judge_model: "deepseek/deepseek-v4.1-flash", budget_usd: "3.5000", max_steps: 90, replay_steps: 30, provider: "openrouter", provider_base_url: null, prompt_usd_per_mtok: null, completion_usd_per_mtok: null },
     stored: { provider: "openrouter", key: "sk-or-v1-" + "k".repeat(40), baseUrl: null },
   });
 });
@@ -89,6 +94,7 @@ test("Run again starts the plan as it is now with the previous run's model, cap 
 
 test("a run on a model without a known price runs again under the token cap, and a separate judge model is checked too", async () => {
   state.price = null;
+  state.previous = { ...state.previous!, prompt_usd_per_mtok: null, completion_usd_per_mtok: null };
   state.previous = { ...state.previous!, judge_model: "anthropic/claude-haiku-4.5" };
   await expect(runAgainAction(RUN)).rejects.toMatchObject({ to: "/runs/new-run" });
   expect(state.checked).toEqual(["deepseek/deepseek-v4.1-flash", "anthropic/claude-haiku-4.5"]);
@@ -145,7 +151,7 @@ test("the key is held in the transaction the run starts in, for the provider and
   expect(state.held.at(-1)).toMatchObject({ provider: "custom", baseUrl: "https://llm.example.com/v1" });
 });
 
-test("a key removed or changed while the run was starting starts nothing, and says so", async () => {
+test("a key removed, or replaced by one for another provider or address, while the run was starting starts nothing, and says so", async () => {
   state.keyHeld = false;
   expect(await runAgainAction(RUN)).toEqual({ error: "The workspace's model key was removed or changed while the run was starting. Check the key and run it again." });
   expect(state.started).toEqual([]);
@@ -159,4 +165,18 @@ test("a run that could not start is logged with the workspace key masked", async
   expect(state.logged[0]!.message).toBe("run could not start again");
   expect(state.logged[0]!.masked).not.toContain(state.stored!.key);
   expect(state.logged[0]!.masked).toContain("insert failed for");
+});
+
+test("when no price can be found now, the new run keeps the price the previous run was held to, so its cap in dollars still applies", async () => {
+  state.price = null;
+  state.previous = { ...state.previous!, provider: "anthropic", agent_model: "claude-haiku-4-5", judge_model: "claude-haiku-4-5", prompt_usd_per_mtok: "1.000000", completion_usd_per_mtok: "5.000000" };
+  state.stored = { provider: "anthropic", key: "sk-ant-" + "k".repeat(40), baseUrl: null };
+  await expect(runAgainAction(RUN)).rejects.toMatchObject({ to: "/runs/new-run" });
+  expect(state.started[0]).toMatchObject({ options: { price: { promptUsdPerMtok: 1, completionUsdPerMtok: 5 }, tokenCap: null } });
+});
+
+test("a price known now wins over the one the previous run was held to", async () => {
+  state.previous = { ...state.previous!, prompt_usd_per_mtok: "9.000000", completion_usd_per_mtok: "9.000000" };
+  await expect(runAgainAction(RUN)).rejects.toMatchObject({ to: "/runs/new-run" });
+  expect(state.started[0]).toMatchObject({ options: { price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } } });
 });

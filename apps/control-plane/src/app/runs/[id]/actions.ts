@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { keyStillStored, modelKey } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
-import { priceFor } from "../../../llm/prices.ts";
+import { priceFor, type Price } from "../../../llm/prices.ts";
 import { providerArticle } from "../../../llm/provider-kinds.ts";
 import { checkModelCall, endpointFor, PROVIDER_LABEL, type Provider } from "../../../llm/providers.ts";
 import { DEFAULT_RUN } from "../../../runs/models.ts";
@@ -49,9 +49,17 @@ export async function judgeAgainAction(runId: string, findingKey: string): Promi
 
 class KeyGone extends Error {}
 
+export interface RunAgainState {
+  error?: string;
+}
+
+const pricedBefore = (run: { prompt_usd_per_mtok: string | null; completion_usd_per_mtok: string | null }): Price | null =>
+  run.prompt_usd_per_mtok !== null && run.completion_usd_per_mtok !== null ? { promptUsdPerMtok: Number(run.prompt_usd_per_mtok), completionUsdPerMtok: Number(run.completion_usd_per_mtok) } : null;
+
 const keyName = (provider: Provider) => `${providerArticle(provider)} ${PROVIDER_LABEL[provider]} key`;
 
-export async function runAgainAction(runId: string): Promise<{ error?: string }> {
+export async function runAgainAction(_previous: RunAgainState, form: FormData): Promise<RunAgainState> {
+  const runId = String(form.get("runId") ?? "");
   const member = await signedInMember(await headers());
   if (!member) redirect("/sign-in");
   const { orgId } = member;
@@ -63,7 +71,7 @@ export async function runAgainAction(runId: string): Promise<{ error?: string }>
   const found = await withOrg(getDb(), orgId, async (tx) => ({
     previous: await tx
       .selectFrom("runs")
-      .select(["project_id", "status", "agent_model", "judge_model", "budget_usd", "max_steps", "replay_steps", "provider", "provider_base_url"])
+      .select(["project_id", "status", "agent_model", "judge_model", "budget_usd", "max_steps", "replay_steps", "provider", "provider_base_url", "prompt_usd_per_mtok", "completion_usd_per_mtok"])
       .where("id", "=", runId)
       .where("org_id", "=", orgId)
       .executeTakeFirst(),
@@ -88,7 +96,7 @@ export async function runAgainAction(runId: string): Promise<{ error?: string }>
     return { error: `${label} could not be reached to check the key. Try again in a moment.` };
   }
 
-  const price = await priceFor(endpoint.provider, previous.agent_model, readEnv().openRouterUrl);
+  const price = (await priceFor(endpoint.provider, previous.agent_model, readEnv().openRouterUrl)) ?? pricedBefore(previous);
   const providerBaseUrl = endpoint.provider === "custom" ? endpoint.baseUrl : null;
   let started: string;
   try {
