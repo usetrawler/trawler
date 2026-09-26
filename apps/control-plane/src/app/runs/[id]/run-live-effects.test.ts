@@ -122,9 +122,10 @@ test("Stop run asks first; Stop cancels the run and refreshes, and a failure say
   actions.cancelRunAction.mockResolvedValueOnce(false);
   react.values = [true, false];
   press(button(CancelButton({ runId: "run-1", onDone: refreshed }), /^Stop$/));
+  expect(react.setters.at(-1)).toHaveBeenNthCalledWith(1, null);
   await settle();
   expect(actions.cancelRunAction).toHaveBeenCalledWith("run-1");
-  expect(react.setters.at(-1)).toHaveBeenCalledWith("The run could not be stopped. Try again.");
+  expect(react.setters.at(-1)).toHaveBeenLastCalledWith("The run could not be stopped. Try again.");
   expect(refreshed).toHaveBeenCalledOnce();
 });
 
@@ -178,9 +179,9 @@ test("a judge that could not start, or a run that could not be stopped, says so 
   react.values = ["It is already being judged again."];
   const judging = JudgeAgainButton({ runId: "run-1", findingKey: "ana:f1", judging: false, onDone: async () => {} });
   expect(nodes(judging).filter((node) => node.props?.role === "alert").map(text)).toEqual(["It is already being judged again."]);
-  react.values = [true, "The run could not be stopped. Try again."];
+  react.values = [true, "Trawler was updated since this page opened. Reload the page to stop the run."];
   const stopping = CancelButton({ runId: "run-1", onDone: () => {} });
-  expect(nodes(stopping).filter((node) => node.props?.role === "alert").map(text)).toEqual(["The run could not be stopped. Try again."]);
+  expect(nodes(stopping).filter((node) => node.props?.role === "alert").map(text)).toEqual(["Trawler was updated since this page opened. Reload the page to stop the run."]);
 });
 
 test("Keep running closes the question without stopping anything", () => {
@@ -242,6 +243,12 @@ test("the finding a judge just answered takes the focus, without scrolling the p
   FindingRow({ f: f as never, n: 1, focus: true, onFocused: focused });
   react.effects[0]!();
   expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+  expect(focused).toHaveBeenCalledOnce();
+  react.effects = [];
+  react.refIndex = 0;
+  FindingRow({ f: f as never, n: 1, focus: false, onFocused: focused });
+  react.effects[0]!();
+  expect(focus).toHaveBeenCalledOnce();
   expect(focused).toHaveBeenCalledOnce();
 });
 

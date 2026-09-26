@@ -72,7 +72,7 @@ export function CancelButton({ runId, onDone }: { runId: string; onDone: () => v
   return (
     <div className="flex flex-wrap items-center gap-3 text-sm">
       <span className="text-muted">Stop now? What was found so far is kept.</span>
-      <button type="button" disabled={pending} onClick={() => start(async () => { setFailed(await stop()); onDone(); })} className="h-10 border border-bad px-4 text-bad disabled:opacity-60">
+      <button type="button" disabled={pending} onClick={() => { setFailed(null); start(async () => { setFailed(await stop()); onDone(); }); }} className="h-10 border border-bad px-4 text-bad disabled:opacity-60">
         {pending ? "Stopping…" : "Stop"}
       </button>
       <button type="button" onClick={() => setAsking(false)} className="h-10 px-2 text-muted">Keep running</button>
