@@ -1,8 +1,10 @@
 "use client";
+import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { startTransition, useActionState, useEffect, useReducer, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { field } from "../../components/key-fields.tsx";
 import { LocalTime } from "../../components/local-time.tsx";
+import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { changeRoleAction, inviteMemberAction, removeMemberAction, revokeInvitationAction, type MembersState } from "./actions.ts";
 import { button, heading, panel } from "./styles.ts";
 
@@ -68,6 +70,20 @@ export function said(flow: Flow, answers: Record<Change, MembersState>, busy: bo
   return { ...answers[flow.sent.change], change: flow.sent.change };
 }
 
+async function reloadable(action: (previous: MembersState, form: FormData) => Promise<MembersState>, previous: MembersState, form: FormData, then: string): Promise<MembersState> {
+  try {
+    return await action(previous, form);
+  } catch (err) {
+    if (!unstable_isUnrecognizedActionError(err)) throw err;
+    return { error: updatedSinceOpened(then) };
+  }
+}
+
+export const changeRole = (previous: MembersState, form: FormData) => reloadable(changeRoleAction, previous, form, "Reload the page to change their role.");
+export const removeSomeone = (previous: MembersState, form: FormData) => reloadable(removeMemberAction, previous, form, "Reload the page to remove them.");
+export const revokeInvitation = (previous: MembersState, form: FormData) => reloadable(revokeInvitationAction, previous, form, "Reload the page to revoke the invitation.");
+export const inviteSomeone = (previous: MembersState, form: FormData) => reloadable(inviteMemberAction, previous, form, "Reload the page to invite them.");
+
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" };
 const alert = "border-l-2 border-bad pl-3 text-sm text-bad";
 const tag = "font-mono text-[10px] text-muted uppercase";
@@ -92,10 +108,10 @@ function Submit({ held, working, children }: { held: boolean; working: string; c
 }
 
 export function Members({ members, invitations, canManage, signInAt }: { members: MemberRow[]; invitations: InvitationRow[]; canManage: boolean; signInAt: string }) {
-  const [changed, change, changing] = useActionState<MembersState, FormData>(changeRoleAction, {});
-  const [removed, remove, removing] = useActionState<MembersState, FormData>(removeMemberAction, {});
-  const [revoked, revoke, revoking] = useActionState<MembersState, FormData>(revokeInvitationAction, {});
-  const [invited, invite, inviting] = useActionState<MembersState, FormData>(inviteMemberAction, {});
+  const [changed, change, changing] = useActionState<MembersState, FormData>(changeRole, {});
+  const [removed, remove, removing] = useActionState<MembersState, FormData>(removeSomeone, {});
+  const [revoked, revoke, revoking] = useActionState<MembersState, FormData>(revokeInvitation, {});
+  const [invited, invite, inviting] = useActionState<MembersState, FormData>(inviteSomeone, {});
   const [flow, dispatch] = useReducer(nextFlow, QUIET);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const removeButtons = useRef(new Map<string, HTMLButtonElement>());
