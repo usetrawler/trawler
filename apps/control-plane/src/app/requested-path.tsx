@@ -4,12 +4,16 @@ import { useSyncExternalStore } from "react";
 
 const neverChanges = () => () => {};
 
+const KEEP_ENCODED = /[\p{C}\s%/?#]/u;
+
 function readable(path: string): string {
-  try {
-    return decodeURI(path);
-  } catch {
-    return path;
-  }
+  return path.replace(/(?:%[0-9A-Fa-f]{2})+/g, (escapes) => {
+    try {
+      return Array.from(decodeURIComponent(escapes), (char) => (KEEP_ENCODED.test(char) ? encodeURIComponent(char) : char)).join("");
+    } catch {
+      return escapes;
+    }
+  });
 }
 
 export function RequestedPath() {
