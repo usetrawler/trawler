@@ -284,6 +284,17 @@ describe("runRoleSession", () => {
     for (let i = 0; i < log.length; i += 2) expect(log[i + 1]).toBe(log[i]!.replace("-start", "-end"));
   });
 
+  test("a finding reported in the same step as finish still gets its screenshot before the session ends", async () => {
+    const kept: string[] = [];
+    const defect = toolCall("submit_finding", { kind: "defect", goal: "sign-up", title: "500", observed: "got a 500", reproduction: ["a", "b"], severity: "high" });
+    const model = scriptedModel([look, reached("invoice"), [defect, toolCall("goal_status", { goal: "sign-up", status: "failed", note: "500" }), finish]]);
+    await run(model, {
+      screenshot: async () => (await new Promise((r) => setTimeout(r, 50)), { bytes: new Uint8Array([1]), contentType: "image/png" }),
+      keepScreenshot: (id) => void kept.push(id),
+    }).promise;
+    expect(kept).toEqual(["f1"]);
+  });
+
   test("results over 1500 characters are elided once a newer one arrives", async () => {
     const medium = { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => ({ content: [{ type: "text", text: "m".repeat(2000) }] }) }) };
     const model = scriptedModel([toolCall("browser_snapshot", {}), toolCall("browser_snapshot", {}), reached("sign-up"), reached("invoice"), finish]);

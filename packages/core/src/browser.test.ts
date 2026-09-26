@@ -129,6 +129,28 @@ beforeAll(async () => {
         return res.end(JSON.stringify({ prefetch: [{ source: "list", urls: [`${foreignOrigin}/header-prefetch`] }] }));
       case "/neuter":
         return html(`<input aria-label="Password" type="password"><button onclick="const p=document.querySelector('input');p.type='text';p.removeAttribute('data-trawler-secret')">Show</button><button onclick="const p=document.querySelector('input');p.type='text';p.removeAttribute('data-trawler-secret');p.value=p.value.slice(0,6)+'X'+p.value.slice(6)">Tamper</button>`);
+      case "/text-a":
+        return html(`<h1>Invoice 1001</h1>`);
+      case "/text-b":
+        return html(`<h1>Invoice 2002</h1>`);
+      case "/frame-remount":
+        return html(`<iframe src="/remount" style="width:640px;height:160px;border:0"></iframe>`);
+      case "/echo-inline":
+        return html(`<input aria-label="Password" type="password" oninput="document.getElementById('echo').textContent = this.value"><p>You typed <b id="echo"></b> just now.</p>`);
+      case "/echo-encoded-a":
+        return html(`<p>Posted to /login?password=Alpha%26Secret%231111</p>`);
+      case "/echo-encoded-b":
+        return html(`<p>Posted to /login?password=Bravo%26Secret%232222</p>`);
+      case "/toast":
+        return html(`<style>@keyframes fade{from{opacity:1}to{opacity:.9}} #toast{animation:fade 3s forwards}</style><p id="toast" onanimationend="this.remove()">Could not save: error 500</p>`);
+      case "/api-key-a":
+        return html(`<p>API key: sk-live-first-1</p><input aria-label="Key" value="sk-live-first-1"><input aria-label="Hint" placeholder="sk-live-first-1">`);
+      case "/api-key-b":
+        return html(`<p>API key: sk-live-other-2</p><input aria-label="Key" value="sk-live-other-2"><input aria-label="Hint" placeholder="sk-live-other-2">`);
+      case "/swap-echo":
+        return html(`<input aria-label="Password" type="password"><button onclick="const p = document.querySelector('input'); p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value">Swap</button><p id="echo"></p>`);
+      case "/reveal-clear":
+        return html(`<input aria-label="Password" type="password"><button onclick="const o=document.querySelector('input');const n=document.createElement('input');n.type='text';n.setAttribute('aria-label','Password');n.value=o.value;o.replaceWith(n)">Show password</button><button onclick="document.querySelector('input').value=''">Clear</button>`);
       case "/visible-password-a":
         return html(`<input aria-label="Password" type="password" value="short-pw-1">`);
       case "/visible-password-b":
@@ -898,6 +920,128 @@ describe("screenshots", () => {
     expect(first.byteLength).toBeGreaterThan(0);
     expect(Buffer.compare(first, await shotOf("/visible-password-b"))).toBe(0);
   }, 120_000);
+
+  test("taking a screenshot leaves the page as it was: a message that removes itself when its animation ends is still there, and in the picture", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/toast`);
+      expect(await snapshot(b)).toContain("Could not save: error 500");
+      expect(await b.screenshot()).not.toBeNull();
+      expect(await snapshot(b)).toContain("Could not save: error 500");
+    });
+  }, 60_000);
+
+  test("a secret the run knows but never typed, like a secret header's value, is masked where the page shows it", async () => {
+    const shotOf = async (path: string, secret: string) => {
+      const scrubber = new SecretScrubber();
+      scrubber.add(secret);
+      const taken: { shot: Screenshot | null } = { shot: null };
+      await withBrowser(async (b) => {
+        await navigate(b, `${origin}${path}`);
+        taken.shot = await b.screenshot();
+      }, { scrubber });
+      return Buffer.from(taken.shot?.bytes ?? []);
+    };
+    const first = await shotOf("/api-key-a", "sk-live-first-1");
+    expect(first.byteLength).toBeGreaterThan(0);
+    expect(Buffer.compare(first, await shotOf("/api-key-b", "sk-live-other-2"))).toBe(0);
+  }, 120_000);
+
+  test("a field masked for a screenshot because it showed a password can be typed into again once it no longer does", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/reveal-clear`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), PASSWORD, "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Show password"), element: "show" }, ctx);
+      expect(await b.screenshot()).not.toBeNull();
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Clear"), element: "clear" }, ctx);
+      const cleared = await snapshot(b);
+      const typed = (await b.tools.browser_type!.execute!({ target: refOf(cleared, "Password"), text: "hello", element: "field" }, ctx)) as { isError?: boolean };
+      expect(typed.isError).toBeFalsy();
+    });
+  }, 60_000);
+
+  test("the masks never cover what is not secret: pages that differ in ordinary text give different screenshots", async () => {
+    const shotOf = async (path: string) => {
+      const taken: { shot: Screenshot | null } = { shot: null };
+      await withBrowser(async (b) => {
+        await navigate(b, `${origin}${path}`);
+        taken.shot = await b.screenshot();
+      });
+      return Buffer.from(taken.shot?.bytes ?? []);
+    };
+    const first = await shotOf("/text-a");
+    expect(first.byteLength).toBeGreaterThan(0);
+    expect(Buffer.compare(first, await shotOf("/text-b"))).not.toBe(0);
+  }, 120_000);
+
+  test("a password shown inside a frame of the page is masked too", async () => {
+    const shotAfter = async (password: string) => {
+      const taken: { shot: Screenshot | null } = { shot: null };
+      await withBrowser(async (b) => {
+        await navigate(b, `${origin}/frame-remount`);
+        const snap = await snapshot(b);
+        expect(await b.fillField(refOf(snap, "Password"), password, "password")).toBe("typed the password");
+        await b.tools.browser_click!.execute!({ target: refOf(snap, "Show password"), element: "show" }, ctx);
+        taken.shot = await b.screenshot();
+      });
+      return Buffer.from(taken.shot?.bytes ?? []);
+    };
+    const first = await shotAfter("first-secret-1");
+    expect(first.byteLength).toBeGreaterThan(0);
+    expect(Buffer.compare(first, await shotAfter("other-secret-2"))).toBe(0);
+  }, 120_000);
+
+  test("a password field in a frame from another allowed origin is masked, so not even the length of what was typed shows", async () => {
+    const shotAfter = async (password: string) => {
+      const taken: { shot: Screenshot | null } = { shot: null };
+      await withBrowser(async (b) => {
+        await navigate(b, `${origin}/cross-frame`);
+        const snap = await snapshot(b);
+        expect(await b.fillField(refOf(snap, "Inner password"), password, "password")).toBe("typed the password");
+        taken.shot = await b.screenshot();
+      }, { allowedOrigins: [origin, secondOrigin] });
+      return Buffer.from(taken.shot?.bytes ?? []);
+    };
+    const first = await shotAfter("short-secret-1");
+    expect(first.byteLength).toBeGreaterThan(0);
+    expect(Buffer.compare(first, await shotAfter("a-much-longer-secret-2"))).toBe(0);
+  }, 120_000);
+
+  test("a password the page changed after it was typed is masked where the page repeats it", async () => {
+    const swap = (b: Browser, snap: string) => b.tools.browser_click!.execute!({ target: refOf(snap, "Swap"), element: "swap" }, ctx);
+    const first = await screenshotAfter("first-secret-1", "/swap-echo", swap);
+    const second = await screenshotAfter("other-secret-2", "/swap-echo", swap);
+    expect(Buffer.compare(Buffer.from(first.bytes), Buffer.from(second.bytes))).toBe(0);
+  }, 120_000);
+
+  test("a password the page repeats inside a line of text is masked with its whole line, so its length does not show", async () => {
+    const first = await screenshotAfter("short-secret-1", "/echo-inline", async () => undefined);
+    const second = await screenshotAfter("a-much-longer-secret-2", "/echo-inline", async () => undefined);
+    expect(Buffer.compare(Buffer.from(first.bytes), Buffer.from(second.bytes))).toBe(0);
+  }, 120_000);
+
+  test("a secret the run knows is masked in the forms a page shows it in, such as URL encoding", async () => {
+    const shotOf = async (path: string, secret: string) => {
+      const scrubber = new SecretScrubber();
+      scrubber.add(secret);
+      const taken: { shot: Screenshot | null } = { shot: null };
+      await withBrowser(async (b) => {
+        await navigate(b, `${origin}${path}`);
+        taken.shot = await b.screenshot();
+      }, { scrubber });
+      return Buffer.from(taken.shot?.bytes ?? []);
+    };
+    const first = await shotOf("/echo-encoded-a", "Alpha&Secret#1111");
+    expect(first.byteLength).toBeGreaterThan(0);
+    expect(Buffer.compare(first, await shotOf("/echo-encoded-b", "Bravo&Secret#2222"))).toBe(0);
+  }, 120_000);
+
+  test("when the page cannot be checked for secrets in time, no screenshot is taken rather than an unmasked one", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/two`);
+      expect(await b.screenshot()).toBeNull();
+    }, { maskCheckMs: 0 });
+  }, 60_000);
 
   test("a page not opened yet, or one waiting on a dialog, gives no screenshot rather than hanging", async () => {
     await withBrowser(async (b) => {

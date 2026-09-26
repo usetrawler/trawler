@@ -97,7 +97,7 @@ export async function runReplay(opts: {
   });
   const observation: ReplayObservation = report ?? NO_REPORT;
   const { screenshot, keepScreenshot } = opts;
-  if (screenshot && keepScreenshot) {
+  if (screenshot && keepScreenshot && outcome.stoppedBy !== "budget") {
     const shot = await screenshot().catch(() => null);
     if (shot) keepScreenshot(opts.finding.id, shot);
   }

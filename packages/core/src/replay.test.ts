@@ -66,6 +66,13 @@ describe("runReplay", () => {
     expect([none.observation.completed, broken.observation.completed]).toEqual([true, true]);
   });
 
+  test("a replay the run stopped keeps no screenshot, since the run no longer takes files", async () => {
+    const kept: string[] = [];
+    const { observation } = await replay(scriptedModel([toolCall("browser_snapshot", {}), proxyRefusal("the run has spent its budget", JOB_STOPPED)]), { screenshot: async () => ({ bytes: new Uint8Array([1]), contentType: "image/png" }), keepScreenshot: (id) => void kept.push(id) }).promise;
+    expect(observation.completed).toBe(false);
+    expect(kept).toEqual([]);
+  });
+
   test("stops as soon as the report is in", async () => {
     const model = scriptedModel([report({ completed: false, observed: "No Create account button", blockedAt: 2 }), toolCall("browser_snapshot", {})]);
     const { observation, usage } = await replay(model).promise;

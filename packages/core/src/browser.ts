@@ -39,6 +39,11 @@ const KEYS_SAFE_ON_SECRETS = new Set(["Enter", "Tab", "Shift+Tab", "Escape"]);
 const FOCUS_CHECK_MS = 2000;
 const HANDLE_READ_MS = 500;
 const SCREENSHOT_MS = 5000;
+const MASK_COLOR = "#17191c";
+const MASK_CHECK_MS = 2500;
+const PAUSED = "*,*::before,*::after{animation-play-state:paused!important}";
+const BLOCK_AROUND = "xpath=ancestor-or-self::*[self::p or self::div or self::li or self::td or self::th or self::dd or self::dt or self::pre or self::blockquote or self::h1 or self::h2 or self::h3 or self::h4 or self::h5 or self::h6 or self::section or self::article or self::main or self::form or self::label or self::button][1]";
+const escapedForRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const EDITABLE = "input, textarea, [contenteditable]";
 function fieldStateOf(el: any, mark: string) {
   return {
@@ -143,6 +148,7 @@ export async function openBrowser(opts: {
   onBlocked: (url: string) => void;
   headless?: boolean;
   survivesSignals?: boolean;
+  maskCheckMs?: number;
 }): Promise<Browser> {
   const allowed = new Set(opts.allowedOrigins.map((o) => new URL(o).origin));
   const isAllowed = (url: string) => {
@@ -260,19 +266,35 @@ export async function openBrowser(opts: {
       if (verdict !== "slow") return verdict;
       return !dialogOpen;
     };
-    const markFieldsHoldingSecrets = async (frame: Frame) => {
-      const fields = frame.locator(EDITABLE);
-      const values = await fields.evaluateAll((els: any[]) => els.map((el) => (el.isContentEditable ? String(el.textContent ?? "") : typeof el.value === "string" ? el.value : "")));
-      const holders = values.flatMap((value, i) => (holdsSecret(value) ? [i] : []));
-      if (holders.length > 0) await fields.evaluateAll((els: Element[], { mark, holders }: { mark: string; holders: number[] }) => holders.forEach((i) => els[i]?.setAttribute(mark, "shown")), { mark: SECRET_MARK, holders });
-    };
-    const masksFor = async (frames: Frame[]) => {
-      const masks = [];
-      for (const frame of frames) {
-        await within(markFieldsHoldingSecrets(frame).catch(() => undefined), HANDLE_READ_MS, undefined);
-        masks.push(frame.locator(`input[type=password i], [${SECRET_MARK}]`), ...[...typedSecrets].map((secret) => frame.getByText(secret)));
+    const secretsOnPage = async () => {
+      const filledValues = [];
+      for (const h of await liveFilled()) {
+        const value = await readValue(h);
+        if (value.length >= MIN_SECRET_LENGTH && value !== valuesBeforeTyping.get(h)) filledValues.push(value);
       }
-      return masks;
+      const needles = [...new Set([...opts.scrubber.needles(), ...typedSecrets, ...filledValues])].filter((n) => n.length >= MIN_SECRET_LENGTH);
+      return needles.length > 0 ? new RegExp(needles.map(escapedForRegExp).join("|"), "i") : null;
+    };
+    const fieldsShowing = async (frame: Frame, secrets: RegExp) => {
+      const fields = frame.locator(EDITABLE);
+      const shown = await fields.evaluateAll((els: any[]) => els.map((el) => [el.isContentEditable ? String(el.textContent ?? "") : typeof el.value === "string" ? el.value : "", String(el.getAttribute?.("placeholder") ?? "")]));
+      return shown.flatMap(([value, placeholder], i) => (secrets.test(value!) || secrets.test(placeholder!) ? [fields.nth(i)] : []));
+    };
+    const masksIn = async (frame: Frame, secrets: RegExp | null) => {
+      const masks = [frame.locator(`input[type=password i], [${SECRET_MARK}]`)];
+      if (!secrets) return masks;
+      const text = frame.getByText(secrets);
+      return [...masks, text, text.locator(BLOCK_AROUND), ...(await fieldsShowing(frame, secrets))];
+    };
+    const masksOnPage = async (frames: Frame[]) => {
+      const secrets = await secretsOnPage();
+      let timer: NodeJS.Timeout | undefined;
+      const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error("the page did not answer in time to be masked")), opts.maskCheckMs ?? MASK_CHECK_MS)));
+      try {
+        return (await Promise.race([Promise.all(frames.map((frame) => masksIn(frame, secrets))), late])).flat();
+      } finally {
+        clearTimeout(timer);
+      }
     };
     const findMarked = async (mark: string) => {
       for (const page of context.pages()) {
@@ -371,11 +393,14 @@ export async function openBrowser(opts: {
         const page = context.pages()[0];
         if (!page || disconnected || dialogOpen || page.url() === "about:blank") return null;
         const shoot = async (): Promise<Screenshot | null> => {
-          const mask = await masksFor(page.frames());
-          const bytes = await page.screenshot({ type: "png", mask, animations: "disabled", caret: "hide", scale: "css", timeout: SCREENSHOT_MS });
+          const mask = await masksOnPage(page.frames());
+          const bytes = await page.screenshot({ type: "png", mask, maskColor: MASK_COLOR, style: PAUSED, caret: "hide", scale: "css", timeout: SCREENSHOT_MS });
           return bytes.byteLength <= MAX_ARTIFACT_BYTES ? { bytes: new Uint8Array(bytes), contentType: "image/png" } : null;
         };
-        return within(shoot().catch(() => null), 2 * SCREENSHOT_MS, null);
+        let timer: NodeJS.Timeout | undefined;
+        const shot = await Promise.race([shoot().catch(() => null), new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), 2 * SCREENSHOT_MS)))]);
+        clearTimeout(timer);
+        return shot;
       },
       async close() {
         try {

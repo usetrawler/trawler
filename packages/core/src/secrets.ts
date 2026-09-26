@@ -56,6 +56,10 @@ export class SecretScrubber {
     this.#needles = [...new Set([...this.#needles, ...variants(secret)])].filter((n) => n.length > 0);
   }
 
+  needles(): string[] {
+    return [...this.#needles];
+  }
+
   scrub<T>(value: T): T {
     return this.#scrub(value, new WeakSet()) as T;
   }
