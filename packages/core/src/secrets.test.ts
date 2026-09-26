@@ -71,6 +71,28 @@ describe("SecretScrubber masking", () => {
   test("repeated characters leave no fragment", () => {
     expect(scrubbed("aaaaaaaa", "aaaaaaaaaa!")).toBe("•••!");
   });
+  test("touching copies of a secret become one mask, and copies with a gap stay apart", () => {
+    expect(scrubbed("hunter22", "hunter22hunter22")).toBe("•••");
+    expect(scrubbed("hunter22", "xhunter22hunter22hunter22 hunter22y")).toBe("x••• •••y");
+    expect(scrubbed("abababab", "abababababab.ababababa")).toBe("•••.•••a");
+  });
+  test("a run of one secret still joins another secret that overlaps its end", () => {
+    const s = new SecretScrubber();
+    s.add("aaaaaaaa");
+    s.add("aaab1234");
+    expect(s.scrub("xaaaaaaaaaaab1234y")).toBe("x•••y");
+    expect(s.scrub("aaab1234aaaaaaaa")).toBe("•••");
+  });
+  test("stays fast on a long run of a secret's own repeating pattern", () => {
+    for (const unit of ["a", "ab"]) {
+      const s = new SecretScrubber();
+      s.add(unit.repeat(20 / unit.length));
+      const text = unit.repeat(16_000_000 / unit.length);
+      const started = performance.now();
+      expect(s.scrub(text)).toBe("•••");
+      expect(performance.now() - started).toBeLessThan(1000);
+    }
+  });
   test("an Error keeps its message, scrubbed", () => {
     const s = new SecretScrubber();
     s.add("hunter22");
