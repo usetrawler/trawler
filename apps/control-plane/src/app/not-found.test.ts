@@ -30,7 +30,7 @@ test("the mockup's steps include their own widths: one column at 820 px, an iPad
 
 test("the page keeps the theme switch, and hides the big number from screen readers", () => {
   const html = render();
-  expect(html).toMatch(/<header[^>]*>.*<button type="button" aria-label="Theme: System\. Switch to Dark\."/);
+  expect(html).toMatch(/<header[^>]*>.*<button type="button" title="Theme: System\. Switch to Dark\."/);
   expect(html).toMatch(/<div aria-hidden="true" class="[^"]*">404<\/div>/);
   expect(html).toContain(">HTTP 404</span>");
 });
