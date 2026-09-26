@@ -188,6 +188,14 @@ beforeAll(async () => {
         return html(card({ heading: "Account settings", name: "Bea", secret: "card-secret-1111" }));
       case "/overflowing":
         return html(`<div style="font:20px sans-serif;padding:16px;border:1px solid #999;width:640px"><h2>Account settings</h2><p style="width:80px;white-space:nowrap;color:#ff0000">card-secret-1111 is the key</p><p>Plan: Team</p></div>`);
+      case "/static-secret":
+        return html(`<p style="font:20px monospace;color:#ff0000">Your key is card-secret-1111</p><p>Plan: Team</p>`);
+      case "/scroll-code":
+      case "/scroll-code-other":
+        return html(`<div style="font:16px sans-serif;width:640px"><h2>${req.url === "/scroll-code" ? "Use the API" : "Call the API"}</h2><pre style="overflow:auto;width:300px;font:14px monospace;color:#ff0000">curl -H "Authorization: Bearer card-secret-1111" https://api.example.com/v1/projects?limit=100</pre><p>Paragraph below</p><p>Another paragraph</p><p>And another</p></div>`);
+      case "/ellipsis":
+      case "/ellipsis-other":
+        return html(`<div style="font:16px sans-serif"><h2>${req.url === "/ellipsis" ? "API keys" : "Access keys"}</h2><table><tr><td>Production</td><td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#ff0000">card-secret-1111-and-a-long-tail</td></tr><tr><td>Plan</td><td>Team</td></tr><tr><td>Region</td><td>EU</td></tr><tr><td>Seats</td><td>5</td></tr></table><p>Paragraph below</p></div>`);
       case "/overflow-edge":
         return html(`<div id="parent" style="font:20px monospace"><p id="secret" style="width:100px;white-space:nowrap;color:#ff0000;margin:0">card-secret-11112</p></div><p>After</p><p>More</p><p>And more</p><p>Still more</p><script>const text = document.createRange(); text.selectNodeContents(document.getElementById("secret")); document.getElementById("parent").style.width = (text.getBoundingClientRect().width - 5) + "px";</script>`);
       case "/zero-height":
@@ -1167,24 +1175,28 @@ describe("screenshots", () => {
     ["waapi", "a script's Web Animation"],
     ["transition", "CSS transitions"],
     ["frame-clock", "a script timed by the frame clock"],
-  ])("a password on an element moved by %s (%s) is still masked, because the page holds still for the capture", async (motion) => {
-    const shots = await shotsOf(`/moving-${motion}`, 4, typeAndClick("Move"));
-    expect(shots.every((shot) => shot !== null)).toBe(true);
-    expect(await Promise.all(shots.map((shot) => redPixels(shot!)))).toEqual([0, 0, 0, 0]);
+    ["wall-clock", "a script timed by the wall clock"],
+  ])("a password on an element moved by %s (%s) gives no screenshot rather than one the masks may miss", async (motion) => {
+    expect(await shotsOf(`/moving-${motion}`, 3, typeAndClick("Move"))).toEqual([null, null, null]);
   }, 120_000);
 
-  test("two screenshots asked for at once are taken one after the other, so neither lets the other's page move", async () => {
+  test("screenshots asked for at once are taken one after the other, so none takes away another's masks", async () => {
     await withBrowser(async (b) => {
-      await navigate(b, `${origin}/moving-keyframes`);
-      await typeAndClick("Move")(b, await snapshot(b));
-      const shots = await Promise.all([b.screenshot(), b.screenshot()]);
+      await navigate(b, `${origin}/static-secret`);
+      const shots = await Promise.all([b.screenshot(), b.screenshot(), b.screenshot()]);
       expect(shots.every((shot) => shot !== null)).toBe(true);
-      expect(await Promise.all(shots.map((shot) => redPixels(shot!)))).toEqual([0, 0]);
-    });
+      expect(await Promise.all(shots.map((shot) => redPixels(shot!)))).toEqual([0, 0, 0]);
+    }, knowing("card-secret-1111"));
   }, 60_000);
 
-  test("a password on an element a script moves by the wall clock gives no screenshot rather than one the masks may miss", async () => {
-    expect(await shotsOf("/moving-wall-clock", 3, typeAndClick("Move"))).toEqual([null, null, null]);
+  test.each([
+    ["/scroll-code", "/scroll-code-other", "a code block that scrolls sideways"],
+    ["/ellipsis", "/ellipsis-other", "a table cell cut short with an ellipsis"],
+  ])("a secret in text the page cuts off, in %s, is masked without blacking out the rest of the page (%s)", async (path, other) => {
+    const shotOf = async (at: string) => (await shotsOf(at, 1, async () => undefined, knowing("card-secret-1111")))[0]!;
+    const shot = await shotOf(path);
+    expect(await redPixels(shot)).toBe(0);
+    expect(Buffer.compare(Buffer.from(shot.bytes), Buffer.from((await shotOf(other)).bytes))).not.toBe(0);
   }, 120_000);
 
   test("after a screenshot the page's animations run on and still obey the page's own styles", async () => {

@@ -1,7 +1,7 @@
 import { createMCPClient } from "@ai-sdk/mcp";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createConnection } from "@playwright/mcp";
-import { chromium, selectors, type CDPSession, type ElementHandle, type Frame, type Locator, type Page, type Route } from "playwright";
+import { chromium, selectors, type ElementHandle, type Frame, type Locator, type Page, type Route } from "playwright";
 import { jsonSchema, type Tool, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
 import { MAX_ARTIFACT_BYTES } from "@usetrawler/protocol";
@@ -63,19 +63,36 @@ const SELECTOR_ENGINES = {
   })`,
   [LINE_AROUND]: `({
     queryAll(root) {
+      const up = (el) => el.parentElement ?? el.parentNode?.host;
       const style = getComputedStyle(root);
       const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2 || 0;
       const reach = root.getBoundingClientRect().height + 2 * line;
       const text = document.createRange();
       text.selectNodeContents(root);
-      const shown = text.getBoundingClientRect();
+      const drawn = text.getBoundingClientRect();
+      const shown = { left: drawn.left, top: drawn.top, right: drawn.right, bottom: drawn.bottom };
+      let escaping = false;
+      for (let el = root; el && el !== document.body && el !== document.documentElement; el = up(el)) {
+        const css = getComputedStyle(el);
+        if (escaping && css.position !== "static") escaping = false;
+        if (!escaping && (css.overflowX !== "visible" || css.overflowY !== "visible")) {
+          const box = el.getBoundingClientRect();
+          shown.left = Math.max(shown.left, box.left);
+          shown.top = Math.max(shown.top, box.top);
+          shown.right = Math.min(shown.right, box.right);
+          shown.bottom = Math.min(shown.bottom, box.bottom);
+        }
+        if (css.position === "fixed") break;
+        if (css.position === "absolute") escaping = true;
+      }
+      if (shown.right <= shown.left || shown.bottom <= shown.top) return [root];
       const covers = (el, slack) => {
         const box = el.getBoundingClientRect();
         return box.left - slack <= shown.left && box.top - slack <= shown.top && box.right + slack >= shown.right && box.bottom + slack >= shown.bottom;
       };
       let widest = covers(root, line / 2) ? root : null;
       const slack = widest ? line / 2 : 1;
-      for (let el = root.parentElement ?? root.parentNode?.host; el; el = el.parentElement ?? el.parentNode?.host) {
+      for (let el = up(root); el; el = up(el)) {
         if (getComputedStyle(el).display === "contents") continue;
         if (widest && el.getBoundingClientRect().height > reach) break;
         if (covers(el, slack)) widest = el;
@@ -335,11 +352,7 @@ export async function openBrowser(opts: {
     const capture = async (page: Page, deliver: (shot: Screenshot | null) => void) => {
       if (disconnected || dialogOpen) return deliver(null);
       const frames = page.frames();
-      const animations = await context.newCDPSession(page);
-      let frozenSince: number | undefined;
       try {
-        await animations.send("Animation.setPlaybackRate", { playbackRate: 0 });
-        frozenSince = performance.now();
         const { mask, placed } = await inTime(async () => {
           const secrets = await secretsOnPage();
           const mask = frames.flatMap((frame) => masksIn(frame, secrets));
@@ -351,13 +364,7 @@ export async function openBrowser(opts: {
         deliver(unmoved && sameFrames && bytes.byteLength <= MAX_ARTIFACT_BYTES ? { bytes: new Uint8Array(bytes), contentType: "image/png" } : null);
       } finally {
         deliver(null);
-        if (frozenSince !== undefined) await catchUp(animations, performance.now() - frozenSince).catch(() => undefined);
-        await animations.detach().catch(() => undefined);
       }
-    };
-    const catchUp = async (animations: CDPSession, frozenMs: number) => {
-      await animations.send("Animation.setPlaybackRate", { playbackRate: 2 });
-      await new Promise((resolve) => setTimeout(resolve, frozenMs));
     };
     const boxOf = async (element: ElementHandle) => {
       try {
