@@ -23,7 +23,8 @@ test("on a full page load the tab names the page, before its JavaScript runs and
   expect(render()).toMatch(/^<title>Page not found · Trawler<\/title><div class="app-frame /);
 });
 
-test("the route check card holds the requested route, which the browser fills in, the broken route line and the result", () => {
+test("the route check card holds the requested route, which the browser fills in, the broken route line, which high-contrast modes still draw, and the result", () => {
+  expect(render()).toMatch(/<b class="[^"]*\bborder-t-2 border-transparent\b[^"]*"><\/b>/);
   expect(render()).toMatch(/<section aria-label="Route check"[^>]*><div><p [^>]*>Requested route<\/p><code [^>]*><\/code><\/div><div aria-hidden="true"[^>]*>.*>×<\/strong><\/div><p [^>]*><span [^>]*>Result<\/span><b[^>]*>Not found<\/b><\/p><small[^>]*>Checked twice by Trawler\.<\/small><\/section>/);
 });
 

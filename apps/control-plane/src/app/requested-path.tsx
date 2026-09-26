@@ -4,7 +4,7 @@ import { useSyncExternalStore } from "react";
 
 const neverChanges = () => () => {};
 
-const KEEP_ENCODED = /[\p{C}\p{Default_Ignorable_Code_Point}\s#$%&+,/:;=?@\\]/u;
+const KEEP_ENCODED = /[\p{C}\p{Default_Ignorable_Code_Point}\s\u2800#$%&+,/:;=?@\\]/u;
 
 function readable(path: string): string {
   return path.replace(/(?:%[0-9A-Fa-f]{2})+/g, (escapes) => {
