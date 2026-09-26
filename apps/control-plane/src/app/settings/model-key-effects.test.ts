@@ -110,3 +110,14 @@ test("sending a form tells the panel at once, before its answer arrives", () => 
   expect(ReplaceForm({ saved, action: () => {}, pending: false, refusal: null, onSent: sent, onKeep: () => {} }).props.onSubmit).toBe(sent);
   expect(RemoveForm({ addedAt: saved.addedAt, action: () => {}, pending: false, error: "", onSent: sent, onKeep: () => {} }).props.onSubmit).toBe(sent);
 });
+
+test("a removal's refusal never shows in the key form, and a key refusal never in the removal step", () => {
+  react.panel = { step: "confirming", status: "", refusal: { from: "remove", error: "E" }, focus: null };
+  react.results = [{}, {}];
+  const withoutKey = ModelKey({ saved: null, addedBy: null, canManage: true });
+  expect(nodes(withoutKey).find((node) => node.type === ReplaceForm)?.props).toMatchObject({ refusal: null });
+  react.panel = { step: "confirming", status: "", refusal: { from: "replace", error: "E" }, focus: null };
+  react.results = [{}, {}];
+  const withKey = ModelKey({ saved, addedBy: null, canManage: true });
+  expect(nodes(withKey).find((node) => node.type === RemoveForm)?.props).toMatchObject({ error: "" });
+});
