@@ -3,7 +3,7 @@ import { sql } from "kysely";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { ProjectConfigSchema, type RunEvent } from "@usetrawler/protocol";
-import { withOrg } from "../db/tenancy.ts";
+import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { setModelKey } from "../credentials/credentials.ts";
@@ -153,21 +153,24 @@ describe("safety", () => {
     expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.status).toBe("cancelled");
   });
 
-  test("stopping a workspace's live runs cancels the queued and the going ones, and leaves finished runs and other workspaces alone", async () => {
+  test("stopping a workspace's live runs cancels the queued and the going ones, and leaves finished runs and other workspaces alone, even without row security", async () => {
     await drain();
-    const finished = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const org = "org-live";
+    await sql`insert into organization (id, name, slug, "createdAt") values (${org}, ${org}, ${org}, now())`.execute(t.db);
+    const own = await withOrg(t.db, org, (tx) => createProject(tx, org, config, keys));
+    const finished = await withOrg(t.db, org, (tx) => startRun(tx, org, own, keys, options));
     await drain();
-    const going = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const going = await withOrg(t.db, org, (tx) => startRun(tx, org, own, keys, options));
     const claimed = (await claimJob(t.db, keys))!;
     expect(claimed.runId).toBe(going.id);
-    const waiting = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const waiting = await withOrg(t.db, org, (tx) => startRun(tx, org, own, keys, options));
     const elsewhere = await withOrg(t.db, "org-b", (tx) => startRun(tx, "org-b", other, keys, options));
-    const status = async (org: string, id: string) => (await withOrg(t.db, org, (tx) => runSummary(tx, org, id)))!.status;
-    const before = await status("org-a", finished.id);
+    const status = async (orgId: string, id: string) => (await withOrg(t.db, orgId, (tx) => runSummary(tx, orgId, id)))!.status;
+    const before = await status(org, finished.id);
 
-    expect(await withOrg(t.db, "org-a", (tx) => cancelLiveRuns(tx, "org-a"))).toBe(2);
+    expect(await asSystem(t.db, (tx) => cancelLiveRuns(tx, org))).toBe(2);
 
-    expect([await status("org-a", finished.id), await status("org-a", going.id), await status("org-a", waiting.id), await status("org-b", elsewhere.id)]).toEqual([before, "cancelled", "cancelled", "queued"]);
+    expect([await status(org, finished.id), await status(org, going.id), await status(org, waiting.id), await status("org-b", elsewhere.id)]).toEqual([before, "cancelled", "cancelled", "queued"]);
     const jobs = await t.db.selectFrom("jobs").select(["run_id", "status"]).where("run_id", "in", [going.id, waiting.id]).execute();
     expect(jobs.filter((j) => j.run_id === waiting.id).every((j) => j.status === "cancelled")).toBe(true);
     expect(jobs.filter((j) => j.run_id === going.id).map((j) => j.status).sort()).toEqual(["cancelled", "leased"]);
