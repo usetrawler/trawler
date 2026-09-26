@@ -35,6 +35,13 @@ test("the requested route reads as the address bar shows it, and a malformed or 
   expect(shown("/a%2Fb")).toEqual(["/a%2Fb", "/a%2Fb"]);
 });
 
+test("the mockup's steps include their own widths: one column at 820 px, an iPad Air upright, and stacked actions at 520 px", () => {
+  const html = render();
+  expect(html).toMatch(/<main class="[^"]*\bmax-\[821px\]:grid-cols-1\b/);
+  expect(html).toMatch(/<div class="[^"]*\bmax-\[521px\]:flex-col\b[^"]*"><a href="\/"/);
+  expect(html).not.toMatch(/max-\[820px\]|max-\[520px\]/);
+});
+
 test("the page keeps the theme switch, and hides the big number from screen readers", () => {
   const html = render();
   expect(html).toMatch(/<header[^>]*>.*<button type="button" aria-label="Theme: System\. Switch to Dark\."/);
