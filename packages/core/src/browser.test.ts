@@ -222,6 +222,13 @@ beforeAll(async () => {
         return html(`<style>@keyframes hop{from{transform:translateX(0)}to{transform:translateX(200px)}} #echo{font:20px monospace;color:#ff0000;animation:hop 20s steps(2) infinite}</style><p id="echo">card-secret-1111</p>`);
       case "/glowing-field":
         return html(`<style>@keyframes glow{from{box-shadow:0 0 0 #09f}to{box-shadow:0 0 12px #09f}} input{animation:glow 1s infinite alternate}</style><input aria-label="Password" type="password" value="field-secret-1">`);
+      case "/row-hidden":
+        return html(narrowColumn(`<table style="font:20px monospace"><tr style="overflow:hidden"><td>Key</td><td style="max-width:40px;white-space:nowrap;color:#ff0000">card-secret-1111 is the key</td></tr><tr><td>Plan</td><td>Team</td></tr></table>`));
+      case "/row-span":
+        return html(`<table style="font:20px monospace"><tr style="overflow:hidden"><td>Key</td><td rowspan="3" style="vertical-align:bottom;color:#ff0000">card-secret-1111</td></tr><tr><td>Row two</td></tr><tr><td>Row three</td></tr></table>`);
+      case "/closed-details":
+      case "/closed-details-plain":
+        return html(`<details><summary style="font:20px monospace;color:#0000ff">Show the key</summary><p style="font:20px monospace;color:#ff0000">${req.url === "/closed-details" ? "card-secret-1111" : "not-a-secret-00"}</p></details><p>Plan: Team</p>`);
       case "/fixed-below":
         return html(`<p>Short page</p><div style="position:fixed;left:20px;bottom:120px;height:0;font:20px monospace;color:#ff0000">card-secret-1111</div>`);
       case "/flicker":
@@ -1293,6 +1300,8 @@ describe("screenshots", () => {
     ["/contents-hidden", "is inside a box-less wrapper that says it hides overflow"],
     ["/inline-hidden", "is inside an inline element that says it hides overflow"],
     ["/clip-margin", "is cut off only past a clip margin"],
+    ["/row-hidden", "runs past a table row that says it hides overflow"],
+    ["/row-span", "spans rows below the one that says it hides overflow"],
   ])("a secret whose text %s is masked where it is drawn (%s)", async (path) => {
     const [shot] = await shotsOf(path, 1, async () => undefined, knowing(path === "/overflow-edge" ? "card-secret-11112" : "card-secret-1111"));
     expect(shot).not.toBeNull();
@@ -1307,6 +1316,11 @@ describe("screenshots", () => {
   test("a secret the page hides entirely, like one in a collapsed panel, blacks out nothing that is on screen", async () => {
     const shotOf = async (at: string) => (await shotsOf(at, 1, async () => undefined, knowing("card-secret-1111")))[0]!;
     expect(Buffer.compare(Buffer.from((await shotOf("/collapsed")).bytes), Buffer.from((await shotOf("/collapsed-plain")).bytes))).toBe(0);
+  }, 60_000);
+
+  test("a secret inside a closed disclosure blacks out nothing that is on screen", async () => {
+    const shotOf = async (at: string) => (await shotsOf(at, 1, async () => undefined, knowing("card-secret-1111")))[0]!;
+    expect(Buffer.compare(Buffer.from((await shotOf("/closed-details")).bytes), Buffer.from((await shotOf("/closed-details-plain")).bytes))).toBe(0);
   }, 60_000);
 
   test("a secret drawn where nothing on the page contains it gives no screenshot", async () => {

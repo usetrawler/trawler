@@ -41,7 +41,6 @@ const HANDLE_READ_MS = 500;
 const SCREENSHOT_MS = 5000;
 const MASK_COLOR = "#17191c";
 const MASK_CHECK_MS = 2500;
-const STEADY_MS = 20;
 const SECRET_FIELDS = "trawler-secret-fields";
 const LINE_AROUND = "trawler-line-around";
 const MOVING = "trawler-moving";
@@ -69,7 +68,9 @@ const SELECTOR_ENGINES = {
   })`,
   [LINE_AROUND]: `({
     queryAll(root, mode) {
+      if (!root.checkVisibility({ visibilityProperty: true, contentVisibilityAuto: true })) return [];
       const up = (el) => el.parentElement ?? el.parentNode?.host;
+      const neverClips = new Set(["contents", "inline", "table-row", "table-row-group", "table-header-group", "table-footer-group", "table-column", "table-column-group"]);
       const style = getComputedStyle(root);
       const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2 || 0;
       const reach = root.getBoundingClientRect().height + 2 * line;
@@ -82,7 +83,7 @@ const SELECTOR_ENGINES = {
       for (let el = root; el && el !== document.body && el !== document.documentElement; el = up(el)) {
         const css = getComputedStyle(el);
         if (escaping && css.position !== "static") escaping = false;
-        if (!escaping && css.display !== "contents" && css.display !== "inline") {
+        if (!escaping && !neverClips.has(css.display)) {
           const box = el.getBoundingClientRect();
           if (cuts(css.overflowX, css.overflowClipMargin)) {
             shown.left = Math.max(shown.left, box.left);
@@ -386,18 +387,13 @@ export async function openBrowser(opts: {
         const shown = frames.map((frame) => secretsIn(frame, secrets));
         const uncovered = await anyIn(shown.flatMap(({ text }) => (text ? [text.locator(`${LINE_AROUND}=uncovered`)] : [])));
         const moving = await anyIn(shown.flatMap(({ passwords, text, fields }) => [passwords, text, fields].flatMap((l) => (l ? [l.locator(`${MOVING}=1`)] : []))));
-        return { mask, placed: await steadyBoxesOf(mask), uncovered, moving };
+        return { mask, placed: await boxesOf(mask), uncovered, moving };
       });
-      if (uncovered || moving || placed === null) return null;
+      if (uncovered || moving) return null;
       const bytes = await page.screenshot({ type: "png", mask, maskColor: MASK_COLOR, caret: "hide", scale: "css", timeout: SCREENSHOT_MS });
-      const unmoved = (await inTime(() => steadyBoxesOf(mask))) === placed;
+      const unmoved = (await inTime(() => boxesOf(mask))) === placed;
       const sameFrames = page.frames().length === frames.length && page.frames().every((frame, i) => frame === frames[i]);
       return unmoved && sameFrames && bytes.byteLength <= MAX_ARTIFACT_BYTES ? { bytes: new Uint8Array(bytes), contentType: "image/png" } : null;
-    };
-    const steadyBoxesOf = async (mask: Locator[]) => {
-      const first = await boxesOf(mask);
-      await new Promise((resolve) => setTimeout(resolve, STEADY_MS));
-      return (await boxesOf(mask)) === first ? first : null;
     };
     const boxOf = async (element: ElementHandle) => {
       try {
