@@ -179,7 +179,6 @@ describe("safety", () => {
       { status: "cancelled", cancelReason: "key_removed" },
       { status: "queued", cancelReason: null },
     ]);
-    expect(before.cancelReason).toBeNull();
     const jobs = await t.db.selectFrom("jobs").select(["run_id", "status"]).where("run_id", "in", [going.id, waiting.id]).execute();
     expect(jobs.filter((j) => j.run_id === waiting.id).every((j) => j.status === "cancelled")).toBe(true);
     expect(jobs.filter((j) => j.run_id === going.id).map((j) => j.status).sort()).toEqual(["cancelled", "leased"]);
@@ -188,6 +187,16 @@ describe("safety", () => {
     await completeJob(t.db, claimed.token, { usage: usage(0), stoppedBy: "error", error: "cancelled" });
     await withOrg(t.db, "org-b", (tx) => cancelRun(tx, "org-b", elsewhere.id, "stopped"));
     await drain();
+  });
+
+  test("the database keeps a cancel reason only on a cancelled run, and only one it knows", async () => {
+    await drain();
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    await expect(sql`update runs set cancel_reason = 'stopped' where id = ${run.id}`.execute(t.db)).rejects.toThrow(/runs_cancel_reason_only_when_cancelled/);
+    await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id, "stopped"));
+    await expect(sql`update runs set cancel_reason = 'someone' where id = ${run.id}`.execute(t.db)).rejects.toThrow(/runs_cancel_reason_check/);
+    await expect(sql`update runs set status = 'running' where id = ${run.id}`.execute(t.db)).rejects.toThrow(/runs_cancel_reason_only_when_cancelled/);
+    expect(await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id))).toMatchObject({ status: "cancelled", cancelReason: "stopped" });
   });
 
   test("two claimers never get two jobs of the same run", async () => {
