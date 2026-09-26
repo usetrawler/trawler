@@ -58,10 +58,20 @@ test("models are listed with the key, and a start check tells a bad key from a b
   expect(await checkModelCall(google, "x", fake(503, {}))).toMatchObject({ ok: false, reason: "unavailable" });
 });
 
+const refusing = (status: number, message: string): typeof fetch => async () => new Response(JSON.stringify({ error: { message } }), { status });
+
 test("a provider's refusal comes back with the key it was sent masked, also where the message is cut", async () => {
   const key = "sk-or-v1-" + "0123456789abcdef".repeat(4);
   const endpoint = endpointFor("openrouter", key, { openRouterUrl: "https://or" });
-  const refusing = (status: number, message: string): typeof fetch => async () => new Response(JSON.stringify({ error: { message } }), { status });
   expect(await checkModelCall(endpoint, "x", refusing(401, `${"a".repeat(180)}${key}${"b".repeat(100)}`))).toEqual({ ok: false, reason: "key", detail: `${"a".repeat(180)}•••${"b".repeat(17)}` });
+  expect(await checkModelCall(endpoint, "x", refusing(401, `${key}${"a".repeat(177)}${key}${"b".repeat(50)}`))).toEqual({ ok: false, reason: "key", detail: `•••${"a".repeat(177)}•••${"b".repeat(17)}` });
   expect(await checkModelCall(endpoint, "x", refusing(404, `No endpoints found for x with the key ${key}.`))).toEqual({ ok: false, reason: "model", detail: "No endpoints found for x with the key •••." });
+  expect(await checkModelCall(endpoint, "x", refusing(503, `Overloaded, retry with ${key} later.`))).toEqual({ ok: false, reason: "unavailable", detail: "Overloaded, retry with ••• later." });
+});
+
+test("a refusal longer than 4,000 characters is left out rather than searched for the key", async () => {
+  const key = "k".repeat(20);
+  const endpoint = endpointFor("custom", key, { openRouterUrl: "", customUrl: "https://llm.example.com/v1" });
+  expect(await checkModelCall(endpoint, "x", refusing(401, key.repeat(200)))).toEqual({ ok: false, reason: "key", detail: "•••" });
+  expect(await checkModelCall(endpoint, "x", refusing(401, `${key.repeat(200)}k`))).toEqual({ ok: false, reason: "key", detail: "" });
 });
