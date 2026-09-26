@@ -2,11 +2,12 @@
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { keyLooksValid, modelKey, modelKeyHint, setModelKey, type KeyHint } from "../../../credentials/credentials.ts";
+import { keyStillStored, modelKey, modelKeyHint, setModelKey, type KeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
 import { openRouterPrices, priceFor, type Price } from "../../../llm/prices.ts";
 import { projectExists, ProjectNotFound } from "../../../projects/projects.ts";
-import { checkModelCall, customUrlProblem, detectProvider, endpointFor, listModels, PREFERRED_MODELS, PROVIDER_LABEL, PROVIDERS, priceKey, type Endpoint, type Provider } from "../../../llm/providers.ts";
+import { freshEndpoint, withinListingLimit, type KeyInput } from "../../../llm/key-input.ts";
+import { checkModelCall, endpointFor, listModels, PREFERRED_MODELS, PROVIDER_LABEL, priceKey, type Endpoint, type Provider } from "../../../llm/providers.ts";
 import { DEFAULT_RUN } from "../../../runs/models.ts";
 import { startRun } from "../../../runs/runs.ts";
 import { canManageBilling, signedInMember } from "../../../server/auth.ts";
@@ -27,14 +28,10 @@ export interface ModelOption {
 
 export type ModelList = { ok: true; provider: Provider; models: ModelOption[]; suggested: string } | { ok: false; error: string };
 
+class KeyGone extends Error {}
+
 const MODEL_ID = /^[A-Za-z0-9._:\/@-]{1,200}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-interface KeyInput {
-  key?: string;
-  provider?: string;
-  baseUrl?: string;
-}
 
 async function endpointFrom(orgId: string, input: KeyInput): Promise<{ endpoint: Endpoint; fresh: boolean } | { error: string }> {
   const openRouterUrl = readEnv().openRouterUrl;
@@ -44,27 +41,8 @@ async function endpointFrom(orgId: string, input: KeyInput): Promise<{ endpoint:
     if (!stored) return { error: "Paste an API key from your model provider to start." };
     return { endpoint: endpointFor(stored.provider, stored.key, { openRouterUrl, customUrl: stored.baseUrl }), fresh: false };
   }
-  if (!keyLooksValid(key)) return { error: "That does not look like an API key. Copy it again from your provider." };
-  const chosen = PROVIDERS.includes(input.provider as Provider) ? (input.provider as Provider) : null;
-  const provider = chosen ?? detectProvider(key) ?? "custom";
-  if (provider === "custom") {
-    const baseUrl = (input.baseUrl ?? "").trim();
-    const problem = customUrlProblem(baseUrl);
-    if (problem) return { error: problem };
-    return { endpoint: endpointFor("custom", key, { openRouterUrl, customUrl: baseUrl }), fresh: true };
-  }
-  return { endpoint: endpointFor(provider, key, { openRouterUrl }), fresh: true };
-}
-
-const LISTINGS_PER_WINDOW = 30;
-const LISTING_WINDOW_MS = 10 * 60 * 1000;
-const listings = new Map<string, number[]>();
-
-function withinListingLimit(userId: string, now = Date.now()): boolean {
-  const recent = (listings.get(userId) ?? []).filter((t) => now - t < LISTING_WINDOW_MS);
-  if (recent.length >= LISTINGS_PER_WINDOW) return false;
-  listings.set(userId, [...recent, now]);
-  return true;
+  const fresh = freshEndpoint(input, openRouterUrl);
+  return "error" in fresh ? fresh : { endpoint: fresh.endpoint, fresh: true };
 }
 
 
@@ -126,17 +104,23 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   }
   const price = await priceFor(endpoint.provider, modelId, readEnv().openRouterUrl);
   let runId: string;
+  const providerBaseUrl = endpoint.provider === "custom" ? endpoint.baseUrl : null;
   try {
-    const run = await withOrg(getDb(), orgId, (tx) =>
-      startRun(tx, orgId, projectId, getKeyring(), {
+    const run = await withOrg(getDb(), orgId, async (tx) => {
+      if (!(await keyStillStored(tx, orgId, endpoint.provider, providerBaseUrl))) throw new KeyGone();
+      return startRun(tx, orgId, projectId, getKeyring(), {
         budgetUsd, agentModel: modelId, judgeModel: modelId, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: member.userId,
-        provider: endpoint.provider, providerBaseUrl: endpoint.provider === "custom" ? endpoint.baseUrl : null, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap,
-      }),
-    );
+        provider: endpoint.provider, providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap,
+      });
+    });
     runId = run.id;
   } catch (err) {
-    if (!(err instanceof ProjectNotFound)) await logError("run could not start", { orgId, projectId, err }, scrubberWith([endpoint.key]));
     const keyHint = await withOrg(getDb(), orgId, (tx) => modelKeyHint(tx, orgId));
+    if (err instanceof KeyGone) {
+      revalidatePath(`/projects/${projectId}`);
+      return { error: "The workspace's model key was removed or changed while the run was starting. Check the key and start again.", ...(keyHint ? { keyHint } : {}) };
+    }
+    if (!(err instanceof ProjectNotFound)) await logError("run could not start", { orgId, projectId, err }, scrubberWith([endpoint.key]));
     return { error: "The run could not start. Try again.", ...(keyHint ? { keyHint } : {}) };
   }
   redirect(`/runs/${runId}`);

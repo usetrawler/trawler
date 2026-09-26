@@ -57,12 +57,20 @@ export class RunNotFound extends Error {
   }
 }
 
-export async function cancelRun(tx: Tx, orgId: string, runId: string): Promise<void> {
+export async function cancelRun(tx: Tx, orgId: string, runId: string): Promise<boolean> {
   const run = await tx.selectFrom("runs").select("status").where("id", "=", runId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
   if (!run) throw new RunNotFound();
-  if (run.status !== "queued" && run.status !== "running") return;
+  if (run.status !== "queued" && run.status !== "running") return false;
   await tx.updateTable("runs").set({ status: "cancelled", finished_at: new Date() }).where("id", "=", runId).execute();
   await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date() }).where("run_id", "=", runId).where("status", "=", "queued").execute();
+  return true;
+}
+
+export async function cancelLiveRuns(tx: Tx, orgId: string): Promise<number> {
+  const live = await tx.selectFrom("runs").select("id").where("org_id", "=", orgId).where("status", "in", ["queued", "running"]).forUpdate().execute();
+  let cancelled = 0;
+  for (const run of live) if (await cancelRun(tx, orgId, run.id)) cancelled++;
+  return cancelled;
 }
 
 export function capSpent(run: { cost_usd: string; budget_usd: string; token_cap: string | null; tokens_used: string }): boolean {

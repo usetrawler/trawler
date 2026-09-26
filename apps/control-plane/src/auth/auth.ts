@@ -95,6 +95,16 @@ export function createAuth(options: AuthOptions) {
     await db.deleteFrom("session").where("id", "=", session.id).execute();
     return null;
   };
+  const memberEmail = async (orgId: string, userId: string): Promise<string | null> => {
+    const member = await db
+      .selectFrom("member")
+      .innerJoin("user", "user.id", "member.userId")
+      .select("user.email")
+      .where("member.organizationId", "=", orgId)
+      .where("member.userId", "=", userId)
+      .executeTakeFirst();
+    return member?.email ?? null;
+  };
 
   const auth = betterAuth({
     secret: options.secret,
@@ -124,7 +134,7 @@ export function createAuth(options: AuthOptions) {
       },
     },
   });
-  return Object.assign(auth, { workspaceOf });
+  return Object.assign(auth, { workspaceOf, memberEmail });
 }
 
 export type Auth = ReturnType<typeof createAuth>;

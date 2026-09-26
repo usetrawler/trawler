@@ -1,0 +1,41 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { beforeEach, expect, test, vi } from "vitest";
+
+const react = vi.hoisted(() => ({ result: {} as Record<string, unknown>, pending: false, states: [] as unknown[] }));
+vi.mock("react", async (original) => ({
+  ...(await original<typeof import("react")>()),
+  useActionState: () => [react.result, () => {}, react.pending],
+  useState: (initial: unknown) => [react.states.length ? react.states.shift() : initial, () => {}],
+  useEffect: () => {},
+}));
+vi.mock("./actions.ts", () => ({ renameWorkspaceAction: async () => ({}), replaceModelKeyAction: async () => ({}), removeModelKeyAction: async () => ({}) }));
+
+const { WorkspaceName } = await import("./workspace-name.tsx");
+const RULE = "Workspace names are 1 to 100 plain characters.";
+const render = () => renderToStaticMarkup(createElement(WorkspaceName, { name: "Acme", canManage: true }));
+const saved = (html: string) => html.match(/<span role="status"[^>]*>([^<]*)<\/span>/)?.[1];
+
+beforeEach(() => {
+  react.result = {};
+  react.pending = false;
+  react.states = [];
+});
+
+test("Saved. shows after a rename, and goes once the name is edited again", () => {
+  react.result = { saved: true };
+  expect(saved(render())).toBe("Saved.");
+  react.states = ["Acme Labs edited", true];
+  expect(saved(render())).toBe("");
+});
+
+test("a refused name is shown with its field marked, and hidden while the next save runs so a repeat is announced again", () => {
+  react.result = { error: RULE };
+  const refused = render();
+  expect(refused).toContain(`<p id="workspace-error" role="alert" class="border-l-2 border-bad pl-3 text-sm text-bad">${RULE}</p>`);
+  expect(refused.match(/<input [^>]*name="name"[^>]*>/)?.[0]).toMatch(/aria-invalid="true" aria-describedby="workspace-error"/);
+  react.pending = true;
+  const saving = render();
+  expect(saving).not.toContain('role="alert"');
+  expect(saving.match(/<input [^>]*name="name"[^>]*>/)?.[0]).not.toContain("aria-invalid");
+});

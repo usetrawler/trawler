@@ -187,6 +187,16 @@ test("a member removed from the workspace a session is in is signed out of that 
   expect(await auth.workspaceOf(own)).toMatchObject({ orgId: own.activeOrganizationId });
 });
 
+test("a member's email is given only for the workspace asked about, and only while they belong to it", async () => {
+  const { user, session } = await signIn("adder@acme.test");
+  const own = sessionOf(session);
+  const elsewhere = sessionOf((await signIn("elsewhere@acme.test")).session);
+  expect(await auth.memberEmail(own.activeOrganizationId!, user.id)).toBe("adder@acme.test");
+  expect(await auth.memberEmail(elsewhere.activeOrganizationId!, user.id)).toBeNull();
+  await sql`delete from member where "organizationId" = ${own.activeOrganizationId} and "userId" = ${user.id}`.execute(t.db);
+  expect(await auth.memberEmail(own.activeOrganizationId!, user.id)).toBeNull();
+});
+
 test("a session that names no workspace is signed out", async () => {
   const session = sessionOf((await signIn("unset@acme.test")).session);
   await sql`update session set "activeOrganizationId" = null where id = ${session.id}`.execute(t.db);

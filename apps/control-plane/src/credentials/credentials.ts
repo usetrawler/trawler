@@ -1,3 +1,4 @@
+import { sql } from "kysely";
 import type { Tx } from "../db/tenancy.ts";
 import { last4, type Keyring } from "../lib/secrets.ts";
 import { customUrlProblem, PROVIDERS, type Provider } from "../llm/providers.ts";
@@ -36,6 +37,29 @@ export async function setModelKey(tx: Tx, orgId: string, input: { provider: Prov
 export async function modelKeyHint(tx: Tx, orgId: string): Promise<KeyHint | null> {
   const row = await tx.selectFrom("credentials").select(["kind", "hint", "base_url"]).where("org_id", "=", orgId).executeTakeFirst();
   return row ? { provider: row.kind as Provider, hint: row.hint, baseUrl: row.base_url } : null;
+}
+
+export interface KeyDetails extends KeyHint {
+  addedBy: string;
+  addedAt: Date;
+}
+
+export async function modelKeyDetails(tx: Tx, orgId: string): Promise<KeyDetails | null> {
+  const row = await tx.selectFrom("credentials").select(["kind", "hint", "base_url", "created_by", "created_at"]).where("org_id", "=", orgId).executeTakeFirst();
+  return row ? { provider: row.kind as Provider, hint: row.hint, baseUrl: row.base_url, addedBy: row.created_by, addedAt: row.created_at } : null;
+}
+
+export async function keyStillStored(tx: Tx, orgId: string, provider: Provider, baseUrl: string | null): Promise<boolean> {
+  let stored = tx.selectFrom("credentials").select("org_id").where("org_id", "=", orgId).where("kind", "=", provider);
+  if (provider === "custom") stored = stored.where("base_url", "=", baseUrl);
+  return Boolean(await stored.forShare().executeTakeFirst());
+}
+
+export async function removeModelKey(tx: Tx, orgId: string, addedAt?: Date): Promise<boolean> {
+  let removal = tx.deleteFrom("credentials").where("org_id", "=", orgId);
+  if (addedAt) removal = removal.where(sql<Date>`date_trunc('milliseconds', created_at)`, "=", addedAt);
+  const { numDeletedRows } = await removal.executeTakeFirst();
+  return numDeletedRows > 0n;
 }
 
 export async function modelKey(tx: Tx, orgId: string, keys: Keyring): Promise<StoredKey | null> {

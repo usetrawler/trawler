@@ -1,5 +1,5 @@
 import { scrubberWith } from "../server/log.ts";
-import { guardedFetch } from "../setup/safe-fetch.ts";
+import { FetchRefused, guardedFetch } from "../setup/safe-fetch.ts";
 
 import { PROVIDERS, type Provider } from "./provider-kinds.ts";
 
@@ -95,6 +95,26 @@ export async function checkModelCall(endpoint: Endpoint, model: string, fetchImp
     if (res.status === 400 || res.status === 404 || res.status === 422) return { ok: false, reason: "model", detail };
     return { ok: false, reason: "unavailable", detail };
   } catch {
+    return { ok: false, reason: "unavailable" };
+  }
+}
+
+export type SavedKeyCheck = { ok: true; checked: boolean } | { ok: false; reason: "key" | "private" | "unavailable" };
+
+export async function checkKey(endpoint: Endpoint, fetchImpl: typeof fetch = fetchFor(endpoint)): Promise<SavedKeyCheck> {
+  try {
+    if (endpoint.provider === "openrouter") {
+      const res = await fetchImpl(`${endpoint.baseUrl}/key`, { headers: listingHeaders(endpoint), redirect: "error", signal: AbortSignal.timeout(10_000) });
+      await res.body?.cancel();
+      if (!res.ok) throw new ProviderRefused(res.status);
+    } else {
+      await listModels(endpoint, fetchImpl);
+    }
+    return { ok: true, checked: true };
+  } catch (err) {
+    if (err instanceof ProviderRefused && (err.status === 401 || err.status === 403 || (endpoint.provider === "google" && err.status === 400))) return { ok: false, reason: "key" };
+    if (err instanceof ProviderRefused && endpoint.provider === "custom" && (err.status === 404 || err.status === 405)) return { ok: true, checked: false };
+    if (err instanceof FetchRefused && err.reason === "private") return { ok: false, reason: "private" };
     return { ok: false, reason: "unavailable" };
   }
 }

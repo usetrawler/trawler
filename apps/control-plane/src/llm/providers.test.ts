@@ -1,6 +1,7 @@
 import { expect, test, vi } from "vitest";
 import { scrubberWith } from "../server/log.ts";
-import { checkModelCall, detectProvider, endpointFor, listModels, priceKey, PROVIDER_LABEL, PROVIDERS } from "./providers.ts";
+import { FetchRefused } from "../setup/safe-fetch.ts";
+import { checkKey, checkModelCall, detectProvider, endpointFor, listModels, priceKey, PROVIDER_LABEL, PROVIDERS } from "./providers.ts";
 import { providerArticle } from "./provider-kinds.ts";
 import { parseOpenRouterPrices } from "./prices.ts";
 
@@ -84,4 +85,40 @@ test("a refusal longer than 4,000 characters is left out rather than searched fo
   vi.mocked(scrubberWith).mockClear();
   expect(await checkModelCall(endpoint, "x", refusing(401, `${key.repeat(200)}k`))).toEqual({ ok: false, reason: "key", detail: "" });
   expect(scrubberWith).not.toHaveBeenCalled();
+});
+
+test("a key to save is checked where a wrong one is refused: OpenRouter's key endpoint, the others' model listing", async () => {
+  const seen: Array<{ url: string; auth: string | null }> = [];
+  const answer = (status: number): typeof fetch => async (url, init) => {
+    seen.push({ url: String(url), auth: new Headers(init?.headers).get("authorization") ?? new Headers(init?.headers).get("x-api-key") });
+    return new Response(JSON.stringify({ data: [{ id: "m" }] }), { status });
+  };
+  const openRouter = endpointFor("openrouter", "sk-or-x", { openRouterUrl: "https://openrouter.test/api/v1" });
+  expect(await checkKey(openRouter, answer(200))).toEqual({ ok: true, checked: true });
+  expect(seen.at(-1)).toEqual({ url: "https://openrouter.test/api/v1/key", auth: "Bearer sk-or-x" });
+  expect(await checkKey(openRouter, answer(401))).toEqual({ ok: false, reason: "key" });
+  const anthropic = endpointFor("anthropic", "sk-ant-x", { openRouterUrl: "" });
+  expect(await checkKey(anthropic, answer(200))).toEqual({ ok: true, checked: true });
+  expect(seen.at(-1)).toEqual({ url: "https://api.anthropic.com/v1/models", auth: "sk-ant-x" });
+  expect(await checkKey(anthropic, answer(403))).toEqual({ ok: false, reason: "key" });
+  expect(await checkKey(anthropic, answer(404))).toEqual({ ok: false, reason: "unavailable" });
+  const google = endpointFor("google", "AIza-x", { openRouterUrl: "" });
+  expect(await checkKey(google, answer(400))).toEqual({ ok: false, reason: "key" });
+  expect(await checkKey(anthropic, answer(400))).toEqual({ ok: false, reason: "unavailable" });
+  expect(await checkKey(anthropic, answer(503))).toEqual({ ok: false, reason: "unavailable" });
+});
+
+test("an OpenAI-compatible service that lists no models is saved unchecked, and a private one is named as such", async () => {
+  const custom = endpointFor("custom", "key-x", { openRouterUrl: "", customUrl: "https://llm.example.com/v1" });
+  const answer = (status: number): typeof fetch => async () => new Response("{}", { status });
+  expect(await checkKey(custom, answer(404))).toEqual({ ok: true, checked: false });
+  expect(await checkKey(custom, answer(405))).toEqual({ ok: true, checked: false });
+  expect(await checkKey(custom, answer(401))).toEqual({ ok: false, reason: "key" });
+  expect(await checkKey(custom, async () => { throw new FetchRefused("private", "the address is not allowed"); })).toEqual({ ok: false, reason: "private" });
+  expect(await checkKey(custom, async () => { throw new TypeError("fetch failed"); })).toEqual({ ok: false, reason: "unavailable" });
+});
+
+test("a key for a service on a private network is refused by the guarded fetch itself, before it is sent anywhere", async () => {
+  const custom = endpointFor("custom", "k-" + "x".repeat(30), { openRouterUrl: "", customUrl: "https://10.0.0.8/v1" });
+  expect(await checkKey(custom)).toEqual({ ok: false, reason: "private" });
 });
