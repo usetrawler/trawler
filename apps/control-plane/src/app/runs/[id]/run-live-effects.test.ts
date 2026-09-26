@@ -9,6 +9,7 @@ const react = vi.hoisted(() => ({
   started: [] as Array<Promise<unknown>>,
   refs: [] as Array<{ current: unknown }>,
   refIndex: 0,
+  again: {} as { error?: string },
 }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
@@ -26,11 +27,14 @@ vi.mock("react", async (original) => ({
   },
   useId: () => "id",
   useTransition: () => [false, (work: () => Promise<unknown>) => { react.started.push(work()); }],
+  useActionState: () => [react.again, () => {}, false],
 }));
 const actions = vi.hoisted(() => ({ cancelRunAction: vi.fn(), judgeAgainAction: vi.fn(), runAgainAction: vi.fn() }));
 vi.mock("./actions.ts", () => actions);
 
-const { CancelButton, JudgeAgainButton, RunLive } = await import("./run-live.tsx");
+const { CancelButton, FindingRow, JudgeAgainButton, RunLive } = await import("./run-live.tsx");
+const { RunAgainError } = await import("./run-again-button.tsx");
+const { UnrecognizedActionError } = await import("next/dist/client/components/unrecognized-action-error.js");
 
 type Node = { type?: unknown; props?: Record<string, unknown> & { children?: unknown } };
 const nodes = (node: unknown): Node[] => {
@@ -57,7 +61,7 @@ const settle = async () => { await Promise.all(react.started); await vi.advanceT
 
 beforeEach(() => {
   vi.useFakeTimers();
-  Object.assign(react, { effects: [], setters: [], values: [], started: [], refs: [], refIndex: 0 });
+  Object.assign(react, { effects: [], setters: [], values: [], started: [], refs: [], refIndex: 0, again: {} });
   vi.stubGlobal("document", { hidden: false, activeElement: null, body: {} });
   for (const action of Object.values(actions)) action.mockReset();
 });
@@ -120,29 +124,29 @@ test("Stop run asks first; Stop cancels the run and refreshes, and a failure say
   press(button(CancelButton({ runId: "run-1", onDone: refreshed }), /^Stop$/));
   await settle();
   expect(actions.cancelRunAction).toHaveBeenCalledWith("run-1");
-  expect(react.setters.at(-1)).toHaveBeenCalledWith(true);
+  expect(react.setters.at(-1)).toHaveBeenCalledWith("The run could not be stopped. Try again.");
   expect(refreshed).toHaveBeenCalledOnce();
 });
 
-test("a run that is gone says so and is not fetched again, a lost session goes to sign in, and a failed fetch marks the page stale", async () => {
+test("a run that is gone says so, a lost session goes to sign in, and a failed fetch marks the page stale", async () => {
+  const poll = async () => {
+    draw(data("running"));
+    const stop = react.effects[0]!() as () => void;
+    await vi.advanceTimersByTimeAsync(2000);
+    stop();
+  };
   vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 404 })));
-  draw(data("running"));
-  react.effects[0]!();
-  await vi.advanceTimersByTimeAsync(2000);
+  await poll();
   expect(react.setters[2]).toHaveBeenCalledWith(true);
 
   const assign = vi.fn();
   vi.stubGlobal("window", { location: { assign } });
   vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 401 })));
-  draw(data("running"));
-  react.effects[0]!();
-  await vi.advanceTimersByTimeAsync(2000);
+  await poll();
   expect(assign).toHaveBeenCalledWith("/sign-in");
 
   vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
-  draw(data("running"));
-  react.effects[0]!();
-  await vi.advanceTimersByTimeAsync(2000);
+  await poll();
   expect(react.setters[1]).toHaveBeenCalledWith(true);
 });
 
@@ -174,7 +178,7 @@ test("a judge that could not start, or a run that could not be stopped, says so 
   react.values = ["It is already being judged again."];
   const judging = JudgeAgainButton({ runId: "run-1", findingKey: "ana:f1", judging: false, onDone: async () => {} });
   expect(nodes(judging).filter((node) => node.props?.role === "alert").map(text)).toEqual(["It is already being judged again."]);
-  react.values = [true, true];
+  react.values = [true, "The run could not be stopped. Try again."];
   const stopping = CancelButton({ runId: "run-1", onDone: () => {} });
   expect(nodes(stopping).filter((node) => node.props?.role === "alert").map(text)).toEqual(["The run could not be stopped. Try again."]);
 });
@@ -192,8 +196,53 @@ test("a Stop that cannot reach Trawler says it could not stop the run, instead o
   react.values = [true, false];
   press(button(CancelButton({ runId: "run-1", onDone: refreshed }), /^Stop$/));
   await settle();
-  expect(react.setters[1]).toHaveBeenCalledWith(true);
+  expect(react.setters[1]).toHaveBeenCalledWith("The run could not be stopped. Try again.");
   expect(refreshed).toHaveBeenCalledOnce();
+});
+
+test("after Trawler was updated, Stop and Judge again ask for a reload, since trying again cannot work until then", async () => {
+  actions.cancelRunAction.mockRejectedValueOnce(new UnrecognizedActionError("Server action not found."));
+  react.values = [true, null];
+  press(button(CancelButton({ runId: "run-1", onDone: () => {} }), /^Stop$/));
+  await settle();
+  expect(react.setters[1]).toHaveBeenCalledWith("Trawler was updated since this page opened. Reload the page to stop the run.");
+  actions.judgeAgainAction.mockRejectedValueOnce(new UnrecognizedActionError("Server action not found."));
+  press(button(JudgeAgainButton({ runId: "run-1", findingKey: "ana:f1", judging: false, onDone: async () => {} }), /^Judge again$/));
+  await settle();
+  expect(react.setters.at(-1)).toHaveBeenLastCalledWith("Trawler was updated since this page opened. Reload the page to judge it again.");
+});
+
+test("a Run again refusal sits on its own line under the head, so the buttons stay where they were", () => {
+  react.again = { error: "The workspace has no model key any more. An owner or admin can add one in Settings." };
+  const tree = draw(data("succeeded")) as unknown as Node;
+  const [headRow, errorLine] = tree.props!.children as Node[];
+  expect(nodes(headRow).some((node) => node.type === RunAgainError)).toBe(false);
+  expect(errorLine!.props).toMatchObject({ className: "mt-3 flex wide:justify-end" });
+  expect(nodes(errorLine).some((node) => node.type === RunAgainError)).toBe(true);
+  react.again = {};
+  expect(nodes(draw(data("succeeded"))).some((node) => node.type === RunAgainError)).toBe(false);
+});
+
+test("a run that is gone is not fetched again, even while it is live", async () => {
+  const fetched = vi.fn();
+  vi.stubGlobal("fetch", fetched);
+  const initial = data("running");
+  react.values = [initial, false, true];
+  draw(initial);
+  expect(react.effects[0]!()).toBeUndefined();
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(fetched).not.toHaveBeenCalled();
+});
+
+test("the finding a judge just answered takes the focus, without scrolling the page", () => {
+  const focus = vi.fn();
+  const focused = vi.fn();
+  react.refs = [{ current: { focus } }];
+  const f = { key: "ana:f1", personaKey: "ana", personaName: "Ana", kind: "defect", goal: "g1", goalText: "Get an account.", title: "Saving fails", observed: "A 500 page.", reproduction: ["Open.", "Save."], severity: "high", replay: null, verdict: "confirmed" };
+  FindingRow({ f: f as never, n: 1, focus: true, onFocused: focused });
+  react.effects[0]!();
+  expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+  expect(focused).toHaveBeenCalledOnce();
 });
 
 test("the status line says when the page lost contact, or when the run is gone", () => {

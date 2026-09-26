@@ -8,7 +8,7 @@ vi.mock("react", async (original) => ({
 const actions = vi.hoisted(() => ({ runAgainAction: vi.fn() }));
 vi.mock("./actions.ts", () => actions);
 
-const { RunAgainButton, runAgain } = await import("./run-again-button.tsx");
+const { RunAgainButton, RunAgainError, runAgain, useRunAgain } = await import("./run-again-button.tsx");
 const { redirect } = await import("next/navigation");
 const { UnrecognizedActionError } = await import("next/dist/client/components/unrecognized-action-error.js");
 
@@ -18,8 +18,7 @@ const nodes = (node: unknown): Node[] => {
   if (!node || typeof node !== "object") return [];
   return [node as Node, ...nodes((node as Node).props?.children)];
 };
-const draw = () => RunAgainButton({ runId: "run-1" }) as unknown as Node;
-const alert = (tree: Node) => nodes(tree).find((node) => node.props?.role === "alert");
+const draw = () => RunAgainButton({ runId: "run-1", again: useRunAgain() }) as unknown as Node;
 const button = (tree: Node) => nodes(tree).find((node) => node.type === "button")!;
 
 beforeEach(() => {
@@ -34,14 +33,17 @@ test("Run again sends the run's id through the form, so the framework follows th
   expect(tree.props!.action).toBe(react.action);
   expect(nodes(tree).find((node) => node.type === "input")?.props).toMatchObject({ type: "hidden", name: "runId", value: "run-1" });
   expect(button(tree).props).toMatchObject({ type: "submit" });
-  expect(alert(tree)).toBeUndefined();
 });
 
-test("a refusal shows under the button, and goes while the next try runs, so a repeat is announced again", () => {
+test("a refusal is shown on its own, and goes while the next try runs, so a repeat is announced again", () => {
   react.state = { error: "The workspace has no model key any more. An owner or admin can add one in Settings." };
-  expect(alert(draw())?.props?.children).toBe("The workspace has no model key any more. An owner or admin can add one in Settings.");
+  const shown = RunAgainError({ again: useRunAgain() }) as unknown as Node;
+  expect(shown.props).toMatchObject({ role: "alert", children: "The workspace has no model key any more. An owner or admin can add one in Settings." });
   react.pending = true;
-  expect(alert(draw())).toBeUndefined();
+  expect(RunAgainError({ again: useRunAgain() })).toBeNull();
+  react.state = {};
+  react.pending = false;
+  expect(RunAgainError({ again: useRunAgain() })).toBeNull();
 });
 
 test("while a run is starting, a second press does nothing", () => {
@@ -56,7 +58,6 @@ test("while a run is starting, a second press does nothing", () => {
   (button(draw()).props!.onClick as (event: unknown) => void)(ready);
   expect(ready.preventDefault).not.toHaveBeenCalled();
 });
-
 
 const form = () => {
   const data = new FormData();

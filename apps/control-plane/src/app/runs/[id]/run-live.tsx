@@ -1,4 +1,5 @@
 "use client";
+import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState, useTransition } from "react";
 import type { runView, StageState, PersonaState } from "../../../runs/report.ts";
 import type { RunSummary } from "../../../runs/runs.ts";
@@ -6,7 +7,7 @@ import { runStatusLabel } from "../../../runs/status.ts";
 import { initials } from "../../../components/initials.ts";
 import { LocalTime } from "../../../components/local-time.tsx";
 import { cancelRunAction, judgeAgainAction } from "./actions.ts";
-import { RunAgainButton } from "./run-again-button.tsx";
+import { RunAgainButton, RunAgainError, useRunAgain } from "./run-again-button.tsx";
 
 type View = ReturnType<typeof runView>;
 type Data = { run: RunSummary; view: View };
@@ -24,6 +25,7 @@ const PERSONA_LABEL: Record<PersonaState, [string, string]> = {
 };
 const SEVERITY_TONE: Record<string, string> = { high: "bg-action", medium: "bg-[#d5a557]", low: "bg-[#93b89e]" };
 const label = "font-mono text-[10px] uppercase";
+const reload = (what: string) => `Trawler was updated since this page opened. Reload the page to ${what}.`;
 const secondary = "flex h-[50px] items-center justify-center border border-line bg-panel px-4 text-base hover:border-ink";
 
 type Person = View["personas"][number];
@@ -57,17 +59,24 @@ export function outcome(view: View): { people: string; goals: string } {
 
 export function CancelButton({ runId, onDone }: { runId: string; onDone: () => void }) {
   const [asking, setAsking] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const stop = async () => {
+    try {
+      return (await cancelRunAction(runId)) ? null : "The run could not be stopped. Try again.";
+    } catch (err) {
+      return unstable_isUnrecognizedActionError(err) ? reload("stop the run") : "The run could not be stopped. Try again.";
+    }
+  };
   if (!asking) return <button type="button" onClick={() => setAsking(true)} className={secondary}>Stop run</button>;
   return (
     <div className="flex flex-wrap items-center gap-3 text-sm">
       <span className="text-muted">Stop now? What was found so far is kept.</span>
-      <button type="button" disabled={pending} onClick={() => start(async () => { setFailed(!(await cancelRunAction(runId).catch(() => false))); onDone(); })} className="h-10 border border-bad px-4 text-bad disabled:opacity-60">
+      <button type="button" disabled={pending} onClick={() => start(async () => { setFailed(await stop()); onDone(); })} className="h-10 border border-bad px-4 text-bad disabled:opacity-60">
         {pending ? "Stopping…" : "Stop"}
       </button>
       <button type="button" onClick={() => setAsking(false)} className="h-10 px-2 text-muted">Keep running</button>
-      {failed && <span role="alert" className="text-bad">The run could not be stopped. Try again.</span>}
+      {failed && <span role="alert" className="text-bad">{failed}</span>}
     </div>
   );
 }
@@ -84,7 +93,7 @@ export function JudgeAgainButton({ runId, findingKey, judging, onDone }: { runId
     if (busy) return;
     setError(null);
     start(async () => {
-      const result = await judgeAgainAction(runId, findingKey).catch(() => ({ error: "The judge could not be started. Try again." }));
+      const result = await judgeAgainAction(runId, findingKey).catch((err) => ({ error: unstable_isUnrecognizedActionError(err) ? reload("judge it again") : "The judge could not be started. Try again." }));
       setError(result.error ?? null);
       await onDone();
     });
@@ -112,7 +121,7 @@ function judgedText(report: View["report"], key: string): string {
   return "";
 }
 
-function FindingRow({ f, n, mark, note, detail, action, focus, onFocused }: { f: ReportFinding; n: number; mark?: string; note?: string; detail?: string; action?: React.ReactNode; focus?: boolean; onFocused?: () => void }) {
+export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused }: { f: ReportFinding; n: number; mark?: string; note?: string; detail?: string; action?: React.ReactNode; focus?: boolean; onFocused?: () => void }) {
   const replay = f.replay as { observed: string } | null;
   const summary = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -273,7 +282,7 @@ function PeopleOutcomes({ view }: { view: View }) {
                     {p.goals.map((g) => (
                       <li key={g.id} className="break-words">
                         <span aria-hidden className={g.status === "reached" ? "text-ok" : g.status === "failed" ? "text-warn" : ""}>{g.status === "reached" ? "✓" : g.status === "failed" ? "✕" : "·"}</span>
-                        <span className="sr-only">{g.status === "reached" ? "Reached: " : g.status === "failed" ? "Not reached: " : "No outcome yet: "}</span> <span className="text-ink">{g.goal}</span>
+                        <span className="sr-only">{g.status === "reached" ? "Reached: " : g.status === "failed" ? "Not reached: " : "No answer: "}</span> <span className="text-ink">{g.goal}</span>
                         {g.note && <span> — {g.note}</span>}
                       </li>
                     ))}
@@ -332,6 +341,7 @@ export function RunLive({ initial }: { initial: Data }) {
   const [announcement, setAnnouncement] = useState({ text: "", n: 0 });
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const focused = useCallback(() => setFocusKey(null), []);
+  const again = useRunAgain();
   useEffect(() => {
     const now = new Set(view.report.couldNotJudge.filter((f) => f.action === "judging").map((f) => f.key));
     const finished = [...judging.current].filter((k) => !now.has(k));
@@ -360,12 +370,13 @@ export function RunLive({ initial }: { initial: Data }) {
         {view.live ? (
           <LiveCost run={run} />
         ) : (
-          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:flex-wrap md:justify-end wide:max-w-md">
+          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
             <a href={`/projects/${run.projectId}#start`} className={`${secondary} w-full md:w-auto`}>Start another run</a>
-            <RunAgainButton runId={run.id} />
+            <RunAgainButton runId={run.id} again={again} />
           </div>
         )}
       </div>
+      {!view.live && again.error && <div className="mt-3 flex wide:justify-end"><RunAgainError again={again} /></div>}
 
       {view.live ? (
         <>
@@ -383,7 +394,7 @@ export function RunLive({ initial }: { initial: Data }) {
           )}
           <div className="mt-[30px] flex items-center justify-between gap-4 max-md:flex-col max-md:items-start">
             <p className="flex items-center gap-2.5 text-xs text-muted">
-              <span aria-hidden className="size-[9px] shrink-0 animate-[halo_1.5s_infinite] rounded-full bg-action shadow-[0_0_0_6px_color-mix(in_srgb,var(--action)_15%,transparent)] motion-reduce:animate-none" />
+              <span aria-hidden className="size-[9px] shrink-0 animate-[halo_1.5s_infinite] rounded-full bg-action [box-shadow:0_0_0_6px_color-mix(in_srgb,var(--action)_15%,transparent)] motion-reduce:animate-none" />
               <span><strong className="text-ink">Safe to leave.</strong> The run keeps going; come back to this page for the report.</span>
             </p>
             <CancelButton runId={run.id} onDone={refresh} />

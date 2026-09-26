@@ -46,7 +46,7 @@ test("a finished run's head gives its status and when it ended, the outcome, the
   expect(text(top)).toContain("Complete · 2026-09-25 19:59 UTC");
   expect(top).toMatch(/<h1[^>]*>1 defect confirmed by replay\.<\/h1>/);
   expect(text(top)).toContain("app.acme.test · deepseek/deepseek-v4.1-flash");
-  expect(top).toMatch(/<a href="\/projects\/project-1#start"[^>]*>Start another run<\/a><form[^>]*><input type="hidden" name="runId" value="run-1"\/><button type="submit"[^>]*>Run again/);
+  expect(top).toMatch(/<div class="flex w-full flex-col gap-2 md:w-auto md:flex-row"><a href="\/projects\/project-1#start"[^>]*>Start another run<\/a><form[^>]*><input type="hidden" name="runId" value="run-1"\/><button type="submit"[^>]*>Run again/);
   expect(top).not.toContain("Stop run");
 });
 
@@ -157,12 +157,13 @@ test("while a run is live, the latest things that happened are listed under the 
     ] as RunSummary["activity"],
   }));
   expect(text(html)).toContain("Latest Lee Park: Opened the invoices page Judge: Confirmed: Saving an invoice fails");
+  expect(html.indexOf("Working on: Get an account.")).toBeLessThan(html.indexOf(">Latest</h2>"));
 });
 
 test("the actions stay together and move under the text until the page is wide, a finding's line is cut at two lines, and an opened finding wraps long words", () => {
   const html = render(finished);
   expect(head(html)).toMatch(/^<div class="flex flex-col"><div class="flex flex-col items-start gap-6 wide:flex-row wide:items-end wide:justify-between"><div class="flex min-w-0 flex-col wide:flex-1">/);
-  expect(head(html)).toMatch(/<div class="flex w-full flex-col gap-2 md:w-auto md:flex-row md:flex-wrap md:justify-end wide:max-w-md"><a href="\/projects\/project-1#start"[^>]*>Start another run<\/a><form/);
+  expect(head(html)).toMatch(/<div class="flex w-full flex-col gap-2 md:w-auto md:flex-row"><a href="\/projects\/project-1#start"[^>]*>Start another run<\/a><form/);
   expect(head(render(live))).toMatch(/<div class="flex min-w-0 flex-col md:min-w-80 md:flex-1">/);
   const [row] = rows(html, "Confirmed");
   expect(row).toMatch(/<span class="mt-\[5px\] line-clamp-2 [^"]*">A 500 page\.<\/span>/);
