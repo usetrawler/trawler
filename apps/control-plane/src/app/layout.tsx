@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Instrument_Sans, JetBrains_Mono } from "next/font/google";
 import type { ReactNode } from "react";
-import { THEME_SCRIPT } from "../components/theme.ts";
+import { ThemeScript } from "../components/theme-toggle.tsx";
 import { sentryMeta } from "../server/sentry.ts";
 import "./globals.css";
 
@@ -21,7 +21,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={`${sans.variable} ${mono.variable}`} suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        <ThemeScript />
       </head>
       <body className="min-h-dvh font-sans antialiased">{children}</body>
     </html>

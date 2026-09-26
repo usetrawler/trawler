@@ -30,21 +30,26 @@ describe("nextChoice", () => {
 });
 
 describe("THEME_SCRIPT", () => {
-  const run = (getItem: () => string | null) => {
+  const run = (values: Record<string, string> | "blocked") => {
     const set: Array<[string, string]> = [];
     const document = { documentElement: { setAttribute: (name: string, value: string) => set.push([name, value]) } };
+    const getItem = (key: string) => {
+      if (values === "blocked") throw new Error("blocked");
+      return values[key] ?? null;
+    };
     new Function("document", "localStorage", THEME_SCRIPT)(document, { getItem });
     return set;
   };
 
   it("applies the stored theme before the page paints", () => {
-    expect(run(() => "dark")).toEqual([["data-theme", "dark"]]);
-    expect(run(() => "light")).toEqual([["data-theme", "light"]]);
+    expect(run({ [THEME_KEY]: "dark" })).toEqual([["data-theme", "dark"]]);
+    expect(run({ [THEME_KEY]: "light" })).toEqual([["data-theme", "light"]]);
   });
 
-  it("leaves the system's theme alone for no or an unknown choice, and survives blocked storage", () => {
-    expect(run(() => null)).toEqual([]);
-    expect(run(() => "neon")).toEqual([]);
-    expect(run(() => { throw new Error("blocked"); })).toEqual([]);
+  it("leaves the system's theme alone for no, another or an unknown choice, and survives blocked storage", () => {
+    expect(run({})).toEqual([]);
+    expect(run({ theme: "dark" })).toEqual([]);
+    expect(run({ [THEME_KEY]: "neon" })).toEqual([]);
+    expect(run("blocked")).toEqual([]);
   });
 });

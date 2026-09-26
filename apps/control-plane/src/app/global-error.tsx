@@ -2,6 +2,7 @@
 
 import * as Sentry from "@sentry/nextjs";
 import { useEffect } from "react";
+import { ThemeScript } from "../components/theme-toggle.tsx";
 import "./globals.css";
 
 export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
@@ -9,7 +10,10 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
     if (!error.digest) Sentry.captureException(error);
   }, [error]);
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <ThemeScript />
+      </head>
       <body className="min-h-dvh bg-paper font-sans text-ink antialiased">
         <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center gap-5 px-4">
           <h1 className="text-3xl font-bold tracking-tight">Something went wrong.</h1>
