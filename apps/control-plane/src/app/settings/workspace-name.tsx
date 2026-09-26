@@ -1,4 +1,5 @@
 "use client";
+import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { useActionState, useEffect, useState } from "react";
 import { field } from "../../components/key-fields.tsx";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
@@ -9,7 +10,8 @@ export async function renameWorkspace(previous: SettingsState, form: FormData): 
   try {
     return await renameWorkspaceAction(previous, form);
   } catch (err) {
-    return { error: updatedSinceOpened(err, "rename the workspace") };
+    if (!unstable_isUnrecognizedActionError(err)) throw err;
+    return { error: updatedSinceOpened("Reload the page to rename the workspace.") };
   }
 }
 

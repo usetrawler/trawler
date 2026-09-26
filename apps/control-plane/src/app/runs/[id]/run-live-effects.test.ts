@@ -179,9 +179,9 @@ test("a judge that could not start, or a run that could not be stopped, says so 
   react.values = ["It is already being judged again."];
   const judging = JudgeAgainButton({ runId: "run-1", findingKey: "ana:f1", judging: false, onDone: async () => {} });
   expect(nodes(judging).filter((node) => node.props?.role === "alert").map(text)).toEqual(["It is already being judged again."]);
-  react.values = [true, "Trawler was updated since this page opened. Reload the page to stop the run."];
+  react.values = [true, "Trawler has been updated since this page opened. Reload the page to stop the run."];
   const stopping = CancelButton({ runId: "run-1", onDone: () => {} });
-  expect(nodes(stopping).filter((node) => node.props?.role === "alert").map(text)).toEqual(["Trawler was updated since this page opened. Reload the page to stop the run."]);
+  expect(nodes(stopping).filter((node) => node.props?.role === "alert").map(text)).toEqual(["Trawler has been updated since this page opened. Reload the page to stop the run."]);
 });
 
 test("Keep running closes the question without stopping anything", () => {
@@ -206,11 +206,11 @@ test("after Trawler was updated, Stop and Judge again ask for a reload, since tr
   react.values = [true, null];
   press(button(CancelButton({ runId: "run-1", onDone: () => {} }), /^Stop$/));
   await settle();
-  expect(react.setters[1]).toHaveBeenCalledWith("Trawler was updated since this page opened. Reload the page to stop the run.");
+  expect(react.setters[1]).toHaveBeenCalledWith("Trawler has been updated since this page opened. Reload the page to stop the run.");
   actions.judgeAgainAction.mockRejectedValueOnce(new UnrecognizedActionError("Server action not found."));
   press(button(JudgeAgainButton({ runId: "run-1", findingKey: "ana:f1", judging: false, onDone: async () => {} }), /^Judge again$/));
   await settle();
-  expect(react.setters.at(-1)).toHaveBeenLastCalledWith("Trawler was updated since this page opened. Reload the page to judge it again.");
+  expect(react.setters.at(-1)).toHaveBeenLastCalledWith("Trawler has been updated since this page opened. Reload the page to judge it again.");
 });
 
 test("a Run again refusal sits on its own line under the head, so the buttons stay where they were", () => {

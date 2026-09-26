@@ -153,17 +153,26 @@ test("while a check runs, picking another provider changes nothing; once it is o
 test("saving and removing the key go through the steps that turn an update into a message, and the server's answers are shown as they came", async () => {
   draw({}, {});
   expect(react.served).toEqual([saveKey, removeKey]);
+  const previous = { error: "Too many key checks. Wait a few minutes and try again." };
+  const typed = new FormData();
+  typed.set("apiKey", "sk-or-v1-" + "a".repeat(48));
   actions.replaceModelKeyAction.mockResolvedValue({ saved: true, unchecked: false });
-  expect(await saveKey({}, new FormData())).toEqual({ saved: true, unchecked: false });
+  expect(await saveKey(previous, typed)).toEqual({ saved: true, unchecked: false });
+  expect(actions.replaceModelKeyAction.mock.calls[0]![0]).toBe(previous);
+  expect(actions.replaceModelKeyAction.mock.calls[0]![1]).toBe(typed);
+  const confirmed = new FormData();
+  confirmed.set("addedAt", "2026-09-25T18:50:00.000Z");
   actions.removeModelKeyAction.mockResolvedValue({ saved: true, stoppedRuns: 2 });
-  expect(await removeKey({}, new FormData())).toEqual({ saved: true, stoppedRuns: 2 });
+  expect(await removeKey(previous, confirmed)).toEqual({ saved: true, stoppedRuns: 2 });
+  expect(actions.removeModelKeyAction.mock.calls[0]![0]).toBe(previous);
+  expect(actions.removeModelKeyAction.mock.calls[0]![1]).toBe(confirmed);
 });
 
 test("a key saved or removed from a page left open across an update is told to reload; any other failure goes on as before", async () => {
   actions.replaceModelKeyAction.mockRejectedValue(new UnrecognizedActionError("Server action not found."));
-  expect(await saveKey({}, new FormData())).toEqual({ error: "Trawler was updated since this page opened. Reload the page to save the key." });
+  expect(await saveKey({}, new FormData())).toEqual({ error: "Trawler has been updated since this page opened. Reload the page to save the key." });
   actions.removeModelKeyAction.mockRejectedValue(new UnrecognizedActionError("Server action not found."));
-  expect(await removeKey({}, new FormData())).toEqual({ error: "Trawler was updated since this page opened. Reload the page to remove the key." });
+  expect(await removeKey({}, new FormData())).toEqual({ error: "Trawler has been updated since this page opened. Reload the page to remove the key." });
   const failure = new TypeError("Failed to fetch");
   actions.replaceModelKeyAction.mockRejectedValue(failure);
   await expect(saveKey({}, new FormData())).rejects.toBe(failure);

@@ -1,4 +1,5 @@
 "use client";
+import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { useActionState, useEffect, useReducer, useRef, useState } from "react";
 import { KeyFields } from "../../components/key-fields.tsx";
 import { LocalTime } from "../../components/local-time.tsx";
@@ -24,7 +25,8 @@ export async function saveKey(previous: SettingsState, form: FormData): Promise<
   try {
     return await replaceModelKeyAction(previous, form);
   } catch (err) {
-    return { error: updatedSinceOpened(err, "save the key") };
+    if (!unstable_isUnrecognizedActionError(err)) throw err;
+    return { error: updatedSinceOpened("Reload the page to save the key.") };
   }
 }
 
@@ -32,7 +34,8 @@ export async function removeKey(previous: SettingsState, form: FormData): Promis
   try {
     return await removeModelKeyAction(previous, form);
   } catch (err) {
-    return { error: updatedSinceOpened(err, "remove the key") };
+    if (!unstable_isUnrecognizedActionError(err)) throw err;
+    return { error: updatedSinceOpened("Reload the page to remove the key.") };
   }
 }
 

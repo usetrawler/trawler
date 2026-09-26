@@ -49,13 +49,22 @@ const changedPlan = () => {
   return { save: () => (save.props!.onClick as () => void)(), setSaved: setSaved!, setPersonas: setPersonas!, setGoals: setGoals!, setError: setError! };
 };
 
-test("Save plan on a page left open across an update says to reload, and leaves the changes on screen", async () => {
+const accounts = () => {
+  const onChange = vi.fn();
+  const tree = Accounts({ projectId: "p1", accounts: [account], anyoneWithout: false, onChange });
+  const [, setUsername, setPassword, setError] = react.setters;
+  const add = () => (nodes(tree).find((node) => node.type === "form")!.props!.onSubmit as (event: { preventDefault: () => void }) => void)({ preventDefault: () => {} });
+  const remove = () => (nodes(tree).find((node) => node.props?.label === "Remove kwame@acme.test")!.props!.onClick as () => void)();
+  return { add, remove, onChange, setUsername: setUsername!, setPassword: setPassword!, setError: setError! };
+};
+
+test("Save plan on a page left open across an update says the changes cannot be saved from it, and leaves them on screen to copy", async () => {
   actions.savePlanAction.mockRejectedValue(outdated());
   const plan = changedPlan();
   plan.save();
   await Promise.all(react.started);
   expect(actions.savePlanAction).toHaveBeenCalledWith("p1", { personas: [{ ...ama, name: "Ama Mensah" }], goals });
-  expect(plan.setError).toHaveBeenLastCalledWith("Trawler was updated since this page opened. Reload the page to save the plan.");
+  expect(plan.setError).toHaveBeenLastCalledWith("Trawler has been updated since this page opened. Copy your changes, reload the page, then make them again and save.");
   expect(plan.setSaved).not.toHaveBeenCalled();
   expect(plan.setPersonas).not.toHaveBeenCalled();
   expect(plan.setGoals).not.toHaveBeenCalled();
@@ -73,33 +82,40 @@ test("any other failure of Save plan goes on to the error page as before", async
 test("adding or removing a test account on a page left open across an update says to reload, and changes nothing", async () => {
   actions.addAccountAction.mockRejectedValue(outdated());
   actions.removeAccountAction.mockRejectedValue(outdated());
-  const onChange = vi.fn();
-  const tree = Accounts({ projectId: "p1", accounts: [account], anyoneWithout: false, onChange });
-  const [, setUsername, setPassword, setError] = react.setters;
-  const form = nodes(tree).find((node) => node.type === "form")!;
-  (form.props!.onSubmit as (event: { preventDefault: () => void }) => void)({ preventDefault: () => {} });
+  const panel = accounts();
+  panel.add();
   await Promise.all(react.started);
   expect(actions.addAccountAction).toHaveBeenCalledWith("p1", { username: "", password: "" });
-  expect(setError).toHaveBeenLastCalledWith("Trawler was updated since this page opened. Reload the page to add the account.");
-  const remove = nodes(tree).find((node) => node.props?.label === "Remove kwame@acme.test")!;
-  (remove.props!.onClick as () => void)();
+  expect(panel.setError).toHaveBeenLastCalledWith("Trawler has been updated since this page opened. Reload the page to add the account.");
+  panel.remove();
   await Promise.all(react.started);
   expect(actions.removeAccountAction).toHaveBeenCalledWith("p1", "account-1");
-  expect(setError).toHaveBeenLastCalledWith("Trawler was updated since this page opened. Reload the page to remove the account.");
-  expect(onChange).not.toHaveBeenCalled();
-  expect(setUsername).not.toHaveBeenCalled();
-  expect(setPassword).not.toHaveBeenCalled();
+  expect(panel.setError).toHaveBeenLastCalledWith("Trawler has been updated since this page opened. Reload the page to remove the account.");
+  expect(panel.onChange).not.toHaveBeenCalled();
+  expect(panel.setUsername).not.toHaveBeenCalled();
+  expect(panel.setPassword).not.toHaveBeenCalled();
+});
+
+test("any other failure of adding or removing a test account goes on to the error page as before", async () => {
+  const failure = new TypeError("Failed to fetch");
+  actions.addAccountAction.mockRejectedValue(failure);
+  actions.removeAccountAction.mockRejectedValue(failure);
+  const panel = accounts();
+  panel.add();
+  await expect(react.started[0]).rejects.toBe(failure);
+  panel.remove();
+  await expect(react.started[1]).rejects.toBe(failure);
+  expect(panel.setError).not.toHaveBeenCalled();
 });
 
 test("an account the server adds or removes still reaches the plan", async () => {
   actions.addAccountAction.mockResolvedValue({ ok: true, accounts: [account], ref: "account-1" });
   actions.removeAccountAction.mockResolvedValue({ ok: true, accounts: [] });
-  const onChange = vi.fn();
-  const tree = Accounts({ projectId: "p1", accounts: [account], anyoneWithout: false, onChange });
-  (nodes(tree).find((node) => node.type === "form")!.props!.onSubmit as (event: { preventDefault: () => void }) => void)({ preventDefault: () => {} });
+  const panel = accounts();
+  panel.add();
   await Promise.all(react.started);
-  expect(onChange).toHaveBeenLastCalledWith([account]);
-  (nodes(tree).find((node) => node.props?.label === "Remove kwame@acme.test")!.props!.onClick as () => void)();
+  expect(panel.onChange).toHaveBeenLastCalledWith([account]);
+  panel.remove();
   await Promise.all(react.started);
-  expect(onChange).toHaveBeenLastCalledWith([], "account-1");
+  expect(panel.onChange).toHaveBeenLastCalledWith([], "account-1");
 });

@@ -65,7 +65,7 @@ export function CancelButton({ runId, onDone }: { runId: string; onDone: () => v
     try {
       return (await cancelRunAction(runId)) ? null : "The run could not be stopped. Try again.";
     } catch (err) {
-      return unstable_isUnrecognizedActionError(err) ? updatedSinceOpened(err, "stop the run") : "The run could not be stopped. Try again.";
+      return unstable_isUnrecognizedActionError(err) ? updatedSinceOpened("Reload the page to stop the run.") : "The run could not be stopped. Try again.";
     }
   };
   if (!asking) return <button type="button" onClick={() => setAsking(true)} className={secondary}>Stop run</button>;
@@ -93,7 +93,7 @@ export function JudgeAgainButton({ runId, findingKey, judging, onDone }: { runId
     if (busy) return;
     setError(null);
     start(async () => {
-      const result = await judgeAgainAction(runId, findingKey).catch((err) => ({ error: unstable_isUnrecognizedActionError(err) ? updatedSinceOpened(err, "judge it again") : "The judge could not be started. Try again." }));
+      const result = await judgeAgainAction(runId, findingKey).catch((err) => ({ error: unstable_isUnrecognizedActionError(err) ? updatedSinceOpened("Reload the page to judge it again.") : "The judge could not be started. Try again." }));
       setError(result.error ?? null);
       await onDone();
     });

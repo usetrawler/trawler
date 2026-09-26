@@ -1,6 +1,3 @@
-import { unstable_isUnrecognizedActionError } from "next/navigation";
+export const UPDATED_SINCE_OPENED = "Trawler has been updated since this page opened.";
 
-export function updatedSinceOpened(err: unknown, toDo: string): string {
-  if (!unstable_isUnrecognizedActionError(err)) throw err;
-  return `Trawler was updated since this page opened. Reload the page to ${toDo}.`;
-}
+export const updatedSinceOpened = (then: string) => `${UPDATED_SINCE_OPENED} ${then}`;

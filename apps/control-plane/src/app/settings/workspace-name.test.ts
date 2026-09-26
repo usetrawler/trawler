@@ -54,12 +54,16 @@ test("a rename goes through the step that turns an update into a message, and th
   render();
   expect(react.served).toEqual([renameWorkspace]);
   actions.renameWorkspaceAction.mockResolvedValue({ error: RULE });
-  expect(await renameWorkspace({}, named())).toEqual({ error: RULE });
+  const previous = { saved: true };
+  const sent = named();
+  expect(await renameWorkspace(previous, sent)).toEqual({ error: RULE });
+  expect(actions.renameWorkspaceAction.mock.calls[0]![0]).toBe(previous);
+  expect(actions.renameWorkspaceAction.mock.calls[0]![1]).toBe(sent);
 });
 
 test("a rename from a page left open across an update is told to reload; any other failure goes on as before", async () => {
   actions.renameWorkspaceAction.mockRejectedValue(new UnrecognizedActionError("Server action not found."));
-  expect(await renameWorkspace({}, named())).toEqual({ error: "Trawler was updated since this page opened. Reload the page to rename the workspace." });
+  expect(await renameWorkspace({}, named())).toEqual({ error: "Trawler has been updated since this page opened. Reload the page to rename the workspace." });
   const failure = new TypeError("Failed to fetch");
   actions.renameWorkspaceAction.mockRejectedValue(failure);
   await expect(renameWorkspace({}, named())).rejects.toBe(failure);

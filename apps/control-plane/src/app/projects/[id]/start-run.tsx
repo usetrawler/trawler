@@ -1,4 +1,5 @@
 "use client";
+import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { startTransition, useActionState, useEffect, useState } from "react";
 import type { KeyHint } from "../../../credentials/credentials.ts";
 import { field, KeyFields } from "../../../components/key-fields.tsx";
@@ -11,15 +12,20 @@ import { modelsForKeyAction, startRunAction, type ModelList, type StartState } f
 const usd = (n: number) => `$${n.toFixed(2)}`;
 const perMillion = (n: number) => `$${n >= 0.1 || n === 0 ? n.toFixed(2) : n.toFixed(3)}`;
 
-export async function startRun(previous: StartState, form: FormData): Promise<StartState> {
+export async function startTheRun(previous: StartState, form: FormData): Promise<StartState> {
   try {
     return await startRunAction(previous, form);
   } catch (err) {
-    return { ...previous, error: updatedSinceOpened(err, "start the run") };
+    if (!unstable_isUnrecognizedActionError(err)) throw err;
+    return { ...previous, error: updatedSinceOpened("Reload the page to start the run.") };
   }
 }
 
-export const modelsForKey = (input: KeyInput): Promise<ModelList> => modelsForKeyAction(input).catch((err) => ({ ok: false, error: updatedSinceOpened(err, "load the models") }));
+export const modelsForKey = (input: KeyInput): Promise<ModelList> =>
+  modelsForKeyAction(input).catch((err) => {
+    if (!unstable_isUnrecognizedActionError(err)) throw err;
+    return { ok: false, error: updatedSinceOpened("Reload the page to list the models.") };
+  });
 
 function Submit({ blocked, pending }: { blocked?: string; pending: boolean }) {
   return (
@@ -33,7 +39,7 @@ function Submit({ blocked, pending }: { blocked?: string; pending: boolean }) {
 export function StartRun({ projectId, projectName, personas, keyHint: savedHint, canManageKey, authorisedBefore, blocked }: {
   projectId: string; projectName: string; personas: number; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; blocked?: string;
 }) {
-  const [state, action, pending] = useActionState<StartState, FormData>(startRun, {});
+  const [state, action, pending] = useActionState<StartState, FormData>(startTheRun, {});
   const keyHint = state.keyHint ?? savedHint;
   const [replacingKey, setReplacingKey] = useState(false);
   const [apiKey, setApiKey] = useState("");

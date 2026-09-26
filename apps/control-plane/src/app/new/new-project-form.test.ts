@@ -41,14 +41,18 @@ test("Analyse product sends the form through the step that turns an update into 
   expect(form.served).toEqual([analyseProduct]);
 });
 
-test("an answer from the server is shown as it came", async () => {
+test("the form goes to setup as it was sent, and setup's answer is shown as it came", async () => {
   actions.startSetup.mockResolvedValue({ error: "We could not find that address. Check the spelling.", url: "app.acme.test", focus: "" });
-  expect(await analyseProduct({}, typed())).toEqual({ error: "We could not find that address. Check the spelling.", url: "app.acme.test", focus: "" });
+  const previous = { error: "That address is too long." };
+  const sent = typed();
+  expect(await analyseProduct(previous, sent)).toEqual({ error: "We could not find that address. Check the spelling.", url: "app.acme.test", focus: "" });
+  expect(actions.startSetup.mock.calls[0]![0]).toBe(previous);
+  expect(actions.startSetup.mock.calls[0]![1]).toBe(sent);
 });
 
 test("a page left open across an update is told to reload, and keeps the address and focus typed", async () => {
   actions.startSetup.mockRejectedValue(new UnrecognizedActionError("Server action not found."));
-  expect(await analyseProduct({}, typed())).toEqual({ error: "Trawler was updated since this page opened. Reload the page to analyse the product.", url: "app.acme.test", focus: "the new team-invite flow" });
+  expect(await analyseProduct({}, typed())).toEqual({ error: "Trawler has been updated since this page opened. Reload the page to analyse the product.", url: "app.acme.test", focus: "the new team-invite flow" });
 });
 
 test("the redirect to the new project, and any other failure, go on to the framework as before", async () => {

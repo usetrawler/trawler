@@ -9,7 +9,7 @@ export async function runAgain(previous: RunAgainState, form: FormData): Promise
     return await runAgainAction(previous, form);
   } catch (err) {
     unstable_rethrow(err);
-    if (unstable_isUnrecognizedActionError(err)) return { error: updatedSinceOpened(err, "run it again") };
+    if (unstable_isUnrecognizedActionError(err)) return { error: updatedSinceOpened("Reload the page to run it again.") };
     return { error: "The run could not start. Try again." };
   }
 }

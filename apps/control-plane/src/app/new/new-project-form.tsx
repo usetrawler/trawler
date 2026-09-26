@@ -1,4 +1,5 @@
 "use client";
+import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
@@ -8,7 +9,8 @@ export async function analyseProduct(previous: SetupState, form: FormData): Prom
   try {
     return await startSetup(previous, form);
   } catch (err) {
-    return { error: updatedSinceOpened(err, "analyse the product"), url: String(form.get("url") ?? ""), focus: String(form.get("focus") ?? "") };
+    if (!unstable_isUnrecognizedActionError(err)) throw err;
+    return { error: updatedSinceOpened("Reload the page to analyse the product."), url: String(form.get("url") ?? ""), focus: String(form.get("focus") ?? "") };
   }
 }
 

@@ -20,7 +20,10 @@ const nodes = (node: unknown): Node[] => {
   if (!node || typeof node !== "object") return [];
   return [node as Node, ...nodes((node as Node).props?.children)];
 };
-const press = (error: Error) => (nodes(GlobalError({ error, reset: props.reset })).find((node) => node.type === "button")!.props!.onClick as () => void)();
+const press = (error: Error, reset: () => void) => (nodes(GlobalError({ error, reset })).find((node) => node.type === "button")!.props!.onClick as () => void)();
+const report = () => {
+  for (const effect of react.effects) effect();
+};
 
 beforeEach(() => {
   react.effects = [];
@@ -42,19 +45,27 @@ test("the error page's root element lets the script's theme attribute differ fro
 test("an error in the browser is reported and offers to try again", () => {
   const reset = vi.fn();
   expect(text(renderToStaticMarkup(createElement(GlobalError, { error: new Error("boom"), reset })))).toBe("Something went wrong. Try again, or come back in a minute. Try again →");
-  for (const effect of react.effects) effect();
+  report();
   expect(sentry.captureException).toHaveBeenCalledOnce();
-  (nodes(GlobalError({ error: new Error("boom"), reset })).find((node) => node.type === "button")!.props!.onClick as () => void)();
+  press(new Error("boom"), reset);
   expect(reset).toHaveBeenCalledOnce();
+});
+
+test("an error the server already reported, which carries its digest, is not reported again", () => {
+  renderToStaticMarkup(createElement(GlobalError, { error: Object.assign(new Error("boom"), { digest: "3141592653" }), reset: props.reset }));
+  report();
+  expect(sentry.captureException).not.toHaveBeenCalled();
 });
 
 test("a page left open across an update says so and reloads, since trying again cannot work until then, and nothing is reported", () => {
   const outdated = new UnrecognizedActionError("Server action not found.");
-  expect(text(renderToStaticMarkup(createElement(GlobalError, { error: outdated, reset: props.reset })))).toBe("Trawler was updated since this page opened. Reload the page to carry on. Reload the page →");
-  for (const effect of react.effects) effect();
+  const reset = vi.fn();
+  expect(text(renderToStaticMarkup(createElement(GlobalError, { error: outdated, reset })))).toBe("Trawler has been updated since this page opened. Reload the page to carry on. Reload the page →");
+  report();
   expect(sentry.captureException).not.toHaveBeenCalled();
   const reload = vi.fn();
   vi.stubGlobal("window", { location: { reload } });
-  press(outdated);
+  press(outdated, reset);
   expect(reload).toHaveBeenCalledOnce();
+  expect(reset).not.toHaveBeenCalled();
 });
