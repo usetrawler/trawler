@@ -68,8 +68,11 @@ const SELECTOR_ENGINES = {
   })`,
   [LINE_AROUND]: `({
     queryAll(root, mode) {
-      if (!root.checkVisibility({ visibilityProperty: true, contentVisibilityAuto: true })) return [];
       const up = (el) => el.parentElement ?? el.parentNode?.host;
+      const shows = (el) => getComputedStyle(el).display === "contents" || el.checkVisibility({ visibilityProperty: true, contentVisibilityAuto: true });
+      let boxed = root;
+      while (boxed && getComputedStyle(boxed).display === "contents") boxed = up(boxed);
+      if (boxed && !shows(boxed) && ![...root.querySelectorAll("*")].some(shows)) return [];
       const neverClips = new Set(["contents", "inline", "table-row", "table-row-group", "table-header-group", "table-footer-group", "table-column", "table-column-group"]);
       const style = getComputedStyle(root);
       const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2 || 0;
@@ -118,8 +121,8 @@ const SELECTOR_ENGINES = {
       const keyframeFields = new Set(["offset", "computedOffset", "easing", "composite"]);
       const up = (el) => el.parentElement ?? el.parentNode?.host;
       for (let el = root; el; el = up(el)) {
-        for (const animation of el.getAnimations()) {
-          if (animation.playState !== "running") continue;
+        for (const animation of el.getAnimations({ subtree: true }).filter((a) => el === root || a.effect?.target === el)) {
+          if (animation.playState !== "running" || animation.timeline !== document.timeline) continue;
           const properties = (animation.effect?.getKeyframes?.() ?? []).flatMap((frame) => Object.keys(frame)).filter((key) => !keyframeFields.has(key));
           if (properties.length === 0 || properties.some((key) => !looksOnly.test(key))) return [root];
         }

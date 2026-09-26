@@ -229,6 +229,20 @@ beforeAll(async () => {
       case "/closed-details":
       case "/closed-details-plain":
         return html(`<details><summary style="font:20px monospace;color:#0000ff">Show the key</summary><p style="font:20px monospace;color:#ff0000">${req.url === "/closed-details" ? "card-secret-1111" : "not-a-secret-00"}</p></details><p>Plan: Team</p>`);
+      case "/contents-text":
+        return html(`<p style="font:20px monospace;color:#ff0000">Key: <span style="display:contents">card-secret-1111</span> for the API</p><p>Plan: Team</p>`);
+      case "/slot-fallback":
+        return html(`<key-card></key-card><p>Plan: Team</p><script>customElements.define("key-card", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<p style="font:20px monospace;color:#ff0000"><slot>card-secret-1111</slot></p>'; } });</script>`);
+      case "/flicker-container":
+        return html(`<style>@keyframes jump{0%,49.9%{transform:translateY(0)}50%,100%{transform:translateY(120px)}} #box{animation:jump 60ms infinite}</style><div id="box"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div>`);
+      case "/shaking-field":
+        return html(`<style>@keyframes shake{0%,100%{transform:translateX(0)}50%{transform:translateX(8px)}} input{animation:shake 300ms infinite}</style><input aria-label="Password" type="password" value="field-secret-1">`);
+      case "/scroll-driven":
+        return html(`<style>@keyframes rise{from{transform:translateY(20px)}to{transform:translateY(0)}} #box{animation:rise linear both;animation-timeline:scroll(root)}</style><div id="box"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div><div style="height:2000px"></div>`);
+      case "/hidden-parent-split":
+        return html(`<div style="visibility:hidden;font:20px monospace;color:#ff0000">card-sec<span style="visibility:visible">ret-1111</span> and more</div><p>Plan: Team</p>`);
+      case "/animated-child":
+        return html(`<style>@keyframes jump{0%,49.9%{transform:translateY(0)}50%,100%{transform:translateY(120px)}} b{display:inline-block;animation:jump 60ms infinite}</style><p style="font:20px monospace;color:#ff0000">card-sec<b>ret-1111</b></p>`);
       case "/fixed-below":
         return html(`<p>Short page</p><div style="position:fixed;left:20px;bottom:120px;height:0;font:20px monospace;color:#ff0000">card-secret-1111</div>`);
       case "/flicker":
@@ -1302,6 +1316,9 @@ describe("screenshots", () => {
     ["/clip-margin", "is cut off only past a clip margin"],
     ["/row-hidden", "runs past a table row that says it hides overflow"],
     ["/row-span", "spans rows below the one that says it hides overflow"],
+    ["/contents-text", "is in an element with no box of its own"],
+    ["/slot-fallback", "is a component slot's fallback"],
+    ["/hidden-parent-split", "is partly in a hidden element and partly in a visible child"],
   ])("a secret whose text %s is masked where it is drawn (%s)", async (path) => {
     const [shot] = await shotsOf(path, 1, async () => undefined, knowing(path === "/overflow-edge" ? "card-secret-11112" : "card-secret-1111"));
     expect(shot).not.toBeNull();
@@ -1337,6 +1354,24 @@ describe("screenshots", () => {
 
   test("a secret on an element an animation is moving, even one that has not moved for a while, gives no screenshot", async () => {
     expect(await shotsOf("/slow-steps", 2, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null]);
+  }, 60_000);
+
+  test("a secret inside a container an animation is moving gives no screenshot", async () => {
+    expect(await shotsOf("/flicker-container", 3, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null, null]);
+  }, 60_000);
+
+  test("a secret part of which an animation is moving inside it gives no screenshot", async () => {
+    expect(await shotsOf("/animated-child", 3, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null, null]);
+  }, 60_000);
+
+  test("a password field an animation is shaking gives no screenshot", async () => {
+    expect(await shotsOf("/shaking-field", 2, async () => undefined)).toEqual([null, null]);
+  }, 60_000);
+
+  test("an animation driven by scrolling does not stop the screenshot while the page stands still", async () => {
+    const [shot] = await shotsOf("/scroll-driven", 1, async () => undefined, knowing("card-secret-1111"));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
   }, 60_000);
 
   test("an animation that only changes how a field looks, like a glow, does not stop the screenshot", async () => {
