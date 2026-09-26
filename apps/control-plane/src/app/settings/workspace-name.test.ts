@@ -2,16 +2,18 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
-const react = vi.hoisted(() => ({ result: {} as Record<string, unknown>, pending: false, states: [] as unknown[] }));
+const react = vi.hoisted(() => ({ result: {} as Record<string, unknown>, pending: false, states: [] as unknown[], served: [] as unknown[] }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
-  useActionState: () => [react.result, () => {}, react.pending],
+  useActionState: (serve: unknown) => { react.served.push(serve); return [react.result, () => {}, react.pending]; },
   useState: (initial: unknown) => [react.states.length ? react.states.shift() : initial, () => {}],
   useEffect: () => {},
 }));
-vi.mock("./actions.ts", () => ({ renameWorkspaceAction: async () => ({}), replaceModelKeyAction: async () => ({}), removeModelKeyAction: async () => ({}) }));
+const actions = vi.hoisted(() => ({ renameWorkspaceAction: vi.fn(), replaceModelKeyAction: vi.fn(), removeModelKeyAction: vi.fn() }));
+vi.mock("./actions.ts", () => actions);
 
-const { WorkspaceName } = await import("./workspace-name.tsx");
+const { renameWorkspace, WorkspaceName } = await import("./workspace-name.tsx");
+const { UnrecognizedActionError } = await import("next/dist/client/components/unrecognized-action-error.js");
 const RULE = "Workspace names are 1 to 100 plain characters.";
 const render = () => renderToStaticMarkup(createElement(WorkspaceName, { name: "Acme", canManage: true }));
 const saved = (html: string) => html.match(/<span role="status"[^>]*>([^<]*)<\/span>/)?.[1];
@@ -20,6 +22,8 @@ beforeEach(() => {
   react.result = {};
   react.pending = false;
   react.states = [];
+  react.served = [];
+  actions.renameWorkspaceAction.mockReset();
 });
 
 test("Saved. shows after a rename, and goes once the name is edited again", () => {
@@ -38,4 +42,29 @@ test("a refused name is shown with its field marked, and hidden while the next s
   const saving = render();
   expect(saving).not.toContain('role="alert"');
   expect(saving.match(/<input [^>]*name="name"[^>]*>/)?.[0]).not.toContain("aria-invalid");
+});
+
+const named = () => {
+  const data = new FormData();
+  data.set("name", "Acme Labs");
+  return data;
+};
+
+test("a rename goes through the step that turns an update into a message, and the server's answer is shown as it came", async () => {
+  render();
+  expect(react.served).toEqual([renameWorkspace]);
+  actions.renameWorkspaceAction.mockResolvedValue({ error: RULE });
+  const previous = { saved: true };
+  const sent = named();
+  expect(await renameWorkspace(previous, sent)).toEqual({ error: RULE });
+  expect(actions.renameWorkspaceAction.mock.calls[0]![0]).toBe(previous);
+  expect(actions.renameWorkspaceAction.mock.calls[0]![1]).toBe(sent);
+});
+
+test("a rename from a page left open across an update is told to reload; any other failure goes on as before", async () => {
+  actions.renameWorkspaceAction.mockRejectedValue(new UnrecognizedActionError("Server action not found."));
+  expect(await renameWorkspace({}, named())).toEqual({ error: "Trawler has been updated since this page opened. Reload the page to rename the workspace." });
+  const failure = new TypeError("Failed to fetch");
+  actions.renameWorkspaceAction.mockRejectedValue(failure);
+  await expect(renameWorkspace({}, named())).rejects.toBe(failure);
 });

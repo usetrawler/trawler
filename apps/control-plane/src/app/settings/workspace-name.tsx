@@ -1,8 +1,19 @@
 "use client";
+import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { useActionState, useEffect, useState } from "react";
 import { field } from "../../components/key-fields.tsx";
+import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { renameWorkspaceAction, type SettingsState } from "./actions.ts";
 import { button, heading, panel } from "./styles.ts";
+
+export async function renameWorkspace(previous: SettingsState, form: FormData): Promise<SettingsState> {
+  try {
+    return await renameWorkspaceAction(previous, form);
+  } catch (err) {
+    if (!unstable_isUnrecognizedActionError(err)) throw err;
+    return { error: updatedSinceOpened("Reload the page to rename the workspace.") };
+  }
+}
 
 export function WorkspaceName({ name, canManage }: { name: string; canManage: boolean }) {
   return (
@@ -21,7 +32,7 @@ export function WorkspaceName({ name, canManage }: { name: string; canManage: bo
 }
 
 function RenameForm({ name }: { name: string }) {
-  const [state, action, pending] = useActionState<SettingsState, FormData>(renameWorkspaceAction, {});
+  const [state, action, pending] = useActionState<SettingsState, FormData>(renameWorkspace, {});
   const [value, setValue] = useState(name);
   const [edited, setEdited] = useState(false);
   useEffect(() => {

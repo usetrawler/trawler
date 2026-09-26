@@ -90,5 +90,5 @@ test("the redirect to the new run is passed on to the framework, never turned in
 
 test("a page left open across an update is told to reload, since trying again cannot work until then", async () => {
   actions.runAgainAction.mockRejectedValue(new UnrecognizedActionError("Server action not found."));
-  expect(await runAgain({}, form())).toEqual({ error: "Trawler was updated since this page opened. Reload the page to run it again." });
+  expect(await runAgain({}, form())).toEqual({ error: "Trawler has been updated since this page opened. Reload the page to run it again." });
 });

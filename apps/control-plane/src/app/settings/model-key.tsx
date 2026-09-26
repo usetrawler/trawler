@@ -1,7 +1,9 @@
 "use client";
+import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { useActionState, useEffect, useReducer, useRef, useState } from "react";
 import { KeyFields } from "../../components/key-fields.tsx";
 import { LocalTime } from "../../components/local-time.tsx";
+import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { detectProvider, PROVIDER_LABEL, type Provider } from "../../llm/provider-kinds.ts";
 import { removeModelKeyAction, replaceModelKeyAction, type SettingsState } from "./actions.ts";
 import { button, heading, panel } from "./styles.ts";
@@ -18,6 +20,24 @@ type Target = "heading" | "replace" | "remove";
 
 const alert = "border-l-2 border-bad pl-3 text-sm text-bad";
 const runs = (n: number) => (n === 1 ? "The run that was going is stopped." : `The ${n} runs that were going are stopped.`);
+
+export async function saveKey(previous: SettingsState, form: FormData): Promise<SettingsState> {
+  try {
+    return await replaceModelKeyAction(previous, form);
+  } catch (err) {
+    if (!unstable_isUnrecognizedActionError(err)) throw err;
+    return { error: updatedSinceOpened("Reload the page to save the key.") };
+  }
+}
+
+export async function removeKey(previous: SettingsState, form: FormData): Promise<SettingsState> {
+  try {
+    return await removeModelKeyAction(previous, form);
+  } catch (err) {
+    if (!unstable_isUnrecognizedActionError(err)) throw err;
+    return { error: updatedSinceOpened("Reload the page to remove the key.") };
+  }
+}
 
 export function savedStatus(state: SettingsState): string {
   return state.unchecked ? "Key saved. That service lists no models, so the key is checked when a run starts." : "Key saved.";
@@ -75,8 +95,8 @@ export function afterRemove(state: SettingsState): PanelEvent | null {
 
 export function ModelKey({ saved, addedBy, canManage }: { saved: SavedKey | null; addedBy: string | null; canManage: boolean }) {
   const [{ step, status, refusal, focus }, dispatch] = useReducer(nextPanel, { step: "view", status: "", refusal: null, focus: null });
-  const [replaced, replace, checking] = useActionState<SettingsState, FormData>(replaceModelKeyAction, {});
-  const [removed, remove, removing] = useActionState<SettingsState, FormData>(removeModelKeyAction, {});
+  const [replaced, replace, checking] = useActionState<SettingsState, FormData>(saveKey, {});
+  const [removed, remove, removing] = useActionState<SettingsState, FormData>(removeKey, {});
   const targets = { heading: useRef<HTMLHeadingElement>(null), replace: useRef<HTMLButtonElement>(null), remove: useRef<HTMLButtonElement>(null) };
 
   useEffect(() => {

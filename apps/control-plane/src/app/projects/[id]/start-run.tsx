@@ -1,13 +1,31 @@
 "use client";
+import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { startTransition, useActionState, useEffect, useState } from "react";
 import type { KeyHint } from "../../../credentials/credentials.ts";
 import { field, KeyFields } from "../../../components/key-fields.tsx";
+import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { detectProvider, PROVIDER_LABEL, type Provider } from "../../../llm/provider-kinds.ts";
+import type { KeyInput } from "../../../llm/key-input.ts";
 import { DEFAULT_RUN, estimateUsd } from "../../../runs/models.ts";
 import { modelsForKeyAction, startRunAction, type ModelList, type StartState } from "./actions.ts";
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
 const perMillion = (n: number) => `$${n >= 0.1 || n === 0 ? n.toFixed(2) : n.toFixed(3)}`;
+
+export async function startTheRun(previous: StartState, form: FormData): Promise<StartState> {
+  try {
+    return await startRunAction(previous, form);
+  } catch (err) {
+    if (!unstable_isUnrecognizedActionError(err)) throw err;
+    return { ...previous, error: updatedSinceOpened("Reload the page to start the run.") };
+  }
+}
+
+export const modelsForKey = (input: KeyInput): Promise<ModelList> =>
+  modelsForKeyAction(input).catch((err) => {
+    if (!unstable_isUnrecognizedActionError(err)) throw err;
+    return { ok: false, error: updatedSinceOpened("Reload the page to list the models.") };
+  });
 
 function Submit({ blocked, pending }: { blocked?: string; pending: boolean }) {
   return (
@@ -21,7 +39,7 @@ function Submit({ blocked, pending }: { blocked?: string; pending: boolean }) {
 export function StartRun({ projectId, projectName, personas, keyHint: savedHint, canManageKey, authorisedBefore, blocked }: {
   projectId: string; projectName: string; personas: number; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; blocked?: string;
 }) {
-  const [state, action, pending] = useActionState<StartState, FormData>(startRunAction, {});
+  const [state, action, pending] = useActionState<StartState, FormData>(startTheRun, {});
   const keyHint = state.keyHint ?? savedHint;
   const [replacingKey, setReplacingKey] = useState(false);
   const [apiKey, setApiKey] = useState("");
@@ -46,7 +64,7 @@ export function StartRun({ projectId, projectName, personas, keyHint: savedHint,
     let cancelled = false;
     const timer = setTimeout(async () => {
       setLoading(true);
-      const result = await modelsForKeyAction(typingKey ? { key: apiKey, provider: provider ?? undefined, baseUrl } : {});
+      const result = await modelsForKey(typingKey ? { key: apiKey, provider: provider ?? undefined, baseUrl } : {});
       if (cancelled) return;
       setLoading(false);
       setList(result);
