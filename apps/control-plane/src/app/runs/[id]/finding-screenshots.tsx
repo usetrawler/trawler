@@ -17,7 +17,7 @@ export function CaptureFrame({ shot, failed, onFailed }: { shot: Shot; failed: b
         <p className="text-sm text-muted">This screen capture could not be loaded.</p>
       ) : (
         <a href={`/captures/${shot.id}`} target="_blank" rel="noreferrer" className="block self-start border border-line bg-panel after:absolute after:inset-0 hover:border-ink">
-          <img ref={failedBeforeHydration} src={`/api/artifacts/${shot.id}`} alt={shot.alt} width={1280} height={720} loading="lazy" onError={onFailed} className="block h-auto w-full" />
+          <img ref={failedBeforeHydration} src={`/api/artifacts/${shot.id}`} alt={shot.alt} width={1280} height={720} loading="lazy" onError={onFailed} className="relative z-[1] block h-auto w-full" />
           <span className="sr-only"> (opens in a new tab)</span>
         </a>
       )}

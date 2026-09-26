@@ -23,6 +23,7 @@ test("each capture keeps its 16:9 place while it loads, nothing covers it, and t
   const [reported] = figures(render(REPORTED, null));
   expect(reported).toMatch(new RegExp(`<a href="/captures/${REPORTED}" target="_blank" rel="noreferrer"[^>]*><img src="/api/artifacts/${REPORTED}" alt="The page when “Save fails” was reported" width="1280" height="720" loading="lazy"[^>]*/><span class="sr-only"> \\(opens in a new tab\\)</span></a>`));
   expect(reported).toMatch(/^<figure class="relative\b/);
+  expect(reported).toMatch(/<img [^>]*class="relative z-\[1\] /);
   expect(reported).toMatch(/<a href="\/captures\/[^"]*" [^>]*class="[^"]*\bafter:absolute after:inset-0\b/);
   expect(reported).not.toMatch(/class="[^"]*(?<!after:)\babsolute\b/);
 });

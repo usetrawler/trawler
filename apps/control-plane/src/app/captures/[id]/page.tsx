@@ -38,6 +38,7 @@ export default async function CapturePage({ params }: { params: Promise<{ id: st
           height={720}
           className="block h-auto w-full border border-line"
         />
+        <span className="sr-only"> (opens the original in a new tab)</span>
       </a>
       <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
         <span>Passwords and other secrets are blacked out in screen captures.</span>

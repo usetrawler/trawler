@@ -53,7 +53,7 @@ test("a capture opens at an address that stays valid, under its finding's title,
   expect(crumbs).toMatch(new RegExp(`<a href="/projects/p1"[^>]*>Acme</a>.*<a href="/runs/${RUN}"[^>]*>Run 0017</a>.*<li aria-current="page"[^>]*>Screen capture</li>`));
   expect(html).toMatch(/<h1[^>]*>Saving fails<\/h1>/);
   expect(html).toContain(">Screen capture · when reported</p>");
-  expect(html).toMatch(new RegExp(`<a href="/api/artifacts/${ID}" target="_blank" rel="noreferrer" tabindex="-1" class="[^"]*\\bmax-w-\\[1282px\\][^"]*"><img src="/api/artifacts/${ID}" alt="The page when “Saving fails” was reported" width="1280" height="720" class="[^"]*\\bborder\\b[^"]*"/></a>`));
+  expect(html).toMatch(new RegExp(`<a href="/api/artifacts/${ID}" target="_blank" rel="noreferrer" tabindex="-1" class="[^"]*\\bmax-w-\\[1282px\\][^"]*"><img src="/api/artifacts/${ID}" alt="The page when “Saving fails” was reported" width="1280" height="720" class="[^"]*\\bborder\\b[^"]*"/><span class="sr-only"> \\(opens the original in a new tab\\)</span></a>`));
   expect(html).not.toContain("max-w-3xl");
   expect(html).toContain(">Passwords and other secrets are blacked out in screen captures.</span>");
   expect(html).toMatch(new RegExp(`<a href="/api/artifacts/${ID}" target="_blank" rel="noreferrer" class="[^"]*">Open the original, 1280 × 720<span aria-hidden="true"> ↗</span><span class="sr-only"> \\(opens in a new tab\\)</span></a>`));
