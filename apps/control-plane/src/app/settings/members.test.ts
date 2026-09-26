@@ -96,17 +96,19 @@ test("invitations that can still be used are listed with their role and expiry, 
 
 test("an owner or admin invites by address, as a member unless they pick admin", () => {
   const form = inviteForm(render());
-  expect(form).toMatch(/<input type="email" required=""[^>]*name="email"\/>/);
+  expect(form).toMatch(/<input type="email" required=""[^>]*name="email" value=""\/>/);
   expect(form).toMatch(/<select name="role"[^>]*><option value="member" selected="">Member<\/option><option value="admin">Admin<\/option><\/select>/);
   expect(form).toMatch(/<button type="submit"[^>]*>Invite<\/button>/);
 });
 
-test("after an invitation the page says where the invited person signs in, and a refusal is tied to the address field", () => {
+test("after an invitation the page says where the invited person signs in, and a refusal keeps the address and role for another try", () => {
   react.actions = [IDLE, IDLE, IDLE, [{ invited: "max@acme.test" }, false]];
   expect(text(inviteForm(render()))).toContain("Invite Invited max@acme.test. Ask them to sign in at app.usetrawler.test with this address; no email is sent.");
   react.actions = [IDLE, IDLE, IDLE, [{ error: "That address is already in this workspace." }, false]];
+  react.states = [{}, null, "max@acme.test", "admin"];
   const refused = inviteForm(render());
-  expect(refused).toMatch(/<input type="email"[^>]*aria-invalid="true" aria-describedby="invite-error"[^>]*>/);
+  expect(refused).toMatch(/<input type="email" required=""[^>]*aria-invalid="true" aria-describedby="invite-error"[^>]*name="email" value="max@acme.test"\/>/);
+  expect(refused).toMatch(/<option value="admin" selected="">Admin<\/option>/);
   expect(refused).toMatch(/<p id="invite-error" role="alert"[^>]*>That address is already in this workspace.<\/p>/);
   react.actions = [IDLE, IDLE, IDLE, [{ error: "That address is already in this workspace." }, true]];
   const sending = inviteForm(render());

@@ -1,5 +1,5 @@
 "use client";
-import { useActionState, useEffect, useRef, useState } from "react";
+import { startTransition, useActionState, useEffect, useRef, useState } from "react";
 import { field } from "../../components/key-fields.tsx";
 import { LocalTime } from "../../components/local-time.tsx";
 import { changeRoleAction, inviteMemberAction, removeMemberAction, revokeInvitationAction, type MembersState } from "./actions.ts";
@@ -136,18 +136,32 @@ function ConfirmRemoval({ member, action, pending, onKeep }: { member: MemberRow
 
 function InviteForm({ signInAt }: { signInAt: string }) {
   const [state, action, pending] = useActionState<MembersState, FormData>(inviteMemberAction, {});
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("member");
+  useEffect(() => {
+    if (!state.invited) return;
+    setEmail("");
+    setRole("member");
+  }, [state]);
   const failed = Boolean(state.error) && !pending;
   return (
-    <form action={action} className="flex flex-col gap-3 border-t border-line pt-4">
+    <form
+      action={action}
+      onSubmit={(e) => {
+        e.preventDefault();
+        const data = new FormData(e.currentTarget);
+        startTransition(() => action(data));
+      }}
+      className="flex flex-col gap-3 border-t border-line pt-4">
       <h3 className="text-sm font-bold">Invite someone</h3>
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex min-w-0 flex-1 basis-64 flex-col gap-2">
           <span className="text-sm text-muted">The email address they sign in with, on GitHub or Google.</span>
-          <input name="email" type="email" required autoComplete="off" spellCheck={false} maxLength={254} readOnly={pending} aria-invalid={failed || undefined} aria-describedby={failed ? "invite-error" : undefined} className={`${field} font-sans`} />
+          <input name="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" spellCheck={false} maxLength={254} readOnly={pending} aria-invalid={failed || undefined} aria-describedby={failed ? "invite-error" : undefined} className={`${field} font-sans`} />
         </label>
         <label className="flex flex-col gap-2">
           <span className="text-sm text-muted">As</span>
-          <select name="role" defaultValue="member" className={field}>
+          <select name="role" value={role} onChange={(e) => setRole(e.target.value)} className={field}>
             <option value="member">Member</option>
             <option value="admin">Admin</option>
           </select>
