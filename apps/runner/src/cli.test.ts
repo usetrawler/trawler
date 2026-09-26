@@ -1,8 +1,10 @@
 import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { tool } from "ai";
 import { expect, test } from "vitest";
 import YAML from "yaml";
+import { z } from "zod";
 import { scriptedModel, text, toolCall } from "../../../packages/core/src/testing.ts";
 import { fetchPage, runCli, type CliDeps } from "./cli.ts";
 import type { LogFields } from "./worker.ts";
@@ -195,6 +197,40 @@ test("setup passes a focus through to the proposal", async () => {
   const { d } = deps({ model: () => model });
   expect(await runCli(["setup", "https://a.test/", "-o", join(mkdtempSync(join(tmpdir(), "cfg-")), "p.yaml"), "--focus", "the invite flow"], d)).toBe(0);
   expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toContain("the invite flow");
+});
+
+test("work hands the browser's screenshots to the job, so a finding's screenshot is uploaded", async () => {
+  const job = {
+    kind: "role_session", personaKey: "ana", jobId: "11111111-1111-4111-8111-111111111111", runId: "22222222-2222-4222-8222-222222222222", token: "job-token-" + "x".repeat(40),
+    config: { name: "Acme", targetUrl: "https://a.test/", description: "", allowedOrigins: ["https://a.test"], personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "x" }], accounts: [], extraHeaders: {}, secretHeaders: {} },
+    maxSteps: 10, budgetUsd: 1, agentModel: "m/agent", judgeModel: "m/judge",
+  };
+  const uploads: Array<{ path: string; type: string | null }> = [];
+  const controlPlane = (async (url: string | URL, init?: RequestInit) => {
+    const { pathname, search } = new URL(String(url));
+    if (pathname === "/api/runner/claim") return Response.json(job);
+    if (pathname.endsWith("/events")) return Response.json({ cancel: false });
+    if (pathname.endsWith("/artifacts")) {
+      uploads.push({ path: pathname + search, type: new Headers(init?.headers).get("content-type") });
+      return Response.json({ id: "33333333-3333-4333-8333-333333333333" }, { status: 201 });
+    }
+    return Response.json({ ok: true });
+  }) as typeof fetch;
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+  const { d } = deps({
+    env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40) },
+    fetchImpl: controlPlane,
+    model: () => scriptedModel([
+      toolCall("browser_snapshot", {}),
+      toolCall("submit_finding", { kind: "defect", goal: "g", title: "Broken", observed: "500", reproduction: ["Open /", "Click Save"], severity: "high" }),
+      toolCall("goal_status", { goal: "g", status: "failed", note: "500" }),
+      toolCall("finish", { summary: "done" }),
+    ]),
+    openBrowser: async () => ({ tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => "the page" }) }, fillField: async () => "typed", screenshot: async () => ({ bytes: png, contentType: "image/png" as const }), close: async () => {} }),
+    startReporting: async () => ({ report: () => {}, maskWith: () => {}, close: async () => {} }),
+  });
+  expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(0);
+  expect(uploads).toEqual([{ path: `/api/jobs/${job.jobId}/artifacts?kind=screenshot&finding=f1`, type: "image/png" }]);
 });
 
 test("work refuses to send the runner token over plain http to another machine", async () => {

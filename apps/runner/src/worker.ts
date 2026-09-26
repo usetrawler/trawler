@@ -28,13 +28,14 @@ export interface WorkerDeps {
   attempts?: number;
   claimRetryMs?: number;
   uploadWaitMs?: number;
+  uploadTimeoutMs?: number;
   secrets?: string[];
 }
 
 const CLOSE_TIMEOUT_MS = 10_000;
-const UPLOAD_ATTEMPTS = 3;
-const UPLOAD_TIMEOUT_MS = 20_000;
-const UPLOAD_WAIT_MS = 30_000;
+const UPLOAD_ATTEMPTS = 6;
+const UPLOAD_TIMEOUT_MS = 30_000;
+const UPLOAD_WAIT_MS = 35_000;
 const MAX_ERROR = 2000;
 const MAX_BATCH_BYTES = 1_500_000;
 
@@ -42,6 +43,15 @@ const clip = (s: string) => Array.from(s).slice(0, MAX_ERROR).join("");
 
 class Unauthorized extends Error {}
 class Refused extends Error {}
+
+const worthRetrying = (status: number) => status === 429 || (status >= 500 && status !== 501);
+const timedOut = (err: unknown) => err instanceof Error && err.name === "TimeoutError";
+
+function described(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const code = (err.cause as { code?: unknown } | undefined)?.code;
+  return typeof code === "string" ? `${err.message} (${code})` : err.message;
+}
 
 function pause(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -149,15 +159,26 @@ class JobEvents {
 
 class Screenshots {
   #pending: Promise<void>[] = [];
+  #stopped = false;
+  #dropped = new AbortController();
 
   constructor(private deps: WorkerDeps, private job: JobAssignment, private warn: (line: string) => void) {}
 
   keep = (findingId: string, shot: Screenshot) => {
-    this.#pending.push(this.#upload(findingId, shot).catch((err: unknown) => this.warn(`the screenshot of ${findingId} could not be uploaded: ${err instanceof Error ? err.message : String(err)}`)));
+    if (this.#stopped) return;
+    this.#pending.push(this.#upload(findingId, shot).catch((err: unknown) => {
+      if (!this.#stopped) this.warn(`the screenshot of ${findingId} could not be uploaded: ${described(err)}`);
+    }));
   };
+
+  stop() {
+    this.#stopped = true;
+    this.#dropped.abort();
+  }
 
   async #upload(findingId: string, shot: Screenshot): Promise<void> {
     const url = new URL(`/api/jobs/${this.job.jobId}/artifacts?${new URLSearchParams({ kind: "screenshot", finding: findingId })}`, this.deps.controlPlane);
+    const started = Date.now();
     let last: unknown;
     for (let i = 0; i < UPLOAD_ATTEMPTS; i++) {
       try {
@@ -165,25 +186,25 @@ class Screenshots {
           method: "POST",
           headers: { "content-type": shot.contentType, authorization: `Bearer ${this.job.token}`, [PROTOCOL_HEADER]: String(PROTOCOL_VERSION) },
           body: shot.bytes,
-          signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+          signal: AbortSignal.any([AbortSignal.timeout(this.deps.uploadTimeoutMs ?? UPLOAD_TIMEOUT_MS), this.#dropped.signal]),
         });
-        if (res.ok) return;
+        if (res.ok) return void (await res.body?.cancel());
         const failure = `HTTP ${res.status} ${(await res.text()).slice(0, 300)}`;
-        if (res.status < 500 && res.status !== 429) throw new Refused(failure);
+        if (!worthRetrying(res.status)) throw new Refused(failure);
         last = new Error(failure);
       } catch (err) {
-        if (err instanceof Refused) throw err;
+        if (err instanceof Refused || timedOut(err) || this.#stopped) throw err;
         last = err;
       }
-      if (i < UPLOAD_ATTEMPTS - 1) await pause((this.deps.retryBaseMs ?? 500) * 2 ** i);
+      const wait = (this.deps.retryBaseMs ?? 500) * 2 ** i * (0.5 + Math.random());
+      if (i === UPLOAD_ATTEMPTS - 1 || Date.now() - started + wait > (this.deps.uploadWaitMs ?? UPLOAD_WAIT_MS)) break;
+      await pause(wait);
     }
     throw last instanceof Error ? last : new Error(String(last));
   }
 
-  async settled(): Promise<void> {
-    let timer: NodeJS.Timeout | undefined;
-    await Promise.race([Promise.all(this.#pending), new Promise((r) => (timer = setTimeout(r, this.deps.uploadWaitMs ?? UPLOAD_WAIT_MS)))]);
-    clearTimeout(timer);
+  async settled(signal?: AbortSignal): Promise<void> {
+    await Promise.race([Promise.all(this.#pending), pause(this.deps.uploadWaitMs ?? UPLOAD_WAIT_MS, signal)]);
   }
 }
 
@@ -292,15 +313,16 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
   const budget = new Budget(Math.max(job.budgetUsd, 1e-6));
   if (job.budgetUsd <= 0) budget.add(1e-6);
   const events = new JobEvents(deps, job, () => budget.add(budget.limitUsd));
+  const screenshots = new Screenshots(deps, job, warn);
   let released: Promise<boolean> | undefined;
   const handOver = () => {
+    screenshots.stop();
     released ??= call(deps, `/api/jobs/${job.jobId}/release`, job.token, {})
       .then((r) => r.ok)
       .catch(() => false);
     budget.add(budget.limitUsd);
   };
   signal?.addEventListener("abort", handOver, { once: true });
-  const screenshots = new Screenshots(deps, job, warn);
   let completion: JobCompletion;
   try {
     completion = await run(deps, job, events, budget, scrubber, screenshots);
@@ -316,7 +338,7 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
     else fail(`${job.kind} ${job.jobId} could not be handed back; it will be retried when its lease expires`);
     return "done";
   }
-  await screenshots.settled();
+  await screenshots.settled(signal);
   events.stop();
   await events.flush();
   if (events.failure) {
