@@ -122,7 +122,7 @@ function refusal(code: unknown): string | null {
   }
 }
 
-async function throughAuth(call: () => Promise<unknown>, fallback: string): Promise<string | null> {
+async function throughAuth(orgId: string, call: () => Promise<unknown>, fallback: string): Promise<string | null> {
   try {
     await call();
     return null;
@@ -131,7 +131,7 @@ async function throughAuth(call: () => Promise<unknown>, fallback: string): Prom
     const code = (err.body as { code?: unknown } | undefined)?.code;
     const said = refusal(code);
     if (said) return said;
-    await logError("a members change was refused for a reason the page does not name", { code: String(code), err });
+    await logError("a members change was refused for a reason the page does not name", { orgId, code: String(code), err });
     return fallback;
   }
 }
@@ -143,7 +143,7 @@ export async function inviteMemberAction(_previous: MembersState, form: FormData
   if (email.length > 254 || !EMAIL.test(email)) return { error: NOT_AN_ADDRESS };
   if (!withinListingLimit(`invite:${member.userId}`)) return { error: "Too many invitations. Wait a few minutes and try again." };
   const auth = getAuth();
-  const refused = await throughAuth(async () => auth.api.createInvitation({ headers: await headers(), body: { email, role: roleFrom(form.get("role")), organizationId: member.orgId } }), "The invitation could not be created. Try again.");
+  const refused = await throughAuth(member.orgId, async () => auth.api.createInvitation({ headers: await headers(), body: { email, role: roleFrom(form.get("role")), organizationId: member.orgId } }), "The invitation could not be created. Try again.");
   return refused ? { error: refused } : { invited: email };
 }
 
@@ -153,7 +153,7 @@ export async function revokeInvitationAction(_previous: MembersState, form: Form
   const auth = getAuth();
   const invitation = (await auth.pendingInvitations(member.orgId)).find((i) => i.id === String(form.get("invitationId") ?? ""));
   if (!invitation) return { done: "That invitation was already revoked, used or expired." };
-  const refused = await throughAuth(async () => auth.api.cancelInvitation({ headers: await headers(), body: { invitationId: invitation.id } }), "The invitation could not be revoked. Try again.");
+  const refused = await throughAuth(member.orgId, async () => auth.api.cancelInvitation({ headers: await headers(), body: { invitationId: invitation.id } }), "The invitation could not be revoked. Try again.");
   return refused ? { error: refused } : { done: `The invitation for ${invitation.email} is revoked.` };
 }
 
@@ -165,7 +165,7 @@ export async function removeMemberAction(_previous: MembersState, form: FormData
   if (!target) return { done: "That person is no longer in this workspace." };
   if (target.userId === member.userId) return { error: "You cannot remove yourself from the workspace here." };
   if (isOwner(target.role)) return { error: "An owner is not removed here." };
-  const refused = await throughAuth(async () => auth.api.removeMember({ headers: await headers(), body: { memberIdOrEmail: target.id, organizationId: member.orgId } }), "They could not be removed. Try again.");
+  const refused = await throughAuth(member.orgId, async () => auth.api.removeMember({ headers: await headers(), body: { memberIdOrEmail: target.id, organizationId: member.orgId } }), "They could not be removed. Try again.");
   return refused ? { error: refused } : { done: `${nameOf(target)} is removed from this workspace.` };
 }
 
@@ -178,6 +178,6 @@ export async function changeRoleAction(_previous: MembersState, form: FormData):
   if (target.userId === member.userId) return { error: "You cannot change your own role." };
   if (isOwner(target.role)) return { error: "An owner's role is not changed here." };
   const role = roleFrom(form.get("role"));
-  const refused = await throughAuth(async () => auth.api.updateMemberRole({ headers: await headers(), body: { memberId: target.id, role, organizationId: member.orgId } }), "Their role could not be changed. Try again.");
+  const refused = await throughAuth(member.orgId, async () => auth.api.updateMemberRole({ headers: await headers(), body: { memberId: target.id, role, organizationId: member.orgId } }), "Their role could not be changed. Try again.");
   return refused ? { error: refused } : { done: `${nameOf(target)} is now ${role === "admin" ? "an admin" : "a member"}.` };
 }

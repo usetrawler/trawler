@@ -112,7 +112,7 @@ test("Better Auth's refusals are said in the page's words; anything it does not 
     state.fails = refused(code);
     expect(await inviteMemberAction({}, form({ email: "new@acme.test" }))).toEqual({ error: message });
   }
-  expect(state.logged).toEqual([["a members change was refused for a reason the page does not name", { code: "SOMETHING_NEW", err: state.fails }]]);
+  expect(state.logged).toEqual([["a members change was refused for a reason the page does not name", { orgId: "org-1", code: "SOMETHING_NEW", err: state.fails }]]);
   expect(state.revalidated).toHaveLength(cases.length);
   state.fails = new Error("database down");
   await expect(inviteMemberAction({}, form({ email: "new@acme.test" }))).rejects.toThrow("database down");

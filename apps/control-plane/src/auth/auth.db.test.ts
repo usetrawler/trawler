@@ -292,6 +292,7 @@ test("an address that already has a workspace, in any case, is not invited, howe
   const token = sessionOf(other.session).token;
   expect(await answer(auth.api.createInvitation({ ...as(token), body: { email: "HOME-Owner@acme.test", role: "member", organizationId: orgOf(other.session) } }))).toBe("ADDRESS_HAS_A_WORKSPACE");
   expect(await answer(auth.api.createInvitation({ ...as(token), body: { email: "nobody-yet@acme.test", role: "member", organizationId: orgOf(other.session) } }))).toBe("done");
+  expect((await auth.pendingInvitations(orgOf(other.session))).map((i) => i.email)).toEqual(["nobody-yet@acme.test"]);
   expect(await pendingIds(orgOf(home.session))).toEqual([]);
 });
 
@@ -320,6 +321,7 @@ test("Better Auth's invitation and membership endpoints are not reachable from a
     ["list-user-invitations", lee.token],
     ["leave", lee.token, { organizationId: org }],
     ["set-active", lee.token, { organizationId: null }],
+    ["check-slug", lee.token, { slug: "closed-owner-org" }],
   ];
   for (const [path, who, body] of calls) expect((await http(path, who, body)).status, path).toBe(404);
   expect(await memberRoles(org)).toEqual([{ email: "closed-lee@acme.test", role: "member" }, { email: "closed-owner@acme.test", role: "owner" }]);

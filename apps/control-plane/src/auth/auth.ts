@@ -31,6 +31,7 @@ export function authPool(connectionString: string, max = 10): pg.Pool {
 const CLOSED_ORGANIZATION_PATHS = [
   "get-organization",
   "get-full-organization",
+  "check-slug",
   "set-active",
   "invite-member",
   "cancel-invitation",
