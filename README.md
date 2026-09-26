@@ -36,7 +36,7 @@ Nothing a person reports reaches the top of your report on their word alone. Eve
 
 ## How it works
 
-**01 · Paste a URL.** Trawler reads your product's page and, in about half a minute, proposes up to four people and six goals. Edit the people and goals — or just start.
+**01 · Paste a URL.** Trawler reads your product's page and, within a minute or two, proposes up to four people and six goals. Edit the people and goals — or just start.
 
 **02 · Meet your users.** The people take their turns in your real product: clicking, typing and navigating as they see fit, working through every goal, and reporting defects and friction with the steps that led there. No scripts, no recorded flows to maintain.
 
