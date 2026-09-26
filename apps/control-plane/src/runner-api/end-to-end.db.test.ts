@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { createServer, type Server } from "node:http";
 import { sql } from "kysely";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
@@ -7,6 +8,8 @@ import { createModel } from "@usetrawler/core";
 import { tool } from "ai";
 import { z } from "zod";
 import { workOnce } from "../../../runner/src/worker.ts";
+import { s3Store } from "../artifacts/store.ts";
+import { testStorage } from "../artifacts/test-storage.ts";
 import { withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
@@ -17,7 +20,7 @@ import { createProject } from "../projects/projects.ts";
 import { runView } from "../runs/report.ts";
 import { runSummary, startRun } from "../runs/runs.ts";
 import { scrubberWith } from "../server/log.ts";
-import { handleClaim, handleComplete, handleEvents, handleRelease, type RunnerApiDeps } from "./handlers.ts";
+import { handleArtifactUpload, handleClaim, handleComplete, handleEvents, handleRelease, type RunnerApiDeps } from "./handlers.ts";
 
 vi.mock("../server/log.ts", async (importOriginal) => {
   const real = await importOriginal<typeof import("../server/log.ts")>();
@@ -25,10 +28,15 @@ vi.mock("../server/log.ts", async (importOriginal) => {
 });
 
 const t = await testDb();
-afterAll(() => t.drop());
+const bucket = await testStorage();
+afterAll(async () => {
+  await bucket.drop();
+  await t.drop();
+});
 const keys = new Keyring(randomBytes(32));
 const runnerToken = "runner-" + "r".repeat(40);
-const deps: RunnerApiDeps = { db: t.db, keys, runnerToken, claimWaitMs: 50, pollMs: 10 };
+const deps: RunnerApiDeps = { db: t.db, keys, runnerToken, claimWaitMs: 50, pollMs: 10, artifacts: s3Store(bucket.storage) };
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...randomBytes(64)]);
 const ORG_KEY = "sk-or-v1-" + "k".repeat(64);
 let server: Server;
 let openRouter: Server;
@@ -53,7 +61,8 @@ beforeAll(async () => {
     for await (const c of req) chunks.push(c as Buffer);
     const request = new Request(`http://cp.test${req.url}`, { method: req.method, headers: req.headers as Record<string, string>, body: chunks.length ? Buffer.concat(chunks) : undefined });
     const match = /^\/api\/jobs\/([^/]+)\/(events|complete|release)$/.exec(req.url ?? "");
-    const response = req.url === "/api/llm/v1/chat/completions" ? await handleChatCompletions(request, { db: t.db, keys, openRouterUrl: openRouterBase, fetch: viaFakeUpstream, retryBaseMs: 1 }) : req.url === "/api/runner/claim" ? await handleClaim(request, deps) : match ? await (match[2] === "events" ? handleEvents : match[2] === "release" ? handleRelease : handleComplete)(request, match[1]!, deps) : new Response(null, { status: 404 });
+    const upload = /^\/api\/jobs\/([^/]+)\/artifacts\?/.exec(req.url ?? "");
+    const response = req.url === "/api/llm/v1/chat/completions" ? await handleChatCompletions(request, { db: t.db, keys, openRouterUrl: openRouterBase, fetch: viaFakeUpstream, retryBaseMs: 1 }) : req.url === "/api/runner/claim" ? await handleClaim(request, deps) : upload ? await handleArtifactUpload(request, upload[1]!, deps) : match ? await (match[2] === "events" ? handleEvents : match[2] === "release" ? handleRelease : handleComplete)(request, match[1]!, deps) : new Response(null, { status: 404 });
     res.writeHead(response.status, Object.fromEntries(response.headers));
     res.end(Buffer.from(await response.arrayBuffer()));
   });
@@ -88,10 +97,10 @@ afterAll(() => new Promise<void>((r) => server.close(() => openRouter.close(() =
 const worker = () => ({
   controlPlane: base, runnerToken, log: () => {}, flushMs: 5, retryBaseMs: 5,
   model: (modelId: string, jobToken: string) => createModel({ modelId, apiKey: jobToken, baseURL: `${base}/api/llm/v1` }),
-  openBrowser: async () => ({ tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => "the invoice form" }) }, fillField: async () => "typed", screenshot: async () => null, close: async () => {} }),
+  openBrowser: async () => ({ tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => "the invoice form" }) }, fillField: async () => "typed", screenshot: async () => ({ bytes: PNG, contentType: "image/png" as const }), close: async () => {} }),
 });
 
-test("a run goes from start to a confirmed defect through the real runner API and worker", async () => {
+test("a run goes from start to a confirmed defect, with the screenshots of its report and its replay, through the real runner API and worker", async () => {
   const config = ProjectConfigSchema.parse({
     name: "Acme", targetUrl: "https://app.acme.test/",
     personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "Save an invoice." }],
@@ -112,6 +121,9 @@ test("a run goes from start to a confirmed defect through the real runner API an
   const summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
   expect(summary).toMatchObject({ status: "succeeded" });
   expect(summary!.findings).toEqual([expect.objectContaining({ key: "ana:f1", title: "Saving fails", verdict: "confirmed", replay: expect.objectContaining({ completed: true }) })]);
+  const { reported, replayed } = summary!.findings[0]!.screenshots;
+  const listed = await bucket.client.send(new ListObjectsV2Command({ Bucket: bucket.storage.bucket, Prefix: `orgs/org-a/runs/${run.id}/` }));
+  expect((listed.Contents ?? []).map((o) => o.Key).sort()).toEqual([reported, replayed].map((id) => `orgs/org-a/runs/${run.id}/${id}.png`).sort());
   expect(summary!.goals).toEqual([{ personaKey: "ana", goal: "g", status: "failed", note: "error page" }]);
   expect(summary!.costUsd).toBeCloseTo(0.006, 6);
   expect(seen).toHaveLength(6);
