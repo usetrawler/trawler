@@ -73,15 +73,24 @@ const SELECTOR_ENGINES = {
       const shows = (el) => getComputedStyle(el).display === "contents" || el.checkVisibility({ visibilityProperty: true, contentVisibilityAuto: true });
       let boxed = root;
       while (boxed && getComputedStyle(boxed).display === "contents") boxed = up(boxed);
-      if (boxed && !shows(boxed) && ![...root.querySelectorAll("*")].some(shows)) return [];
+      const anyShows = (scope) => [...scope.querySelectorAll("*")].some((el) => shows(el) || (el.shadowRoot !== null && anyShows(el.shadowRoot)));
+      if (boxed && !shows(boxed) && !anyShows(root) && !(root.shadowRoot && anyShows(root.shadowRoot))) return [];
       const neverClips = new Set(["contents", "inline", "table-row", "table-row-group", "table-header-group", "table-footer-group", "table-column", "table-column-group"]);
       const style = getComputedStyle(root);
       const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2 || 0;
       const reach = root.getBoundingClientRect().height + 2 * line;
-      const text = document.createRange();
-      text.selectNodeContents(root);
-      const drawn = text.getBoundingClientRect();
-      const shown = { left: drawn.left, top: drawn.top, right: drawn.right, bottom: drawn.bottom };
+      let shown = null;
+      const texts = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let node = texts.nextNode(); node; node = texts.nextNode()) {
+        if (!node.data.trim()) continue;
+        const text = document.createRange();
+        text.selectNodeContents(node);
+        for (const box of text.getClientRects()) {
+          if (box.width === 0 && box.height === 0) continue;
+          shown = shown ? { left: Math.min(shown.left, box.left), top: Math.min(shown.top, box.top), right: Math.max(shown.right, box.right), bottom: Math.max(shown.bottom, box.bottom) } : { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
+        }
+      }
+      if (!shown) return [];
       const cuts = (overflow, margin) => overflow !== "visible" && !(overflow === "clip" && parseFloat(margin) !== 0);
       let escaping = false;
       for (let el = root; el && el !== document.body && el !== document.documentElement; el = up(el)) {
@@ -119,14 +128,17 @@ const SELECTOR_ENGINES = {
   [MOVING]: `({
     queryAll(root) {
       const looksOnly = /^(opacity|color|background|boxShadow|textShadow|outline|border\\w*(Color|Radius)|fill|stroke|filter|visibility|caretColor|accentColor|textDecorationColor|columnRuleColor)/;
+      const movesOnlyItself = /^(transform|translate|rotate|scale|offset(Path|Distance|Rotate|Anchor|Position))$/;
       const keyframeFields = new Set(["offset", "computedOffset", "easing", "composite"]);
       const up = (el) => el.parentElement ?? el.parentNode?.host;
+      const drawsText = (target) => target === root || (target?.textContent ?? "").trim() !== "";
       for (let el = root; el; el = up(el)) {
-        const drawsText = (target) => target && (target === root || (target.textContent ?? "").trim() !== "");
-        for (const animation of el.getAnimations({ subtree: true }).filter((a) => (el === root ? drawsText(a.effect?.target) : a.effect?.target === el))) {
-          if (animation.playState !== "running" || animation.timeline !== document.timeline || animation.effect?.getComputedTiming?.().progress == null) continue;
+        for (const animation of el.getAnimations({ subtree: true }).filter((a) => el === root || a.effect?.target === el)) {
+          if (animation.playState !== "running" || !(animation.timeline instanceof DocumentTimeline) || animation.effect?.getComputedTiming?.().progress == null) continue;
           const properties = (animation.effect?.getKeyframes?.() ?? []).flatMap((frame) => Object.keys(frame)).filter((key) => !keyframeFields.has(key));
-          if (properties.some((key) => !looksOnly.test(key))) return [root];
+          const drawnOnly = animation.effect?.pseudoElement || (el === root && !drawsText(animation.effect?.target));
+          const moves = drawnOnly ? (key) => !looksOnly.test(key) && !movesOnlyItself.test(key) : (key) => !looksOnly.test(key);
+          if (properties.some(moves)) return [root];
         }
       }
       return [];

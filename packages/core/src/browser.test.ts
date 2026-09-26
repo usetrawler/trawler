@@ -253,6 +253,19 @@ beforeAll(async () => {
         return html(`<style>@keyframes bounce{from{transform:translateY(0)}to{transform:translateY(-6px)}} .badge{display:inline-block;animation:bounce 400ms infinite alternate}</style><p style="font:20px monospace;color:#ff0000">Key: <span>card-secret-1111</span> <span class="badge" style="color:#333">NEW</span></p><p>Plan: Team</p>`);
       case "/icon-inside":
         return html(`<style>@keyframes spin{to{transform:rotate(360deg)}} .icon{display:inline-block;width:12px;height:12px;border:2px solid #333;border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite}</style><p style="font:20px monospace;color:#ff0000">Key: card-secret-1111 <span class="icon"></span></p><p>Plan: Team</p>`);
+      case "/shadow-split":
+        return html(`<split-key style="visibility:hidden;font:20px monospace;color:#ff0000">card-sec</split-key><p>Plan: Team</p><script>customElements.define("split-key", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<slot></slot><span style="visibility:visible">ret-1111</span>'; } });</script>`);
+      case "/pusher":
+        return html(`<style>@keyframes push{from{height:0}to{height:160px}} .pusher{display:inline-block;width:4px;animation:push 20s steps(2) infinite}</style><p style="font:20px monospace;color:#ff0000"><span class="pusher"></span>card-secret-1111</p>`);
+      case "/big-icon":
+      case "/big-icon-other":
+        return html(`<style>@keyframes spin{to{transform:rotate(360deg)}} .icon{display:inline-block;width:30px;height:30px;background:#333;animation:spin 1s linear infinite}</style><h1>${req.url === "/big-icon" ? "Settings" : "Preferences"}</h1><p style="font:20px/24px monospace;color:#ff0000">Key: card-secret-1111 <span class="icon"></span></p><p>Plan: Team</p><p>Billing: monthly</p><p>Seats: 5</p>`);
+      case "/custom-timeline":
+        return html(`<p id="echo" style="font:20px monospace;color:#ff0000">card-secret-1111</p><script>document.getElementById("echo").animate([{ transform: "translateX(0)" }, { transform: "translateX(200px)" }], { duration: 20000, easing: "steps(2)", iterations: Infinity, timeline: new DocumentTimeline() });</script>`);
+      case "/decorated-card":
+        return html(`<style>@keyframes turn{to{transform:rotate(360deg)}} .card{position:relative;overflow:hidden;padding:16px;width:420px} .card::before{content:"";position:absolute;inset:-50%;background:conic-gradient(#eee,#ccc,#eee);animation:turn 3s linear infinite;z-index:-1}</style><div class="card"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div>`);
+      case "/pushing-before":
+        return html(`<style>@keyframes grow{from{height:0}to{height:160px}} .card::before{content:"";display:block;animation:grow 20s steps(2) infinite}</style><div class="card"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div>`);
       case "/fixed-below":
         return html(`<p>Short page</p><div style="position:fixed;left:20px;bottom:120px;height:0;font:20px monospace;color:#ff0000">card-secret-1111</div>`);
       case "/flicker":
@@ -1329,6 +1342,7 @@ describe("screenshots", () => {
     ["/contents-text", "is in an element with no box of its own"],
     ["/slot-fallback", "is a component slot's fallback"],
     ["/hidden-parent-split", "is partly in a hidden element and partly in a visible child"],
+    ["/shadow-split", "is partly in a hidden element and partly in a visible child of its shadow root"],
   ])("a secret whose text %s is masked where it is drawn (%s)", async (path) => {
     const [shot] = await shotsOf(path, 1, async () => undefined, knowing(path === "/overflow-edge" ? "card-secret-11112" : "card-secret-1111"));
     expect(shot).not.toBeNull();
@@ -1374,6 +1388,25 @@ describe("screenshots", () => {
     expect(await shotsOf("/animated-child", 3, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null, null]);
   }, 60_000);
 
+  test("a secret pushed down by an animation on its container's pseudo-element gives no screenshot", async () => {
+    expect(await shotsOf("/pushing-before", 2, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null]);
+  }, 60_000);
+
+  test("a secret pushed along by an animated element with no text inside its own gives no screenshot", async () => {
+    expect(await shotsOf("/pusher", 2, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null]);
+  }, 60_000);
+
+  test("a secret moved by an animation on a timeline of the page's own gives no screenshot", async () => {
+    expect(await shotsOf("/custom-timeline", 2, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null]);
+  }, 60_000);
+
+  test("a large icon spinning beside a secret neither stops the screenshot nor blacks out the rest of the page", async () => {
+    const shotOf = async (at: string) => (await shotsOf(at, 1, async () => undefined, knowing("card-secret-1111")))[0];
+    const shot = await shotOf("/big-icon");
+    expect(shot).not.toBeNull();
+    expect(Buffer.compare(Buffer.from(shot!.bytes), Buffer.from((await shotOf("/big-icon-other"))?.bytes ?? []))).not.toBe(0);
+  }, 60_000);
+
   test("a password field an animation is moving, even one that has not moved for a while, gives no screenshot", async () => {
     expect(await shotsOf("/shaking-field", 2, async () => undefined)).toEqual([null, null]);
   }, 60_000);
@@ -1386,6 +1419,7 @@ describe("screenshots", () => {
 
   test.each([
     ["/badge-beside", "a badge beside it in the same line"],
+    ["/decorated-card", "a decoration spinning on its card's pseudo-element"],
     ["/icon-inside", "a spinning icon without text inside its element"],
     ["/delayed-animation", "one still waiting to start"],
     ["/timer-animation", "one with no keyframes, used as a timer"],
