@@ -1,7 +1,13 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
+import { scrubberWith } from "../server/log.ts";
 import { checkModelCall, detectProvider, endpointFor, listModels, priceKey, PROVIDER_LABEL, PROVIDERS } from "./providers.ts";
 import { providerArticle } from "./provider-kinds.ts";
 import { parseOpenRouterPrices } from "./prices.ts";
+
+vi.mock("../server/log.ts", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../server/log.ts")>();
+  return { ...real, scrubberWith: vi.fn(real.scrubberWith) };
+});
 
 test("each provider's name takes the article it is spoken with", () => {
   expect(PROVIDERS.map((p) => `${providerArticle(p)} ${PROVIDER_LABEL[p]}`)).toEqual(["an OpenRouter", "an OpenAI", "an Anthropic", "a Google", "an OpenAI-compatible"]);
@@ -72,6 +78,10 @@ test("a provider's refusal comes back with the key it was sent masked, also wher
 test("a refusal longer than 4,000 characters is left out rather than searched for the key", async () => {
   const key = "k".repeat(20);
   const endpoint = endpointFor("custom", key, { openRouterUrl: "", customUrl: "https://llm.example.com/v1" });
+  vi.mocked(scrubberWith).mockClear();
   expect(await checkModelCall(endpoint, "x", refusing(401, key.repeat(200)))).toEqual({ ok: false, reason: "key", detail: "•••" });
+  expect(scrubberWith).toHaveBeenCalledTimes(1);
+  vi.mocked(scrubberWith).mockClear();
   expect(await checkModelCall(endpoint, "x", refusing(401, `${key.repeat(200)}k`))).toEqual({ ok: false, reason: "key", detail: "" });
+  expect(scrubberWith).not.toHaveBeenCalled();
 });
