@@ -2,7 +2,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { Shell } from "../server/shell.ts";
-import { AppShell, initials, type ShellPage } from "./app-shell.tsx";
+import { AppShell, type ShellPage } from "./app-shell.tsx";
+import { initials } from "./initials.ts";
 
 const shell: Shell = {
   user: { name: "Ben Ortiz", email: "ben@acme.test" },

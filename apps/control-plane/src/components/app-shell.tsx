@@ -2,16 +2,11 @@ import type { ReactNode } from "react";
 import type { Shell } from "../server/shell.ts";
 import { BrandMark } from "./brand-mark.tsx";
 import { DocsLink } from "./docs-link.tsx";
+import { initials } from "./initials.ts";
 import { SignOutButton } from "./sign-out-button.tsx";
 import { ThemeToggle } from "./theme-toggle.tsx";
 
 export type ShellPage = "overview" | "runs" | "new" | "settings" | { project: string };
-
-export function initials(text: string): string {
-  const words = text.replace(/@.*$/, "").split(/[\s._-]+/).filter(Boolean).map((word) => Array.from(word));
-  const letters = words.length > 1 ? words[0]![0]! + words[1]![0]! : (words[0] ?? ["?"]).slice(0, 2).join("");
-  return letters.toUpperCase();
-}
 
 const same = (current: ShellPage | undefined, page: ShellPage) =>
   typeof page === "string" ? current === page : typeof current === "object" && current.project === page.project;

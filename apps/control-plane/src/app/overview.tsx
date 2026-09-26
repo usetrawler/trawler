@@ -1,4 +1,4 @@
-import { initials } from "../components/app-shell.tsx";
+import { initials } from "../components/initials.ts";
 import { Greeting } from "../components/greeting.tsx";
 import { PageHead, PrimaryLink } from "../components/page-head.tsx";
 import { RunTable } from "../components/run-table.tsx";
