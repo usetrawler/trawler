@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useRef, useState, useTransition } from "
 import type { runView, StageState, PersonaState } from "../../../runs/report.ts";
 import type { RunSummary } from "../../../runs/runs.ts";
 import { runStatusLabel } from "../../../runs/status.ts";
+import { initials } from "../../../components/initials.ts";
 import { LocalTime } from "../../../components/local-time.tsx";
 import { cancelRunAction, judgeAgainAction } from "./actions.ts";
 import { RunAgainButton } from "./run-again-button.tsx";
@@ -22,22 +23,17 @@ const PERSONA_LABEL: Record<PersonaState, [string, string]> = {
   finished: ["Finished", "text-ink"], failed: ["Could not finish", "text-bad"], cancelled: ["Stopped", "text-muted"],
 };
 const SEVERITY_TONE: Record<string, string> = { high: "bg-action", medium: "bg-[#d5a557]", low: "bg-[#93b89e]" };
-const label = "font-mono text-[10px] tracking-[0.1em] uppercase";
+const label = "font-mono text-[10px] uppercase";
 const secondary = "flex h-[50px] items-center justify-center border border-line bg-panel px-4 text-base hover:border-ink";
 
 type Person = View["personas"][number];
-
-export function initials(name: string): string {
-  const words = name.split(/\s+/).filter(Boolean);
-  const letters = words.length > 1 ? words.slice(0, 2).map((word) => [...word][0]!) : [...(words[0] ?? "")].slice(0, 2);
-  return letters.join("").toUpperCase() || "?";
-}
 
 export function personLine(p: Person): string {
   const reached = p.goals.filter((g) => g.status === "reached").length;
   if (p.state === "reached") return p.goals.length === 1 ? "Reached the goal." : `Reached all ${p.goals.length} goals.`;
   if (p.state === "missed") {
-    const missed = p.goals.find((g) => g.status === "failed")!;
+    const missed = p.goals.find((g) => g.status === "failed");
+    if (!missed) return "Did not reach a goal.";
     return missed.note || `Did not reach: ${missed.goal}`;
   }
   if (p.state === "failed") return p.error ? `Could not finish: ${p.error}` : "Could not finish.";
@@ -67,7 +63,7 @@ export function CancelButton({ runId, onDone }: { runId: string; onDone: () => v
   return (
     <div className="flex flex-wrap items-center gap-3 text-sm">
       <span className="text-muted">Stop now? What was found so far is kept.</span>
-      <button type="button" disabled={pending} onClick={() => start(async () => { setFailed(!(await cancelRunAction(runId))); onDone(); })} className="h-10 border border-bad px-4 text-bad disabled:opacity-60">
+      <button type="button" disabled={pending} onClick={() => start(async () => { setFailed(!(await cancelRunAction(runId).catch(() => false))); onDone(); })} className="h-10 border border-bad px-4 text-bad disabled:opacity-60">
         {pending ? "Stopping…" : "Stop"}
       </button>
       <button type="button" onClick={() => setAsking(false)} className="h-10 px-2 text-muted">Keep running</button>
@@ -128,16 +124,16 @@ function FindingRow({ f, n, mark, note, detail, action, focus, onFocused }: { f:
     <li className="border-b border-line bg-panel last:border-b-0">
       <details className="group">
         <summary ref={summary} className="grid cursor-pointer list-none grid-cols-[75px_minmax(0,1fr)_85px_18px] items-start gap-3.5 p-[17px] max-md:grid-cols-1 [&::-webkit-details-marker]:hidden">
-          <span className={`inline-flex w-max px-1.5 py-[5px] font-mono text-[10px] text-[#17191c] uppercase ${SEVERITY_TONE[f.severity] ?? "bg-soft"}`}>{f.severity}</span>
+          <span className={`inline-flex w-max px-1.5 py-[5px] font-mono text-[10px] text-[#17191c] uppercase ${SEVERITY_TONE[f.severity] ?? "bg-soft"}`}>{f.severity}<span className="sr-only"> severity</span></span>
           <span className="min-w-0">
-            <small className="block font-mono text-[10px] text-muted">{String(n).padStart(2, "0")} · {f.personaName}</small>
+            <small className="block font-mono text-[10px] break-words text-muted">{String(n).padStart(2, "0")} · {f.personaName}</small>
             <strong className="mt-1 block text-[17px] leading-snug break-words">{f.title}</strong>
-            <span className="mt-[5px] line-clamp-2 block text-[11px] leading-[1.4] break-words text-muted">{note ?? f.observed}</span>
+            <span className="mt-[5px] line-clamp-2 text-[11px] leading-[1.4] break-words text-muted">{note ?? f.observed}</span>
           </span>
           <span className="font-mono text-[10px] text-ok uppercase max-md:empty:hidden">{mark}</span>
           <b aria-hidden className="transition-transform group-open:rotate-90 max-md:hidden">→</b>
         </summary>
-        <div className="flex flex-col gap-3 border-t border-line p-[17px] text-sm">
+        <div className="flex flex-col gap-3 border-t border-line p-[17px] text-sm wrap-anywhere">
           <p><span className="text-muted">While trying to: </span>{f.goalText}</p>
           <div>
             <p className="mb-1 text-muted">Steps</p>
@@ -168,7 +164,10 @@ function Section<T extends ReportFinding & { reason?: string }>({ title, hint, i
 }
 
 function spentOf(run: RunSummary, live: boolean) {
-  if (run.tokenCap) return { title: live ? "Tokens so far" : "Tokens", value: `${(run.tokensUsed / 1_000_000).toFixed(2)}M`, of: `of ${(run.tokenCap / 1_000_000).toFixed(1)}M cap · price unknown`, share: Math.min(100, (run.tokensUsed / run.tokenCap) * 100) };
+  if (run.tokenCap) {
+    const cap = `${(run.tokenCap / 1_000_000).toFixed(1)}M`;
+    return { title: live ? "Tokens so far" : "Tokens", value: `${(run.tokensUsed / 1_000_000).toFixed(2)}M`, of: `${live ? `of ${cap} cap` : `cap was ${cap}`} · price unknown`, share: Math.min(100, (run.tokensUsed / run.tokenCap) * 100) };
+  }
   return { title: live ? "Live cost" : "Cost", value: usd(run.costUsd), of: live ? `of ${usd(run.budgetUsd)} cap` : `cap was ${usd(run.budgetUsd)}`, share: Math.min(100, run.budgetUsd > 0 ? (run.costUsd / run.budgetUsd) * 100 : 0) };
 }
 
@@ -242,7 +241,7 @@ function LivePeople({ view }: { view: View }) {
             <span aria-hidden className="grid size-[42px] place-items-center rounded-full border border-line bg-soft font-mono text-[10px]">{initials(p.name)}</span>
             <span className="min-w-0">
               <strong className="block break-words">{p.name}</strong>
-              <span className="mt-[3px] block text-xs break-words text-muted">{personLine(p)}</span>
+              <span className="mt-[3px] block text-xs break-words text-muted">{personLine(p)}{p.state === "exploring" && <span className="sr-only"> {reached} of {plural(p.goals.length, "goal", "goals")} reached.</span>}</span>
             </span>
             <span className={`${label} ${tone} max-md:col-start-2`}>{state}</span>
             <span aria-hidden className="absolute right-0 -bottom-px left-0 h-0.5 bg-soft"><span className="block h-full bg-ok" style={{ width: `${p.goals.length ? (reached / p.goals.length) * 100 : 0}%` }} /></span>
@@ -264,23 +263,24 @@ function PeopleOutcomes({ view }: { view: View }) {
           const bad = p.state === "missed" || p.state === "failed";
           return (
             <li key={p.id} className="grid grid-cols-[auto_minmax(0,1fr)] gap-[9px] border-b border-line py-3 last:border-b-0">
-              <span aria-hidden className={`grid size-[22px] place-items-center rounded-full text-xs ${good ? "bg-ok text-paper" : bad ? "bg-action text-[#17191c]" : "bg-soft text-muted"}`}>{good ? "✓" : bad ? "×" : "–"}</span>
-              <span className="min-w-0 text-[11px] text-muted">
+              <span aria-hidden className={`grid size-[22px] place-items-center rounded-full text-sm ${good ? "bg-ok text-paper" : bad ? "bg-action text-[#17191c]" : "bg-soft text-muted"}`}>{good ? "✓" : bad ? "×" : "–"}</span>
+              <div className="min-w-0 text-[11px] text-muted">
                 <strong className="block text-xs break-words text-ink">{p.name}<span className="sr-only">: {PERSONA_LABEL[p.state][0]}.</span></strong>
                 <span className="block break-words">{personLine(p)}</span>
                 <details className="mt-1">
-                  <summary className="cursor-pointer hover:text-ink">Each goal</summary>
+                  <summary className="cursor-pointer hover:text-ink">Each goal<span className="sr-only"> of {p.name}</span></summary>
                   <ul className="mt-1 flex flex-col gap-1">
                     {p.goals.map((g) => (
                       <li key={g.id} className="break-words">
-                        <span aria-label={g.status ?? "no outcome yet"} className={g.status === "reached" ? "text-ok" : g.status === "failed" ? "text-warn" : ""}>{g.status === "reached" ? "✓" : g.status === "failed" ? "✕" : "·"}</span> <span className="text-ink">{g.goal}</span>
+                        <span aria-hidden className={g.status === "reached" ? "text-ok" : g.status === "failed" ? "text-warn" : ""}>{g.status === "reached" ? "✓" : g.status === "failed" ? "✕" : "·"}</span>
+                        <span className="sr-only">{g.status === "reached" ? "Reached: " : g.status === "failed" ? "Not reached: " : "No outcome yet: "}</span> <span className="text-ink">{g.goal}</span>
                         {g.note && <span> — {g.note}</span>}
                       </li>
                     ))}
                   </ul>
                 </details>
                 {(p.defects > 0 || p.friction > 0) && <span className="mt-1 block">{plural(p.defects, "defect report", "defect reports")} · {plural(p.friction, "friction", "frictions")}</span>}
-              </span>
+              </div>
             </li>
           );
         })}
@@ -346,24 +346,24 @@ export function RunLive({ initial }: { initial: Data }) {
   const when = view.live ? run.createdAt : run.finishedAt ?? run.createdAt;
   return (
     <div className="flex flex-col">
-      <div className="flex flex-col items-start justify-between gap-6 md:flex-row md:flex-wrap md:items-end">
-        <div className="flex min-w-0 flex-col md:flex-1">
+      <div className={`flex flex-col items-start gap-6 ${view.live ? "md:flex-row md:flex-wrap md:items-end md:justify-between md:gap-x-[60px]" : "wide:flex-row wide:items-end wide:justify-between"}`}>
+        <div className={`flex min-w-0 flex-col ${view.live ? "md:min-w-80 md:flex-1" : "wide:flex-1"}`}>
           <p className="font-mono text-base tracking-[0.1em] text-muted uppercase">{runStatusLabel(run.status)} · <LocalTime iso={new Date(when).toISOString()} /></p>
-          <h1 className="my-2.5 text-[44px] leading-[0.96] font-bold tracking-[-0.055em] wrap-anywhere md:text-[clamp(44px,5vw,72px)]">{view.headline}</h1>
+          <h1 className={`my-2.5 font-bold wrap-anywhere ${view.live ? "text-[48px] leading-[0.94] tracking-[-0.06em] md:text-[clamp(48px,6vw,88px)]" : "text-[44px] leading-[0.96] tracking-[-0.055em] md:text-[clamp(44px,5vw,72px)]"}`}>{view.headline}</h1>
           <p className="text-base break-words text-muted">{host} · {run.agentModel}</p>
-          {view.live && <p className="mt-2 max-w-[700px] text-base text-muted">Defects count only after a fresh agent reproduces them.</p>}
-          <p role="status" aria-live="polite" className="mt-2 text-sm text-warn empty:hidden">
-            {gone ? "This run is no longer available." : stale ? "Lost contact with Trawler. Retrying…" : ""}
+          {view.live && <p className="mt-2 max-w-[700px] text-lg text-muted">Defects count only after a fresh agent reproduces them.</p>}
+          <p role="status" aria-live="polite" className="text-sm text-warn">
+            {(gone || stale) && <span className="mt-2 block">{gone ? "This run is no longer available." : "Lost contact with Trawler. Retrying…"}</span>}
             <span className="sr-only">{runStatusLabel(run.status)}. {view.headline} <span key={announcement.n}>{announcement.text}</span></span>
           </p>
         </div>
         {view.live ? (
           <LiveCost run={run} />
         ) : (
-          <>
+          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:flex-wrap md:justify-end wide:max-w-md">
             <a href={`/projects/${run.projectId}#start`} className={`${secondary} w-full md:w-auto`}>Start another run</a>
             <RunAgainButton runId={run.id} />
-          </>
+          </div>
         )}
       </div>
 
@@ -383,7 +383,7 @@ export function RunLive({ initial }: { initial: Data }) {
           )}
           <div className="mt-[30px] flex items-center justify-between gap-4 max-md:flex-col max-md:items-start">
             <p className="flex items-center gap-2.5 text-xs text-muted">
-              <span aria-hidden className="size-[9px] shrink-0 animate-pulse rounded-full bg-action shadow-[0_0_0_6px_color-mix(in_srgb,var(--action)_15%,transparent)] motion-reduce:animate-none" />
+              <span aria-hidden className="size-[9px] shrink-0 animate-[halo_1.5s_infinite] rounded-full bg-action shadow-[0_0_0_6px_color-mix(in_srgb,var(--action)_15%,transparent)] motion-reduce:animate-none" />
               <span><strong className="text-ink">Safe to leave.</strong> The run keeps going; come back to this page for the report.</span>
             </p>
             <CancelButton runId={run.id} onDone={refresh} />

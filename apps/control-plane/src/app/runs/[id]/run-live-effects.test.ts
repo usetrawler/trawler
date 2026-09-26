@@ -7,6 +7,8 @@ const react = vi.hoisted(() => ({
   setters: [] as Array<ReturnType<typeof import("vitest").vi.fn>>,
   values: [] as unknown[],
   started: [] as Array<Promise<unknown>>,
+  refs: [] as Array<{ current: unknown }>,
+  refIndex: 0,
 }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
@@ -17,7 +19,11 @@ vi.mock("react", async (original) => ({
   },
   useEffect: (effect: () => void | (() => void)) => { react.effects.push(effect); },
   useCallback: (fn: unknown) => fn,
-  useRef: (value: unknown) => ({ current: value }),
+  useRef: (value: unknown) => {
+    const at = react.refIndex++;
+    react.refs[at] ??= { current: value };
+    return react.refs[at];
+  },
   useId: () => "id",
   useTransition: () => [false, (work: () => Promise<unknown>) => { react.started.push(work()); }],
 }));
@@ -36,17 +42,22 @@ const text = (node: unknown): string => (typeof node === "string" ? node : Array
 const button = (tree: unknown, label: RegExp) => nodes(tree).find((node) => node.type === "button" && label.test(text(node)))!;
 const press = (node: Node) => (node.props!.onClick as () => void)();
 
-const summary = (status: string): RunSummary => ({
+const summary = (status: string, over: Partial<RunSummary> = {}): RunSummary => ({
   id: "run-1", number: 7, status, projectId: "project-1", costUsd: 0.2, budgetUsd: 2, agentModel: "m", judgeModel: "m", provider: "openrouter", tokenCap: null, tokensUsed: 0,
   createdAt: new Date(), startedAt: new Date(), finishedAt: null, jobs: [], findings: [], goals: [], target: "https://app.acme.test/", activity: [],
   personas: [{ id: "ana", name: "Ana" }], goalTexts: [{ id: "g1", instruction: "Get an account." }],
+  ...over,
 });
-const data = (status: string) => JSON.parse(JSON.stringify({ run: summary(status), view: runView(summary(status)) }));
+const data = (status: string, over: Partial<RunSummary> = {}) => JSON.parse(JSON.stringify({ run: summary(status, over), view: runView(summary(status, over)) }));
+const draw = (initial: ReturnType<typeof data>) => {
+  Object.assign(react, { effects: [], setters: [], refIndex: 0 });
+  return RunLive({ initial });
+};
 const settle = async () => { await Promise.all(react.started); await vi.advanceTimersByTimeAsync(0); };
 
 beforeEach(() => {
   vi.useFakeTimers();
-  Object.assign(react, { effects: [], setters: [], values: [], started: [] });
+  Object.assign(react, { effects: [], setters: [], values: [], started: [], refs: [], refIndex: 0 });
   vi.stubGlobal("document", { hidden: false, activeElement: null, body: {} });
   for (const action of Object.values(actions)) action.mockReset();
 });
@@ -111,4 +122,87 @@ test("Stop run asks first; Stop cancels the run and refreshes, and a failure say
   expect(actions.cancelRunAction).toHaveBeenCalledWith("run-1");
   expect(react.setters.at(-1)).toHaveBeenCalledWith(true);
   expect(refreshed).toHaveBeenCalledOnce();
+});
+
+test("a run that is gone says so and is not fetched again, a lost session goes to sign in, and a failed fetch marks the page stale", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 404 })));
+  draw(data("running"));
+  react.effects[0]!();
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(react.setters[2]).toHaveBeenCalledWith(true);
+
+  const assign = vi.fn();
+  vi.stubGlobal("window", { location: { assign } });
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 401 })));
+  draw(data("running"));
+  react.effects[0]!();
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(assign).toHaveBeenCalledWith("/sign-in");
+
+  vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
+  draw(data("running"));
+  react.effects[0]!();
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(react.setters[1]).toHaveBeenCalledWith(true);
+});
+
+test("when a judge answers, the page says where the defect went, and moves focus to it when nothing else has focus", () => {
+  const defect = { key: "ana:f1", personaKey: "ana", kind: "defect", goal: "g1", title: "Saving fails", observed: "A 500 page.", reproduction: ["Open.", "Save."], severity: "high", replay: null };
+  const judge = (status: string) => ({ id: `judge-${status}`, kind: "judge", status, persona_key: null, finding_key: "ana:f1", usage: null, stopped_by: null, error: null, requested: true });
+  const asking = data("succeeded", { jobs: [judge("queued")] as RunSummary["jobs"], findings: [{ ...defect, verdict: null }] as RunSummary["findings"] });
+  const answered = data("succeeded", { jobs: [judge("succeeded")] as RunSummary["jobs"], findings: [{ ...defect, verdict: "confirmed" }] as RunSummary["findings"] });
+  (document as { activeElement: unknown }).activeElement = document.body;
+  draw(asking);
+  react.effects[1]!();
+  draw(answered);
+  react.effects[1]!();
+  const update = react.setters[3]!.mock.calls[0]![0] as (was: { text: string; n: number }) => { text: string; n: number };
+  expect(update({ text: "", n: 4 })).toEqual({ text: "Saving fails: confirmed.", n: 5 });
+  expect(react.setters[4]).toHaveBeenCalledWith("ana:f1");
+
+  (document as { activeElement: unknown }).activeElement = { id: "somewhere" };
+  react.refs = [];
+  draw(asking);
+  react.effects[1]!();
+  draw(answered);
+  react.effects[1]!();
+  expect(react.setters[3]).toHaveBeenCalledOnce();
+  expect(react.setters[4]).not.toHaveBeenCalled();
+});
+
+test("a judge that could not start, or a run that could not be stopped, says so in an alert", () => {
+  react.values = ["It is already being judged again."];
+  const judging = JudgeAgainButton({ runId: "run-1", findingKey: "ana:f1", judging: false, onDone: async () => {} });
+  expect(nodes(judging).filter((node) => node.props?.role === "alert").map(text)).toEqual(["It is already being judged again."]);
+  react.values = [true, true];
+  const stopping = CancelButton({ runId: "run-1", onDone: () => {} });
+  expect(nodes(stopping).filter((node) => node.props?.role === "alert").map(text)).toEqual(["The run could not be stopped. Try again."]);
+});
+
+test("Keep running closes the question without stopping anything", () => {
+  react.values = [true, false];
+  press(button(CancelButton({ runId: "run-1", onDone: () => {} }), /^Keep running$/));
+  expect(react.setters[0]).toHaveBeenCalledWith(false);
+  expect(actions.cancelRunAction).not.toHaveBeenCalled();
+});
+
+test("a Stop that cannot reach Trawler says it could not stop the run, instead of taking the page down", async () => {
+  const refreshed = vi.fn();
+  actions.cancelRunAction.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+  react.values = [true, false];
+  press(button(CancelButton({ runId: "run-1", onDone: refreshed }), /^Stop$/));
+  await settle();
+  expect(react.setters[1]).toHaveBeenCalledWith(true);
+  expect(refreshed).toHaveBeenCalledOnce();
+});
+
+test("the status line says when the page lost contact, or when the run is gone", () => {
+  const status = (stale: boolean, gone: boolean) => {
+    const initial = data("running");
+    react.values = [initial, stale, gone];
+    return text(nodes(draw(initial)).find((node) => node.props?.role === "status"));
+  };
+  expect(status(true, false)).toMatch(/^Lost contact with Trawler\. Retrying…/);
+  expect(status(false, true)).toMatch(/^This run is no longer available\./);
+  expect(status(false, false)).toMatch(/^Live\./);
 });
