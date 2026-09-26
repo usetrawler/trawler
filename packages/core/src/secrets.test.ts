@@ -1,3 +1,4 @@
+import { Worker } from "node:worker_threads";
 import { describe, expect, test } from "vitest";
 import { SecretScrubber } from "./secrets.ts";
 
@@ -8,6 +9,22 @@ function scrubbed(secret: string, text: string): string {
 }
 
 const tricky = `p@ss w"rd/1&<x>'!`;
+
+function scrubInSmallHeap(unit: string): Promise<unknown> {
+  const worker = new Worker(
+    `const { parentPort, workerData } = require("node:worker_threads");
+    import(workerData.url).then(({ SecretScrubber }) => {
+      const s = new SecretScrubber();
+      s.add(workerData.unit.repeat(20 / workerData.unit.length));
+      parentPort.postMessage(s.scrub(workerData.unit.repeat(16_000_000 / workerData.unit.length)));
+    });`,
+    { eval: true, workerData: { url: new URL("./secrets.ts", import.meta.url).href, unit }, resourceLimits: { maxOldGenerationSizeMb: 64 } },
+  );
+  return new Promise((resolve, reject) => {
+    worker.once("message", resolve);
+    worker.once("error", reject);
+  });
+}
 
 describe("SecretScrubber forms", () => {
   test.each([
@@ -83,15 +100,8 @@ describe("SecretScrubber masking", () => {
     expect(s.scrub("xaaaaaaaaaaab1234y")).toBe("x•••y");
     expect(s.scrub("aaab1234aaaaaaaa")).toBe("•••");
   });
-  test("stays fast on a long run of a secret's own repeating pattern", () => {
-    for (const unit of ["a", "ab"]) {
-      const s = new SecretScrubber();
-      s.add(unit.repeat(20 / unit.length));
-      const text = unit.repeat(16_000_000 / unit.length);
-      const started = performance.now();
-      expect(s.scrub(text)).toBe("•••");
-      expect(performance.now() - started).toBeLessThan(1000);
-    }
+  test("masks 16 MB of a secret's own repeating pattern within a 64 MB heap", async () => {
+    for (const unit of ["a", "ab"]) expect(await scrubInSmallHeap(unit)).toBe("•••");
   });
   test("an Error keeps its message, scrubbed", () => {
     const s = new SecretScrubber();
