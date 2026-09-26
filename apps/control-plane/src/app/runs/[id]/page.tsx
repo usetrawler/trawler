@@ -17,7 +17,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   const shell = await shellFor(access.member);
   const project = shell.workspace.projects.find((p) => p.id === access.run!.projectId);
   return (
-    <AppShell shell={shell} current={{ project: access.run.projectId }} parent>
+    <AppShell shell={shell} current={{ project: access.run.projectId }} parent wide>
       <nav aria-label="Breadcrumb" className="mb-[34px]">
         <ol className="flex flex-wrap items-center gap-x-2 gap-y-4 font-mono text-[10px] text-muted">
           {project && <><li><a href={`/projects/${project.id}`} className="-my-2 inline-block py-2 hover:text-ink">{project.name}</a></li><li aria-hidden>/</li></>}
