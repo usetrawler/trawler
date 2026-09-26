@@ -41,6 +41,7 @@ const HANDLE_READ_MS = 500;
 const SCREENSHOT_MS = 5000;
 const MASK_COLOR = "#17191c";
 const MASK_CHECK_MS = 2500;
+const STEADY_MS = 20;
 const SECRET_FIELDS = "trawler-secret-fields";
 const LINE_AROUND = "trawler-line-around";
 const SELECTOR_ENGINES = {
@@ -62,7 +63,7 @@ const SELECTOR_ENGINES = {
     },
   })`,
   [LINE_AROUND]: `({
-    queryAll(root) {
+    queryAll(root, mode) {
       const up = (el) => el.parentElement ?? el.parentNode?.host;
       const style = getComputedStyle(root);
       const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2 || 0;
@@ -71,33 +72,38 @@ const SELECTOR_ENGINES = {
       text.selectNodeContents(root);
       const drawn = text.getBoundingClientRect();
       const shown = { left: drawn.left, top: drawn.top, right: drawn.right, bottom: drawn.bottom };
+      const cuts = (overflow, margin) => overflow !== "visible" && !(overflow === "clip" && parseFloat(margin) !== 0);
       let escaping = false;
       for (let el = root; el && el !== document.body && el !== document.documentElement; el = up(el)) {
         const css = getComputedStyle(el);
         if (escaping && css.position !== "static") escaping = false;
-        if (!escaping && (css.overflowX !== "visible" || css.overflowY !== "visible")) {
+        if (!escaping && css.display !== "contents" && css.display !== "inline") {
           const box = el.getBoundingClientRect();
-          shown.left = Math.max(shown.left, box.left);
-          shown.top = Math.max(shown.top, box.top);
-          shown.right = Math.min(shown.right, box.right);
-          shown.bottom = Math.min(shown.bottom, box.bottom);
+          if (cuts(css.overflowX, css.overflowClipMargin)) {
+            shown.left = Math.max(shown.left, box.left);
+            shown.right = Math.min(shown.right, box.right);
+          }
+          if (cuts(css.overflowY, css.overflowClipMargin)) {
+            shown.top = Math.max(shown.top, box.top);
+            shown.bottom = Math.min(shown.bottom, box.bottom);
+          }
         }
         if (css.position === "fixed") break;
         if (css.position === "absolute") escaping = true;
       }
-      if (shown.right <= shown.left || shown.bottom <= shown.top) return [root];
-      const covers = (el, slack) => {
+      if (shown.right <= shown.left || shown.bottom <= shown.top) return mode === "uncovered" ? [] : [root];
+      const covers = (el) => {
         const box = el.getBoundingClientRect();
-        return box.left - slack <= shown.left && box.top - slack <= shown.top && box.right + slack >= shown.right && box.bottom + slack >= shown.bottom;
+        return box.left - 1 <= shown.left && box.top - 1 <= shown.top && box.right + 1 >= shown.right && box.bottom + 1 >= shown.bottom;
       };
-      let widest = covers(root, line / 2) ? root : null;
-      const slack = widest ? line / 2 : 1;
+      let widest = covers(root) ? root : null;
       for (let el = up(root); el; el = up(el)) {
         if (getComputedStyle(el).display === "contents") continue;
         if (widest && el.getBoundingClientRect().height > reach) break;
-        if (covers(el, slack)) widest = el;
+        if (covers(el)) widest = el;
       }
-      return [widest ?? document.documentElement];
+      if (mode === "uncovered") return widest ? [] : [root];
+      return [widest ?? root];
     },
   })`,
 };
@@ -350,15 +356,22 @@ export async function openBrowser(opts: {
     };
     const capture = async (page: Page): Promise<Screenshot | null> => {
       const frames = page.frames();
-      const { mask, placed } = await inTime(async () => {
+      const { mask, placed, uncovered } = await inTime(async () => {
         const secrets = await secretsOnPage();
         const mask = frames.flatMap((frame) => masksIn(frame, secrets));
-        return { mask, placed: await boxesOf(mask) };
+        const uncovered = secrets ? (await Promise.all(frames.map((frame) => frame.getByText(secrets).locator(`${LINE_AROUND}=uncovered`).count()))).some((n) => n > 0) : false;
+        return { mask, placed: await steadyBoxesOf(mask), uncovered };
       });
+      if (uncovered || placed === null) return null;
       const bytes = await page.screenshot({ type: "png", mask, maskColor: MASK_COLOR, caret: "hide", scale: "css", timeout: SCREENSHOT_MS });
-      const unmoved = (await inTime(() => boxesOf(mask))) === placed;
+      const unmoved = (await inTime(() => steadyBoxesOf(mask))) === placed;
       const sameFrames = page.frames().length === frames.length && page.frames().every((frame, i) => frame === frames[i]);
       return unmoved && sameFrames && bytes.byteLength <= MAX_ARTIFACT_BYTES ? { bytes: new Uint8Array(bytes), contentType: "image/png" } : null;
+    };
+    const steadyBoxesOf = async (mask: Locator[]) => {
+      const first = await boxesOf(mask);
+      await new Promise((resolve) => setTimeout(resolve, STEADY_MS));
+      return (await boxesOf(mask)) === first ? first : null;
     };
     const boxOf = async (element: ElementHandle) => {
       try {

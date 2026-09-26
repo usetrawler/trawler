@@ -64,7 +64,7 @@ beforeAll(async () => {
     seen[req.url ?? ""] = req.headers;
     const html = (body: string) => {
       res.setHeader("content-type", "text/html");
-      res.end(`<html><body>${body}</body></html>`);
+      res.end(`<!doctype html><html><body>${body}</body></html>`);
     };
     switch (req.url) {
       case "/":
@@ -187,7 +187,26 @@ beforeAll(async () => {
       case "/card-other-field":
         return html(card({ heading: "Account settings", name: "Bea", secret: "card-secret-1111" }));
       case "/overflowing":
-        return html(`<div style="font:20px sans-serif;padding:16px;border:1px solid #999;width:640px"><h2>Account settings</h2><p style="width:80px;white-space:nowrap;color:#ff0000">card-secret-1111 is the key</p><p>Plan: Team</p></div>`);
+      case "/overflowing-other":
+        return html(`<h1>${req.url === "/overflowing" ? "Settings" : "Preferences"}</h1><div style="font:20px sans-serif;padding:16px;border:1px solid #999;width:640px"><h2>Account settings</h2><p style="width:80px;white-space:nowrap;color:#ff0000">card-secret-1111 is the key</p><p>Plan: Team</p></div>`);
+      case "/tight-line":
+        return html(`<p style="font:20px monospace;line-height:0;color:#ff0000">card-secret-1111</p><p>Plan: Team</p><p>Billing: monthly</p>`);
+      case "/tight-height":
+        return html(`<p style="font:20px monospace;height:13px;margin:0;color:#ff0000">card-secret-1111</p><p>Plan: Team</p><p>Billing: monthly</p>`);
+      case "/tight-width":
+        return html(`<p id="secret" style="font:20px monospace;white-space:nowrap;color:#ff0000">card-secret-1111</p><p>Plan: Team</p><script>const text = document.createRange(); text.selectNodeContents(document.getElementById("secret")); document.getElementById("secret").style.width = (text.getBoundingClientRect().width - 8) + "px";</script>`);
+      case "/clip-one-axis":
+        return html(`<div style="height:32px;overflow-x:clip;width:220px;font:20px/24px monospace;color:#ff0000">first-line card-secret-1111</div><p>Plan: Team</p><p>Billing: monthly</p>`);
+      case "/contents-hidden":
+        return html(`<div style="display:contents;overflow:hidden"><p style="width:80px;white-space:nowrap;font:20px monospace;color:#ff0000">card-secret-1111 is here</p></div><p>Plan: Team</p>`);
+      case "/inline-hidden":
+        return html(`<p><a href="#" style="overflow:hidden"><span style="display:inline-block;width:80px;white-space:nowrap;font:20px monospace;color:#ff0000">card-secret-1111 is here</span></a></p><p>Plan: Team</p>`);
+      case "/clip-margin":
+        return html(`<div style="width:90px;overflow:clip;overflow-clip-margin:200px;white-space:nowrap;font:20px monospace;color:#ff0000">card-secret-1111 and more</div><p>Plan: Team</p>`);
+      case "/fixed-below":
+        return html(`<p>Short page</p><div style="position:fixed;left:20px;bottom:120px;height:0;font:20px monospace;color:#ff0000">card-secret-1111</div>`);
+      case "/flicker":
+        return html(`<style>@keyframes jump{0%,49.9%{transform:translateY(0)}50%,100%{transform:translateY(120px)}} #echo{font:20px monospace;color:#ff0000;animation:jump 60ms infinite}</style><p id="echo">card-secret-1111</p>`);
       case "/static-secret":
         return html(`<p style="font:20px monospace;color:#ff0000">Your key is card-secret-1111</p><p>Plan: Team</p>`);
       case "/scroll-code":
@@ -1248,11 +1267,33 @@ describe("screenshots", () => {
     ["/overflowing", "runs outside its box"],
     ["/zero-height", "sits in a box with no height"],
     ["/overflow-edge", "runs just past the edge of the box around its own"],
+    ["/tight-line", "has a line height of zero"],
+    ["/tight-height", "is taller than its box"],
+    ["/tight-width", "is a little wider than its box"],
+    ["/clip-one-axis", "is cut off sideways but not below"],
+    ["/contents-hidden", "is inside a box-less wrapper that says it hides overflow"],
+    ["/inline-hidden", "is inside an inline element that says it hides overflow"],
+    ["/clip-margin", "is cut off only past a clip margin"],
   ])("a secret whose text %s is masked where it is drawn (%s)", async (path) => {
     const [shot] = await shotsOf(path, 1, async () => undefined, knowing(path === "/overflow-edge" ? "card-secret-11112" : "card-secret-1111"));
     expect(shot).not.toBeNull();
     expect(await redPixels(shot!)).toBe(0);
   }, 60_000);
+
+  test("text that spills out of its box blacks out only what contains it, not the rest of the page", async () => {
+    const shotOf = async (at: string) => (await shotsOf(at, 1, async () => undefined, knowing("card-secret-1111")))[0]!;
+    expect(Buffer.compare(Buffer.from((await shotOf("/overflowing")).bytes), Buffer.from((await shotOf("/overflowing-other")).bytes))).not.toBe(0);
+  }, 60_000);
+
+  test("a secret drawn where nothing on the page contains it gives no screenshot", async () => {
+    expect(await shotsOf("/fixed-below", 1, async () => undefined, knowing("card-secret-1111"))).toEqual([null]);
+  }, 60_000);
+
+  test("a secret that jumps back and forth is never shown: each screenshot is dropped or masks it", async () => {
+    const shots = await shotsOf("/flicker", 25, async () => undefined, knowing("card-secret-1111"));
+    const taken = shots.filter((shot): shot is Screenshot => shot !== null);
+    expect(await Promise.all(taken.map(redPixels))).toEqual(taken.map(() => 0));
+  }, 180_000);
 
   test("screenshots leave the page's animation clock where it would have been, neither behind by the time it held still nor running fast", async () => {
     await withBrowser(async (b) => {
