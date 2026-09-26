@@ -19,7 +19,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   return (
     <AppShell shell={shell} current={{ project: access.run.projectId }} parent>
       <nav aria-label="Breadcrumb" className="mb-[34px]">
-        <ol className="flex flex-wrap items-center gap-2 font-mono text-[10px] text-muted">
+        <ol className="flex flex-wrap items-center gap-x-2 gap-y-4 font-mono text-[10px] text-muted">
           {project && <><li><a href={`/projects/${project.id}`} className="-my-2 inline-block py-2 hover:text-ink">{project.name}</a></li><li aria-hidden>/</li></>}
           <li><a href={project ? `/projects/${project.id}/runs` : "/runs"} className="-my-2 inline-block py-2 hover:text-ink">Runs</a></li>
           <li aria-hidden>/</li>

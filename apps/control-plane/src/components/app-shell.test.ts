@@ -9,8 +9,8 @@ const shell: Shell = {
   workspace: { name: "Acme Labs", projects: [{ id: "p1", name: "Acme Invoices", address: "app.acme.test" }, { id: "p2", name: "Globex Store", address: "shop.globex.test" }], runs: 17 },
 };
 
-const render = (options: { current?: ShellPage; parent?: boolean; shell?: Shell; step?: 1 | 2 | 3 } = {}) =>
-  renderToStaticMarkup(createElement(AppShell, { shell: options.shell ?? shell, current: options.current, parent: options.parent, step: options.step, children: "page" }));
+const render = (options: { current?: ShellPage; parent?: boolean; shell?: Shell } = {}) =>
+  renderToStaticMarkup(createElement(AppShell, { shell: options.shell ?? shell, current: options.current, parent: options.parent, children: "page" }));
 const link = (html: string, label: string) => html.match(new RegExp(`<a [^>]*>(?:(?!</a>).)*${label}(?:(?!</a>).)*</a>`))?.[0] ?? "";
 const nav = (html: string) => html.match(/<nav aria-label="Workspace".*?<\/nav>/)?.[0] ?? "";
 const header = (html: string) => html.match(/<header.*<\/header>/)?.[0] ?? "";
@@ -106,6 +106,16 @@ describe("AppShell", () => {
     expect(html).not.toMatch(/\bmd:sticky\b/);
   });
 
+  it("makes room on a phone's header by hiding the initials below 400 px and the wordmark, for screen readers only, below 360 px", () => {
+    const top = header(render());
+    expect(top).toMatch(/<span class="max-\[360px\]:sr-only">trawler<\/span><\/a>/);
+    expect(top).toMatch(/<span aria-hidden="true" class="[^"]*\bmax-\[400px\]:hidden\b[^"]*">BO<\/span>/);
+  });
+
+  it("offers the theme switch at the end of the header", () => {
+    expect(header(render())).toMatch(/<button type="button" title="Theme: System\. Switch to Dark\."[^>]*>(?:(?!<\/button>).)*<\/button><\/div><\/header>$/);
+  });
+
   it("lets a keyboard skip the header and the panel", () => {
     const html = render();
     expect(html).toMatch(/^<div[^>]*><a href="#main" class="sr-only[^"]*focus:not-sr-only[^"]*\bfocus:px-4 focus:py-3">Skip to content<\/a>/);
@@ -122,10 +132,6 @@ describe("AppShell", () => {
     expect(docs).toMatch(/<span class="sr-only[^"]*"> \(opens in a new tab\)<\/span>/);
   });
 
-  it("shows where a new run stands in its three steps", () => {
-    expect(render()).not.toContain('aria-label="Progress"');
-    expect(render({ step: 2 })).toMatch(/<li[^>]*>01 Product<\/li><li aria-current="step"[^>]*>02 Plan<\/li><li[^>]*>03 Run<\/li>/);
-  });
 });
 
 describe("initials", () => {

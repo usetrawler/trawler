@@ -30,6 +30,7 @@
   --bad: #a63d32;
   --info: #3d6478;
   --header: rgb(244 241 235 / 0.84);
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
