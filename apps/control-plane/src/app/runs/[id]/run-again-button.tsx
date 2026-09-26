@@ -1,5 +1,5 @@
 "use client";
-import { unstable_rethrow } from "next/navigation";
+import { unstable_isUnrecognizedActionError, unstable_rethrow } from "next/navigation";
 import { useActionState } from "react";
 import { runAgainAction, type RunAgainState } from "./actions.ts";
 
@@ -8,6 +8,7 @@ export async function runAgain(previous: RunAgainState, form: FormData): Promise
     return await runAgainAction(previous, form);
   } catch (err) {
     unstable_rethrow(err);
+    if (unstable_isUnrecognizedActionError(err)) return { error: "Trawler was updated since this page opened. Reload the page to run it again." };
     return { error: "The run could not start. Try again." };
   }
 }

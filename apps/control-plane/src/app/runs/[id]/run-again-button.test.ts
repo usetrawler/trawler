@@ -10,6 +10,7 @@ vi.mock("./actions.ts", () => actions);
 
 const { RunAgainButton, runAgain } = await import("./run-again-button.tsx");
 const { redirect } = await import("next/navigation");
+const { UnrecognizedActionError } = await import("next/dist/client/components/unrecognized-action-error.js");
 
 type Node = { type?: unknown; props?: Record<string, unknown> & { children?: unknown } };
 const nodes = (node: unknown): Node[] => {
@@ -84,4 +85,9 @@ test("the redirect to the new run is passed on to the framework, never turned in
   })();
   actions.runAgainAction.mockRejectedValue(leaving);
   await expect(runAgain({}, form())).rejects.toBe(leaving);
+});
+
+test("a page left open across an update is told to reload, since trying again cannot work until then", async () => {
+  actions.runAgainAction.mockRejectedValue(new UnrecognizedActionError("Server action not found."));
+  expect(await runAgain({}, form())).toEqual({ error: "Trawler was updated since this page opened. Reload the page to run it again." });
 });
