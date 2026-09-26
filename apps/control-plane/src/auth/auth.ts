@@ -28,6 +28,22 @@ export function authPool(connectionString: string, max = 10): pg.Pool {
   return new pg.Pool({ connectionString, max, options: "-c role=trawler_auth" });
 }
 
+const CLOSED_ORGANIZATION_PATHS = [
+  "get-organization",
+  "get-full-organization",
+  "set-active",
+  "invite-member",
+  "cancel-invitation",
+  "accept-invitation",
+  "reject-invitation",
+  "get-invitation",
+  "list-invitations",
+  "list-user-invitations",
+  "remove-member",
+  "update-member-role",
+  "leave",
+];
+
 export function createAuth(options: AuthOptions) {
   const db = new Kysely<AuthTables>({ dialect: new PostgresDialect({ pool: options.pool }) });
   const storeFor = (ex: Kysely<AuthTables> | Transaction<AuthTables>): OnboardingStore => ({
@@ -58,6 +74,12 @@ export function createAuth(options: AuthOptions) {
         .insertInto("member")
         .values({ id: crypto.randomUUID(), organizationId: invitation.organizationId, userId, role: invitation.role, createdAt: new Date() })
         .onConflict((oc) => oc.columns(["organizationId", "userId"]).doNothing())
+        .execute();
+      await ex
+        .updateTable("invitation")
+        .set({ status: "canceled" })
+        .where("status", "=", "pending")
+        .where(sql<boolean>`lower(email) = (select lower(email) from invitation where id = ${invitation.id})`)
         .execute();
       return true;
     },
@@ -147,8 +169,8 @@ export function createAuth(options: AuthOptions) {
       ...(options.github ? { github: options.github } : {}),
       ...(options.google ? { google: options.google } : {}),
     },
-    plugins: [organizationPlugin(), ...devSignIn(options.devOidc), nextCookies()],
-    disabledPaths: ["/organization/get-organization", "/organization/get-full-organization"],
+    plugins: [organizationPlugin(async (email) => (await workspaceOfEmail(email)) !== null), ...devSignIn(options.devOidc), nextCookies()],
+    disabledPaths: CLOSED_ORGANIZATION_PATHS.map((path) => `/organization/${path}`),
     databaseHooks: {
       session: {
         create: {
@@ -165,7 +187,7 @@ export function createAuth(options: AuthOptions) {
       },
     },
   });
-  return Object.assign(auth, { workspaceOf, memberEmail, workspaceMembers, pendingInvitations, workspaceOfEmail });
+  return Object.assign(auth, { workspaceOf, memberEmail, workspaceMembers, pendingInvitations });
 }
 
 export type Auth = ReturnType<typeof createAuth>;

@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { sql } from "kysely";
 import pg from "pg";
+import { APIError } from "better-auth/api";
 import { afterAll, expect, test } from "vitest";
 import { grantAppLogin } from "../db/provision.ts";
 import { onServer, testDb } from "../db/test-db.ts";
@@ -221,8 +222,7 @@ test("a member the owner removes through Better Auth still names the workspace i
   await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-removed', ${org}, 'removed@acme.test', 'member', 'pending', now() + interval '1 day', ${owner.user.id})`.execute(t.db);
   const { user } = await signIn("removed@acme.test");
   const other = sessionOf(await (await auth.$context).internalAdapter.createSession(user.id, false));
-  const removal = await auth.handler(new Request("http://localhost:3000/api/auth/organization/remove-member", { method: "POST", headers: cookieFor(sessionOf(owner.session).token), body: JSON.stringify({ memberIdOrEmail: "removed@acme.test", organizationId: org }) }));
-  expect(removal.status).toBe(200);
+  await auth.api.removeMember({ headers: cookieFor(sessionOf(owner.session).token), body: { memberIdOrEmail: "removed@acme.test", organizationId: org } });
   const found = await auth.api.getSession({ headers: cookieFor(other.token) });
   expect(found?.session.activeOrganizationId).toBe(org);
   expect(await auth.workspaceOf(found!.session)).toBeNull();
@@ -240,10 +240,12 @@ test("a link to Better Auth's workspace lookups cannot empty a session's workspa
 });
 
 const orgOf = (s: unknown) => sessionOf(s).activeOrganizationId!;
-const call = (path: string, token: string, body: unknown) =>
-  auth.handler(new Request(`http://localhost:3000/api/auth/organization/${path}`, { method: "POST", headers: cookieFor(token), body: JSON.stringify(body) }));
+const http = (path: string, token: string, body?: unknown) =>
+  auth.handler(new Request(`http://localhost:3000/api/auth/organization/${path}`, body === undefined ? { headers: cookieFor(token) } : { method: "POST", headers: cookieFor(token), body: JSON.stringify(body) }));
+const answer = (work: Promise<unknown>) => work.then(() => "done", (err: unknown) => (err instanceof APIError ? String((err.body as { code?: unknown } | undefined)?.code ?? err.status) : Promise.reject(err)));
+const as = (token: string) => ({ headers: cookieFor(token) });
 async function invited(org: string, inviterId: string, email: string, role = "member", status = "pending", expires = "now() + interval '1 day'") {
-  const id = `inv-${email}`;
+  const id = `inv-${org}-${email}`;
   await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values (${id}, ${org}, ${email}, ${role}, ${status}, ${sql.raw(expires)}, ${inviterId})`.execute(t.db);
   return id;
 }
@@ -260,29 +262,81 @@ test("a workspace lists its own members, oldest first, and its own invitations t
   const a = await signIn("list-owner@acme.test", true, "Lina");
   const org = orgOf(a.session);
   await joins(org, a.user.id, "list-member@acme.test");
+  const early = await joins(org, a.user.id, "list-early@acme.test");
+  await sql`update member set "createdAt" = now() - interval '1 day' where id = ${early.memberId}`.execute(t.db);
   await invited(org, a.user.id, "list-waiting@acme.test", "admin");
   await invited(org, a.user.id, "list-expired@acme.test", "member", "pending", "now() - interval '1 minute'");
   await invited(org, a.user.id, "list-revoked@acme.test", "member", "canceled");
   const b = await signIn("list-other@acme.test");
   await invited(orgOf(b.session), b.user.id, "list-elsewhere@acme.test");
-  expect((await auth.workspaceMembers(org)).map((m) => [m.name, m.email, m.role])).toEqual([["Lina", "list-owner@acme.test", "owner"], ["list-member", "list-member@acme.test", "member"]]);
+  expect((await auth.workspaceMembers(org)).map((m) => [m.name, m.email, m.role])).toEqual([
+    ["list-early", "list-early@acme.test", "member"],
+    ["Lina", "list-owner@acme.test", "owner"],
+    ["list-member", "list-member@acme.test", "member"],
+  ]);
   expect((await auth.pendingInvitations(org)).map((i) => [i.email, i.role])).toEqual([["list-waiting@acme.test", "admin"]]);
-});
-
-test("an address that already has a workspace is found whatever its case, and one without a workspace is not", async () => {
-  const a = await signIn("home-owner@acme.test");
-  expect(await auth.workspaceOfEmail("  HOME-Owner@acme.test ")).toBe(orgOf(a.session));
-  expect(await auth.workspaceOfEmail("nobody-yet@acme.test")).toBeNull();
 });
 
 test("an owner invites into their own workspace through Better Auth, and the invitation lasts a week", async () => {
   const a = await signIn("week-owner@acme.test");
-  const res = await call("invite-member", sessionOf(a.session).token, { email: "Week-Guest@acme.test", role: "admin", organizationId: orgOf(a.session) });
-  expect(res.status).toBe(200);
+  expect(await answer(auth.api.createInvitation({ ...as(sessionOf(a.session).token), body: { email: "Week-Guest@acme.test", role: "admin", organizationId: orgOf(a.session) } }))).toBe("done");
   const [row] = (await sql<{ email: string; role: string; days: number }>`select email, role, extract(epoch from ("expiresAt" - now())) / 86400 as days from invitation where "organizationId" = ${orgOf(a.session)}`.execute(t.db)).rows;
   expect(row).toMatchObject({ email: "week-guest@acme.test", role: "admin" });
   expect(Number(row!.days)).toBeGreaterThan(6.9);
   expect(Number(row!.days)).toBeLessThan(7.001);
+});
+
+test("an address that already has a workspace, in any case, is not invited, however Better Auth is asked", async () => {
+  const home = await signIn("home-owner@acme.test");
+  const other = await signIn("home-inviter@acme.test");
+  const token = sessionOf(other.session).token;
+  expect(await answer(auth.api.createInvitation({ ...as(token), body: { email: "HOME-Owner@acme.test", role: "member", organizationId: orgOf(other.session) } }))).toBe("ADDRESS_HAS_A_WORKSPACE");
+  expect(await answer(auth.api.createInvitation({ ...as(token), body: { email: "nobody-yet@acme.test", role: "member", organizationId: orgOf(other.session) } }))).toBe("done");
+  expect(await pendingIds(orgOf(home.session))).toEqual([]);
+});
+
+test("an address Better Auth does not take for one is refused with its own code", async () => {
+  const a = await signIn("typo-owner@acme.test");
+  expect(await answer(auth.api.createInvitation({ ...as(sessionOf(a.session).token), body: { email: "someone@acme.c", role: "member", organizationId: orgOf(a.session) } }))).toBe("INVALID_EMAIL");
+});
+
+test("Better Auth's invitation and membership endpoints are not reachable from a browser", async () => {
+  const owner = await signIn("closed-owner@acme.test");
+  const org = orgOf(owner.session);
+  const token = sessionOf(owner.session).token;
+  const waiting = await invited(org, owner.user.id, "closed-guest@acme.test");
+  const lee = await joins(org, owner.user.id, "closed-lee@acme.test");
+  const other = await signIn("closed-other@acme.test");
+  const second = await invited(orgOf(other.session), other.user.id, "closed-lee@acme.test");
+  const calls: Array<[string, string, unknown?]> = [
+    ["invite-member", token, { email: "closed-new@acme.test", role: "member", organizationId: org }],
+    ["cancel-invitation", token, { invitationId: waiting }],
+    ["remove-member", token, { memberIdOrEmail: lee.memberId, organizationId: org }],
+    ["update-member-role", token, { memberId: lee.memberId, role: "admin", organizationId: org }],
+    ["list-invitations", token],
+    ["accept-invitation", lee.token, { invitationId: second }],
+    ["reject-invitation", lee.token, { invitationId: second }],
+    ["get-invitation?id=" + second, lee.token],
+    ["list-user-invitations", lee.token],
+    ["leave", lee.token, { organizationId: org }],
+    ["set-active", lee.token, { organizationId: null }],
+  ];
+  for (const [path, who, body] of calls) expect((await http(path, who, body)).status, path).toBe(404);
+  expect(await memberRoles(org)).toEqual([{ email: "closed-lee@acme.test", role: "member" }, { email: "closed-owner@acme.test", role: "owner" }]);
+  expect(await pendingIds(org)).toEqual([waiting]);
+  expect(await activeOf(sessionOf(lee.session).id)).toEqual([{ active: org }]);
+});
+
+test("joining one workspace withdraws the other workspaces' invitations for that address", async () => {
+  const first = await signIn("both-first@acme.test");
+  const last = await signIn("both-last@acme.test");
+  await invited(orgOf(first.session), first.user.id, "both-guest@acme.test", "member", "pending", "now() + interval '1 day'");
+  await invited(orgOf(last.session), last.user.id, "Both-Guest@acme.test", "admin", "pending", "now() + interval '2 days'");
+  const guest = await signIn("both-guest@acme.test");
+  expect(orgOf(guest.session)).toBe(orgOf(last.session));
+  expect(await pendingIds(orgOf(first.session))).toEqual([]);
+  expect(await auth.pendingInvitations(orgOf(first.session))).toEqual([]);
+  expect(await memberRoles(orgOf(first.session))).toEqual([{ email: "both-first@acme.test", role: "owner" }]);
 });
 
 test("an owner can never remove, re-role, revoke or invite in another workspace, whichever workspace the request names", async () => {
@@ -294,11 +348,11 @@ test("an owner can never remove, re-role, revoke or invite in another workspace,
   const lee = await joins(orgB, b.user.id, "iso-lee@acme.test");
   const waiting = await invited(orgB, b.user.id, "iso-waiting@acme.test");
   for (const org of [orgB, orgA]) {
-    expect((await call("remove-member", tokenA, { memberIdOrEmail: lee.memberId, organizationId: org })).status).not.toBe(200);
-    expect((await call("update-member-role", tokenA, { memberId: lee.memberId, role: "admin", organizationId: org })).status).not.toBe(200);
+    expect(await answer(auth.api.removeMember({ ...as(tokenA), body: { memberIdOrEmail: lee.memberId, organizationId: org } }))).not.toBe("done");
+    expect(await answer(auth.api.updateMemberRole({ ...as(tokenA), body: { memberId: lee.memberId, role: "admin", organizationId: org } }))).not.toBe("done");
   }
-  expect((await call("cancel-invitation", tokenA, { invitationId: waiting })).status).not.toBe(200);
-  expect((await call("invite-member", tokenA, { email: "iso-sneak@acme.test", role: "member", organizationId: orgB })).status).not.toBe(200);
+  expect(await answer(auth.api.cancelInvitation({ ...as(tokenA), body: { invitationId: waiting } }))).not.toBe("done");
+  expect(await answer(auth.api.createInvitation({ ...as(tokenA), body: { email: "iso-sneak@acme.test", role: "member", organizationId: orgB } }))).not.toBe("done");
   expect(await memberRoles(orgB)).toEqual([{ email: "iso-lee@acme.test", role: "member" }, { email: "iso-owner-b@acme.test", role: "owner" }]);
   expect(await pendingIds(orgB)).toEqual([waiting]);
 });
@@ -310,14 +364,14 @@ test("only owners and admins change who is in a workspace; an admin cannot touch
   const admin = await joins(org, owner.user.id, "perm-admin@acme.test", "admin");
   const plain = await joins(org, owner.user.id, "perm-plain@acme.test");
   const other = await joins(org, owner.user.id, "perm-other@acme.test");
-  expect((await call("invite-member", plain.token, { email: "perm-new@acme.test", role: "member", organizationId: org })).status).not.toBe(200);
-  expect((await call("remove-member", plain.token, { memberIdOrEmail: other.memberId, organizationId: org })).status).not.toBe(200);
-  expect((await call("update-member-role", plain.token, { memberId: other.memberId, role: "admin", organizationId: org })).status).not.toBe(200);
-  expect((await call("remove-member", admin.token, { memberIdOrEmail: ownerMember, organizationId: org })).status).not.toBe(200);
-  expect((await call("update-member-role", admin.token, { memberId: ownerMember, role: "member", organizationId: org })).status).not.toBe(200);
-  expect((await call("remove-member", sessionOf(owner.session).token, { memberIdOrEmail: ownerMember, organizationId: org })).status).not.toBe(200);
-  expect((await call("update-member-role", admin.token, { memberId: other.memberId, role: "admin", organizationId: org })).status).toBe(200);
-  expect((await call("remove-member", admin.token, { memberIdOrEmail: plain.memberId, organizationId: org })).status).toBe(200);
+  expect(await answer(auth.api.createInvitation({ ...as(plain.token), body: { email: "perm-new@acme.test", role: "member", organizationId: org } }))).toBe("YOU_ARE_NOT_ALLOWED_TO_INVITE_USERS_TO_THIS_ORGANIZATION");
+  expect(await answer(auth.api.removeMember({ ...as(plain.token), body: { memberIdOrEmail: other.memberId, organizationId: org } }))).not.toBe("done");
+  expect(await answer(auth.api.updateMemberRole({ ...as(plain.token), body: { memberId: other.memberId, role: "admin", organizationId: org } }))).not.toBe("done");
+  expect(await answer(auth.api.removeMember({ ...as(admin.token), body: { memberIdOrEmail: ownerMember, organizationId: org } }))).not.toBe("done");
+  expect(await answer(auth.api.updateMemberRole({ ...as(admin.token), body: { memberId: ownerMember, role: "member", organizationId: org } }))).not.toBe("done");
+  expect(await answer(auth.api.removeMember({ ...as(sessionOf(owner.session).token), body: { memberIdOrEmail: ownerMember, organizationId: org } }))).not.toBe("done");
+  expect(await answer(auth.api.updateMemberRole({ ...as(admin.token), body: { memberId: other.memberId, role: "admin", organizationId: org } }))).toBe("done");
+  expect(await answer(auth.api.removeMember({ ...as(admin.token), body: { memberIdOrEmail: plain.memberId, organizationId: org } }))).toBe("done");
   expect(await memberRoles(org)).toEqual([{ email: "perm-admin@acme.test", role: "admin" }, { email: "perm-other@acme.test", role: "admin" }, { email: "perm-owner@acme.test", role: "owner" }]);
 });
 
@@ -325,7 +379,7 @@ test("a revoked or expired invitation does not join; the address gets a workspac
   const owner = await signIn("stale-owner@acme.test");
   const org = orgOf(owner.session);
   const revoked = await invited(org, owner.user.id, "stale-revoked@acme.test");
-  expect((await call("cancel-invitation", sessionOf(owner.session).token, { invitationId: revoked })).status).toBe(200);
+  expect(await answer(auth.api.cancelInvitation({ ...as(sessionOf(owner.session).token), body: { invitationId: revoked } }))).toBe("done");
   await invited(org, owner.user.id, "stale-expired@acme.test", "member", "pending", "now() - interval '1 minute'");
   for (const email of ["stale-revoked@acme.test", "stale-expired@acme.test"]) {
     const person = await signIn(email);
