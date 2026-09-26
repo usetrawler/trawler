@@ -8,9 +8,9 @@ export function Recognised({ provider }: { provider: Provider }) {
   return <p className="text-sm"><span className="text-muted">Recognised as {providerArticle(provider)} </span>{PROVIDER_LABEL[provider]}<span className="text-muted"> key. Not right? Pick the provider below.</span></p>;
 }
 
-export function KeyFields({ apiKey, onKey, detected, chosen, onChoose, provider, baseUrl, onBaseUrl, required, aside, autoFocus }: {
+export function KeyFields({ apiKey, onKey, detected, chosen, onChoose, provider, baseUrl, onBaseUrl, required, aside, autoFocus, error }: {
   apiKey: string; onKey: (key: string) => void; detected: Provider | null; chosen: Provider | null; onChoose: (provider: Provider) => void;
-  provider: Provider | null; baseUrl: string; onBaseUrl: (url: string) => void; required: boolean; aside?: ReactNode; autoFocus?: boolean;
+  provider: Provider | null; baseUrl: string; onBaseUrl: (url: string) => void; required: boolean; aside?: ReactNode; autoFocus?: boolean; error?: string;
 }) {
   const keyId = useId();
   const label = provider && provider !== "custom" ? PROVIDER_LABEL[provider] : null;
@@ -20,7 +20,7 @@ export function KeyFields({ apiKey, onKey, detected, chosen, onChoose, provider,
         An API key from your model provider: OpenAI, Anthropic, Google, OpenRouter or any OpenAI-compatible service. Runs are billed to it directly; Trawler adds nothing. It is stored encrypted and only its last characters are shown.
       </label>
       <div className="flex gap-2">
-        <input id={keyId} name="apiKey" type="password" autoComplete="off" spellCheck={false} required={required} autoFocus={autoFocus} placeholder="sk-…, sk-ant-…, AIza…, sk-or-…" value={apiKey} onChange={(e) => onKey(e.target.value)} className={`${field} flex-1`} />
+        <input id={keyId} name="apiKey" type="password" autoComplete="off" spellCheck={false} required={required} autoFocus={autoFocus} aria-invalid={error ? true : undefined} aria-describedby={error} placeholder="sk-…, sk-ant-…, AIza…, sk-or-…" value={apiKey} onChange={(e) => onKey(e.target.value)} className={`${field} flex-1`} />
         {aside}
       </div>
       {detected && !chosen && <Recognised provider={detected} />}

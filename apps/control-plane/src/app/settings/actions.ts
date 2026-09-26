@@ -21,6 +21,7 @@ export interface SettingsState {
 }
 
 const OWNERS_AND_ADMINS = "Only an owner or admin of this workspace can change its settings.";
+const KEY_CHANGED = "The key changed since this page was loaded, so it was not removed. The page now shows the current key.";
 const sentence = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}${/[.!?]$/.test(text) ? "" : "."}`;
 
 async function manager(): Promise<Member | { error: string }> {
@@ -50,12 +51,12 @@ export async function replaceModelKeyAction(_previous: SettingsState, form: Form
   const fresh = freshEndpoint({ key: String(form.get("apiKey") ?? ""), provider: String(form.get("provider") ?? ""), baseUrl: String(form.get("baseUrl") ?? "") }, readEnv().openRouterUrl);
   if ("error" in fresh) return fresh;
   const { endpoint } = fresh;
-  if (!withinListingLimit(member.userId)) return { error: "Too many key checks. Wait a few minutes and try again." };
+  if (!withinListingLimit(`key-check:${member.userId}`)) return { error: "Too many key checks. Wait a few minutes and try again." };
   const check = await checkKey(endpoint);
   if (!check.ok) {
-    const provider = PROVIDER_LABEL[endpoint.provider];
+    const provider = endpoint.provider === "custom" ? "The OpenAI-compatible service" : PROVIDER_LABEL[endpoint.provider];
     if (check.reason === "key") return { error: `${provider} refused this key. Copy it again from your provider, and check the provider picked below it.` };
-    if (check.reason === "private") return { error: "That base URL is on a private network. Hosted runs reach only public addresses; the local runner reaches private ones." };
+    if (check.reason === "private") return { error: "That base URL is on a private network. Trawler calls models only at public addresses." };
     return { error: `${provider} could not be reached to check the key. Try again in a minute.` };
   }
   await withOrg(getDb(), member.orgId, (tx) => setModelKey(tx, member.orgId, { provider: endpoint.provider, key: endpoint.key, baseUrl: endpoint.provider === "custom" ? endpoint.baseUrl : null }, member.userId, getKeyring()));
@@ -63,13 +64,13 @@ export async function replaceModelKeyAction(_previous: SettingsState, form: Form
   return { saved: true, unchecked: !check.checked };
 }
 
-export async function removeModelKeyAction(): Promise<SettingsState> {
+export async function removeModelKeyAction(_previous: SettingsState, form: FormData): Promise<SettingsState> {
   const member = await manager();
   if ("error" in member) return member;
-  const stoppedRuns = await withOrg(getDb(), member.orgId, async (tx) => {
-    await removeModelKey(tx, member.orgId);
-    return cancelLiveRuns(tx, member.orgId);
-  });
+  const addedAt = new Date(String(form.get("addedAt") ?? ""));
+  const stoppedRuns = Number.isNaN(addedAt.getTime())
+    ? null
+    : await withOrg(getDb(), member.orgId, async (tx) => ((await removeModelKey(tx, member.orgId, addedAt)) ? cancelLiveRuns(tx, member.orgId) : null));
   revalidatePath("/", "layout");
-  return { saved: true, stoppedRuns };
+  return stoppedRuns === null ? { error: KEY_CHANGED } : { saved: true, stoppedRuns };
 }

@@ -102,6 +102,9 @@ test("a key to save is checked where a wrong one is refused: OpenRouter's key en
   expect(seen.at(-1)).toEqual({ url: "https://api.anthropic.com/v1/models", auth: "sk-ant-x" });
   expect(await checkKey(anthropic, answer(403))).toEqual({ ok: false, reason: "key" });
   expect(await checkKey(anthropic, answer(404))).toEqual({ ok: false, reason: "unavailable" });
+  const google = endpointFor("google", "AIza-x", { openRouterUrl: "" });
+  expect(await checkKey(google, answer(400))).toEqual({ ok: false, reason: "key" });
+  expect(await checkKey(anthropic, answer(400))).toEqual({ ok: false, reason: "unavailable" });
   expect(await checkKey(anthropic, answer(503))).toEqual({ ok: false, reason: "unavailable" });
 });
 
@@ -113,4 +116,9 @@ test("an OpenAI-compatible service that lists no models is saved unchecked, and 
   expect(await checkKey(custom, answer(401))).toEqual({ ok: false, reason: "key" });
   expect(await checkKey(custom, async () => { throw new FetchRefused("private", "the address is not allowed"); })).toEqual({ ok: false, reason: "private" });
   expect(await checkKey(custom, async () => { throw new TypeError("fetch failed"); })).toEqual({ ok: false, reason: "unavailable" });
+});
+
+test("a key for a service on a private network is refused by the guarded fetch itself, before it is sent anywhere", async () => {
+  const custom = endpointFor("custom", "k-" + "x".repeat(30), { openRouterUrl: "", customUrl: "https://10.0.0.8/v1" });
+  expect(await checkKey(custom)).toEqual({ ok: false, reason: "private" });
 });

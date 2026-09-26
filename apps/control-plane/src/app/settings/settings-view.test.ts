@@ -48,14 +48,32 @@ test("a member reads the key but cannot change it, and without a key is told who
 test("replacing a key starts in its field, with Keep beside it and outside its label", () => {
   const html = render(createElement(ReplaceForm, { saved, action: nothing, pending: false, error: "", onKeep: nothing }));
   expect(html.match(/<input [^>]*name="apiKey"[^>]*>/)?.[0]).toMatch(/\bautofocus=""/);
+  expect(html.match(/<input [^>]*name="apiKey"[^>]*>/)?.[0]).not.toContain("aria-invalid");
   expect(html).toMatch(/<label for="([^"]+)"[^>]*>An API key from your model provider[^<]*<\/label><div class="flex gap-2"><input id="\1" [^>]*name="apiKey"[^>]*\/?><button type="button"[^>]*>Keep …a1b2<\/button><\/div>/);
   expect(html).toMatch(/<button type="submit"[^>]*>Save key<\/button><span[^>]*>Saved once the provider accepts it\.<\/span>/);
 });
 
-test("the remove step names what it stops, on the button that confirms it", () => {
-  const html = render(createElement(RemoveForm, { action: nothing, pending: false, error: "", onKeep: nothing }));
+test("the remove step names what it stops on both its buttons, and removes only the key the page shows", () => {
+  const html = render(createElement(RemoveForm, { addedAt: saved.addedAt, action: nothing, pending: false, error: "", onKeep: nothing }));
+  expect(html).toContain('<input type="hidden" name="addedAt" value="2026-09-25T18:50:00.000Z"/>');
   expect(html).toContain('<p id="remove-warning">Remove the key? The workspace&#x27;s runs that are going now stop, and Start asks for a new key.</p>');
-  expect(html).toMatch(/<button type="submit" aria-describedby="remove-warning"[^>]*>Remove the key<\/button><button type="button"[^>]*>Keep the key<\/button>/);
+  expect(html).toMatch(/<button type="submit" aria-describedby="remove-warning"[^>]*>Remove the key<\/button><button type="button" aria-describedby="remove-warning"[^>]*>Keep the key<\/button>/);
+});
+
+test("while a removal or a key check runs, Keep cannot leave the step and the last error is hidden, so the next one is announced afresh", () => {
+  const removing = render(createElement(RemoveForm, { addedAt: saved.addedAt, action: nothing, pending: true, error: "E", onKeep: nothing }));
+  expect(removing).toMatch(/<button type="submit" aria-describedby="remove-warning" aria-disabled="true"[^>]*>Removing…<\/button><button type="button" aria-describedby="remove-warning" aria-disabled="true"[^>]*>Keep the key<\/button>/);
+  expect(removing).not.toContain('role="alert"');
+  const checking = render(createElement(ReplaceForm, { saved, action: nothing, pending: true, error: "E", onKeep: nothing }));
+  expect(checking).toMatch(/<button type="button" aria-disabled="true"[^>]*>Keep …a1b2<\/button>/);
+  expect(checking).toMatch(/<button type="submit" aria-disabled="true"[^>]*>Checking the key…<\/button>/);
+  expect(checking).not.toContain('role="alert"');
+});
+
+test("a refused key points its field at the reason", () => {
+  const html = render(createElement(ReplaceForm, { saved, action: nothing, pending: false, error: "OpenRouter refused this key.", onKeep: nothing }));
+  expect(html.match(/<input [^>]*name="apiKey"[^>]*>/)?.[0]).toMatch(/aria-invalid="true" aria-describedby="key-error"/);
+  expect(html).toContain('<p id="key-error" role="alert" class="border-l-2 border-bad pl-3 text-sm text-bad">OpenRouter refused this key.</p>');
 });
 
 test("a saved or removed key is reported, with any runs it stopped, and a key no models could be listed for says when it is checked", () => {
@@ -66,8 +84,8 @@ test("a saved or removed key is reported, with any runs it stopped, and a key no
   expect(removedStatus({ saved: true, stoppedRuns: 3 })).toBe("Key removed. The 3 runs that were going are stopped.");
 });
 
-test("the key's status line is always there for screen readers, and takes no room while empty", () => {
-  expect(render(createElement(ModelKey, { saved, addedBy: null, canManage: true }))).toMatch(/<p role="status" class="text-sm text-ok empty:-mt-4"><\/p><\/section>$/);
+test("the key's status line sits under its heading, is always there for screen readers, and takes no room while empty", () => {
+  expect(render(createElement(ModelKey, { saved, addedBy: null, canManage: true }))).toMatch(/^<section aria-labelledby="key-heading" [^>]*><h2 id="key-heading" tabindex="-1" class="font-mono text-xs tracking-\[0\.2em\] text-muted uppercase">Model key<\/h2><p role="status" class="text-sm text-ok empty:-mt-4"><\/p>/);
 });
 
 test("an owner or admin edits the workspace name; a member reads it as text, with nothing to submit", () => {

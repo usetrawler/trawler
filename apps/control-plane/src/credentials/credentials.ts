@@ -1,3 +1,4 @@
+import { sql } from "kysely";
 import type { Tx } from "../db/tenancy.ts";
 import { last4, type Keyring } from "../lib/secrets.ts";
 import { customUrlProblem, PROVIDERS, type Provider } from "../llm/providers.ts";
@@ -48,8 +49,16 @@ export async function modelKeyDetails(tx: Tx, orgId: string): Promise<KeyDetails
   return row ? { provider: row.kind as Provider, hint: row.hint, baseUrl: row.base_url, addedBy: row.created_by, addedAt: row.created_at } : null;
 }
 
-export async function removeModelKey(tx: Tx, orgId: string): Promise<boolean> {
-  const { numDeletedRows } = await tx.deleteFrom("credentials").where("org_id", "=", orgId).executeTakeFirst();
+export async function keyStillStored(tx: Tx, orgId: string, provider: Provider, baseUrl: string | null): Promise<boolean> {
+  let stored = tx.selectFrom("credentials").select("org_id").where("org_id", "=", orgId).where("kind", "=", provider);
+  if (provider === "custom") stored = stored.where("base_url", "=", baseUrl);
+  return Boolean(await stored.forShare().executeTakeFirst());
+}
+
+export async function removeModelKey(tx: Tx, orgId: string, addedAt?: Date): Promise<boolean> {
+  let removal = tx.deleteFrom("credentials").where("org_id", "=", orgId);
+  if (addedAt) removal = removal.where(sql<Date>`date_trunc('milliseconds', created_at)`, "=", addedAt);
+  const { numDeletedRows } = await removal.executeTakeFirst();
   return numDeletedRows > 0n;
 }
 

@@ -82,7 +82,8 @@ export function ModelKey({ saved, addedBy, canManage }: { saved: SavedKey | null
 
   return (
     <section aria-labelledby="key-heading" className={panel}>
-      <h2 id="key-heading" ref={targets.heading} tabIndex={-1} className={`${heading} outline-none`}>Model key</h2>
+      <h2 id="key-heading" ref={targets.heading} tabIndex={-1} className={heading}>Model key</h2>
+      <p role="status" className="text-sm text-ok empty:-mt-4">{status}</p>
       {saved ? (
         <div className="flex flex-col gap-1 text-sm">
           <p><span className="text-muted">{PROVIDER_LABEL[saved.provider]} key </span><span className="font-mono">{saved.hint}</span></p>
@@ -100,19 +101,19 @@ export function ModelKey({ saved, addedBy, canManage }: { saved: SavedKey | null
       ) : editing ? (
         <ReplaceForm saved={saved} action={replace} pending={checking} error={error} onKeep={() => dispatch({ type: "back", to: "replace" })} />
       ) : step === "confirming" ? (
-        <RemoveForm action={remove} pending={removing} error={error} onKeep={() => dispatch({ type: "back", to: "remove" })} />
+        <RemoveForm addedAt={saved?.addedAt ?? ""} action={remove} pending={removing} error={error} onKeep={() => dispatch({ type: "back", to: "remove" })} />
       ) : (
         <div className="flex flex-wrap gap-3">
           <button type="button" ref={targets.replace} onClick={() => dispatch({ type: "go", step: "replacing" })} className={button}>Replace</button>
           <button type="button" ref={targets.remove} onClick={() => dispatch({ type: "go", step: "confirming" })} className={button}>Remove</button>
         </div>
       )}
-      <p role="status" className="text-sm text-ok empty:-mt-4">{status}</p>
     </section>
   );
 }
 
 export function ReplaceForm({ saved, action, pending, error, onKeep }: { saved: SavedKey | null; action: (form: FormData) => void; pending: boolean; error: string; onKeep: () => void }) {
+  const shown = Boolean(error) && !pending;
   const [apiKey, setApiKey] = useState("");
   const [chosen, setChosen] = useState<Provider | null>(null);
   const [baseUrl, setBaseUrl] = useState("");
@@ -122,31 +123,32 @@ export function ReplaceForm({ saved, action, pending, error, onKeep }: { saved: 
     <form action={action} className="flex flex-col gap-3">
       <KeyFields
         apiKey={apiKey} onKey={setApiKey} detected={detected} chosen={chosen} onChoose={setChosen}
-        provider={provider} baseUrl={baseUrl} onBaseUrl={setBaseUrl} required autoFocus={Boolean(saved)}
-        aside={saved && <button type="button" onClick={onKeep} className="h-12 px-3 text-sm text-muted hover:text-ink">Keep {saved.hint}</button>}
+        provider={provider} baseUrl={baseUrl} onBaseUrl={setBaseUrl} required autoFocus={Boolean(saved)} error={shown ? "key-error" : undefined}
+        aside={saved && <button type="button" aria-disabled={pending || undefined} onClick={() => { if (!pending) onKeep(); }} className="h-12 px-3 text-sm text-muted hover:text-ink aria-disabled:cursor-wait aria-disabled:opacity-60">Keep {saved.hint}</button>}
       />
       <div className="flex flex-wrap items-center gap-3">
         <button type="submit" aria-disabled={pending || undefined} onClick={(e) => { if (pending) e.preventDefault(); }} className={button}>{pending ? "Checking the key…" : "Save key"}</button>
         <span className="text-sm text-muted">Saved once the provider accepts it.</span>
       </div>
-      {error && <p role="alert" className={alert}>{error}</p>}
+      {shown && <p id="key-error" role="alert" className={alert}>{error}</p>}
     </form>
   );
 }
 
-export function RemoveForm({ action, pending, error, onKeep }: { action: (form: FormData) => void; pending: boolean; error: string; onKeep: () => void }) {
-  const confirm = useRef<HTMLButtonElement>(null);
+export function RemoveForm({ addedAt, action, pending, error, onKeep }: { addedAt: string; action: (form: FormData) => void; pending: boolean; error: string; onKeep: () => void }) {
+  const keep = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    confirm.current?.focus();
+    keep.current?.focus();
   }, []);
   return (
     <form action={action} className="flex flex-col gap-3 text-sm">
+      <input type="hidden" name="addedAt" value={addedAt} />
       <p id="remove-warning">Remove the key? The workspace's runs that are going now stop, and Start asks for a new key.</p>
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" ref={confirm} aria-describedby="remove-warning" aria-disabled={pending || undefined} onClick={(e) => { if (pending) e.preventDefault(); }} className="h-10 border border-bad px-4 text-bad aria-disabled:cursor-wait aria-disabled:opacity-60">{pending ? "Removing…" : "Remove the key"}</button>
-        <button type="button" onClick={onKeep} className="h-10 px-2 text-muted hover:text-ink">Keep the key</button>
+        <button type="submit" aria-describedby="remove-warning" aria-disabled={pending || undefined} onClick={(e) => { if (pending) e.preventDefault(); }} className="h-10 border border-bad px-4 text-bad aria-disabled:cursor-wait aria-disabled:opacity-60">{pending ? "Removing…" : "Remove the key"}</button>
+        <button type="button" ref={keep} aria-describedby="remove-warning" aria-disabled={pending || undefined} onClick={() => { if (!pending) onKeep(); }} className="h-10 px-2 text-muted hover:text-ink aria-disabled:cursor-wait aria-disabled:opacity-60">Keep the key</button>
       </div>
-      {error && <p role="alert" className={alert}>{error}</p>}
+      {error && !pending && <p role="alert" className={alert}>{error}</p>}
     </form>
   );
 }

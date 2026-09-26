@@ -2,7 +2,7 @@
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { modelKey, modelKeyHint, setModelKey, type KeyHint } from "../../../credentials/credentials.ts";
+import { keyStillStored, modelKey, modelKeyHint, setModelKey, type KeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
 import { openRouterPrices, priceFor, type Price } from "../../../llm/prices.ts";
 import { projectExists, ProjectNotFound } from "../../../projects/projects.ts";
@@ -27,6 +27,8 @@ export interface ModelOption {
 }
 
 export type ModelList = { ok: true; provider: Provider; models: ModelOption[]; suggested: string } | { ok: false; error: string };
+
+class KeyGone extends Error {}
 
 const MODEL_ID = /^[A-Za-z0-9._:\/@-]{1,200}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -102,17 +104,20 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   }
   const price = await priceFor(endpoint.provider, modelId, readEnv().openRouterUrl);
   let runId: string;
+  const providerBaseUrl = endpoint.provider === "custom" ? endpoint.baseUrl : null;
   try {
-    const run = await withOrg(getDb(), orgId, (tx) =>
-      startRun(tx, orgId, projectId, getKeyring(), {
+    const run = await withOrg(getDb(), orgId, async (tx) => {
+      if (!(await keyStillStored(tx, orgId, endpoint.provider, providerBaseUrl))) throw new KeyGone();
+      return startRun(tx, orgId, projectId, getKeyring(), {
         budgetUsd, agentModel: modelId, judgeModel: modelId, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: member.userId,
-        provider: endpoint.provider, providerBaseUrl: endpoint.provider === "custom" ? endpoint.baseUrl : null, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap,
-      }),
-    );
+        provider: endpoint.provider, providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap,
+      });
+    });
     runId = run.id;
   } catch (err) {
-    if (!(err instanceof ProjectNotFound)) await logError("run could not start", { orgId, projectId, err }, scrubberWith([endpoint.key]));
     const keyHint = await withOrg(getDb(), orgId, (tx) => modelKeyHint(tx, orgId));
+    if (err instanceof KeyGone) return { error: "The workspace's model key was removed or changed while the run was starting. Check the key and start again.", ...(keyHint ? { keyHint } : {}) };
+    if (!(err instanceof ProjectNotFound)) await logError("run could not start", { orgId, projectId, err }, scrubberWith([endpoint.key]));
     return { error: "The run could not start. Try again.", ...(keyHint ? { keyHint } : {}) };
   }
   redirect(`/runs/${runId}`);
