@@ -116,7 +116,10 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
     runId = run.id;
   } catch (err) {
     const keyHint = await withOrg(getDb(), orgId, (tx) => modelKeyHint(tx, orgId));
-    if (err instanceof KeyGone) return { error: "The workspace's model key was removed or changed while the run was starting. Check the key and start again.", ...(keyHint ? { keyHint } : {}) };
+    if (err instanceof KeyGone) {
+      revalidatePath(`/projects/${projectId}`);
+      return { error: "The workspace's model key was removed or changed while the run was starting. Check the key and start again.", ...(keyHint ? { keyHint } : {}) };
+    }
     if (!(err instanceof ProjectNotFound)) await logError("run could not start", { orgId, projectId, err }, scrubberWith([endpoint.key]));
     return { error: "The run could not start. Try again.", ...(keyHint ? { keyHint } : {}) };
   }

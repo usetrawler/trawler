@@ -67,7 +67,7 @@ export async function cancelRun(tx: Tx, orgId: string, runId: string): Promise<b
 }
 
 export async function cancelLiveRuns(tx: Tx, orgId: string): Promise<number> {
-  const live = await tx.selectFrom("runs").select("id").where("org_id", "=", orgId).where("status", "in", ["queued", "running"]).execute();
+  const live = await tx.selectFrom("runs").select("id").where("org_id", "=", orgId).where("status", "in", ["queued", "running"]).forUpdate().execute();
   let cancelled = 0;
   for (const run of live) if (await cancelRun(tx, orgId, run.id)) cancelled++;
   return cancelled;

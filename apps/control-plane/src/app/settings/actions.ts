@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { WORKSPACE_NAME_RULE } from "../../auth/plugins.ts";
-import { removeModelKey, setModelKey } from "../../credentials/credentials.ts";
+import { modelKeyHint, removeModelKey, setModelKey } from "../../credentials/credentials.ts";
 import { withOrg } from "../../db/tenancy.ts";
 import { freshEndpoint, withinListingLimit } from "../../llm/key-input.ts";
 import { checkKey, PROVIDER_LABEL } from "../../llm/providers.ts";
@@ -15,9 +15,11 @@ import { readEnv } from "../../server/env.ts";
 
 export interface SettingsState {
   error?: string;
+  field?: "key" | "baseUrl";
   saved?: boolean;
   unchecked?: boolean;
   stoppedRuns?: number;
+  alreadyRemoved?: boolean;
 }
 
 const OWNERS_AND_ADMINS = "Only an owner or admin of this workspace can change its settings.";
@@ -55,8 +57,8 @@ export async function replaceModelKeyAction(_previous: SettingsState, form: Form
   const check = await checkKey(endpoint);
   if (!check.ok) {
     const provider = endpoint.provider === "custom" ? "The OpenAI-compatible service" : PROVIDER_LABEL[endpoint.provider];
-    if (check.reason === "key") return { error: `${provider} refused this key. Copy it again from your provider, and check the provider picked below it.` };
-    if (check.reason === "private") return { error: "That base URL is on a private network. Trawler calls models only at public addresses." };
+    if (check.reason === "key") return { error: `${provider} refused this key. Copy it again from your provider, and check the provider picked below it.`, field: "key" };
+    if (check.reason === "private") return { error: "That base URL is on a private network. Trawler calls models only at public addresses.", field: "baseUrl" };
     return { error: `${provider} could not be reached to check the key. Try again in a minute.` };
   }
   await withOrg(getDb(), member.orgId, (tx) => setModelKey(tx, member.orgId, { provider: endpoint.provider, key: endpoint.key, baseUrl: endpoint.provider === "custom" ? endpoint.baseUrl : null }, member.userId, getKeyring()));
@@ -68,9 +70,11 @@ export async function removeModelKeyAction(_previous: SettingsState, form: FormD
   const member = await manager();
   if ("error" in member) return member;
   const addedAt = new Date(String(form.get("addedAt") ?? ""));
-  const stoppedRuns = Number.isNaN(addedAt.getTime())
-    ? null
-    : await withOrg(getDb(), member.orgId, async (tx) => ((await removeModelKey(tx, member.orgId, addedAt)) ? cancelLiveRuns(tx, member.orgId) : null));
+  const outcome = await withOrg(getDb(), member.orgId, async (tx) => {
+    if (!Number.isNaN(addedAt.getTime()) && (await removeModelKey(tx, member.orgId, addedAt))) return { stoppedRuns: await cancelLiveRuns(tx, member.orgId) };
+    return (await modelKeyHint(tx, member.orgId)) ? { changed: true } : { alreadyRemoved: true };
+  });
   revalidatePath("/", "layout");
-  return stoppedRuns === null ? { error: KEY_CHANGED } : { saved: true, stoppedRuns };
+  if ("stoppedRuns" in outcome) return { saved: true, stoppedRuns: outcome.stoppedRuns };
+  return "changed" in outcome ? { error: KEY_CHANGED } : { saved: true, stoppedRuns: 0, alreadyRemoved: true };
 }

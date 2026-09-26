@@ -46,7 +46,7 @@ test("a member reads the key but cannot change it, and without a key is told who
 });
 
 test("replacing a key starts in its field, with Keep beside it and outside its label", () => {
-  const html = render(createElement(ReplaceForm, { saved, action: nothing, pending: false, error: "", onKeep: nothing }));
+  const html = render(createElement(ReplaceForm, { saved, action: nothing, pending: false, refusal: null, onSent: nothing, onKeep: nothing }));
   expect(html.match(/<input [^>]*name="apiKey"[^>]*>/)?.[0]).toMatch(/\bautofocus=""/);
   expect(html.match(/<input [^>]*name="apiKey"[^>]*>/)?.[0]).not.toContain("aria-invalid");
   expect(html).toMatch(/<label for="([^"]+)"[^>]*>An API key from your model provider[^<]*<\/label><div class="flex gap-2"><input id="\1" [^>]*name="apiKey"[^>]*\/?><button type="button"[^>]*>Keep …a1b2<\/button><\/div>/);
@@ -54,26 +54,29 @@ test("replacing a key starts in its field, with Keep beside it and outside its l
 });
 
 test("the remove step names what it stops on both its buttons, and removes only the key the page shows", () => {
-  const html = render(createElement(RemoveForm, { addedAt: saved.addedAt, action: nothing, pending: false, error: "", onKeep: nothing }));
+  const html = render(createElement(RemoveForm, { addedAt: saved.addedAt, action: nothing, pending: false, error: "", onSent: nothing, onKeep: nothing }));
   expect(html).toContain('<input type="hidden" name="addedAt" value="2026-09-25T18:50:00.000Z"/>');
   expect(html).toContain('<p id="remove-warning">Remove the key? The workspace&#x27;s runs that are going now stop, and Start asks for a new key.</p>');
   expect(html).toMatch(/<button type="submit" aria-describedby="remove-warning"[^>]*>Remove the key<\/button><button type="button" aria-describedby="remove-warning"[^>]*>Keep the key<\/button>/);
 });
 
-test("while a removal or a key check runs, Keep cannot leave the step and the last error is hidden, so the next one is announced afresh", () => {
-  const removing = render(createElement(RemoveForm, { addedAt: saved.addedAt, action: nothing, pending: true, error: "E", onKeep: nothing }));
+test("while a removal or a key check runs, Keep looks unavailable and the key's fields cannot be edited", () => {
+  const removing = render(createElement(RemoveForm, { addedAt: saved.addedAt, action: nothing, pending: true, error: "", onSent: nothing, onKeep: nothing }));
   expect(removing).toMatch(/<button type="submit" aria-describedby="remove-warning" aria-disabled="true"[^>]*>Removing…<\/button><button type="button" aria-describedby="remove-warning" aria-disabled="true"[^>]*>Keep the key<\/button>/);
-  expect(removing).not.toContain('role="alert"');
-  const checking = render(createElement(ReplaceForm, { saved, action: nothing, pending: true, error: "E", onKeep: nothing }));
+  const checking = render(createElement(ReplaceForm, { saved, action: nothing, pending: true, refusal: null, onSent: nothing, onKeep: nothing }));
   expect(checking).toMatch(/<button type="button" aria-disabled="true"[^>]*>Keep …a1b2<\/button>/);
   expect(checking).toMatch(/<button type="submit" aria-disabled="true"[^>]*>Checking the key…<\/button>/);
-  expect(checking).not.toContain('role="alert"');
+  expect(checking.match(/<input [^>]*name="apiKey"[^>]*>/)?.[0]).toMatch(/\breadOnly=""/);
 });
 
-test("a refused key points its field at the reason", () => {
-  const html = render(createElement(ReplaceForm, { saved, action: nothing, pending: false, error: "OpenRouter refused this key.", onKeep: nothing }));
-  expect(html.match(/<input [^>]*name="apiKey"[^>]*>/)?.[0]).toMatch(/aria-invalid="true" aria-describedby="key-error"/);
-  expect(html).toContain('<p id="key-error" role="alert" class="border-l-2 border-bad pl-3 text-sm text-bad">OpenRouter refused this key.</p>');
+test("a refused key points the key field at the reason; a base URL problem points the base URL instead; a provider that cannot be reached points at neither", () => {
+  const refusal = (field?: "key" | "baseUrl") => ({ from: "replace" as const, error: "E", ...(field ? { field } : {}) });
+  const refused = render(createElement(ReplaceForm, { saved, action: nothing, pending: false, refusal: refusal("key"), onSent: nothing, onKeep: nothing }));
+  expect(refused.match(/<input [^>]*name="apiKey"[^>]*>/)?.[0]).toMatch(/aria-invalid="true" aria-describedby="key-error"/);
+  expect(refused).toContain('<p id="key-error" role="alert" class="border-l-2 border-bad pl-3 text-sm text-bad">E</p>');
+  const unreachable = render(createElement(ReplaceForm, { saved, action: nothing, pending: false, refusal: refusal(), onSent: nothing, onKeep: nothing }));
+  expect(unreachable.match(/<input [^>]*name="apiKey"[^>]*>/)?.[0]).not.toContain("aria-invalid");
+  expect(unreachable).toContain('role="alert"');
 });
 
 test("a saved or removed key is reported, with any runs it stopped, and a key no models could be listed for says when it is checked", () => {
@@ -82,6 +85,7 @@ test("a saved or removed key is reported, with any runs it stopped, and a key no
   expect(removedStatus({ saved: true, stoppedRuns: 0 })).toBe("Key removed.");
   expect(removedStatus({ saved: true, stoppedRuns: 1 })).toBe("Key removed. The run that was going is stopped.");
   expect(removedStatus({ saved: true, stoppedRuns: 3 })).toBe("Key removed. The 3 runs that were going are stopped.");
+  expect(removedStatus({ saved: true, stoppedRuns: 0, alreadyRemoved: true })).toBe("The key was already removed.");
 });
 
 test("the key's status line sits under its heading, is always there for screen readers, and takes no room while empty", () => {
@@ -97,20 +101,24 @@ test("an owner or admin edits the workspace name; a member reads it as text, wit
   expect(member).toMatch(/<p class="text-lg font-bold wrap-anywhere">Acme<\/p><p class="text-sm text-muted">Only an owner or admin of this workspace can rename it\.<\/p>/);
 });
 
-test("starting a step clears what the last one said, so an old error never comes back", () => {
-  const refused = { step: "replacing" as const, status: "", error: "OpenRouter refused this key.", focus: null };
-  expect(nextPanel(refused, { type: "back", to: "replace" })).toEqual({ step: "view", status: "", error: "", focus: "replace" });
-  expect(nextPanel({ ...refused, step: "view", status: "Key saved." }, { type: "go", step: "replacing" })).toEqual({ step: "replacing", status: "", error: "", focus: null });
-  expect(nextPanel({ ...refused, step: "confirming" }, { type: "go", step: "confirming" })).toMatchObject({ error: "" });
-  expect(nextPanel({ step: "replacing", status: "", error: "", focus: null }, { type: "refused", error: "E" })).toEqual({ step: "replacing", status: "", error: "E", focus: null });
-  expect(nextPanel({ step: "view", status: "Key saved.", error: "", focus: "replace" }, { type: "focused" })).toEqual({ step: "view", status: "Key saved.", error: "", focus: null });
+test("starting a step, or sending one, clears what the last one said, so an old error never comes back", () => {
+  const refusal = { from: "replace" as const, error: "OpenRouter refused this key." };
+  const refused = { step: "replacing" as const, status: "", refusal, focus: null };
+  expect(nextPanel(refused, { type: "back", to: "replace" })).toEqual({ step: "view", status: "", refusal: null, focus: "replace" });
+  expect(nextPanel({ ...refused, step: "view", status: "Key saved." }, { type: "go", step: "replacing" })).toEqual({ step: "replacing", status: "", refusal: null, focus: null });
+  expect(nextPanel({ ...refused, step: "confirming" }, { type: "go", step: "confirming" })).toMatchObject({ refusal: null });
+  expect(nextPanel({ ...refused, status: "Key saved." }, { type: "sent" })).toEqual({ step: "replacing", status: "", refusal: null, focus: null });
+  expect(nextPanel({ step: "replacing", status: "", refusal: null, focus: null }, { type: "refused", refusal })).toEqual({ step: "replacing", status: "", refusal, focus: null });
+  expect(nextPanel({ step: "view", status: "Key saved.", refusal: null, focus: "replace" }, { type: "focused" })).toEqual({ step: "view", status: "Key saved.", refusal: null, focus: null });
 });
 
-test("a saved key returns to Replace and says so; a removal lands on the section heading with the runs it stopped; a refusal stays on its step", () => {
+test("a saved key returns to Replace and says so; a removal, or finding the key already gone, lands on the section heading; a refusal stays on its step and names its field", () => {
   expect(afterReplace({ saved: true, unchecked: false })).toEqual({ type: "back", to: "replace", status: "Key saved." });
-  expect(afterReplace({ error: "E" })).toEqual({ type: "refused", error: "E" });
+  expect(afterReplace({ error: "E", field: "baseUrl" })).toEqual({ type: "refused", refusal: { from: "replace", error: "E", field: "baseUrl" } });
+  expect(afterReplace({ error: "E" })).toEqual({ type: "refused", refusal: { from: "replace", error: "E" } });
   expect(afterReplace({})).toBeNull();
   expect(afterRemove({ saved: true, stoppedRuns: 1 })).toEqual({ type: "back", to: "heading", status: "Key removed. The run that was going is stopped." });
-  expect(afterRemove({ error: "E" })).toEqual({ type: "refused", error: "E" });
+  expect(afterRemove({ saved: true, stoppedRuns: 0, alreadyRemoved: true })).toEqual({ type: "back", to: "heading", status: "The key was already removed." });
+  expect(afterRemove({ error: "E" })).toEqual({ type: "refused", refusal: { from: "remove", error: "E" } });
   expect(afterRemove({})).toBeNull();
 });

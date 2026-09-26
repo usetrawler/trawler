@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   saved: [] as unknown[],
   removed: [] as Array<{ orgId: string; tx: unknown; addedAt?: Date }>,
   removeMatches: true,
+  keyRemains: true,
   cancelled: [] as Array<{ orgId: string; tx: unknown }>,
   live: 0,
   tenants: [] as string[],
@@ -38,6 +39,7 @@ vi.mock("../../credentials/credentials.ts", async (original) => ({
   ...(await original<typeof import("../../credentials/credentials.ts")>()),
   setModelKey: async (_tx: unknown, orgId: string, input: unknown, userId: string) => { state.saved.push({ orgId, input, userId }); },
   removeModelKey: async (tx: unknown, orgId: string, addedAt?: Date) => { state.removed.push({ orgId, tx, addedAt }); return state.removeMatches; },
+  modelKeyHint: async () => (state.keyRemains ? { provider: "openrouter", hint: "…zzzz", baseUrl: null } : null),
 }));
 vi.mock("../../runs/runs.ts", () => ({ cancelLiveRuns: async (tx: unknown, orgId: string) => { state.cancelled.push({ orgId, tx }); return state.live; } }));
 vi.mock("../../llm/providers.ts", async (original) => ({
@@ -63,7 +65,7 @@ const form = (fields: Record<string, string>) => {
 const OWNERS_AND_ADMINS = "Only an owner or admin of this workspace can change its settings.";
 
 beforeEach(() => {
-  Object.assign(state, { member: owner, renamed: [], renameFails: null, checked: [], check: { ok: true, checked: true }, saved: [], removed: [], removeMatches: true, cancelled: [], live: 0, tenants: [], revalidated: [] });
+  Object.assign(state, { member: owner, renamed: [], renameFails: null, checked: [], check: { ok: true, checked: true }, saved: [], removed: [], removeMatches: true, keyRemains: true, cancelled: [], live: 0, tenants: [], revalidated: [] });
 });
 
 test("a member of this workspace who is neither owner nor admin renames nothing, and replaces or removes no key", async () => {
@@ -112,17 +114,17 @@ test("a key is saved for the member's workspace only once the provider accepts i
 
 test("a key the provider refuses, one on a private network, or one that cannot be checked right now is not saved", async () => {
   state.check = { ok: false, reason: "key" };
-  expect(await replaceModelKeyAction({}, form({ apiKey: OPENROUTER }))).toEqual({ error: "OpenRouter refused this key. Copy it again from your provider, and check the provider picked below it." });
+  expect(await replaceModelKeyAction({}, form({ apiKey: OPENROUTER }))).toEqual({ error: "OpenRouter refused this key. Copy it again from your provider, and check the provider picked below it.", field: "key" });
   state.check = { ok: false, reason: "private" };
-  expect(await replaceModelKeyAction({}, form({ apiKey: CUSTOM, provider: "custom", baseUrl: "https://10.0.0.8/v1" }))).toEqual({ error: "That base URL is on a private network. Trawler calls models only at public addresses." });
+  expect(await replaceModelKeyAction({}, form({ apiKey: CUSTOM, provider: "custom", baseUrl: "https://10.0.0.8/v1" }))).toEqual({ error: "That base URL is on a private network. Trawler calls models only at public addresses.", field: "baseUrl" });
   state.check = { ok: false, reason: "unavailable" };
   expect(await replaceModelKeyAction({}, form({ apiKey: OPENROUTER }))).toEqual({ error: "OpenRouter could not be reached to check the key. Try again in a minute." });
   expect([state.saved, state.revalidated]).toEqual([[], []]);
 });
 
 test("a malformed key or an http base URL is refused before the provider is asked", async () => {
-  expect(await replaceModelKeyAction({}, form({ apiKey: "short" }))).toEqual({ error: "That does not look like an API key. Copy it again from your provider." });
-  expect(await replaceModelKeyAction({}, form({ apiKey: CUSTOM, provider: "custom", baseUrl: "http://llm.example.com/v1" }))).toEqual({ error: "The base URL must use https." });
+  expect(await replaceModelKeyAction({}, form({ apiKey: "short" }))).toEqual({ error: "That does not look like an API key. Copy it again from your provider.", field: "key" });
+  expect(await replaceModelKeyAction({}, form({ apiKey: CUSTOM, provider: "custom", baseUrl: "http://llm.example.com/v1" }))).toEqual({ error: "The base URL must use https.", field: "baseUrl" });
   expect([state.checked, state.saved]).toEqual([[], []]);
 });
 
@@ -138,6 +140,7 @@ test("removing the key also stops the workspace's runs that are going, in the sa
 });
 
 test("a removal that no longer matches the key shown, because someone replaced it meanwhile, removes nothing, stops no run and shows the current key", async () => {
+  state.keyRemains = true;
   state.removeMatches = false;
   state.live = 2;
   const changed = { error: "The key changed since this page was loaded, so it was not removed. The page now shows the current key." };
@@ -151,7 +154,7 @@ test("a removal that no longer matches the key shown, because someone replaced i
 test("an OpenAI-compatible service is named as a service in the key's messages", async () => {
   const custom = form({ apiKey: CUSTOM, provider: "custom", baseUrl: "https://llm.example.com/v1" });
   state.check = { ok: false, reason: "key" };
-  expect(await replaceModelKeyAction({}, custom)).toEqual({ error: "The OpenAI-compatible service refused this key. Copy it again from your provider, and check the provider picked below it." });
+  expect(await replaceModelKeyAction({}, custom)).toEqual({ error: "The OpenAI-compatible service refused this key. Copy it again from your provider, and check the provider picked below it.", field: "key" });
   state.check = { ok: false, reason: "unavailable" };
   expect(await replaceModelKeyAction({}, custom)).toEqual({ error: "The OpenAI-compatible service could not be reached to check the key. Try again in a minute." });
 });
@@ -162,4 +165,13 @@ test("key checks here have their own limit of 30 in 10 minutes per person, apart
   expect(await replaceModelKeyAction({}, form({ apiKey: OPENROUTER }))).toEqual({ saved: true, unchecked: false });
   for (let i = 0; i < 29; i++) await replaceModelKeyAction({}, form({ apiKey: OPENROUTER }));
   expect(await replaceModelKeyAction({}, form({ apiKey: OPENROUTER }))).toEqual({ error: "Too many key checks. Wait a few minutes and try again." });
+});
+
+test("a removal that finds the key already gone says so, as done, and stops no run", async () => {
+  state.removeMatches = false;
+  state.keyRemains = false;
+  state.live = 2;
+  expect(await removeModelKeyAction({}, form({ addedAt: ADDED_AT }))).toEqual({ saved: true, stoppedRuns: 0, alreadyRemoved: true });
+  expect(state.cancelled).toEqual([]);
+  expect(state.revalidated).toEqual(EVERY_PAGE);
 });

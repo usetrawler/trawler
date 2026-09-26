@@ -7,15 +7,15 @@ export interface KeyInput {
   baseUrl?: string;
 }
 
-export function freshEndpoint(input: KeyInput, openRouterUrl: string): { endpoint: Endpoint } | { error: string } {
+export function freshEndpoint(input: KeyInput, openRouterUrl: string): { endpoint: Endpoint } | { error: string; field: "key" | "baseUrl" } {
   const key = (input.key ?? "").trim();
-  if (!keyLooksValid(key)) return { error: "That does not look like an API key. Copy it again from your provider." };
+  if (!keyLooksValid(key)) return { error: "That does not look like an API key. Copy it again from your provider.", field: "key" };
   const chosen = PROVIDERS.includes(input.provider as Provider) ? (input.provider as Provider) : null;
   const provider = chosen ?? detectProvider(key) ?? "custom";
   if (provider === "custom") {
     const baseUrl = (input.baseUrl ?? "").trim();
     const problem = customUrlProblem(baseUrl);
-    if (problem) return { error: problem };
+    if (problem) return { error: problem, field: "baseUrl" };
     return { endpoint: endpointFor("custom", key, { openRouterUrl, customUrl: baseUrl }) };
   }
   return { endpoint: endpointFor(provider, key, { openRouterUrl }) };
