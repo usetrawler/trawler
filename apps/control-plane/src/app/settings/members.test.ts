@@ -114,6 +114,11 @@ test("only what the latest change did is said, so a revoked invitation no longer
   const afterInvite = render();
   expect(listStatus(afterInvite)).toBe("");
   expect(text(inviteForm(afterInvite))).toContain("Invited max@acme.test. Ask them to sign in");
+  react.actions = [IDLE, IDLE, [{ done: "The invitation for max@acme.test is revoked." }, false], [{ error: "That address is already in this workspace." }, false]];
+  react.states = [{ done: "The invitation for max@acme.test is revoked." }, null, null, "list"];
+  const refusedThenRevoked = inviteForm(render());
+  expect(refusedThenRevoked).not.toContain("invite-error");
+  expect(refusedThenRevoked).not.toContain("aria-invalid");
 });
 
 test("invitations that can still be used are listed with their role and expiry, and can be revoked", () => {
