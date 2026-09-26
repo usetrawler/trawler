@@ -212,6 +212,16 @@ beforeAll(async () => {
       case "/collapsed":
       case "/collapsed-plain":
         return html(`<p>Keys</p><div style="max-height:0;overflow:hidden"><p style="font:20px monospace;color:#ff0000">Your key is ${req.url === "/collapsed" ? "card-secret-1111" : "not-a-secret-00"}</p></div><p style="font:20px monospace;color:#0000ff">Plan: Team, billed monthly</p>`);
+      case "/select-list":
+        return html(`<select size="3" style="font:20px monospace;color:#ff0000;width:300px"><option>first</option><option>card-secret-1111</option><option>third</option></select><p>Plan: Team</p>`);
+      case "/select-closed":
+        return html(`<select style="font:20px monospace;color:#ff0000;width:300px"><option selected>card-secret-1111</option><option>other</option></select><p>Plan: Team</p>`);
+      case "/broken-image":
+        return html(`<img alt="card-secret-1111" src="https://blocked.example/key.png" style="font:20px monospace;color:#ff0000"><p>Plan: Team</p>`);
+      case "/slow-steps":
+        return html(`<style>@keyframes hop{from{transform:translateX(0)}to{transform:translateX(200px)}} #echo{font:20px monospace;color:#ff0000;animation:hop 20s steps(2) infinite}</style><p id="echo">card-secret-1111</p>`);
+      case "/glowing-field":
+        return html(`<style>@keyframes glow{from{box-shadow:0 0 0 #09f}to{box-shadow:0 0 12px #09f}} input{animation:glow 1s infinite alternate}</style><input aria-label="Password" type="password" value="field-secret-1">`);
       case "/fixed-below":
         return html(`<p>Short page</p><div style="position:fixed;left:20px;bottom:120px;height:0;font:20px monospace;color:#ff0000">card-secret-1111</div>`);
       case "/flicker":
@@ -1307,11 +1317,28 @@ describe("screenshots", () => {
     expect(await shotsOf("/moves-when-masked", 1, async () => undefined, knowing("card-secret-1111"))).toEqual([null]);
   }, 60_000);
 
-  test("a secret that jumps back and forth is never shown: each screenshot is dropped or masks it", async () => {
-    const shots = await shotsOf("/flicker", 25, async () => undefined, knowing("card-secret-1111"));
-    const taken = shots.filter((shot): shot is Screenshot => shot !== null);
-    expect(await Promise.all(taken.map(redPixels))).toEqual(taken.map(() => 0));
-  }, 180_000);
+  test("a secret that jumps back and forth by animation gives no screenshot", async () => {
+    expect(await shotsOf("/flicker", 5, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null, null, null, null]);
+  }, 120_000);
+
+  test("a secret on an element an animation is moving, even one that has not moved for a while, gives no screenshot", async () => {
+    expect(await shotsOf("/slow-steps", 2, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null]);
+  }, 60_000);
+
+  test("an animation that only changes how a field looks, like a glow, does not stop the screenshot", async () => {
+    const [shot] = await shotsOf("/glowing-field", 1, async () => undefined);
+    expect(shot).not.toBeNull();
+  }, 60_000);
+
+  test.each([
+    ["/select-list", "a list of options"],
+    ["/select-closed", "a closed drop-down"],
+    ["/broken-image", "the alternative text of an image that did not load"],
+  ])("a secret shown in %s is masked (%s)", async (path) => {
+    const [shot] = await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
 
   test("screenshots leave the page's animation clock where it would have been, neither behind by the time it held still nor running fast", async () => {
     await withBrowser(async (b) => {

@@ -44,6 +44,7 @@ const MASK_CHECK_MS = 2500;
 const STEADY_MS = 20;
 const SECRET_FIELDS = "trawler-secret-fields";
 const LINE_AROUND = "trawler-line-around";
+const MOVING = "trawler-moving";
 const SELECTOR_ENGINES = {
   [SECRET_FIELDS]: `({
     queryAll(root, encoded) {
@@ -51,7 +52,11 @@ const SELECTOR_ENGINES = {
       const found = [];
       const visit = (scope) => {
         for (const el of scope.querySelectorAll("*")) {
-          if (el.matches("input, textarea, [contenteditable]")) {
+          if (el.matches("img, area, input[type=image i]")) {
+            if (secrets.test(el.getAttribute("alt") ?? "")) found.push(el);
+          } else if (el.matches("select")) {
+            if ([...el.querySelectorAll("option, optgroup")].some((choice) => secrets.test(choice.label ?? ""))) found.push(el);
+          } else if (el.matches("input, textarea, [contenteditable]")) {
             const value = el.isContentEditable ? String(el.textContent ?? "") : typeof el.value === "string" ? el.value : "";
             if (secrets.test(value) || secrets.test(el.getAttribute("placeholder") ?? "")) found.push(el);
           }
@@ -104,6 +109,21 @@ const SELECTOR_ENGINES = {
       }
       if (mode === "uncovered") return widest ? [] : [root];
       return [widest ?? root];
+    },
+  })`,
+  [MOVING]: `({
+    queryAll(root) {
+      const looksOnly = /^(opacity|color|background|boxShadow|textShadow|outline|border\\w*Color|fill|stroke|filter|visibility|caretColor|accentColor|textDecorationColor|columnRuleColor)/;
+      const keyframeFields = new Set(["offset", "computedOffset", "easing", "composite"]);
+      const up = (el) => el.parentElement ?? el.parentNode?.host;
+      for (let el = root; el; el = up(el)) {
+        for (const animation of el.getAnimations()) {
+          if (animation.playState !== "running") continue;
+          const properties = (animation.effect?.getKeyframes?.() ?? []).flatMap((frame) => Object.keys(frame)).filter((key) => !keyframeFields.has(key));
+          if (properties.length === 0 || properties.some((key) => !looksOnly.test(key))) return [root];
+        }
+      }
+      return [];
     },
   })`,
 };
@@ -348,20 +368,27 @@ export async function openBrowser(opts: {
       const needles = [...new Set([...opts.scrubber.browserNeedles(), ...typedSecrets, ...filledValues])].filter((n) => n.length >= MIN_SECRET_LENGTH);
       return needles.length > 0 ? new RegExp(needles.map(escapedForRegExp).join("|"), "i") : null;
     };
-    const masksIn = (frame: Frame, secrets: RegExp | null) => {
-      const masks = [frame.locator(`input[type=password i], [${SECRET_MARK}]`)];
-      if (!secrets) return masks;
-      return [...masks, frame.getByText(secrets).locator(`${LINE_AROUND}=line`), frame.locator(`${SECRET_FIELDS}=${Buffer.from(secrets.source).toString("base64")}`)];
+    const secretsIn = (frame: Frame, secrets: RegExp | null) => {
+      const passwords = frame.locator(`input[type=password i], [${SECRET_MARK}]`);
+      if (!secrets) return { passwords, text: null, fields: null };
+      return { passwords, text: frame.getByText(secrets), fields: frame.locator(`${SECRET_FIELDS}=${Buffer.from(secrets.source).toString("base64")}`) };
     };
+    const masksIn = (frame: Frame, secrets: RegExp | null) => {
+      const { passwords, text, fields } = secretsIn(frame, secrets);
+      return text && fields ? [passwords, text.locator(`${LINE_AROUND}=line`), fields] : [passwords];
+    };
+    const anyIn = async (locators: Locator[]) => (await Promise.all(locators.map((l) => l.count()))).some((n) => n > 0);
     const capture = async (page: Page): Promise<Screenshot | null> => {
       const frames = page.frames();
-      const { mask, placed, uncovered } = await inTime(async () => {
+      const { mask, placed, uncovered, moving } = await inTime(async () => {
         const secrets = await secretsOnPage();
         const mask = frames.flatMap((frame) => masksIn(frame, secrets));
-        const uncovered = secrets ? (await Promise.all(frames.map((frame) => frame.getByText(secrets).locator(`${LINE_AROUND}=uncovered`).count()))).some((n) => n > 0) : false;
-        return { mask, placed: await steadyBoxesOf(mask), uncovered };
+        const shown = frames.map((frame) => secretsIn(frame, secrets));
+        const uncovered = await anyIn(shown.flatMap(({ text }) => (text ? [text.locator(`${LINE_AROUND}=uncovered`)] : [])));
+        const moving = await anyIn(shown.flatMap(({ passwords, text, fields }) => [passwords, text, fields].flatMap((l) => (l ? [l.locator(`${MOVING}=1`)] : []))));
+        return { mask, placed: await steadyBoxesOf(mask), uncovered, moving };
       });
-      if (uncovered || placed === null) return null;
+      if (uncovered || moving || placed === null) return null;
       const bytes = await page.screenshot({ type: "png", mask, maskColor: MASK_COLOR, caret: "hide", scale: "css", timeout: SCREENSHOT_MS });
       const unmoved = (await inTime(() => steadyBoxesOf(mask))) === placed;
       const sameFrames = page.frames().length === frames.length && page.frames().every((frame, i) => frame === frames[i]);
