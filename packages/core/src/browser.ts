@@ -103,7 +103,9 @@ const SELECTOR_ENGINES = {
       const flatChildrenOf = ${FLAT_CHILDREN_OF};
       const flatTextOf = (${FLAT_TEXT_OF})(new Map());
       const shows = (node) => secrets.test(flatTextOf(node));
-      return [root, ...(${SHADOW_ROOTS_UNDER})(root)]
+      const shadowRoots = (${SHADOW_ROOTS_UNDER})(root);
+      if (shadowRoots.length === 0) return [];
+      return [root, ...shadowRoots]
         .flatMap((tree) => [...tree.querySelectorAll("*")])
         .filter((el) => shows(el) && !flatChildrenOf(el).some((child) => child.nodeType === Node.ELEMENT_NODE && shows(child)));
     },
@@ -498,8 +500,8 @@ export async function openBrowser(opts: {
         const value = await readValue(h);
         if (value.length >= MIN_SECRET_LENGTH && value !== valuesBeforeTyping.get(h)) filledValues.push(value);
       }
-      const needles = [...new Set([...opts.scrubber.browserNeedles(), ...typedSecrets, ...filledValues])].filter((n) => n.length >= MIN_SECRET_LENGTH).sort((a, b) => b.length - a.length);
-      return needles.length > 0 ? new RegExp(needles.map(escapedForRegExp).join("|"), "i") : null;
+      const needles = [...new Set([...opts.scrubber.browserNeedles(), ...typedSecrets, ...filledValues].map((n) => n.trim()))].filter((n) => n.length >= MIN_SECRET_LENGTH).sort((a, b) => b.length - a.length);
+      return needles.length > 0 ? new RegExp(needles.map((n) => escapedForRegExp(n).replace(/\s+/g, "\\s+")).join("|"), "i") : null;
     };
     const secretsIn = (frame: Frame, secrets: RegExp | null) => {
       const passwords = frame.locator(`input[type=password i], [${SECRET_MARK}]`);

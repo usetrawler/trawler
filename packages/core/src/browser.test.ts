@@ -343,6 +343,15 @@ beforeAll(async () => {
         return html(`<p style="font:20px monospace;color:#ff0000">card-secret-<closed-b></closed-b></p><p>Plan: Team</p><script>customElements.define("closed-b", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "1111"; } });</script>`);
       case "/closed-password-tail":
         return html(`<p style="font:20px monospace;color:#ff0000">moving-s<closed-tail></closed-tail></p><p>Plan: Team</p><script>customElements.define("closed-tail", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "ecret-1"; } });</script>`);
+      case "/phrase-newline":
+        return html(`<p style="font:20px monospace;color:#ff0000">correct
+          horse battery-42</p><p>Plan: Team</p>`);
+      case "/phrase-nbsp":
+        return html(`<p style="font:20px monospace;color:#ff0000">correct&nbsp;horse battery-42</p><p>Plan: Team</p>`);
+      case "/phrase-double":
+        return html(`<p style="font:20px monospace;color:#ff0000">correct  horse battery-42</p><p>Plan: Team</p>`);
+      case "/closed-phrase":
+        return html(closedCard("", "correct&nbsp;horse battery-42"));
       case "/closed-password":
         return html(closedCard("", '<input aria-label="Password" type="password" value="closed-pass-1">'));
       case "/closed-typed":
@@ -1534,6 +1543,22 @@ describe("screenshots", () => {
     const scrubber = new SecretScrubber();
     for (let length = MIN_SECRET_LENGTH; length <= "moving-secret-1".length; length++) scrubber.add("moving-secret-1".slice(0, length));
     expect(await shotsOf("/closed-password-tail", 1, async () => undefined, { scrubber })).toEqual([null]);
+  }, 60_000);
+
+  test.each(["/phrase-newline", "/phrase-nbsp", "/phrase-double"])("a secret with a space in it is masked however the page spaces it (%s)", async (path) => {
+    const [shot] = await shotsOf(path, 1, async () => undefined, knowing("correct horse battery-42"));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
+
+  test("a secret stored with a space at its end is masked where the page shows it without one", async () => {
+    const [shot] = await shotsOf("/static-secret", 1, async () => undefined, knowing("card-secret-1111 "));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
+
+  test("a secret with a space in it, inside a closed shadow root and spaced differently, gives no screenshot", async () => {
+    expect(await shotsOf("/closed-phrase", 1, async () => undefined, knowing("correct horse battery-42"))).toEqual([null]);
   }, 60_000);
 
   test("a closed shadow root without a secret keeps the screenshot", async () => {
