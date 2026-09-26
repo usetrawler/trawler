@@ -107,7 +107,7 @@ const SELECTOR_ENGINES = {
       if (shadowRoots.length === 0) return [];
       return [root, ...shadowRoots]
         .flatMap((tree) => [...tree.querySelectorAll("*")])
-        .filter((el) => shows(el) && !flatChildrenOf(el).some((child) => child.nodeType === Node.ELEMENT_NODE && shows(child)));
+        .filter((el) => !document.head?.contains(el) && shows(el) && !flatChildrenOf(el).some((child) => child.nodeType === Node.ELEMENT_NODE && shows(child)));
     },
   })`,
   [LINE_AROUND]: `({
@@ -179,7 +179,7 @@ const SELECTOR_ENGINES = {
   })`,
   [MOVING]: `({
     queryAll(root) {
-      const looksOnly = /^(opacity|color|background|boxShadow|textShadow|outline|border\\w*(Color|Radius)|fill|stroke|filter|visibility|caretColor|accentColor|textDecorationColor|columnRuleColor)/;
+      const looksOnly = /^(opacity|color|background|boxShadow|textShadow|outline|border\\w*(Color|Radius)|fill|stroke|filter|visibility|caretColor|accentColor|textDecorationColor|textEmphasisColor|columnRuleColor)/;
       const movesOnlyItself = /^(transform|translate|rotate|scale|offset(Path|Distance|Rotate|Anchor|Position)|top|right|bottom|left|inset\\w*)$/;
       const keyframeFields = new Set(["offset", "computedOffset", "easing", "composite"]);
       const up = (el) => el.parentElement ?? el.parentNode?.host;
@@ -190,14 +190,19 @@ const SELECTOR_ENGINES = {
       const drawsText = (target) => target === root || (!!target && flatTextOf(target).trim() !== "");
       const running = (animation) => animation.playState === "running" && animation.timeline instanceof DocumentTimeline && animation.effect?.getComputedTiming?.().progress != null;
       const propertiesOf = (animation) => (animation.effect?.getKeyframes?.() ?? []).flatMap((frame) => Object.keys(frame)).filter((key) => !keyframeFields.has(key));
+      const everywhere = [...document.getAnimations(), ...shadowRootsUnder(document).flatMap((shadow) => shadow.getAnimations())];
+      const inside = (target) => {
+        for (let el = target; el; el = layoutUp(el)) if (el === root) return true;
+        return false;
+      };
       for (let el = root; el; el = layoutUp(el)) {
-        const animations = el === root ? [...el.getAnimations({ subtree: true }), ...shadowRootsUnder(el).flatMap((shadow) => shadow.getAnimations())] : el.getAnimations({ subtree: true }).filter((a) => a.effect?.target === el);
+        const animations = el === root ? everywhere.filter((a) => a.effect?.target && inside(a.effect.target)) : el.getAnimations({ subtree: true }).filter((a) => a.effect?.target === el);
         for (const animation of animations) {
           const drawnOnly = animation.effect?.pseudoElement || (el === root && !drawsText(animation.effect?.target));
           if (!drawnOnly && running(animation) && propertiesOf(animation).some((key) => !looksOnly.test(key))) return [root];
         }
       }
-      const paintsOnly = /^(clipPath|backdropFilter|zIndex|transformOrigin|perspective\\w*|mask\\w*|borderImage\\w*|textDecoration\\w*|textUnderline\\w*|textEmphasis\\w*|objectPosition|objectFit|mixBlendMode|isolation|columnRule\\w*)$/;
+      const paintsOnly = /^(clipPath|backdropFilter|zIndex|transformOrigin|perspective\\w*|mask\\w*|borderImage\\w*|textDecoration\\w*|textUnderline\\w*|objectPosition|objectFit|mixBlendMode|isolation|columnRule\\w*)$/;
       const relayouts = (key) => !looksOnly.test(key) && !movesOnlyItself.test(key) && !paintsOnly.test(key);
       const around = new Set();
       for (let el = root; el; el = layoutUp(el)) around.add(el);
@@ -208,7 +213,6 @@ const SELECTOR_ENGINES = {
         for (let el = target; el && !around.has(el); el = layoutUp(el)) if (outOfFlow(el)) return false;
         return true;
       };
-      const everywhere = [...document.getAnimations(), ...shadowRootsUnder(document).flatMap((shadow) => shadow.getAnimations())];
       return everywhere.some((animation) => running(animation) && propertiesOf(animation).some(relayouts) && canPush(animation)) ? [root] : [];
     },
   })`,
@@ -223,6 +227,7 @@ const registerEngines = () =>
     ),
   ));
 const escapedForRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const CDP_TEXT_LIMIT = 10_000;
 type DomNode = {
   nodeType: number;
   nodeName: string;
@@ -252,10 +257,12 @@ function closedRootHides(root: DomNode, secrets: RegExp | null): boolean {
     .filter((node) => node.nodeType === 9)
     .some((document) => {
       let shown = "";
+      let cutShort = false;
       const closedParts: Array<[number, number]> = [];
       const read = (node: DomNode, closed: boolean) => {
         if (node.nodeType === 3) {
           if (closed) closedParts.push([shown.length, shown.length + node.nodeValue.length]);
+          cutShort ||= node.nodeValue.length > CDP_TEXT_LIMIT && node.nodeValue.endsWith("\u2026");
           shown += node.nodeValue;
         } else if (!/^(HEAD|SCRIPT|NOSCRIPT|STYLE)$/i.test(node.nodeName)) {
           for (const child of flatChildrenOf(node)) read(child, closed || child.shadowRootType === "closed");
@@ -263,6 +270,7 @@ function closedRootHides(root: DomNode, secrets: RegExp | null): boolean {
       };
       read(document, false);
       if (closedParts.length === 0) return false;
+      if (cutShort) return true;
       everyMatch.lastIndex = 0;
       for (let match = everyMatch.exec(shown); match; match = everyMatch.exec(shown)) {
         const [start, end] = [match.index, match.index + match[0].length];

@@ -317,6 +317,14 @@ beforeAll(async () => {
         return html(`<style>@keyframes glass{from{backdrop-filter:blur(0)}to{backdrop-filter:blur(4px)}} .glass{padding:8px;animation:glass 800ms linear infinite alternate}</style><div class="glass">Status</div><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><p>Plan: Team</p>`);
       case "/zindex-step":
         return html(`<style>@keyframes lift{from{z-index:1}to{z-index:5}} .tile{position:relative;animation:lift 400ms steps(2) infinite}</style><div class="tile">Tile</div><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><p>Plan: Team</p>`);
+      case "/title-secret":
+        return html(`<style>@keyframes load{from{width:10%}to{width:90%}} .bar{height:4px;background:#333;animation:load 1s linear infinite}</style><div class="bar"></div><plan-note></plan-note><p>Hello</p><script>document.title = "Inbox - card-secret-1111"; customElements.define("plan-note", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = "Plan: Team"; } });</script>`);
+      case "/emphasis-pusher":
+        return html(`<style>@keyframes marks{from{text-emphasis-style:none}to{text-emphasis-style:filled}} .note{font:20px/1 sans-serif;text-emphasis-position:under;animation:marks 20s steps(2) infinite}</style><p class="note">Heads up<br>Read this<br>Then this</p><p style="font:20px monospace;color:#ff0000">card-secret-1111</p>`);
+      case "/slotted-part-moving":
+        return html(`<style>@keyframes hop{to{transform:translateY(120px)}} .hop{display:inline-block;animation:hop 20s steps(2) infinite}</style><part-host style="display:block;font:20px monospace;color:#ff0000"><span class="hop">ret-1111</span></part-host><p>Plan: Team</p><script>customElements.define("part-host", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<div id="wrap">card-sec<slot></slot></div>'; } });</script>`);
+      case "/emphasis-tint":
+        return html(`<style>@keyframes tint{to{text-emphasis-color:#999}} .key{font:20px monospace;color:#ff0000;text-emphasis:filled #ccc;animation:tint 800ms linear infinite alternate}</style><p class="key">card-secret-1111</p><p>Plan: Team</p>`);
       case "/fixed-progress":
         return html(`<style>@keyframes load{from{width:0}to{width:100%}} .bar{position:fixed;top:0;left:0;height:4px;background:#333;animation:load 1s linear infinite}</style><div class="bar"></div><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><p>Plan: Team</p>`);
       case "/popover-growing":
@@ -352,6 +360,8 @@ beforeAll(async () => {
         return html(`<p style="font:20px monospace;color:#ff0000">correct  horse battery-42</p><p>Plan: Team</p>`);
       case "/closed-phrase":
         return html(closedCard("", "correct&nbsp;horse battery-42"));
+      case "/closed-long-text":
+        return html(closedCard("", `<p style="margin:0">${" ".repeat(10500)}card-secret-1111</p>`));
       case "/closed-password":
         return html(closedCard("", '<input aria-label="Password" type="password" value="closed-pass-1">'));
       case "/closed-typed":
@@ -1510,11 +1520,11 @@ describe("screenshots", () => {
     expect(await shotsOf("/pushing-before", 2, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null]);
   }, 60_000);
 
-  test.each(["/shadow-moving-part", "/nested-moving-part", "/moving-component", "/slotted-carried", "/slotted-carried-element"])("a secret part of which an animation moves inside a component gives no screenshot (%s)", async (path) => {
+  test.each(["/shadow-moving-part", "/nested-moving-part", "/moving-component", "/slotted-carried", "/slotted-carried-element", "/slotted-part-moving"])("a secret part of which an animation moves inside a component gives no screenshot (%s)", async (path) => {
     expect(await shotsOf(path, 2, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null]);
   }, 60_000);
 
-  test.each(["/sibling-pusher", "/pusher-elsewhere"])("a secret an animation elsewhere on the page can push gives no screenshot (%s)", async (path) => {
+  test.each(["/sibling-pusher", "/pusher-elsewhere", "/emphasis-pusher"])("a secret an animation elsewhere on the page can push gives no screenshot (%s)", async (path) => {
     expect(await shotsOf(path, 2, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null]);
   }, 60_000);
 
@@ -1529,13 +1539,13 @@ describe("screenshots", () => {
     expect(Buffer.compare(Buffer.from(shot.bytes), Buffer.from((await shotOf("/shadow-card-other")).bytes))).not.toBe(0);
   }, 60_000);
 
-  test.each(["/fixed-progress", "/popover-growing", "/shaking-sibling", "/animated-underline", "/svg-status-dot", "/clip-reveal", "/backdrop-pulse", "/zindex-step"])("an animation that cannot move the secret keeps the screenshot (%s)", async (path) => {
+  test.each(["/fixed-progress", "/popover-growing", "/shaking-sibling", "/animated-underline", "/svg-status-dot", "/clip-reveal", "/backdrop-pulse", "/zindex-step", "/emphasis-tint"])("an animation that cannot move the secret keeps the screenshot (%s)", async (path) => {
     const [shot] = await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"));
     expect(shot).not.toBeNull();
     expect(await redPixels(shot!)).toBe(0);
   }, 60_000);
 
-  test.each(["/closed-text", "/closed-groups", "/closed-split", "/closed-slotted", "/closed-slot-after", "/closed-slot-named", "/closed-slot-manual", "/closed-sibling-hosts", "/closed-after-light", "/closed-password", "/closed-typed", "/closed-in-frame"])("a secret or password field inside a closed shadow root gives no screenshot (%s)", async (path) => {
+  test.each(["/closed-text", "/closed-groups", "/closed-split", "/closed-slotted", "/closed-slot-after", "/closed-slot-named", "/closed-slot-manual", "/closed-sibling-hosts", "/closed-after-light", "/closed-password", "/closed-typed", "/closed-in-frame", "/closed-long-text"])("a secret or password field inside a closed shadow root gives no screenshot (%s)", async (path) => {
     expect(await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"))).toEqual([null]);
   }, 60_000);
 
@@ -1559,6 +1569,11 @@ describe("screenshots", () => {
 
   test("a secret with a space in it, inside a closed shadow root and spaced differently, gives no screenshot", async () => {
     expect(await shotsOf("/closed-phrase", 1, async () => undefined, knowing("correct horse battery-42"))).toEqual([null]);
+  }, 60_000);
+
+  test("a secret in the page's title, which a screen capture does not show, neither stops the screenshot nor blacks anything out", async () => {
+    const [shot] = await shotsOf("/title-secret", 1, async () => undefined, knowing("card-secret-1111"));
+    expect(shot).not.toBeNull();
   }, 60_000);
 
   test("a closed shadow root without a secret keeps the screenshot", async () => {
