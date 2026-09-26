@@ -95,6 +95,37 @@ export function createAuth(options: AuthOptions) {
     await db.deleteFrom("session").where("id", "=", session.id).execute();
     return null;
   };
+  const workspaceMembers = async (orgId: string): Promise<Array<{ id: string; userId: string; role: string; joinedAt: Date; name: string; email: string }>> =>
+    db
+      .selectFrom("member")
+      .innerJoin("user", "user.id", "member.userId")
+      .select(["member.id", "member.userId", "member.role", "member.createdAt as joinedAt", "user.name", "user.email"])
+      .where("member.organizationId", "=", orgId)
+      .orderBy("member.createdAt")
+      .orderBy("member.id")
+      .execute();
+  const pendingInvitations = async (orgId: string): Promise<Array<{ id: string; email: string; role: string; expiresAt: Date }>> =>
+    (
+      await db
+        .selectFrom("invitation")
+        .select(["id", "email", "role", "expiresAt"])
+        .where("organizationId", "=", orgId)
+        .where("status", "=", "pending")
+        .where("expiresAt", ">", new Date())
+        .orderBy("expiresAt")
+        .orderBy("id")
+        .execute()
+    ).map((row) => ({ ...row, role: row.role ?? "member" }));
+  const workspaceOfEmail = async (email: string): Promise<string | null> =>
+    (
+      await db
+        .selectFrom("user")
+        .innerJoin("member", "member.userId", "user.id")
+        .select("member.organizationId")
+        .where(sql<string>`lower(${sql.ref("user.email")})`, "=", email.trim().toLowerCase())
+        .orderBy("member.createdAt")
+        .executeTakeFirst()
+    )?.organizationId ?? null;
   const memberEmail = async (orgId: string, userId: string): Promise<string | null> => {
     const member = await db
       .selectFrom("member")
@@ -134,7 +165,7 @@ export function createAuth(options: AuthOptions) {
       },
     },
   });
-  return Object.assign(auth, { workspaceOf, memberEmail });
+  return Object.assign(auth, { workspaceOf, memberEmail, workspaceMembers, pendingInvitations, workspaceOfEmail });
 }
 
 export type Auth = ReturnType<typeof createAuth>;

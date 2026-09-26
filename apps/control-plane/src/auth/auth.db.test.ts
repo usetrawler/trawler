@@ -238,3 +238,98 @@ test("a link to Better Auth's workspace lookups cannot empty a session's workspa
   }
   expect(await activeOf(victim.id)).toEqual([{ active: victim.activeOrganizationId }]);
 });
+
+const orgOf = (s: unknown) => sessionOf(s).activeOrganizationId!;
+const call = (path: string, token: string, body: unknown) =>
+  auth.handler(new Request(`http://localhost:3000/api/auth/organization/${path}`, { method: "POST", headers: cookieFor(token), body: JSON.stringify(body) }));
+async function invited(org: string, inviterId: string, email: string, role = "member", status = "pending", expires = "now() + interval '1 day'") {
+  const id = `inv-${email}`;
+  await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values (${id}, ${org}, ${email}, ${role}, ${status}, ${sql.raw(expires)}, ${inviterId})`.execute(t.db);
+  return id;
+}
+async function joins(org: string, inviterId: string, email: string, role = "member") {
+  await invited(org, inviterId, email, role);
+  const person = await signIn(email, true, email.split("@")[0]!);
+  const row = (await sql<{ id: string }>`select id from member where "userId" = ${person.user.id} and "organizationId" = ${org}`.execute(t.db)).rows[0]!;
+  return { ...person, memberId: row.id, token: sessionOf(person.session).token };
+}
+const pendingIds = async (org: string) => (await sql<{ id: string }>`select id from invitation where "organizationId" = ${org} and status = 'pending'`.execute(t.db)).rows.map((r) => r.id);
+const memberRoles = async (org: string) => (await sql<{ email: string; role: string }>`select u.email, m.role from member m join "user" u on u.id = m."userId" where m."organizationId" = ${org} order by u.email`.execute(t.db)).rows;
+
+test("a workspace lists its own members, oldest first, and its own invitations that can still be used", async () => {
+  const a = await signIn("list-owner@acme.test", true, "Lina");
+  const org = orgOf(a.session);
+  await joins(org, a.user.id, "list-member@acme.test");
+  await invited(org, a.user.id, "list-waiting@acme.test", "admin");
+  await invited(org, a.user.id, "list-expired@acme.test", "member", "pending", "now() - interval '1 minute'");
+  await invited(org, a.user.id, "list-revoked@acme.test", "member", "canceled");
+  const b = await signIn("list-other@acme.test");
+  await invited(orgOf(b.session), b.user.id, "list-elsewhere@acme.test");
+  expect((await auth.workspaceMembers(org)).map((m) => [m.name, m.email, m.role])).toEqual([["Lina", "list-owner@acme.test", "owner"], ["list-member", "list-member@acme.test", "member"]]);
+  expect((await auth.pendingInvitations(org)).map((i) => [i.email, i.role])).toEqual([["list-waiting@acme.test", "admin"]]);
+});
+
+test("an address that already has a workspace is found whatever its case, and one without a workspace is not", async () => {
+  const a = await signIn("home-owner@acme.test");
+  expect(await auth.workspaceOfEmail("  HOME-Owner@acme.test ")).toBe(orgOf(a.session));
+  expect(await auth.workspaceOfEmail("nobody-yet@acme.test")).toBeNull();
+});
+
+test("an owner invites into their own workspace through Better Auth, and the invitation lasts a week", async () => {
+  const a = await signIn("week-owner@acme.test");
+  const res = await call("invite-member", sessionOf(a.session).token, { email: "Week-Guest@acme.test", role: "admin", organizationId: orgOf(a.session) });
+  expect(res.status).toBe(200);
+  const [row] = (await sql<{ email: string; role: string; days: number }>`select email, role, extract(epoch from ("expiresAt" - now())) / 86400 as days from invitation where "organizationId" = ${orgOf(a.session)}`.execute(t.db)).rows;
+  expect(row).toMatchObject({ email: "week-guest@acme.test", role: "admin" });
+  expect(Number(row!.days)).toBeGreaterThan(6.9);
+  expect(Number(row!.days)).toBeLessThan(7.001);
+});
+
+test("an owner can never remove, re-role, revoke or invite in another workspace, whichever workspace the request names", async () => {
+  const a = await signIn("iso-owner-a@acme.test");
+  const tokenA = sessionOf(a.session).token;
+  const b = await signIn("iso-owner-b@acme.test");
+  const orgA = orgOf(a.session);
+  const orgB = orgOf(b.session);
+  const lee = await joins(orgB, b.user.id, "iso-lee@acme.test");
+  const waiting = await invited(orgB, b.user.id, "iso-waiting@acme.test");
+  for (const org of [orgB, orgA]) {
+    expect((await call("remove-member", tokenA, { memberIdOrEmail: lee.memberId, organizationId: org })).status).not.toBe(200);
+    expect((await call("update-member-role", tokenA, { memberId: lee.memberId, role: "admin", organizationId: org })).status).not.toBe(200);
+  }
+  expect((await call("cancel-invitation", tokenA, { invitationId: waiting })).status).not.toBe(200);
+  expect((await call("invite-member", tokenA, { email: "iso-sneak@acme.test", role: "member", organizationId: orgB })).status).not.toBe(200);
+  expect(await memberRoles(orgB)).toEqual([{ email: "iso-lee@acme.test", role: "member" }, { email: "iso-owner-b@acme.test", role: "owner" }]);
+  expect(await pendingIds(orgB)).toEqual([waiting]);
+});
+
+test("only owners and admins change who is in a workspace; an admin cannot touch an owner, and the last owner stays", async () => {
+  const owner = await signIn("perm-owner@acme.test");
+  const org = orgOf(owner.session);
+  const ownerMember = (await sql<{ id: string }>`select id from member where "userId" = ${owner.user.id}`.execute(t.db)).rows[0]!.id;
+  const admin = await joins(org, owner.user.id, "perm-admin@acme.test", "admin");
+  const plain = await joins(org, owner.user.id, "perm-plain@acme.test");
+  const other = await joins(org, owner.user.id, "perm-other@acme.test");
+  expect((await call("invite-member", plain.token, { email: "perm-new@acme.test", role: "member", organizationId: org })).status).not.toBe(200);
+  expect((await call("remove-member", plain.token, { memberIdOrEmail: other.memberId, organizationId: org })).status).not.toBe(200);
+  expect((await call("update-member-role", plain.token, { memberId: other.memberId, role: "admin", organizationId: org })).status).not.toBe(200);
+  expect((await call("remove-member", admin.token, { memberIdOrEmail: ownerMember, organizationId: org })).status).not.toBe(200);
+  expect((await call("update-member-role", admin.token, { memberId: ownerMember, role: "member", organizationId: org })).status).not.toBe(200);
+  expect((await call("remove-member", sessionOf(owner.session).token, { memberIdOrEmail: ownerMember, organizationId: org })).status).not.toBe(200);
+  expect((await call("update-member-role", admin.token, { memberId: other.memberId, role: "admin", organizationId: org })).status).toBe(200);
+  expect((await call("remove-member", admin.token, { memberIdOrEmail: plain.memberId, organizationId: org })).status).toBe(200);
+  expect(await memberRoles(org)).toEqual([{ email: "perm-admin@acme.test", role: "admin" }, { email: "perm-other@acme.test", role: "admin" }, { email: "perm-owner@acme.test", role: "owner" }]);
+});
+
+test("a revoked or expired invitation does not join; the address gets a workspace of its own", async () => {
+  const owner = await signIn("stale-owner@acme.test");
+  const org = orgOf(owner.session);
+  const revoked = await invited(org, owner.user.id, "stale-revoked@acme.test");
+  expect((await call("cancel-invitation", sessionOf(owner.session).token, { invitationId: revoked })).status).toBe(200);
+  await invited(org, owner.user.id, "stale-expired@acme.test", "member", "pending", "now() - interval '1 minute'");
+  for (const email of ["stale-revoked@acme.test", "stale-expired@acme.test"]) {
+    const person = await signIn(email);
+    expect(orgOf(person.session)).not.toBe(org);
+  }
+  expect(await memberRoles(org)).toEqual([{ email: "stale-owner@acme.test", role: "owner" }]);
+});

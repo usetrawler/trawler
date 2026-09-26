@@ -14,6 +14,7 @@ export const organizationPlugin = () =>
     allowUserToCreateOrganization: false,
     disableOrganizationDeletion: true,
     requireEmailVerificationOnInvitation: true,
+    invitationExpiresIn: 7 * 24 * 60 * 60,
     organizationHooks: {
       beforeUpdateOrganization: async ({ organization: changes }) => {
         if (changes.slug !== undefined && !/^[a-z0-9-]{1,48}$/.test(changes.slug)) refuse("workspace addresses use lowercase letters, digits and dashes, up to 48 characters");
