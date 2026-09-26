@@ -7,19 +7,22 @@ const react = vi.hoisted(() => ({
   refs: [] as Ref[],
   deps: [] as Array<unknown[] | undefined>,
   dispatched: [] as unknown[],
+  served: [] as unknown[],
 }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
   useReducer: () => [react.panel, (event: unknown) => { react.dispatched.push(event); }],
-  useActionState: () => [react.results.shift() ?? {}, () => {}, false],
+  useActionState: (serve: unknown) => { react.served.push(serve); return [react.results.shift() ?? {}, () => {}, false]; },
   useEffect: (effect: () => void, deps?: unknown[]) => { react.deps.push(deps); effect(); },
   useRef: () => react.refs.shift() ?? { current: null },
   useState: (initial: unknown) => [initial, () => {}],
   useId: () => "key",
 }));
-vi.mock("./actions.ts", () => ({ renameWorkspaceAction: async () => ({}), replaceModelKeyAction: async () => ({}), removeModelKeyAction: async () => ({}) }));
+const actions = vi.hoisted(() => ({ renameWorkspaceAction: vi.fn(), replaceModelKeyAction: vi.fn(), removeModelKeyAction: vi.fn() }));
+vi.mock("./actions.ts", () => actions);
 
-const { ModelKey, RemoveForm, ReplaceForm } = await import("./model-key.tsx");
+const { ModelKey, RemoveForm, removeKey, ReplaceForm, saveKey } = await import("./model-key.tsx");
+const { UnrecognizedActionError } = await import("next/dist/client/components/unrecognized-action-error.js");
 const { KeyFields } = await import("../../components/key-fields.tsx");
 const saved = { provider: "openrouter" as const, hint: "…a1b2", baseUrl: null, addedAt: "2026-09-25T18:50:00.000Z" };
 const focusable = () => ({ current: { focus: vi.fn() } });
@@ -44,6 +47,9 @@ beforeEach(() => {
   react.refs = [];
   react.deps = [];
   react.dispatched = [];
+  react.served = [];
+  actions.replaceModelKeyAction.mockReset();
+  actions.removeModelKeyAction.mockReset();
 });
 
 test("a saved key's answer takes the panel back to Replace and says so", () => {
@@ -142,4 +148,25 @@ test("while a check runs, picking another provider changes nothing; once it is o
   expect(chose).not.toHaveBeenCalled();
   pick(false);
   expect(chose).toHaveBeenCalledExactlyOnceWith("openai");
+});
+
+test("saving and removing the key go through the steps that turn an update into a message, and the server's answers are shown as they came", async () => {
+  draw({}, {});
+  expect(react.served).toEqual([saveKey, removeKey]);
+  actions.replaceModelKeyAction.mockResolvedValue({ saved: true, unchecked: false });
+  expect(await saveKey({}, new FormData())).toEqual({ saved: true, unchecked: false });
+  actions.removeModelKeyAction.mockResolvedValue({ saved: true, stoppedRuns: 2 });
+  expect(await removeKey({}, new FormData())).toEqual({ saved: true, stoppedRuns: 2 });
+});
+
+test("a key saved or removed from a page left open across an update is told to reload; any other failure goes on as before", async () => {
+  actions.replaceModelKeyAction.mockRejectedValue(new UnrecognizedActionError("Server action not found."));
+  expect(await saveKey({}, new FormData())).toEqual({ error: "Trawler was updated since this page opened. Reload the page to save the key." });
+  actions.removeModelKeyAction.mockRejectedValue(new UnrecognizedActionError("Server action not found."));
+  expect(await removeKey({}, new FormData())).toEqual({ error: "Trawler was updated since this page opened. Reload the page to remove the key." });
+  const failure = new TypeError("Failed to fetch");
+  actions.replaceModelKeyAction.mockRejectedValue(failure);
+  await expect(saveKey({}, new FormData())).rejects.toBe(failure);
+  actions.removeModelKeyAction.mockRejectedValue(failure);
+  await expect(removeKey({}, new FormData())).rejects.toBe(failure);
 });

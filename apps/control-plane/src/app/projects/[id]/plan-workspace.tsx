@@ -2,6 +2,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { MAX_GOALS, MAX_PERSONAS, type Goal, type Persona } from "@usetrawler/protocol";
 import type { KeyHint } from "../../../credentials/credentials.ts";
+import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { addAccountAction, removeAccountAction, savePlanAction, type AccountView } from "./plan-actions.ts";
 import { StartRun } from "./start-run.tsx";
 
@@ -25,9 +26,11 @@ function RemoveButton({ label, onClick, disabled }: { label: string; onClick: ()
   return <button type="button" aria-label={label} title={label} onClick={onClick} disabled={disabled} className="h-9 w-9 shrink-0 text-muted hover:text-bad disabled:opacity-40">×</button>;
 }
 
+const outdated = (toDo: string) => (err: unknown) => ({ ok: false as const, error: updatedSinceOpened(err, toDo) });
+
 const WITHOUT_ACCOUNT = "People without a test account sign up the way a new user would, if your product lets them, with an example.com address and a password Trawler makes up. They cannot receive email yet.";
 
-function Accounts({ projectId, accounts, anyoneWithout, onChange }: { projectId: string; accounts: AccountView[]; anyoneWithout: boolean; onChange: (accounts: AccountView[], removed?: string) => void }) {
+export function Accounts({ projectId, accounts, anyoneWithout, onChange }: { projectId: string; accounts: AccountView[]; anyoneWithout: boolean; onChange: (accounts: AccountView[], removed?: string) => void }) {
   const [open, setOpen] = useState(accounts.length > 0);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -52,7 +55,7 @@ function Accounts({ projectId, accounts, anyoneWithout, onChange }: { projectId:
               <span className="flex items-center gap-3">
                 <span className="font-mono text-xs text-muted">password {a.hint}</span>
                 <RemoveButton label={`Remove ${a.username}`} disabled={pending} onClick={() => start(async () => {
-                  const res = await removeAccountAction(projectId, a.ref);
+                  const res = await removeAccountAction(projectId, a.ref).catch(outdated("remove the account"));
                   if (!res.ok) return setError(res.error);
                   setError(null);
                   onChange(res.accounts, a.ref);
@@ -67,7 +70,7 @@ function Accounts({ projectId, accounts, anyoneWithout, onChange }: { projectId:
         onSubmit={(e) => {
           e.preventDefault();
           start(async () => {
-            const res = await addAccountAction(projectId, { username, password });
+            const res = await addAccountAction(projectId, { username, password }).catch(outdated("add the account"));
             if (!res.ok) return setError(res.error);
             setError(null);
             setUsername("");
@@ -107,7 +110,7 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
   const updateGoal = (i: number, instruction: string) => setGoals((list) => list.map((g, j) => (j === i ? { ...g, instruction } : g)));
   const save = () => startSaving(async () => {
     const plan = { personas, goals };
-    const res = await savePlanAction(projectId, plan);
+    const res = await savePlanAction(projectId, plan).catch(outdated("save the plan"));
     if (!res.ok) {
       if ("accounts" in res) setAccounts(res.accounts);
       return setError(res.error);

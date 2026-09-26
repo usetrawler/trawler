@@ -1,7 +1,16 @@
 "use client";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
+import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { startSetup, type SetupState } from "./actions.ts";
+
+export async function analyseProduct(previous: SetupState, form: FormData): Promise<SetupState> {
+  try {
+    return await startSetup(previous, form);
+  } catch (err) {
+    return { error: updatedSinceOpened(err, "analyse the product"), url: String(form.get("url") ?? ""), focus: String(form.get("focus") ?? "") };
+  }
+}
 
 function Submit() {
   const { pending } = useFormStatus();
@@ -25,7 +34,7 @@ function Progress() {
 }
 
 export function NewProjectForm() {
-  const [state, action] = useActionState<SetupState, FormData>(startSetup, {});
+  const [state, action] = useActionState<SetupState, FormData>(analyseProduct, {});
   return (
     <form action={action} className="flex flex-col gap-6">
       <label className="flex flex-col gap-2">
