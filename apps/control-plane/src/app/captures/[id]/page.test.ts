@@ -45,7 +45,7 @@ test("a capture the member's workspace does not have is not found", async () => 
   expect(state.shells).toEqual([]);
 });
 
-test("a capture opens full size at an address that stays valid, under its finding's title, leading back to its run and project", async () => {
+test("a capture opens at an address that stays valid, under its finding's title, leading back to its run and project, and offers the original at full size", async () => {
   state.member = member;
   state.capture = capture;
   const html = renderToStaticMarkup(await open());
@@ -53,8 +53,10 @@ test("a capture opens full size at an address that stays valid, under its findin
   expect(crumbs).toMatch(new RegExp(`<a href="/projects/p1"[^>]*>Acme</a>.*<a href="/runs/${RUN}"[^>]*>Run 0017</a>.*<li aria-current="page"[^>]*>Screen capture</li>`));
   expect(html).toMatch(/<h1[^>]*>Saving fails<\/h1>/);
   expect(html).toContain(">Screen capture · when reported</p>");
-  expect(html).toContain(`<img src="/api/artifacts/${ID}" alt="The page when “Saving fails” was reported" width="1280" height="720"`);
-  expect(html).toContain(">Password fields are blacked out in screen captures.</p>");
+  expect(html).toMatch(new RegExp(`<img src="/api/artifacts/${ID}" alt="The page when “Saving fails” was reported" width="1280" height="720" class="[^"]*\\bmax-w-\\[1280px\\][^"]*"`));
+  expect(html).not.toContain("max-w-3xl");
+  expect(html).toContain(">Passwords and other secrets are blacked out in screen captures.</span>");
+  expect(html).toMatch(new RegExp(`<a href="/api/artifacts/${ID}" target="_blank" rel="noreferrer"[^>]*>Open the original \\(1280 × 720\\)<span aria-hidden="true"> ↗</span><span class="sr-only"> \\(opens in a new tab\\)</span></a>`));
   expect(state.shells).toEqual([member]);
 });
 

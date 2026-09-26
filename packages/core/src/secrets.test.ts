@@ -152,6 +152,16 @@ describe("SecretScrubber masking", () => {
     const odd = new (class { toString(): string { throw new Error("no"); } })();
     expect(s.scrub(odd)).toBe("[unserialisable]");
   });
+  test("a secret the browser never holds is scrubbed like any other but is kept out of what the browser is given to look for", () => {
+    const s = new SecretScrubber();
+    s.add("page-password-1");
+    s.add("runner-token-1", { reachesBrowser: false });
+    expect(s.scrub("page-password-1 runner-token-1")).toBe("••• •••");
+    expect(s.browserNeedles()).toContain("page-password-1");
+    expect(s.browserNeedles()).toContain(encodeURIComponent("page-password-1"));
+    expect(s.browserNeedles().some((n) => n.includes("runner-token"))).toBe(false);
+  });
+
   test("buffers and other objects are scrubbed as text", () => {
     const s = new SecretScrubber();
     s.add("hunter22");

@@ -159,6 +159,7 @@ class JobEvents {
 
 class Screenshots {
   #pending: Promise<void>[] = [];
+  #uploading = 0;
   #stopped = false;
   #dropped = new AbortController();
 
@@ -166,9 +167,12 @@ class Screenshots {
 
   keep = (findingId: string, shot: Screenshot) => {
     if (this.#stopped) return;
-    this.#pending.push(this.#upload(findingId, shot).catch((err: unknown) => {
-      if (!this.#stopped) this.warn(`the screenshot of ${findingId} could not be uploaded: ${described(err)}`);
-    }));
+    this.#uploading++;
+    this.#pending.push(this.#upload(findingId, shot)
+      .catch((err: unknown) => {
+        if (!this.#stopped) this.warn(`the screenshot of ${findingId} could not be uploaded: ${described(err)}`);
+      })
+      .finally(() => this.#uploading--));
   };
 
   stop() {
@@ -198,13 +202,20 @@ class Screenshots {
       }
       const wait = (this.deps.retryBaseMs ?? 500) * 2 ** i * (0.5 + Math.random());
       if (i === UPLOAD_ATTEMPTS - 1 || Date.now() - started + wait > (this.deps.uploadWaitMs ?? UPLOAD_WAIT_MS)) break;
-      await pause(wait);
+      await pause(wait, this.#dropped.signal);
     }
     throw last instanceof Error ? last : new Error(String(last));
   }
 
-  async settled(signal?: AbortSignal): Promise<void> {
-    await Promise.race([Promise.all(this.#pending), pause(this.deps.uploadWaitMs ?? UPLOAD_WAIT_MS, signal)]);
+  async finish(signal?: AbortSignal): Promise<void> {
+    const waited = new AbortController();
+    try {
+      await Promise.race([Promise.all(this.#pending), pause(this.deps.uploadWaitMs ?? UPLOAD_WAIT_MS, AbortSignal.any([waited.signal, ...(signal ? [signal] : [])]))]);
+    } finally {
+      waited.abort();
+    }
+    if (this.#uploading > 0) this.warn(`${this.#uploading} screenshot${this.#uploading === 1 ? " was" : "s were"} still uploading when the job finished, so ${this.#uploading === 1 ? "it was" : "they were"} dropped`);
+    this.stop();
   }
 }
 
@@ -255,7 +266,7 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
 
 function withRunnerSecrets(deps: WorkerDeps, scrubber: SecretScrubber): SecretScrubber {
   for (const secret of [deps.runnerToken, ...(deps.secrets ?? [])]) {
-    if (secret.length >= MIN_SECRET_LENGTH) scrubber.add(secret);
+    if (secret.length >= MIN_SECRET_LENGTH) scrubber.add(secret, { reachesBrowser: false });
   }
   return scrubber;
 }
@@ -312,8 +323,11 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
   note(`${job.kind} ${job.jobId} started`);
   const budget = new Budget(Math.max(job.budgetUsd, 1e-6));
   if (job.budgetUsd <= 0) budget.add(1e-6);
-  const events = new JobEvents(deps, job, () => budget.add(budget.limitUsd));
   const screenshots = new Screenshots(deps, job, warn);
+  const events = new JobEvents(deps, job, () => {
+    screenshots.stop();
+    budget.add(budget.limitUsd);
+  });
   let released: Promise<boolean> | undefined;
   const handOver = () => {
     screenshots.stop();
@@ -322,7 +336,8 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
       .catch(() => false);
     budget.add(budget.limitUsd);
   };
-  signal?.addEventListener("abort", handOver, { once: true });
+  if (signal?.aborted) handOver();
+  else signal?.addEventListener("abort", handOver, { once: true });
   let completion: JobCompletion;
   try {
     completion = await run(deps, job, events, budget, scrubber, screenshots);
@@ -338,7 +353,7 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
     else fail(`${job.kind} ${job.jobId} could not be handed back; it will be retried when its lease expires`);
     return "done";
   }
-  await screenshots.settled(signal);
+  await screenshots.finish(signal);
   events.stop();
   await events.flush();
   if (events.failure) {

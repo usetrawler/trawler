@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { chromium, type Browser as PlaywrightBrowser } from "playwright";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { BROWSER_TOOLS, openBrowser, type Browser, type Screenshot } from "./browser.ts";
 import { SecretScrubber } from "./secrets.ts";
@@ -19,6 +20,22 @@ let foreignOrigin = "";
 const seen: Record<string, IncomingMessage["headers"]> = {};
 const foreignHits: string[] = [];
 const signups: Array<{ email: string | null; password: string | null; confirm: string | null }> = [];
+
+const MOTIONS: Record<string, string> = {
+  keyframes: `echo.className = "fly"`,
+  waapi: `echo.animate([{ transform: "translateY(0)" }, { transform: "translateY(300px)" }], { duration: 200, iterations: Infinity, direction: "alternate" })`,
+  transition: `echo.style.transition = "transform .2s linear"; let low = false; const flip = () => { low = !low; echo.style.transform = low ? "translateY(300px)" : "translateY(0)"; }; flip(); setInterval(flip, 200)`,
+  "frame-clock": `const t0 = performance.now(); const step = (t) => { echo.style.transform = "translateY(" + (150 + 150 * Math.sin((t - t0) / 30)) + "px)"; requestAnimationFrame(step); }; requestAnimationFrame(step)`,
+  "wall-clock": `const t0 = performance.now(); const step = () => { echo.style.transform = "translateY(" + (150 + 150 * Math.sin((performance.now() - t0) / 30)) + "px)"; requestAnimationFrame(step); }; requestAnimationFrame(step)`,
+};
+
+function moving(motion: string): string {
+  return `<style>body{margin:0;font:20px monospace} #echo{position:absolute;top:80px;left:20px;margin:0;color:#ff0000} @keyframes fly{from{transform:translateY(0)}to{transform:translateY(300px)}} .fly{animation:fly .2s linear infinite alternate}</style><input aria-label="Password" type="password" oninput="document.getElementById('echo').textContent = this.value"><button onclick="const echo = document.getElementById('echo'); ${MOTIONS[motion]!.replace(/"/g, "&quot;")}">Move</button><p id="echo"></p>`;
+}
+
+function card(c: { heading: string; name: string; secret: string }): string {
+  return `<div style="font:20px sans-serif;padding:16px;border:1px solid #999;width:640px"><h2>${c.heading}</h2><span>Password: </span><span style="color:#ff0000">${c.secret}</span><p>Plan: Team</p><label>Name <input aria-label="Name" value="${c.name}"></label></div>`;
+}
 
 function listen(s: Server): Promise<string> {
   return new Promise((r) => s.listen(0, "127.0.0.1", () => {
@@ -135,6 +152,8 @@ beforeAll(async () => {
         return html(`<h1>Invoice 2002</h1>`);
       case "/frame-remount":
         return html(`<iframe src="/remount" style="width:640px;height:160px;border:0"></iframe>`);
+      case "/echo-upper":
+        return html(`<input aria-label="Password" type="password" oninput="document.getElementById('echo').textContent = this.value.toUpperCase()"><p>Saved as <b id="echo"></b> for you.</p>`);
       case "/echo-inline":
         return html(`<input aria-label="Password" type="password" oninput="document.getElementById('echo').textContent = this.value"><p>You typed <b id="echo"></b> just now.</p>`);
       case "/echo-encoded-a":
@@ -151,6 +170,28 @@ beforeAll(async () => {
         return html(`<input aria-label="Password" type="password"><button onclick="const p = document.querySelector('input'); p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value">Swap</button><p id="echo"></p>`);
       case "/reveal-clear":
         return html(`<input aria-label="Password" type="password"><button onclick="const o=document.querySelector('input');const n=document.createElement('input');n.type='text';n.setAttribute('aria-label','Password');n.value=o.value;o.replaceWith(n)">Show password</button><button onclick="document.querySelector('input').value=''">Clear</button>`);
+      case "/moving-keyframes":
+      case "/moving-waapi":
+      case "/moving-transition":
+      case "/moving-frame-clock":
+      case "/moving-wall-clock":
+        return html(moving(req.url.slice("/moving-".length)));
+      case "/churn":
+        return html(`<div id="top" style="height:30px"></div><input aria-label="Other" style="width:200px"><input aria-label="Password" type="password"><button onclick="const o = document.querySelector('input[type=password]'); const n = document.createElement('input'); n.setAttribute('aria-label', 'Password'); n.style.cssText = 'width:600px;font:20px monospace;color:#ff0000'; n.value = o.value; o.replaceWith(n); setInterval(() => { const top = document.getElementById('top'); if (top.firstChild) top.firstChild.remove(); else top.append(document.createElement('input')); }, 4)">Show password</button>`);
+      case "/hidden-value":
+        return html(`<input aria-label="Password" type="password"><button onclick="const o = document.querySelector('input'); const n = document.createElement('input'); n.setAttribute('aria-label', 'Password'); n.style.cssText = 'width:600px;font:20px monospace'; n.value = o.value; o.replaceWith(n); Object.defineProperty(n, 'value', { get: () => '' })">Show password</button>`);
+      case "/card":
+        return html(card({ heading: "Account settings", name: "Ana", secret: "card-secret-1111" }));
+      case "/card-other-heading":
+        return html(card({ heading: "Billing overview", name: "Ana", secret: "card-secret-1111" }));
+      case "/card-other-field":
+        return html(card({ heading: "Account settings", name: "Bea", secret: "card-secret-1111" }));
+      case "/boxes-refused":
+        return html(`<p>Your key is card-secret-1111</p><script>Element.prototype.getBoundingClientRect = () => { throw new Error("no boxes here"); };</script>`);
+      case "/frames-keep-coming":
+        return html(`<p>Frames</p><script>let n = 0; const add = () => { const f = document.createElement("iframe"); f.style.cssText = "width:300px;height:40px;border:0"; f.srcdoc = '<p style="margin:0;font:20px monospace;color:#ff0000">card-secret-1111</p>'; document.body.append(f); if (++n < 60) setTimeout(add, 25); }; add();</script>`);
+      case "/held-animation":
+        return html(`<style>@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}} #spinner{width:20px;height:20px;background:#333;animation:spin 1s linear infinite} #spinner.hold{animation-play-state:paused}</style><div id="spinner"></div><button onclick="const a = document.getAnimations()[0]; const before = a.currentTime; setTimeout(() => document.getElementById('state').textContent = a.currentTime > before ? 'spinning' : 'still', 150)">Check</button><button onclick="document.getElementById('spinner').classList.add('hold'); setTimeout(() => document.getElementById('state').textContent = 'held: ' + document.getAnimations()[0].playState, 50)">Hold</button><p id="state">unknown</p>`);
       case "/visible-password-a":
         return html(`<input aria-label="Password" type="password" value="short-pw-1">`);
       case "/visible-password-b":
@@ -877,6 +918,51 @@ describe("context", () => {
 
 describe("screenshots", () => {
   const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  let decoder: PlaywrightBrowser;
+  beforeAll(async () => {
+    decoder = await chromium.launch();
+  });
+  afterAll(() => decoder.close());
+
+  async function redPixels(shot: Screenshot): Promise<number> {
+    const page = await decoder.newPage();
+    try {
+      return await page.evaluate(async (png) => {
+        const image = await createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob());
+        const canvas = new OffscreenCanvas(image.width, image.height);
+        const context = canvas.getContext("2d")!;
+        context.drawImage(image, 0, 0);
+        const data = context.getImageData(0, 0, image.width, image.height).data;
+        let red = 0;
+        for (let i = 0; i < data.length; i += 4) if (data[i]! > 200 && data[i + 1]! < 80 && data[i + 2]! < 80) red++;
+        return red;
+      }, Buffer.from(shot.bytes).toString("base64"));
+    } finally {
+      await page.close();
+    }
+  }
+
+  async function shotsOf(path: string, count: number, setUp: (b: Browser, snap: string) => Promise<unknown>, extra: Partial<Parameters<typeof openBrowser>[0]> = {}): Promise<Array<Screenshot | null>> {
+    const shots: Array<Screenshot | null> = [];
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}${path}`);
+      await setUp(b, await snapshot(b));
+      for (let i = 0; i < count; i++) shots.push(await b.screenshot());
+    }, extra);
+    return shots;
+  }
+
+  const typeAndClick = (button: string) => async (b: Browser, snap: string) => {
+    expect(await b.fillField(refOf(snap, "Password"), "moving-secret-1", "password")).toBe("typed the password");
+    await b.tools.browser_click!.execute!({ target: refOf(snap, button), element: button }, ctx);
+    await new Promise((r) => setTimeout(r, 100));
+  };
+
+  const knowing = (secret: string) => {
+    const scrubber = new SecretScrubber();
+    scrubber.add(secret);
+    return { scrubber };
+  };
 
   async function screenshotAfter(password: string, path: string, then: (b: Browser, snap: string) => Promise<unknown>): Promise<Screenshot> {
     const taken: { shot: Screenshot | null } = { shot: null };
@@ -1020,6 +1106,12 @@ describe("screenshots", () => {
     expect(Buffer.compare(Buffer.from(first.bytes), Buffer.from(second.bytes))).toBe(0);
   }, 120_000);
 
+  test("a password the page repeats in capitals is masked too", async () => {
+    const first = await screenshotAfter("first-secret-1", "/echo-upper", async () => undefined);
+    const second = await screenshotAfter("other-secret-2", "/echo-upper", async () => undefined);
+    expect(Buffer.compare(Buffer.from(first.bytes), Buffer.from(second.bytes))).toBe(0);
+  }, 120_000);
+
   test("a secret the run knows is masked in the forms a page shows it in, such as URL encoding", async () => {
     const shotOf = async (path: string, secret: string) => {
       const scrubber = new SecretScrubber();
@@ -1057,6 +1149,82 @@ describe("screenshots", () => {
       await b.tools.browser_handle_dialog!.execute!({ accept: false }, ctx);
     });
   }, 60_000);
+
+  test.each([
+    ["keyframes", "a CSS animation"],
+    ["waapi", "a script's Web Animation"],
+    ["transition", "CSS transitions"],
+    ["frame-clock", "a script timed by the frame clock"],
+  ])("a password on an element moved by %s (%s) is still masked, because the page holds still for the capture", async (motion) => {
+    const shots = await shotsOf(`/moving-${motion}`, 4, typeAndClick("Move"));
+    expect(shots.every((shot) => shot !== null)).toBe(true);
+    expect(await Promise.all(shots.map((shot) => redPixels(shot!)))).toEqual([0, 0, 0, 0]);
+  }, 120_000);
+
+  test("a password on an element a script moves by the wall clock gives no screenshot rather than one the masks may miss", async () => {
+    expect(await shotsOf("/moving-wall-clock", 3, typeAndClick("Move"))).toEqual([null, null, null]);
+  }, 120_000);
+
+  test("after a screenshot the page's animations run on and still obey the page's own styles", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/held-animation`);
+      expect(await b.screenshot()).not.toBeNull();
+      const snap = await snapshot(b);
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Check"), element: "check" }, ctx);
+      await new Promise((r) => setTimeout(r, 400));
+      expect(await snapshot(b)).toContain("spinning");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Hold"), element: "hold" }, ctx);
+      await new Promise((r) => setTimeout(r, 300));
+      expect(await snapshot(b)).toContain("held: paused");
+    });
+  }, 60_000);
+
+  test("a password shown in a field stays masked while the page keeps adding and removing fields above it", async () => {
+    const shots = await shotsOf("/churn", 6, async (b, snap) => {
+      expect(await b.fillField(refOf(snap, "Password"), "churn-secret-1", "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Show password"), element: "show" }, ctx);
+    });
+    const taken = shots.filter((shot): shot is Screenshot => shot !== null);
+    expect(taken.length).toBeGreaterThan(0);
+    expect(await Promise.all(taken.map(redPixels))).toEqual(taken.map(() => 0));
+  }, 120_000);
+
+  test("a password shown in a field is masked even when the page hides the field's value from its own scripts", async () => {
+    const shotAfter = async (password: string) => {
+      const [shot] = await shotsOf("/hidden-value", 1, async (b, snap) => {
+        expect(await b.fillField(refOf(snap, "Password"), password, "password")).toBe("typed the password");
+        await b.tools.browser_click!.execute!({ target: refOf(snap, "Show password"), element: "show" }, ctx);
+      });
+      return Buffer.from(shot?.bytes ?? []);
+    };
+    const first = await shotAfter("hidden-secret-1");
+    expect(first.byteLength).toBeGreaterThan(0);
+    expect(Buffer.compare(first, await shotAfter("hidden-secret-2"))).toBe(0);
+  }, 120_000);
+
+  test("a secret inside a larger block is masked on its own: the heading and the field next to it stay in the picture", async () => {
+    const shotOf = async (path: string) => (await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111")))[0]!;
+    const base = await shotOf("/card");
+    expect(await redPixels(base)).toBe(0);
+    expect(Buffer.compare(Buffer.from(base.bytes), Buffer.from((await shotOf("/card-other-heading")).bytes))).not.toBe(0);
+    expect(Buffer.compare(Buffer.from(base.bytes), Buffer.from((await shotOf("/card-other-field")).bytes))).not.toBe(0);
+  }, 120_000);
+
+  test("when the page will not say where its secrets are, no screenshot is taken", async () => {
+    expect(await shotsOf("/boxes-refused", 1, async () => undefined, knowing("card-secret-1111"))).toEqual([null]);
+  }, 60_000);
+
+  test("frames that appear while the screenshot is taken never show a secret unmasked, and once they stop coming every one is masked", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/frames-keep-coming`);
+      const coming = [await b.screenshot(), await b.screenshot(), await b.screenshot()].filter((shot): shot is Screenshot => shot !== null);
+      expect(await Promise.all(coming.map(redPixels))).toEqual(coming.map(() => 0));
+      await new Promise((r) => setTimeout(r, 2_500));
+      const settled = await b.screenshot();
+      expect(settled).not.toBeNull();
+      expect(await redPixels(settled!)).toBe(0);
+    }, knowing("card-secret-1111"));
+  }, 120_000);
 
   test("an ordinary page gives a PNG of what is on screen", async () => {
     await withBrowser(async (b) => {

@@ -19,7 +19,7 @@ afterEach(() => new Promise<void>((r) => (server ? (server.closeAllConnections()
 
 type Upload = { url: string | undefined; auth: string | undefined; type: string | undefined; protocol: string | undefined; bytes: Buffer };
 
-function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; failEvents?: number; eventsStatus?: number; eventsBody?: string; completeStatus?: number; completeBody?: string; uploadStatuses?: number[]; uploadsHang?: boolean; uploadDelayMs?: number; uploadResets?: number } = {}) {
+function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; cancelOnFinding?: boolean; failEvents?: number; eventsStatus?: number; eventsBody?: string; completeStatus?: number; completeBody?: string; uploadStatuses?: number[]; uploadsHang?: boolean; uploadDelayMs?: number; uploadResets?: number } = {}) {
   const seen = { claims: 0, events: [] as Array<{ seq: number; type: string }>, completions: [] as unknown[], releases: 0, headers: [] as Array<string | undefined>, auth: [] as Array<string | undefined>, uploads: [] as Upload[], order: [] as string[] };
   let batches = 0;
   let failures = opts.failEvents ?? 0;
@@ -52,7 +52,7 @@ function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; failEvents
       if (failures-- > 0) { res.statusCode = opts.eventsStatus ?? 503; return res.end(opts.eventsBody ?? "{}"); }
       batches++;
       seen.events.push(...body.events);
-      return res.end(JSON.stringify({ cancel: opts.cancelAfter !== undefined && batches >= opts.cancelAfter }));
+      return res.end(JSON.stringify({ cancel: (opts.cancelAfter !== undefined && batches >= opts.cancelAfter) || (!!opts.cancelOnFinding && seen.events.some((e) => e.type === "finding")) }));
     }
     if (req.url?.endsWith("/release")) {
       seen.releases++;
@@ -100,10 +100,20 @@ test("a replay uploads a screenshot of where it ended", async () => {
   expect(seen.order.slice(0, seen.order.indexOf("complete"))).toContain("artifacts answered");
 });
 
-test("an upload is tried again after a server error but not after a refusal, and a lost screenshot never fails the job", async () => {
-  const retried = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" }, { uploadStatuses: [503, 201] });
+const within = async (condition: () => boolean, ms = 10_000) => {
+  const started = Date.now();
+  while (!condition()) {
+    if (Date.now() - started > ms) throw new Error("the condition was not met in time");
+    await new Promise((r) => setTimeout(r, 10));
+  }
+};
+
+const timers = () => process.getActiveResourcesInfo().filter((r) => r === "Timeout").length;
+
+test("an upload is tried again after a server error or too many requests but not after a refusal, and a lost screenshot never fails the job", async () => {
+  const retried = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" }, { uploadStatuses: [503, 429, 201] });
   await workOnce(deps(retried.url, reportsDefect(), { openBrowser: shooting }));
-  expect(retried.seen.uploads).toHaveLength(2);
+  expect(retried.seen.uploads).toHaveLength(3);
   await new Promise<void>((r) => server!.close(() => r()));
   server = undefined;
   const logged: Array<[string, LogFields | undefined]> = [];
@@ -135,25 +145,87 @@ test("an upload whose connection breaks is tried again, and a server without sto
   expect(logged.filter((l) => l.includes("screenshot of f1 could not be uploaded"))).toEqual([expect.stringContaining("HTTP 501"), expect.stringMatching(/timeout/i)]);
 });
 
-test("an upload that never answers holds the completion only for a while", async () => {
+test("an upload that never answers holds the completion only for a while, and is then dropped with a line in the log", async () => {
   const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" }, { uploadsHang: true });
+  const logged: Array<[string, LogFields | undefined]> = [];
   const started = Date.now();
-  await workOnce(deps(url, reportsDefect(), { openBrowser: shooting, uploadWaitMs: 300 }));
+  await workOnce(deps(url, reportsDefect(), { openBrowser: shooting, uploadWaitMs: 300, log: (line, fields) => void logged.push([line, fields]) }));
   expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "finish" })]);
   expect(Date.now() - started).toBeLessThan(5_000);
+  await within(() => seen.order.includes("upload dropped"));
+  expect(logged.filter(([line]) => line.includes("screenshot"))).toEqual([["1 screenshot was still uploading when the job finished, so it was dropped", expect.objectContaining({ level: "error", jobId: baseJob.jobId })]]);
+});
+
+test("the last try of an upload is the one that fits in the time the job waits, and its reason is what gets logged", async () => {
+  const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" }, { uploadStatuses: [503, 503, 503] });
+  const logged: string[] = [];
+  await workOnce(deps(url, reportsDefect(), { openBrowser: shooting, retryBaseMs: 2_000, uploadWaitMs: 1_000, log: (line) => void logged.push(line) }));
+  expect(seen.uploads).toHaveLength(1);
+  expect(logged.filter((l) => l.includes("screenshot"))).toEqual([expect.stringMatching(/screenshot of f1 could not be uploaded: HTTP 503/)]);
+});
+
+test("an upload that keeps losing its connection gives up with the connection's error code in the log", async () => {
+  const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" }, { uploadResets: 99 });
+  const logged: string[] = [];
+  await workOnce(deps(url, reportsDefect(), { openBrowser: shooting, retryBaseMs: 1, log: (line) => void logged.push(line) }));
+  expect(seen.uploads).toHaveLength(6);
+  expect(logged.filter((l) => l.includes("screenshot"))).toEqual([expect.stringMatching(/screenshot of f1 could not be uploaded: fetch failed \([A-Z_]+\)$/)]);
+});
+
+test("a finished job leaves no timer behind, so a runner working once can exit at once", async () => {
+  const { url } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" });
+  await workOnce(deps(url, reportsDefect(), { openBrowser: shooting, uploadWaitMs: 60_000 }));
+  const before = timers();
+  await workOnce(deps(url, reportsDefect(), { openBrowser: shooting, uploadWaitMs: 60_000 }));
+  expect(timers()).toBeLessThanOrEqual(before);
+});
+
+test("the browser is never given the runner's or the job's token to look for", async () => {
+  const { url } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana", config: { ...config, accounts: [{ ref: "a", username: "ana", password: "account-pass-1" }] } });
+  let given: string[] = [];
+  await workOnce(deps(url, reportsDefect(), { openBrowser: async (project, opts) => ((given = opts.scrubber.browserNeedles()), shooting()) }));
+  expect(given).toContain("account-pass-1");
+  expect(given.some((n) => n.includes("runner-") || n.includes("job-token-"))).toBe(false);
+});
+
+test("a finding reported once the run is cancelled uploads no screenshot and leaves nothing in the log about it", async () => {
+  const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" }, { uploadsHang: true, cancelOnFinding: true });
+  const logged: string[] = [];
+  const started = Date.now();
+  await workOnce(deps(url, reportsDefect(), { openBrowser: shooting, uploadWaitMs: 10_000, log: (line) => void logged.push(line) }));
+  expect(Date.now() - started).toBeLessThan(5_000);
+  expect(seen.completions).toHaveLength(1);
+  await within(() => seen.order.includes("upload dropped"));
+  expect(logged.filter((l) => l.includes("screenshot"))).toEqual([]);
 });
 
 test("a stop that comes while uploads are pending completes the job at once instead of waiting for them", async () => {
   const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" }, { uploadsHang: true });
   const stop = new AbortController();
   const work = workOnce(deps(url, reportsDefect(), { openBrowser: shooting, uploadWaitMs: 10_000 }), stop.signal);
-  await new Promise((r) => setTimeout(r, 500));
+  await within(() => seen.uploads.length > 0 && seen.events.some((e) => e.type === "job_finished"));
   const stopped = Date.now();
   stop.abort();
   await work;
   expect(Date.now() - stopped).toBeLessThan(2_000);
   expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "finish" })]);
   expect(seen.releases).toBe(0);
+  await within(() => seen.order.includes("upload dropped"));
+});
+
+test("a stop that comes before the job has started hands it back instead of running it", async () => {
+  const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" });
+  const stop = new AbortController();
+  const stopAfterClaim: typeof fetch = async (input, init) => {
+    const res = await fetch(input, init);
+    if (!String(input).endsWith("/api/runner/claim")) return res;
+    const body = await res.arrayBuffer();
+    stop.abort();
+    return new Response(body, { status: res.status, headers: res.headers });
+  };
+  await workOnce(deps(url, reportsDefect(), { openBrowser: shooting, fetch: stopAfterClaim }), stop.signal);
+  expect(seen.releases).toBe(1);
+  expect(seen.completions).toEqual([]);
 });
 
 test("a job handed back because the runner is stopping drops its pending uploads without complaint", async () => {
@@ -178,6 +250,27 @@ test("a job handed back because the runner is stopping drops its pending uploads
   expect(logged.filter((l) => l.includes("screenshot"))).toEqual([]);
 });
 
+test("a job handed back while an upload waits to be tried again leaves no timer behind", async () => {
+  const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana", maxSteps: 30 }, { uploadStatuses: [503, 503, 503] });
+  const model = scriptedModel([
+    toolCall("browser_snapshot", {}),
+    toolCall("submit_finding", { kind: "defect", goal: "g", title: "Broken", observed: "500", reproduction: ["Open /", "Click Save"], severity: "high" }),
+    ...Array.from({ length: 20 }, () => toolCall("note", { text: "still looking" })),
+  ], 0.001);
+  const original = model.doGenerate.bind(model);
+  model.doGenerate = async (options) => (await new Promise((r) => setTimeout(r, 30)), original(options));
+  const before = timers();
+  const stop = new AbortController();
+  const work = workOnce(deps(url, model, { openBrowser: shooting, retryBaseMs: 20_000 }), stop.signal);
+  await within(() => seen.order.includes("artifacts answered"));
+  stop.abort();
+  await work;
+  await new Promise((r) => setTimeout(r, 100));
+  expect(seen.releases).toBe(1);
+  expect(seen.uploads).toHaveLength(1);
+  expect(timers()).toBeLessThanOrEqual(before);
+});
+
 test("a replay handed back because the runner is stopping takes and uploads no screenshot", async () => {
   const finding = { id: "ana:f1", kind: "defect", goal: "g", title: "Broken", observed: "500", reproduction: ["Open /", "Click Save"], severity: "high" };
   const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "replay", finding });
@@ -187,7 +280,7 @@ test("a replay handed back because the runner is stopping takes and uploads no s
   const stop = new AbortController();
   const logged: string[] = [];
   const work = workOnce(deps(url, model, { openBrowser: shooting, log: (line) => void logged.push(line) }), stop.signal);
-  await new Promise((r) => setTimeout(r, 200));
+  await within(() => seen.events.length > 0);
   stop.abort();
   await work;
   await new Promise((r) => setTimeout(r, 200));

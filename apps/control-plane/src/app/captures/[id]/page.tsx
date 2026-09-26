@@ -19,7 +19,7 @@ export default async function CapturePage({ params }: { params: Promise<{ id: st
   const project = shell.workspace.projects.find((p) => p.id === capture.projectId);
   const title = capture.findingTitle ?? "Screen capture";
   return (
-    <AppShell shell={shell} current={{ project: capture.projectId }} parent>
+    <AppShell shell={shell} current={{ project: capture.projectId }} parent wide>
       <nav aria-label="Breadcrumb" className="mb-[34px]">
         <ol className="flex flex-wrap items-center gap-x-2 gap-y-4 font-mono text-[10px] text-muted">
           {project && <><li><a href={`/projects/${project.id}`} className="-my-2 inline-block py-2 hover:text-ink">{project.name}</a></li><li aria-hidden>/</li></>}
@@ -35,9 +35,14 @@ export default async function CapturePage({ params }: { params: Promise<{ id: st
         alt={capture.replay ? `The page where the replay of “${title}” ended` : `The page when “${title}” was reported`}
         width={1280}
         height={720}
-        className="mt-4 block h-auto w-full border border-line"
+        className="mt-4 block h-auto w-full max-w-[1280px] border border-line"
       />
-      <p className="mt-2 text-xs text-muted">Password fields are blacked out in screen captures.</p>
+      <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+        <span>Passwords and other secrets are blacked out in screen captures.</span>
+        <a href={`/api/artifacts/${capture.id}`} target="_blank" rel="noreferrer" className="text-ink underline underline-offset-4 hover:text-action">
+          Open the original (1280 × 720)<span aria-hidden="true"> ↗</span><span className="sr-only"> (opens in a new tab)</span>
+        </a>
+      </p>
     </AppShell>
   );
 }

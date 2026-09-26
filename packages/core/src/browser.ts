@@ -1,7 +1,7 @@
 import { createMCPClient } from "@ai-sdk/mcp";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createConnection } from "@playwright/mcp";
-import { chromium, type ElementHandle, type Frame, type Route } from "playwright";
+import { chromium, selectors, type CDPSession, type ElementHandle, type Frame, type Locator, type Page, type Route } from "playwright";
 import { jsonSchema, type Tool, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
 import { MAX_ARTIFACT_BYTES } from "@usetrawler/protocol";
@@ -41,10 +41,53 @@ const HANDLE_READ_MS = 500;
 const SCREENSHOT_MS = 5000;
 const MASK_COLOR = "#17191c";
 const MASK_CHECK_MS = 2500;
-const PAUSED = "*,*::before,*::after{animation-play-state:paused!important}";
-const BLOCK_AROUND = "xpath=ancestor-or-self::*[self::p or self::div or self::li or self::td or self::th or self::dd or self::dt or self::pre or self::blockquote or self::h1 or self::h2 or self::h3 or self::h4 or self::h5 or self::h6 or self::section or self::article or self::main or self::form or self::label or self::button][1]";
+const SECRET_FIELDS = "trawler-secret-fields";
+const LINE_AROUND = "trawler-line-around";
+const SELECTOR_ENGINES = {
+  [SECRET_FIELDS]: `({
+    queryAll(root, encoded) {
+      const secrets = new RegExp(new TextDecoder().decode(Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0))), "i");
+      const found = [];
+      const visit = (scope) => {
+        for (const el of scope.querySelectorAll("*")) {
+          if (el.matches("input, textarea, [contenteditable]")) {
+            const value = el.isContentEditable ? String(el.textContent ?? "") : typeof el.value === "string" ? el.value : "";
+            if (secrets.test(value) || secrets.test(el.getAttribute("placeholder") ?? "")) found.push(el);
+          }
+          if (el.shadowRoot) visit(el.shadowRoot);
+        }
+      };
+      visit(root);
+      return found;
+    },
+  })`,
+  [LINE_AROUND]: `({
+    queryAll(root) {
+      const style = getComputedStyle(root);
+      const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2 || 0;
+      const reach = root.getBoundingClientRect().height + 2 * line;
+      let widest = root;
+      for (let el = root.parentElement ?? root.parentNode?.host; el; el = el.parentElement ?? el.parentNode?.host) {
+        if (getComputedStyle(el).display === "contents") continue;
+        if (el.getBoundingClientRect().height > reach) break;
+        widest = el;
+      }
+      return [widest];
+    },
+  })`,
+};
+let enginesRegistered: Promise<unknown> | undefined;
+const registerEngines = () =>
+  (enginesRegistered ??= Promise.all(
+    Object.entries(SELECTOR_ENGINES).map(([name, source]) =>
+      selectors.register(name, source, { contentScript: true }).catch((err: unknown) => {
+        if (!(err instanceof Error && /already registered/.test(err.message))) throw err;
+      }),
+    ),
+  ));
+const TWO_FRAMES = "new Promise((resolve) => { requestAnimationFrame(() => requestAnimationFrame(resolve)); setTimeout(resolve, 200); })";
+const BOXES = (els: any[]) => els.map((el) => Object.values(el.getBoundingClientRect().toJSON()).join(",")).join(" ");
 const escapedForRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const EDITABLE = "input, textarea, [contenteditable]";
 function fieldStateOf(el: any, mark: string) {
   return {
     marked: !!el && (el.hasAttribute?.(mark) || (el instanceof HTMLInputElement && el.type.toLowerCase() === "password")),
@@ -164,6 +207,7 @@ export async function openBrowser(opts: {
   };
   let blockedNavigation: string | null = null;
 
+  await registerEngines();
   const chrome = await chromium.launch({ headless: opts.headless ?? true, handleSIGTERM: !opts.survivesSignals, handleSIGINT: !opts.survivesSignals, handleSIGHUP: !opts.survivesSignals });
   let disconnected = false;
   chrome.on("disconnected", () => (disconnected = true));
@@ -272,30 +316,34 @@ export async function openBrowser(opts: {
         const value = await readValue(h);
         if (value.length >= MIN_SECRET_LENGTH && value !== valuesBeforeTyping.get(h)) filledValues.push(value);
       }
-      const needles = [...new Set([...opts.scrubber.needles(), ...typedSecrets, ...filledValues])].filter((n) => n.length >= MIN_SECRET_LENGTH);
+      const needles = [...new Set([...opts.scrubber.browserNeedles(), ...typedSecrets, ...filledValues])].filter((n) => n.length >= MIN_SECRET_LENGTH);
       return needles.length > 0 ? new RegExp(needles.map(escapedForRegExp).join("|"), "i") : null;
     };
-    const fieldsShowing = async (frame: Frame, secrets: RegExp) => {
-      const fields = frame.locator(EDITABLE);
-      const shown = await fields.evaluateAll((els: any[]) => els.map((el) => [el.isContentEditable ? String(el.textContent ?? "") : typeof el.value === "string" ? el.value : "", String(el.getAttribute?.("placeholder") ?? "")]));
-      return shown.flatMap(([value, placeholder], i) => (secrets.test(value!) || secrets.test(placeholder!) ? [fields.nth(i)] : []));
-    };
-    const masksIn = async (frame: Frame, secrets: RegExp | null) => {
+    const masksIn = (frame: Frame, secrets: RegExp | null) => {
       const masks = [frame.locator(`input[type=password i], [${SECRET_MARK}]`)];
       if (!secrets) return masks;
       const text = frame.getByText(secrets);
-      return [...masks, text, text.locator(BLOCK_AROUND), ...(await fieldsShowing(frame, secrets))];
+      return [...masks, text, text.locator(`${LINE_AROUND}=line`), frame.locator(`${SECRET_FIELDS}=${Buffer.from(secrets.source).toString("base64")}`)];
     };
-    const masksOnPage = async (frames: Frame[]) => {
-      const secrets = await secretsOnPage();
+    const boxesOf = async (mask: Locator[]) => (await Promise.all(mask.map((m) => m.evaluateAll(BOXES)))).join("|");
+    const inTime = async <T>(work: () => Promise<T>): Promise<T> => {
       let timer: NodeJS.Timeout | undefined;
       const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error("the page did not answer in time to be masked")), opts.maskCheckMs ?? MASK_CHECK_MS)));
       try {
-        return (await Promise.race([Promise.all(frames.map((frame) => masksIn(frame, secrets))), late])).flat();
+        return await Promise.race([work(), late]);
       } finally {
         clearTimeout(timer);
       }
     };
+    const animationSessions = async (page: Page, frames: Frame[]) => {
+      const sessions: CDPSession[] = [await context.newCDPSession(page)];
+      for (const frame of frames.slice(1)) {
+        const own = await context.newCDPSession(frame).catch(() => null);
+        if (own) sessions.push(own);
+      }
+      return sessions;
+    };
+    const playAnimationsAt = (sessions: CDPSession[], playbackRate: number) => Promise.all(sessions.map((s) => s.send("Animation.setPlaybackRate", { playbackRate })));
     const findMarked = async (mark: string) => {
       for (const page of context.pages()) {
         for (const frame of page.frames()) {
@@ -393,9 +441,25 @@ export async function openBrowser(opts: {
         const page = context.pages()[0];
         if (!page || disconnected || dialogOpen || page.url() === "about:blank") return null;
         const shoot = async (): Promise<Screenshot | null> => {
-          const mask = await masksOnPage(page.frames());
-          const bytes = await page.screenshot({ type: "png", mask, maskColor: MASK_COLOR, style: PAUSED, caret: "hide", scale: "css", timeout: SCREENSHOT_MS });
-          return bytes.byteLength <= MAX_ARTIFACT_BYTES ? { bytes: new Uint8Array(bytes), contentType: "image/png" } : null;
+          const frames = page.frames();
+          const sessions = await animationSessions(page, frames);
+          try {
+            await playAnimationsAt(sessions, 0);
+            const { mask, placed } = await inTime(async () => {
+              await page.evaluate(TWO_FRAMES);
+              const secrets = await secretsOnPage();
+              const mask = frames.flatMap((frame) => masksIn(frame, secrets));
+              return { mask, placed: await boxesOf(mask) };
+            });
+            const bytes = await page.screenshot({ type: "png", mask, maskColor: MASK_COLOR, caret: "hide", scale: "css", timeout: SCREENSHOT_MS });
+            const unmoved = (await inTime(() => boxesOf(mask))) === placed;
+            const sameFrames = page.frames().length === frames.length && page.frames().every((frame, i) => frame === frames[i]);
+            if (!unmoved || !sameFrames || bytes.byteLength > MAX_ARTIFACT_BYTES) return null;
+            return { bytes: new Uint8Array(bytes), contentType: "image/png" };
+          } finally {
+            await playAnimationsAt(sessions, 1).catch(() => undefined);
+            await Promise.all(sessions.map((s) => s.detach().catch(() => undefined)));
+          }
         };
         let timer: NodeJS.Timeout | undefined;
         const shot = await Promise.race([shoot().catch(() => null), new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), 2 * SCREENSHOT_MS)))]);
