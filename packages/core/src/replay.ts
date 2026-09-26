@@ -4,6 +4,7 @@ import { VerdictSchema, type Finding, type JobStopReason, type JobUsage, type Pr
 import { browserQueue, runAgentLoop } from "./agent-loop.ts";
 import { type Budget, failureMessage, stoppedByRun, tallyStep } from "./llm.ts";
 import { judgePrompt, replayPrompt } from "./prompts.ts";
+import type { Screenshot } from "./browser.ts";
 import type { SecretScrubber } from "./secrets.ts";
 import { madeUpEmail, newSessionState, ownPasswordTool, sessionTools, type FillField } from "./session-tools.ts";
 
@@ -42,6 +43,8 @@ export async function runReplay(opts: {
   budget: Budget;
   maxSteps: number;
   emit: (e: RunEventInput) => void;
+  screenshot?: () => Promise<Screenshot | null>;
+  keepScreenshot?: (findingId: string, shot: Screenshot) => void;
 }): Promise<{ observation: ReplayObservation; usage: JobUsage }> {
   onlyDefects(opts.finding, "replayed");
   if (!Number.isInteger(opts.maxSteps) || opts.maxSteps < 1) throw new RangeError(`maxSteps must be a positive integer, got ${opts.maxSteps}`);
@@ -93,6 +96,11 @@ export async function runReplay(opts: {
     largeResultChars: 4000,
   });
   const observation: ReplayObservation = report ?? NO_REPORT;
+  const { screenshot, keepScreenshot } = opts;
+  if (screenshot && keepScreenshot) {
+    const shot = await screenshot().catch(() => null);
+    if (shot) keepScreenshot(opts.finding.id, shot);
+  }
   const stoppedBy: JobStopReason = outcome.stoppedBy === "finish" ? "report" : outcome.stoppedBy;
   emitSafely(emit, { type: "job_finished", jobId, usage, stoppedBy, ...(outcome.error ? { error: outcome.error } : {}) });
   return { observation, usage };

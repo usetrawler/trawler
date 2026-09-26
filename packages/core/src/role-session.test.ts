@@ -267,6 +267,23 @@ describe("runRoleSession", () => {
     for (let i = 0; i < log.length; i += 2) expect(log[i + 1]).toBe(log[i]!.replace("-start", "-end"));
   });
 
+  test("a finding's screenshot is taken between browser calls, never during one, and kept under the finding's id", async () => {
+    const log: string[] = [];
+    const kept: Array<[string, number]> = [];
+    const slowly = async (name: string) => { log.push(`${name}-start`); await new Promise((r) => setTimeout(r, 20)); log.push(`${name}-end`); };
+    const click = tool({ inputSchema: z.object({}), execute: async () => (await slowly("click"), "ok") });
+    const defect = toolCall("submit_finding", { kind: "defect", goal: "sign-up", title: "500", observed: "got a 500", reproduction: ["a", "b"], severity: "high" });
+    const model = scriptedModel([look, [toolCall("browser_click", {}), defect, toolCall("browser_click", {})], reached("sign-up"), reached("invoice"), finish]);
+    await run(model, {
+      browserTools: { ...browserTools, browser_click: click },
+      screenshot: async () => (await slowly("shot"), { bytes: new Uint8Array([1, 2, 3]), contentType: "image/png" }),
+      keepScreenshot: (id, shot) => void kept.push([id, shot.bytes.byteLength]),
+    }).promise;
+    expect(kept).toEqual([["f1", 3]]);
+    expect(log.filter((l) => l.startsWith("shot"))).toEqual(["shot-start", "shot-end"]);
+    for (let i = 0; i < log.length; i += 2) expect(log[i + 1]).toBe(log[i]!.replace("-start", "-end"));
+  });
+
   test("results over 1500 characters are elided once a newer one arrives", async () => {
     const medium = { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => ({ content: [{ type: "text", text: "m".repeat(2000) }] }) }) };
     const model = scriptedModel([toolCall("browser_snapshot", {}), toolCall("browser_snapshot", {}), reached("sign-up"), reached("invoice"), finish]);

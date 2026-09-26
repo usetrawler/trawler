@@ -59,6 +59,7 @@ export function sessionTools(opts: {
   inBrowser: InBrowser;
   scrubber: SecretScrubber;
   newId: () => string;
+  capture?: (findingId: string) => Promise<void>;
 }) {
   const { state, emit, jobId } = opts;
   const goalIds = () => [...state.goals.keys()];
@@ -108,6 +109,7 @@ export function sessionTools(opts: {
         const finding = { ...parsed.data, id: opts.newId() };
         emit({ type: "finding", jobId, finding });
         state.findings.push(finding);
+        await opts.capture?.(finding.id).catch(() => undefined);
         return `recorded ${finding.id}`;
       },
     }),

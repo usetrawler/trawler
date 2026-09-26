@@ -52,6 +52,20 @@ describe("runReplay", () => {
     events.forEach((e, i) => expect(() => RunEventSchema.parse({ ...e, seq: i + 1, at: "2026-09-24T10:00:00.000Z" })).not.toThrow());
   });
 
+  test("keeps a screenshot of where the replay ended, under the finding's id, however it ended; a missing or failed screenshot changes nothing else", async () => {
+    const kept: string[] = [];
+    const shot = { bytes: new Uint8Array([1]), contentType: "image/png" as const };
+    const keep = { keepScreenshot: (id: string) => void kept.push(id) };
+    const reported = report({ completed: true, observed: "The page said Internal Server Error", blockedAt: null });
+    await replay(scriptedModel([toolCall("browser_snapshot", {}), reported]), { screenshot: async () => shot, ...keep }).promise;
+    await replay(scriptedModel([toolCall("browser_snapshot", {}), toolCall("browser_snapshot", {}), toolCall("browser_snapshot", {})]), { maxSteps: 2, screenshot: async () => shot, ...keep }).promise;
+    expect(kept).toEqual(["f1", "f1"]);
+    const none = await replay(scriptedModel([reported]), { screenshot: async () => null, ...keep }).promise;
+    const broken = await replay(scriptedModel([reported]), { screenshot: async () => { throw new Error("the browser is gone"); }, ...keep }).promise;
+    expect(kept).toHaveLength(2);
+    expect([none.observation.completed, broken.observation.completed]).toEqual([true, true]);
+  });
+
   test("stops as soon as the report is in", async () => {
     const model = scriptedModel([report({ completed: false, observed: "No Create account button", blockedAt: 2 }), toolCall("browser_snapshot", {})]);
     const { observation, usage } = await replay(model).promise;

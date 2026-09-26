@@ -10,14 +10,14 @@ const accounts = [{ ref: "solo", username: "kwame@acme.test", password: "hunter2
 const ctx = { toolCallId: "t", messages: [], context: {} };
 const finding = { kind: "defect", goal: "sign-up", title: "500 on submit", observed: "got 500", reproduction: ["Open /signup", "Submit"], severity: "high" };
 
-function setup() {
+function setup(over: Partial<Parameters<typeof sessionTools>[0]> = {}) {
   const events: RunEventInput[] = [];
   const state = newSessionState(goals);
   state.page = "seen";
   const scrubber = new SecretScrubber();
   const fillField = vi.fn(async (ref: string, value: string) => `await page.getByRef('${ref}').fill('${value}');`);
   let n = 0;
-  const tools = sessionTools({ state, accounts, emit: (e) => events.push(e), jobId: "role:solo", fillField, inBrowser: (action) => action(), scrubber, newId: () => `f${++n}` });
+  const tools = sessionTools({ state, accounts, emit: (e) => events.push(e), jobId: "role:solo", fillField, inBrowser: (action) => action(), scrubber, newId: () => `f${++n}`, ...over });
   return { events, state, tools, fillField, scrubber };
 }
 
@@ -31,6 +31,17 @@ describe("submit_finding", () => {
     expect(events).toEqual([]);
     state.page = "seen";
     expect(await tools.submit_finding.execute!(finding, ctx)).toBe("recorded f1");
+  });
+
+  test("a recorded finding gets its screenshot taken right after it is emitted; a refused one gets none, and a failed screenshot still records the finding", async () => {
+    const taken: string[] = [];
+    const { tools, events } = setup({ capture: async (id) => void taken.push(`${id} after ${events.map((e) => e.type).join(",")}`) });
+    expect(await tools.submit_finding.execute!({ ...finding, goal: "nope" }, ctx)).toMatch(/^rejected/);
+    expect(await tools.submit_finding.execute!(finding, ctx)).toBe("recorded f1");
+    expect(taken).toEqual(["f1 after finding"]);
+    const failing = setup({ capture: async () => { throw new Error("the page is gone"); } });
+    expect(await failing.tools.submit_finding.execute!(finding, ctx)).toBe("recorded f1");
+    expect(failing.state.findings).toHaveLength(1);
   });
 
   test("stores a valid finding and emits it", async () => {
