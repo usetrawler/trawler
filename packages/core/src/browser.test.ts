@@ -219,7 +219,7 @@ beforeAll(async () => {
       case "/broken-image":
         return html(`<img alt="card-secret-1111" src="https://blocked.example/key.png" style="font:20px monospace;color:#ff0000"><p>Plan: Team</p>`);
       case "/slow-steps":
-        return html(`<style>@keyframes hop{from{transform:translateX(0)}to{transform:translateX(200px)}} #echo{font:20px monospace;color:#ff0000;animation:hop 20s steps(2) infinite}</style><p id="echo">card-secret-1111</p>`);
+        return html(`<style>@keyframes hop{from{transform:translateX(0)}to{transform:translateX(200px)}} #echo{display:inline-block;animation:hop 20s steps(2) infinite}</style><p style="font:20px monospace;color:#ff0000">Key: <span id="echo">card-secret-1111</span></p>`);
       case "/glowing-field":
         return html(`<style>@keyframes glow{from{box-shadow:0 0 0 #09f}to{box-shadow:0 0 12px #09f}} input{animation:glow 1s infinite alternate}</style><input aria-label="Password" type="password" value="field-secret-1">`);
       case "/row-hidden":
@@ -234,15 +234,15 @@ beforeAll(async () => {
       case "/slot-fallback":
         return html(`<key-card></key-card><p>Plan: Team</p><script>customElements.define("key-card", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<p style="font:20px monospace;color:#ff0000"><slot>card-secret-1111</slot></p>'; } });</script>`);
       case "/flicker-container":
-        return html(`<style>@keyframes jump{0%,49.9%{transform:translateY(0)}50%,100%{transform:translateY(120px)}} #box{animation:jump 60ms infinite}</style><div id="box"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div>`);
+        return html(`<style>@keyframes hop{from{transform:translateX(0)}to{transform:translateX(200px)}} #box{animation:hop 20s steps(2) infinite}</style><div id="box"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div>`);
       case "/shaking-field":
-        return html(`<style>@keyframes shake{0%,100%{transform:translateX(0)}50%{transform:translateX(8px)}} input{animation:shake 300ms infinite}</style><input aria-label="Password" type="password" value="field-secret-1">`);
+        return html(`<style>@keyframes hop{from{transform:translateX(0)}to{transform:translateX(200px)}} input{animation:hop 20s steps(2) infinite}</style><input aria-label="Password" type="password" value="field-secret-1">`);
       case "/scroll-driven":
         return html(`<style>@keyframes rise{from{transform:translateY(20px)}to{transform:translateY(0)}} #box{animation:rise linear both;animation-timeline:scroll(root)}</style><div id="box"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div><div style="height:2000px"></div>`);
       case "/hidden-parent-split":
         return html(`<div style="visibility:hidden;font:20px monospace;color:#ff0000">card-sec<span style="visibility:visible">ret-1111</span> and more</div><p>Plan: Team</p>`);
       case "/animated-child":
-        return html(`<style>@keyframes jump{0%,49.9%{transform:translateY(0)}50%,100%{transform:translateY(120px)}} b{display:inline-block;animation:jump 60ms infinite}</style><p style="font:20px monospace;color:#ff0000">card-sec<b>ret-1111</b></p>`);
+        return html(`<style>@keyframes hop{from{transform:translateY(0)}to{transform:translateY(120px)}} b{display:inline-block;animation:hop 20s steps(2) infinite}</style><p style="font:20px monospace;color:#ff0000">card-sec<b>ret-1111</b></p>`);
       case "/delayed-animation":
         return html(`<style>@keyframes slide{from{transform:translateX(0)}to{transform:translateX(200px)}} #box{animation:slide 1s 60s}</style><div id="box"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div>`);
       case "/timer-animation":
@@ -1362,15 +1362,15 @@ describe("screenshots", () => {
     expect(await shotsOf("/slow-steps", 2, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null]);
   }, 60_000);
 
-  test("a secret inside a container an animation is moving gives no screenshot", async () => {
+  test("a secret inside a container an animation is moving, even one that has not moved for a while, gives no screenshot", async () => {
     expect(await shotsOf("/flicker-container", 3, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null, null]);
   }, 60_000);
 
-  test("a secret part of which an animation is moving inside it gives no screenshot", async () => {
+  test("a secret part of which an animation is moving inside it, even slowly, gives no screenshot", async () => {
     expect(await shotsOf("/animated-child", 3, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null, null]);
   }, 60_000);
 
-  test("a password field an animation is shaking gives no screenshot", async () => {
+  test("a password field an animation is moving, even one that has not moved for a while, gives no screenshot", async () => {
     expect(await shotsOf("/shaking-field", 2, async () => undefined)).toEqual([null, null]);
   }, 60_000);
 
