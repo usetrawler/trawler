@@ -21,8 +21,8 @@ export default function NotFound() {
         <ThemeToggle />
       </header>
       <main className="relative m-auto grid w-[min(1220px,calc(100%-48px))] grid-cols-[minmax(0,1fr)_360px] items-center gap-20 max-[821px]:grid-cols-1 max-[821px]:gap-[55px] max-[821px]:py-[60px] max-[521px]:w-[calc(100%-36px)]">
-        <div aria-hidden className="pointer-events-none absolute top-1/2 -right-[2vw] z-0 -translate-y-[54%] text-[clamp(260px,35vw,540px)] leading-[0.75] font-[850] tracking-[-0.1em] text-[color-mix(in_srgb,var(--ink)_4%,transparent)] select-none forced-colors:hidden max-[821px]:relative max-[821px]:top-auto max-[821px]:right-auto max-[821px]:row-start-1 max-[821px]:h-[0.7em] max-[821px]:translate-y-0 max-[821px]:text-[clamp(120px,38vw,190px)] max-[821px]:text-[color-mix(in_srgb,var(--action)_14%,transparent)]">404</div>
-        <section className="relative z-10 min-w-0 max-[821px]:row-start-2">
+        <div aria-hidden className="pointer-events-none absolute top-1/2 -right-[2vw] z-0 -translate-y-[54%] text-[clamp(260px,35vw,540px)] leading-[0.75] font-[850] tracking-[-0.1em] text-[color-mix(in_srgb,var(--ink)_4%,transparent)] select-none forced-colors:hidden max-[821px]:relative max-[821px]:top-auto max-[821px]:right-auto max-[821px]:h-[0.7em] max-[821px]:translate-y-0 max-[821px]:text-[clamp(120px,38vw,190px)] max-[821px]:text-[color-mix(in_srgb,var(--action)_14%,transparent)]">404</div>
+        <section className="relative z-10 min-w-0">
           <p className="flex items-center gap-2.5 font-mono text-[11px] tracking-[0.12em] text-action uppercase">
             <i aria-hidden className="h-2 w-2 rounded-full bg-action shadow-[0_0_0_7px_color-mix(in_srgb,var(--action)_13%,transparent)]" />
             Page not found
@@ -30,13 +30,13 @@ export default function NotFound() {
           <h1 className="my-7 text-[clamp(68px,8vw,124px)] leading-[0.87] font-bold tracking-[-0.075em] max-[821px]:text-[clamp(58px,16vw,84px)]">This route<br />doesn’t exist.</h1>
           <p className="max-w-[480px] text-xl leading-normal text-muted">The address may be wrong, or the page may have moved.</p>
           <div className="mt-[38px] flex flex-wrap gap-[9px] max-[521px]:flex-col">
-            <a href="/" className="flex h-[51px] min-w-[220px] items-center justify-between gap-6 bg-action px-[17px] font-mono text-[11px] whitespace-nowrap text-[#17191c] uppercase hover:brightness-110">
+            <a href="/" className="flex h-[51px] min-w-[220px] items-center justify-between gap-6 border border-transparent bg-action px-[17px] font-mono text-[11px] whitespace-nowrap text-[#17191c] uppercase hover:brightness-110">
               Open Trawler<span aria-hidden>→</span>
             </a>
             <a href="https://usetrawler.com/" className="flex h-[51px] items-center border border-line bg-panel px-[17px] font-mono text-[11px] whitespace-nowrap text-ink uppercase hover:border-ink">Visit usetrawler.com</a>
           </div>
         </section>
-        <section aria-label="Route check" className="relative z-10 min-w-0 border border-line bg-panel p-5 shadow-[18px_18px_0_var(--soft)] max-[821px]:row-start-3 max-[821px]:shadow-[10px_10px_0_var(--soft)] max-[521px]:shadow-none">
+        <section aria-label="Route check" className="relative z-10 min-w-0 border border-line bg-panel p-5 shadow-[18px_18px_0_var(--soft)] max-[821px]:shadow-[10px_10px_0_var(--soft)] max-[521px]:shadow-none">
           <div>
             <p className={`mb-2 ${label}`}>Requested route</p>
             <RequestedPath />

@@ -18,7 +18,7 @@ test("a missing page says so in the mockup's words, with the way back into the a
   ]);
 });
 
-test("the tab names the page before its JavaScript runs, and still after Next draws a not-found page in the browser", () => {
+test("on a full page load the tab names the page, before its JavaScript runs and after Next draws it", () => {
   expect(metadata.title).toBe("Page not found · Trawler");
   expect(render()).toMatch(/^<title>Page not found · Trawler<\/title><div class="app-frame /);
 });
@@ -41,8 +41,10 @@ test("the two actions wrap as whole buttons where a row has no room for both", (
   expect(html).toMatch(/<a href="https:\/\/usetrawler\.com\/" class="[^"]*\bwhitespace-nowrap\b[^"]*">Visit usetrawler\.com<\/a>/);
 });
 
-test("the header keeps the theme switch, and the big number is hidden from screen readers and from high-contrast modes", () => {
+test("the header keeps the theme switch, the big number is hidden from screen readers and from high-contrast modes, and the page closes up without it", () => {
   const html = render();
+  expect(html).not.toContain("row-start");
+  expect(html).toMatch(/<a href="\/" class="[^"]*\bborder border-transparent\b[^"]*">Open Trawler/);
   expect(header(html)).toMatch(/<button type="button" title="Theme: System\. Switch to Dark\."/);
   expect(html).toMatch(/<div aria-hidden="true" class="[^"]*\bforced-colors:hidden\b[^"]*">404<\/div>/);
   expect(html).toContain(">HTTP 404</span>");
