@@ -16,6 +16,7 @@ import { logError } from "../../server/log.ts";
 
 export interface MembersState {
   error?: string;
+  field?: "email";
   done?: string;
   invited?: string;
 }
@@ -99,30 +100,30 @@ async function membersManager(): Promise<Member | { error: string }> {
   return "error" in member ? { error: MEMBERS_OWNERS_AND_ADMINS } : member;
 }
 
-function refusal(code: unknown): string | null {
+function refusal(code: unknown): MembersState | null {
   switch (code) {
     case "INVALID_EMAIL":
-      return NOT_AN_ADDRESS;
+      return { error: NOT_AN_ADDRESS, field: "email" };
     case ADDRESS_HAS_A_WORKSPACE:
-      return "That address already has a Trawler workspace, and joining a second one is not possible yet.";
+      return { error: "That address already has a Trawler workspace, and joining a second one is not possible yet.", field: "email" };
     case "USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION":
-      return "That address is already in this workspace.";
+      return { error: "That address is already in this workspace.", field: "email" };
     case "USER_IS_ALREADY_INVITED_TO_THIS_ORGANIZATION":
-      return "That address is already invited. Its invitation is listed under Invited.";
+      return { error: "That address is already invited. Its invitation is listed under Invited.", field: "email" };
     case "INVITATION_LIMIT_REACHED":
-      return "This workspace already has 100 invitations waiting. Revoke some before inviting more.";
+      return { error: "This workspace already has 100 invitations waiting. Revoke some before inviting more." };
     case "YOU_ARE_NOT_ALLOWED_TO_INVITE_USERS_TO_THIS_ORGANIZATION":
     case "YOU_ARE_NOT_ALLOWED_TO_INVITE_USER_WITH_THIS_ROLE":
     case "YOU_ARE_NOT_ALLOWED_TO_CANCEL_THIS_INVITATION":
     case "YOU_ARE_NOT_ALLOWED_TO_DELETE_THIS_MEMBER":
     case "YOU_ARE_NOT_ALLOWED_TO_UPDATE_THIS_MEMBER":
-      return MEMBERS_OWNERS_AND_ADMINS;
+      return { error: MEMBERS_OWNERS_AND_ADMINS };
     default:
       return null;
   }
 }
 
-async function throughAuth(orgId: string, call: () => Promise<unknown>, fallback: string): Promise<string | null> {
+async function throughAuth(orgId: string, call: () => Promise<unknown>, fallback: string): Promise<MembersState | null> {
   try {
     await call();
     return null;
@@ -132,7 +133,7 @@ async function throughAuth(orgId: string, call: () => Promise<unknown>, fallback
     const said = refusal(code);
     if (said) return said;
     await logError("a members change was refused for a reason the page does not name", { orgId, code: String(code), err });
-    return fallback;
+    return { error: fallback };
   }
 }
 
@@ -140,11 +141,11 @@ export async function inviteMemberAction(_previous: MembersState, form: FormData
   const member = await membersManager();
   if ("error" in member) return member;
   const email = String(form.get("email") ?? "").trim().toLowerCase();
-  if (email.length > 254 || !EMAIL.test(email)) return { error: NOT_AN_ADDRESS };
+  if (email.length > 254 || !EMAIL.test(email)) return { error: NOT_AN_ADDRESS, field: "email" };
   if (!withinListingLimit(`invite:${member.userId}`)) return { error: "Too many invitations. Wait a few minutes and try again." };
   const auth = getAuth();
   const refused = await throughAuth(member.orgId, async () => auth.api.createInvitation({ headers: await headers(), body: { email, role: roleFrom(form.get("role")), organizationId: member.orgId } }), "The invitation could not be created. Try again.");
-  return refused ? { error: refused } : { invited: email };
+  return refused ?? { invited: email };
 }
 
 export async function revokeInvitationAction(_previous: MembersState, form: FormData): Promise<MembersState> {
@@ -154,7 +155,7 @@ export async function revokeInvitationAction(_previous: MembersState, form: Form
   const invitation = (await auth.pendingInvitations(member.orgId)).find((i) => i.id === String(form.get("invitationId") ?? ""));
   if (!invitation) return { done: "That invitation was already revoked, used or expired." };
   const refused = await throughAuth(member.orgId, async () => auth.api.cancelInvitation({ headers: await headers(), body: { invitationId: invitation.id } }), "The invitation could not be revoked. Try again.");
-  return refused ? { error: refused } : { done: `The invitation for ${invitation.email} is revoked.` };
+  return refused ?? { done: `The invitation for ${invitation.email} is revoked.` };
 }
 
 export async function removeMemberAction(_previous: MembersState, form: FormData): Promise<MembersState> {
@@ -166,7 +167,7 @@ export async function removeMemberAction(_previous: MembersState, form: FormData
   if (target.userId === member.userId) return { error: "You cannot remove yourself from the workspace here." };
   if (isOwner(target.role)) return { error: "An owner is not removed here." };
   const refused = await throughAuth(member.orgId, async () => auth.api.removeMember({ headers: await headers(), body: { memberIdOrEmail: target.id, organizationId: member.orgId } }), "They could not be removed. Try again.");
-  return refused ? { error: refused } : { done: `${nameOf(target)} is removed from this workspace.` };
+  return refused ?? { done: `${nameOf(target)} is removed from this workspace.` };
 }
 
 export async function changeRoleAction(_previous: MembersState, form: FormData): Promise<MembersState> {
@@ -179,5 +180,5 @@ export async function changeRoleAction(_previous: MembersState, form: FormData):
   if (isOwner(target.role)) return { error: "An owner's role is not changed here." };
   const role = roleFrom(form.get("role"));
   const refused = await throughAuth(member.orgId, async () => auth.api.updateMemberRole({ headers: await headers(), body: { memberId: target.id, role, organizationId: member.orgId } }), "Their role could not be changed. Try again.");
-  return refused ? { error: refused } : { done: `${nameOf(target)} is now ${role === "admin" ? "an admin" : "a member"}.` };
+  return refused ?? { done: `${nameOf(target)} is now ${role === "admin" ? "an admin" : "a member"}.` };
 }

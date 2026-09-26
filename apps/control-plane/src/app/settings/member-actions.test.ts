@@ -84,11 +84,12 @@ test("an invitation goes to the lowercased address, as member unless admin is as
 });
 
 test("an address that is not one is refused before Better Auth is asked, and so is one Better Auth does not take", async () => {
-  expect(await inviteMemberAction({}, form({ email: "not an address" }))).toEqual({ error: "Enter the email address they sign in with." });
-  expect(await inviteMemberAction({}, form({ email: `${"a".repeat(250)}@b.cd` }))).toEqual({ error: "Enter the email address they sign in with." });
+  const notAnAddress = { error: "Enter the email address they sign in with.", field: "email" };
+  expect(await inviteMemberAction({}, form({ email: "not an address" }))).toEqual(notAnAddress);
+  expect(await inviteMemberAction({}, form({ email: `${"a".repeat(250)}@b.cd` }))).toEqual(notAnAddress);
   expect(state.calls).toEqual([]);
   state.fails = refused("INVALID_EMAIL");
-  expect(await inviteMemberAction({}, form({ email: "someone@acme.c" }))).toEqual({ error: "Enter the email address they sign in with." });
+  expect(await inviteMemberAction({}, form({ email: "someone@acme.c" }))).toEqual(notAnAddress);
 });
 
 test("a person invites at most 30 times in 10 minutes, refused attempts included", async () => {
@@ -96,21 +97,21 @@ test("a person invites at most 30 times in 10 minutes, refused attempts included
   for (let i = 0; i < 30; i++) await inviteMemberAction({}, form({ email: `probe-${i}@acme.test` }));
   expect(await inviteMemberAction({}, form({ email: "probe-30@acme.test" }))).toEqual({ error: "Too many invitations. Wait a few minutes and try again." });
   state.member = inviter();
-  expect(await inviteMemberAction({}, form({ email: "probe-30@acme.test" }))).toEqual({ error: "That address already has a Trawler workspace, and joining a second one is not possible yet." });
+  expect(await inviteMemberAction({}, form({ email: "probe-30@acme.test" }))).toEqual({ error: "That address already has a Trawler workspace, and joining a second one is not possible yet.", field: "email" });
 });
 
-test("Better Auth's refusals are said in the page's words; anything it does not name is logged, and anything else it throws is not swallowed", async () => {
-  const cases: Array<[string, string]> = [
-    ["ADDRESS_HAS_A_WORKSPACE", "That address already has a Trawler workspace, and joining a second one is not possible yet."],
-    ["USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION", "That address is already in this workspace."],
-    ["USER_IS_ALREADY_INVITED_TO_THIS_ORGANIZATION", "That address is already invited. Its invitation is listed under Invited."],
-    ["INVITATION_LIMIT_REACHED", "This workspace already has 100 invitations waiting. Revoke some before inviting more."],
-    ["YOU_ARE_NOT_ALLOWED_TO_INVITE_USERS_TO_THIS_ORGANIZATION", "Only an owner or admin of this workspace can invite people or change who is in it."],
-    ["SOMETHING_NEW", "The invitation could not be created. Try again."],
+test("Better Auth's refusals are said in the page's words, those about the address marked as such; anything it does not name is logged, and anything else it throws is not swallowed", async () => {
+  const cases: Array<[string, object]> = [
+    ["ADDRESS_HAS_A_WORKSPACE", { error: "That address already has a Trawler workspace, and joining a second one is not possible yet.", field: "email" }],
+    ["USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION", { error: "That address is already in this workspace.", field: "email" }],
+    ["USER_IS_ALREADY_INVITED_TO_THIS_ORGANIZATION", { error: "That address is already invited. Its invitation is listed under Invited.", field: "email" }],
+    ["INVITATION_LIMIT_REACHED", { error: "This workspace already has 100 invitations waiting. Revoke some before inviting more." }],
+    ["YOU_ARE_NOT_ALLOWED_TO_INVITE_USERS_TO_THIS_ORGANIZATION", { error: "Only an owner or admin of this workspace can invite people or change who is in it." }],
+    ["SOMETHING_NEW", { error: "The invitation could not be created. Try again." }],
   ];
-  for (const [code, message] of cases) {
+  for (const [code, answer] of cases) {
     state.fails = refused(code);
-    expect(await inviteMemberAction({}, form({ email: "new@acme.test" }))).toEqual({ error: message });
+    expect(await inviteMemberAction({}, form({ email: "new@acme.test" }))).toEqual(answer);
   }
   expect(state.logged).toEqual([["a members change was refused for a reason the page does not name", { orgId: "org-1", code: "SOMETHING_NEW", err: state.fails }]]);
   expect(state.revalidated).toHaveLength(cases.length);

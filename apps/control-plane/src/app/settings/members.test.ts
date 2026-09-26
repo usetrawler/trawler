@@ -150,13 +150,17 @@ test("an owner or admin invites by address, as a member unless they pick admin",
 test("after an invitation the page says where the invited person signs in, and a refusal keeps the address and role for another try", () => {
   answered("invite", { invited: "max@acme.test" });
   expect(text(inviteForm(render()))).toContain("Invite Invited max@acme.test. Ask them to sign in at app.usetrawler.test with this address; no email is sent.");
-  answered("invite", { error: "That address is already in this workspace." });
+  answered("invite", { error: "That address is already in this workspace.", field: "email" });
   react.states = ["max@acme.test", "admin"];
   const refused = inviteForm(render());
   expect(refused).toMatch(/<input type="email" required=""[^>]*aria-invalid="true" aria-describedby="invite-error"[^>]*name="email" value="max@acme.test"\/>/);
   expect(refused).toMatch(/<option value="admin" selected="">Admin<\/option>/);
   expect(refused).toMatch(/<p id="invite-error" role="alert"[^>]*>That address is already in this workspace.<\/p>/);
-  answered("invite", { error: "That address is already in this workspace." }, { pending: true });
+  answered("invite", { error: "Too many invitations. Wait a few minutes and try again." });
+  const notAboutTheAddress = inviteForm(render());
+  expect(notAboutTheAddress).not.toMatch(/aria-invalid|aria-describedby="invite-error"/);
+  expect(notAboutTheAddress).toMatch(/<p id="invite-error" role="alert"[^>]*>Too many invitations. Wait a few minutes and try again.<\/p>/);
+  answered("invite", { error: "That address is already in this workspace.", field: "email" }, { pending: true });
   const sending = inviteForm(render());
   expect(sending).not.toContain("invite-error");
   expect(sending).toMatch(/<input type="email"[^>]*readOnly=""/);

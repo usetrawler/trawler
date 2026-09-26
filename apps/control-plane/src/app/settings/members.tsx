@@ -270,7 +270,7 @@ export function InviteForm({ state, shown, action, held, inviting, onSent, signI
     setEmail("");
     setRole("member");
   }, [state]);
-  const failed = Boolean(shown.error);
+  const addressRefused = shown.field === "email";
   return (
     <form
       action={action}
@@ -286,7 +286,7 @@ export function InviteForm({ state, shown, action, held, inviting, onSent, signI
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex min-w-0 flex-1 basis-64 flex-col gap-2">
           <span className="text-sm text-muted">The email address they sign in with, on GitHub or Google.</span>
-          <input name="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" spellCheck={false} maxLength={254} readOnly={inviting} aria-invalid={failed || undefined} aria-describedby={failed ? "invite-error" : undefined} className={`${field} font-sans`} />
+          <input name="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" spellCheck={false} maxLength={254} readOnly={inviting} aria-invalid={addressRefused || undefined} aria-describedby={addressRefused ? "invite-error" : undefined} className={`${field} font-sans`} />
         </label>
         <label className="flex flex-col gap-2">
           <span className="text-sm text-muted">Role</span>
@@ -301,7 +301,7 @@ export function InviteForm({ state, shown, action, held, inviting, onSent, signI
         <button type="submit" {...hold(held)} className={button}>{inviting ? "Inviting…" : "Invite"}</button>
         <span role="status" className="min-w-0 text-sm wrap-anywhere text-ok">{shown.invited ? invitedStatus(shown.invited, signInAt) : ""}</span>
       </div>
-      {failed && <p id="invite-error" role="alert" className={alert}>{shown.error}</p>}
+      {shown.error && <p id="invite-error" role="alert" className={alert}>{shown.error}</p>}
     </form>
   );
 }
