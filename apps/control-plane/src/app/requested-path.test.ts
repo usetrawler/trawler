@@ -30,20 +30,24 @@ test("the browser shows the route as it was requested, with the whole route in i
   expect(shown(long)).toBe(`<code title="${long}" class="block min-h-5 truncate font-mono text-sm text-ink">${long}</code>`);
 });
 
-test("the route reads as the address bar shows it: letters decoded, while a malformed or reserved escape stays as it came", () => {
+test("the route reads as the address bar shows it: letters decoded, in either case of escape, while a malformed or reserved escape stays as it came", () => {
   client.on = true;
   const text = (path: string) => shown(path).match(/<code title="([^"]*)"[^>]*>([^<]*)<\/code>/)?.slice(1);
   expect(text("/caf%C3%A9/zg%C5%82oszenia")).toEqual(["/café/zgłoszenia", "/café/zgłoszenia"]);
+  expect(text("/caf%c3%a9")).toEqual(["/café", "/café"]);
   expect(text("/a%2Fb/%E0%A4%A")).toEqual(["/a%2Fb/%E0%A4%A", "/a%2Fb/%E0%A4%A"]);
-  expect(text("/a%2Fb")).toEqual(["/a%2Fb", "/a%2Fb"]);
+  expect(text("/a%40b%3Ac%3Bd%3De%26f%2Bg%2Ch%24i")).toEqual(["/a%40b%3Ac%3Bd%3De%26f%2Bg%2Ch%24i", "/a%40b%3Ac%3Bd%3De%26f%2Bg%2Ch%24i"]);
+  expect(text("/a%3Fb%23c%5Cd")).toEqual(["/a%3Fb%23c%5Cd", "/a%3Fb%23c%5Cd"]);
 });
 
-test("spaces, a percent sign, and invisible or direction-changing characters stay encoded, so the route cannot pass for another", () => {
+test("spaces, a percent sign, control characters, and invisible or direction-changing characters stay encoded", () => {
   client.on = true;
   const text = (path: string) => shown(path).match(/<code [^>]*>([^<]*)<\/code>/)?.[1];
   expect(text("/files/invoice-%E2%80%AEfdp.exe")).toBe("/files/invoice-%E2%80%AEfdp.exe");
   expect(text("/pro%E2%80%8Bjects")).toBe("/pro%E2%80%8Bjects");
+  expect(text("/x%E3%85%A4y")).toBe("/x%E3%85%A4y");
   expect(text("/zg%C5%82oszenia%202")).toBe("/zgłoszenia%202");
   expect(text("/100%25")).toBe("/100%25");
   expect(text("/tab%09and%0Anewline")).toBe("/tab%09and%0Anewline");
+  expect(text("/a%00b%7Fc")).toBe("/a%00b%7Fc");
 });
