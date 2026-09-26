@@ -59,9 +59,19 @@ test("focus goes where the panel points, and the panel then forgets the target",
   expect(react.dispatched).toEqual([{ type: "focused" }]);
 });
 
+type Node = { type?: unknown; props?: { children?: unknown; ref?: unknown } };
+const nodes = (node: unknown): Node[] => {
+  if (Array.isArray(node)) return node.flatMap(nodes);
+  if (!node || typeof node !== "object") return [];
+  const element = node as Node;
+  return [element, ...nodes(element.props?.children)];
+};
+const text = (node: unknown): string => (typeof node === "string" ? node : Array.isArray(node) ? node.map(text).join("") : text((node as Node | null)?.props?.children ?? ""));
+
 test("the remove step opens on Keep the key, so a second Enter keeps the key", () => {
   const keep = focusable();
   react.refs = [keep];
-  RemoveForm({ addedAt: saved.addedAt, action: () => {}, pending: false, error: "", onKeep: () => {} });
+  const form = RemoveForm({ addedAt: saved.addedAt, action: () => {}, pending: false, error: "", onKeep: () => {} });
   expect(keep.current.focus).toHaveBeenCalledOnce();
+  expect(nodes(form).filter((node) => node.props?.ref === keep).map(text)).toEqual(["Keep the key"]);
 });
