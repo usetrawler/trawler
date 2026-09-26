@@ -11,7 +11,7 @@ const { RunLive, outcome, personLine } = await import("./run-live.tsx");
 const job = (kind: string, status: string, extra: Partial<RunSummary["jobs"][number]> = {}) =>
   ({ id: `${kind}-${status}-${Math.random()}`, kind, status, persona_key: null, finding_key: null, usage: null, stopped_by: null, error: null, requested: false, ...extra }) as RunSummary["jobs"][number];
 const finding = (key: string, persona: string, extra: Partial<RunSummary["findings"][number]> = {}) =>
-  ({ key, personaKey: persona, kind: "defect", goal: "g1", title: key, observed: "o", reproduction: ["Open Invoices.", "Save."], severity: "high", replay: null, verdict: null, ...extra }) as RunSummary["findings"][number];
+  ({ key, personaKey: persona, kind: "defect", goal: "g1", title: key, observed: "o", reproduction: ["Open Invoices.", "Save."], severity: "high", replay: null, verdict: null, screenshots: { reported: null, replayed: null }, ...extra }) as RunSummary["findings"][number];
 const summary = (over: Partial<RunSummary>): RunSummary => ({
   id: "run-1", number: 7, status: "succeeded", cancelReason: null, projectId: "project-1", costUsd: 0.35, budgetUsd: 2, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash",
   provider: "openrouter", tokenCap: null, tokensUsed: 0, createdAt: new Date("2026-09-25T19:40:00Z"), startedAt: new Date("2026-09-25T19:40:05Z"), finishedAt: new Date("2026-09-25T19:59:00Z"),
@@ -169,4 +169,19 @@ test("the actions stay together and move under the text until the page is wide, 
   expect(row).toMatch(/<span class="mt-\[5px\] line-clamp-2 [^"]*">A 500 page\.<\/span>/);
   expect(row!.match(/<span class="mt-\[5px\][^"]*"/)?.[0]).not.toMatch(/\bblock\b/);
   expect(row).toMatch(/<div class="[^"]*\bwrap-anywhere\b[^"]*"><p><span class="text-muted">While trying to: /);
+});
+
+test("a confirmed defect's card shows both screenshots after its steps, and a card without any shows none", () => {
+  const html = render(summary({
+    findings: [
+      finding("ana:f1", "ana", { title: "Save fails", reproduction: ["Open /", "Click Save"], verdict: "confirmed", replay: { completed: true, observed: "Internal Server Error", blockedAt: null }, screenshots: { reported: "11111111-1111-4111-8111-111111111111", replayed: "22222222-2222-4222-8222-222222222222" } }),
+      finding("ana:f2", "ana", { title: "Load fails", verdict: "confirmed" }),
+    ],
+  }));
+  const [saved, loaded] = rows(html, "Confirmed");
+  expect(saved).toMatch(/Click Save<\/li><\/ol><\/div><div class="grid gap-3 sm:grid-cols-2">/);
+  expect(saved).toContain('src="/api/artifacts/11111111-1111-4111-8111-111111111111"');
+  expect(saved).toContain('src="/api/artifacts/22222222-2222-4222-8222-222222222222"');
+  expect(loaded).toContain("Load fails");
+  expect(loaded).not.toContain("<figure");
 });

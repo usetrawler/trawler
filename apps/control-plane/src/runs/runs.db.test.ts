@@ -623,3 +623,41 @@ describe("judge again", () => {
     await completeJob(t.db, judge.token, { usage: usage(0), stoppedBy: "budget" });
   });
 });
+
+describe("screenshots", () => {
+  async function screenshot(job: { jobId: string }, run: string, findingKey: string | null, state: { age?: string; stored?: boolean; discarded?: boolean } = {}) {
+    const row = await sql<{ id: string }>`insert into artifacts (id, org_id, run_id, job_id, finding_key, kind, content_type, size_bytes, storage_key, created_at, stored_at, discarded_at)
+      select k.id, 'org-a', ${run}::uuid, ${job.jobId}::uuid, ${findingKey}, 'screenshot', 'image/png', 10, ${`orgs/org-a/runs/${run}/`} || k.id || '.png',
+        now() - ${state.age ?? "0 minutes"}::interval, ${state.stored === false ? null : sql`now()`}, ${state.discarded ? sql`now()` : null}
+      from (select gen_random_uuid() as id) k returning id`.execute(t.db);
+    return row.rows[0]!.id;
+  }
+
+  test("a finding carries the latest stored screenshot from its session and from its replay; a pending or discarded one, or one for another finding, never", async () => {
+    await drain();
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const session = (await claimJob(t.db, keys))!;
+    seq = 0;
+    await ingestEvents(t.db, session.token, [
+      ev({ type: "job_started", jobId: session.jobId, kind: "role_session" }),
+      ev({ type: "finding", jobId: session.jobId, finding: defect }),
+      ev({ type: "finding", jobId: session.jobId, finding: { ...defect, id: "f2", title: "Broken load" } }),
+    ]);
+    await screenshot(session, run.id, "ana:f1", { age: "3 minutes" });
+    const reported = await screenshot(session, run.id, "ana:f1", { age: "2 minutes" });
+    await screenshot(session, run.id, "ana:f1", { age: "1 minute", stored: false });
+    await screenshot(session, run.id, "ana:f1", { discarded: true });
+    await completeJob(t.db, session.token, { usage: usage(0), stoppedBy: "finish" });
+    await completeJob(t.db, (await claimJob(t.db, keys))!.token, { usage: usage(0), stoppedBy: "finish" });
+    const replay = (await claimJob(t.db, keys))!;
+    expect(replay.finding?.id).toBe("ana:f1");
+    const replayed = await screenshot(replay, run.id, "ana:f1");
+
+    const findings = (await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.findings;
+    expect(findings.map((f) => [f.key, f.screenshots])).toEqual([
+      ["ana:f1", { reported, replayed }],
+      ["ana:f2", { reported: null, replayed: null }],
+    ]);
+    await drain();
+  });
+});

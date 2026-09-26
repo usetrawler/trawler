@@ -123,7 +123,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   if (!run) return null;
   const snapshot = run.config_snapshot as unknown as ConfigSnapshot;
   const goalText = new Map(snapshot.goals.map((g) => [g.id, g.instruction]));
-  const [jobs, findings, goals, activity] = await Promise.all([
+  const [jobs, findings, goals, activity, screenshots] = await Promise.all([
     tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error", sql<boolean>`requested_by is not null`.as("requested")]).where("run_id", "=", runId).orderBy("position").execute(),
     tx.selectFrom("findings").select(["key", "persona_key", "kind", "goal", "title", "observed", "reproduction", "severity", "replay", "verdict"]).where("run_id", "=", runId).orderBy("created_at").orderBy("key").execute(),
     tx.selectFrom("goal_outcomes").select(["persona_key", "goal", "status", "note"]).where("run_id", "=", runId).orderBy("persona_key").orderBy("goal").execute(),
@@ -136,15 +136,29 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
       .orderBy("e.id", "desc")
       .limit(8)
       .execute(),
+    tx
+      .selectFrom("artifacts as a")
+      .innerJoin("jobs as j", "j.id", "a.job_id")
+      .select(["a.id", "a.finding_key", "j.kind"])
+      .where("a.run_id", "=", runId)
+      .where("a.kind", "=", "screenshot")
+      .where("a.stored_at", "is not", null)
+      .where("a.discarded_at", "is", null)
+      .orderBy("a.created_at")
+      .execute(),
   ]);
   const findingTitle = new Map(findings.map((f) => [f.key, f.title]));
+  const latestScreenshot = (key: string, kind: string) => screenshots.filter((a) => a.finding_key === key && a.kind === kind).at(-1)?.id ?? null;
   return {
     id: run.id, number: run.number, status: run.status, cancelReason: run.cancel_reason as CancelReason | null, projectId: run.project_id,
     costUsd: Number(run.cost_usd), budgetUsd: Number(run.budget_usd), agentModel: run.agent_model, judgeModel: run.judge_model,
     provider: run.provider, tokenCap: run.token_cap === null ? null : Number(run.token_cap), tokensUsed: Number(run.tokens_used),
     createdAt: run.created_at, startedAt: run.started_at, finishedAt: run.finished_at,
     jobs,
-    findings: findings.map((f) => ({ key: f.key, personaKey: f.persona_key, kind: f.kind, goal: f.goal, title: f.title, observed: f.observed, reproduction: f.reproduction, severity: f.severity, replay: f.replay, verdict: f.verdict })),
+    findings: findings.map((f) => ({
+      key: f.key, personaKey: f.persona_key, kind: f.kind, goal: f.goal, title: f.title, observed: f.observed, reproduction: f.reproduction, severity: f.severity, replay: f.replay, verdict: f.verdict,
+      screenshots: { reported: latestScreenshot(f.key, "role_session"), replayed: latestScreenshot(f.key, "replay") },
+    })),
     goals: goals.map((g) => ({ personaKey: g.persona_key, goal: g.goal, status: g.status, note: g.note })),
     target: snapshot.targetUrl,
     personas: snapshot.personas.map((p) => ({ id: p.id, name: p.name })),

@@ -8,6 +8,7 @@ import { initials } from "../../../components/initials.ts";
 import { LocalTime } from "../../../components/local-time.tsx";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { cancelRunAction, judgeAgainAction } from "./actions.ts";
+import { FindingScreenshots } from "./finding-screenshots.tsx";
 import { RunAgainButton, RunAgainError, useRunAgain } from "./run-again-button.tsx";
 
 type View = ReturnType<typeof runView>;
@@ -148,6 +149,7 @@ export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused 
             <p className="mb-1 text-muted">Steps</p>
             <ol className="list-decimal pl-5">{f.reproduction.map((step, i) => <li key={i}>{step}</li>)}</ol>
           </div>
+          <FindingScreenshots title={f.title} screenshots={f.screenshots} />
           <p><span className="text-muted">What happened: </span>{f.observed}</p>
           {replay?.observed && <p><span className="text-muted">What the replay saw: </span>{replay.observed}</p>}
           {detail && <p className="break-words"><span className="text-muted">Why it was not judged: </span>{detail}</p>}
