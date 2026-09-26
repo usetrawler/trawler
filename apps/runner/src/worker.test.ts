@@ -108,7 +108,23 @@ const within = async (condition: () => boolean, ms = 10_000) => {
   }
 };
 
-const timers = () => process.getActiveResourcesInfo().filter((r) => r === "Timeout").length;
+async function longTimersLeftBy(minMs: number, work: () => Promise<unknown>): Promise<number> {
+  const pending = new Set<unknown>();
+  const { setTimeout: realSet, clearTimeout: realClear } = globalThis;
+  globalThis.setTimeout = ((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+    const handle: unknown = realSet((...a: unknown[]) => (pending.delete(handle), fn(...a)), ms, ...args);
+    if ((ms ?? 0) >= minMs) pending.add(handle);
+    return handle;
+  }) as typeof setTimeout;
+  globalThis.clearTimeout = ((handle: Parameters<typeof clearTimeout>[0]) => (pending.delete(handle), realClear(handle))) as typeof clearTimeout;
+  try {
+    await work();
+    return pending.size;
+  } finally {
+    globalThis.setTimeout = realSet;
+    globalThis.clearTimeout = realClear;
+  }
+}
 
 test("an upload is tried again after a server error or too many requests but not after a refusal, and a lost screenshot never fails the job", async () => {
   const retried = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" }, { uploadStatuses: [503, 429, 201] });
@@ -173,11 +189,9 @@ test("an upload that keeps losing its connection gives up with the connection's 
 });
 
 test("a finished job leaves no timer behind, so a runner working once can exit at once", async () => {
-  const { url } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" });
-  await workOnce(deps(url, reportsDefect(), { openBrowser: shooting, uploadWaitMs: 60_000 }));
-  const before = timers();
-  await workOnce(deps(url, reportsDefect(), { openBrowser: shooting, uploadWaitMs: 60_000 }));
-  expect(timers()).toBeLessThanOrEqual(before);
+  const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" });
+  expect(await longTimersLeftBy(10_000, () => workOnce(deps(url, reportsDefect(), { openBrowser: shooting, uploadWaitMs: 60_000 })))).toBe(0);
+  expect(seen.completions).toHaveLength(1);
 });
 
 test("the browser is never given the runner's or the job's token to look for", async () => {
@@ -259,16 +273,18 @@ test("a job handed back while an upload waits to be tried again leaves no timer 
   ], 0.001);
   const original = model.doGenerate.bind(model);
   model.doGenerate = async (options) => (await new Promise((r) => setTimeout(r, 30)), original(options));
-  const before = timers();
   const stop = new AbortController();
-  const work = workOnce(deps(url, model, { openBrowser: shooting, retryBaseMs: 20_000 }), stop.signal);
-  await within(() => seen.order.includes("artifacts answered"));
-  stop.abort();
-  await work;
-  await new Promise((r) => setTimeout(r, 100));
+  const left = await longTimersLeftBy(10_000, async () => {
+    const work = workOnce(deps(url, model, { openBrowser: shooting, retryBaseMs: 20_000 }), stop.signal);
+    await within(() => seen.order.includes("artifacts answered"));
+    await new Promise((r) => setTimeout(r, 300));
+    stop.abort();
+    await work;
+    await new Promise((r) => setTimeout(r, 100));
+  });
+  expect(left).toBe(0);
   expect(seen.releases).toBe(1);
   expect(seen.uploads).toHaveLength(1);
-  expect(timers()).toBeLessThanOrEqual(before);
 });
 
 test("a replay handed back because the runner is stopping takes and uploads no screenshot", async () => {

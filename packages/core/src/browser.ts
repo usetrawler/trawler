@@ -85,7 +85,6 @@ const registerEngines = () =>
       }),
     ),
   ));
-const TWO_FRAMES = "new Promise((resolve) => { requestAnimationFrame(() => requestAnimationFrame(resolve)); setTimeout(resolve, 200); })";
 const BOXES = (els: any[]) => els.map((el) => Object.values(el.getBoundingClientRect().toJSON()).join(",")).join(" ");
 const escapedForRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 function fieldStateOf(el: any, mark: string) {
@@ -343,7 +342,6 @@ export async function openBrowser(opts: {
       }
       return sessions;
     };
-    const playAnimationsAt = (sessions: CDPSession[], playbackRate: number) => Promise.all(sessions.map((s) => s.send("Animation.setPlaybackRate", { playbackRate })));
     const findMarked = async (mark: string) => {
       for (const page of context.pages()) {
         for (const frame of page.frames()) {
@@ -444,9 +442,8 @@ export async function openBrowser(opts: {
           const frames = page.frames();
           const sessions = await animationSessions(page, frames);
           try {
-            await playAnimationsAt(sessions, 0);
+            await Promise.all(sessions.map((s) => s.send("Animation.setPlaybackRate", { playbackRate: 0 })));
             const { mask, placed } = await inTime(async () => {
-              await page.evaluate(TWO_FRAMES);
               const secrets = await secretsOnPage();
               const mask = frames.flatMap((frame) => masksIn(frame, secrets));
               return { mask, placed: await boxesOf(mask) };
@@ -457,7 +454,6 @@ export async function openBrowser(opts: {
             if (!unmoved || !sameFrames || bytes.byteLength > MAX_ARTIFACT_BYTES) return null;
             return { bytes: new Uint8Array(bytes), contentType: "image/png" };
           } finally {
-            await playAnimationsAt(sessions, 1).catch(() => undefined);
             await Promise.all(sessions.map((s) => s.detach().catch(() => undefined)));
           }
         };
