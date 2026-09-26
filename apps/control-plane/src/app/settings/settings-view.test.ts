@@ -46,14 +46,14 @@ test("a member reads the key but cannot change it, and without a key is told who
 });
 
 test("replacing a key starts in its field, with Keep beside it and outside its label", () => {
-  const html = render(createElement(ReplaceForm, { saved, onSaved: nothing, onKeep: nothing }));
+  const html = render(createElement(ReplaceForm, { saved, action: nothing, pending: false, error: "", onKeep: nothing }));
   expect(html.match(/<input [^>]*name="apiKey"[^>]*>/)?.[0]).toMatch(/\bautofocus=""/);
   expect(html).toMatch(/<label for="([^"]+)"[^>]*>An API key from your model provider[^<]*<\/label><div class="flex gap-2"><input id="\1" [^>]*name="apiKey"[^>]*\/?><button type="button"[^>]*>Keep …a1b2<\/button><\/div>/);
   expect(html).toMatch(/<button type="submit"[^>]*>Save key<\/button><span[^>]*>Saved once the provider accepts it\.<\/span>/);
 });
 
 test("the remove step names what it stops, on the button that confirms it", () => {
-  const html = render(createElement(RemoveForm, { onRemoved: nothing, onKeep: nothing }));
+  const html = render(createElement(RemoveForm, { action: nothing, pending: false, error: "", onKeep: nothing }));
   expect(html).toContain('<p id="remove-warning">Remove the key? The workspace&#x27;s runs that are going now stop, and Start asks for a new key.</p>');
   expect(html).toMatch(/<button type="submit" aria-describedby="remove-warning"[^>]*>Remove the key<\/button><button type="button"[^>]*>Keep the key<\/button>/);
 });

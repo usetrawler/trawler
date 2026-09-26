@@ -30,7 +30,10 @@ export function removedStatus(state: SettingsState): string {
 export function ModelKey({ saved, addedBy, canManage }: { saved: SavedKey | null; addedBy: string | null; canManage: boolean }) {
   const [step, setStep] = useState<Step>("view");
   const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
   const [focus, setFocus] = useState<Target | null>(null);
+  const [replaced, replace, checking] = useActionState<SettingsState, FormData>(replaceModelKeyAction, {});
+  const [removed, remove, removing] = useActionState<SettingsState, FormData>(removeModelKeyAction, {});
   const targets = { heading: useRef<HTMLHeadingElement>(null), replace: useRef<HTMLButtonElement>(null), remove: useRef<HTMLButtonElement>(null) };
 
   useEffect(() => {
@@ -41,13 +44,23 @@ export function ModelKey({ saved, addedBy, canManage }: { saved: SavedKey | null
 
   const go = (next: Step) => {
     setStatus("");
+    setError("");
     setStep(next);
   };
   const back = (to: Target, said = "") => {
     setStatus(said);
+    setError("");
     setStep("view");
     setFocus(to);
   };
+  useEffect(() => {
+    if (replaced.saved) back("replace", savedStatus(replaced));
+    else if (replaced.error) setError(replaced.error);
+  }, [replaced]);
+  useEffect(() => {
+    if (removed.saved) back("heading", removedStatus(removed));
+    else if (removed.error) setError(removed.error);
+  }, [removed]);
   const editing = canManage && (step === "replacing" || !saved);
 
   return (
@@ -68,9 +81,9 @@ export function ModelKey({ saved, addedBy, canManage }: { saved: SavedKey | null
       {!canManage ? (
         saved && <p className="text-sm text-muted">Only an owner or admin of this workspace can change the key.</p>
       ) : editing ? (
-        <ReplaceForm saved={saved} onSaved={(state) => back("replace", savedStatus(state))} onKeep={() => back("replace")} />
+        <ReplaceForm saved={saved} action={replace} pending={checking} error={error} onKeep={() => back("replace")} />
       ) : step === "confirming" ? (
-        <RemoveForm onRemoved={(state) => back("heading", removedStatus(state))} onKeep={() => back("remove")} />
+        <RemoveForm action={remove} pending={removing} error={error} onKeep={() => back("remove")} />
       ) : (
         <div className="flex flex-wrap gap-3">
           <button type="button" ref={targets.replace} onClick={() => go("replacing")} className={button}>Replace</button>
@@ -82,15 +95,10 @@ export function ModelKey({ saved, addedBy, canManage }: { saved: SavedKey | null
   );
 }
 
-export function ReplaceForm({ saved, onSaved, onKeep }: { saved: SavedKey | null; onSaved: (state: SettingsState) => void; onKeep: () => void }) {
-  const [state, action, pending] = useActionState<SettingsState, FormData>(replaceModelKeyAction, {});
+export function ReplaceForm({ saved, action, pending, error, onKeep }: { saved: SavedKey | null; action: (form: FormData) => void; pending: boolean; error: string; onKeep: () => void }) {
   const [apiKey, setApiKey] = useState("");
   const [chosen, setChosen] = useState<Provider | null>(null);
   const [baseUrl, setBaseUrl] = useState("");
-  useEffect(() => {
-    if (state.saved) onSaved(state);
-  }, [state]);
-
   const detected = apiKey.trim() ? detectProvider(apiKey) : null;
   const provider: Provider | null = apiKey.trim().length >= 20 ? chosen ?? detected ?? "custom" : null;
   return (
@@ -104,20 +112,16 @@ export function ReplaceForm({ saved, onSaved, onKeep }: { saved: SavedKey | null
         <button type="submit" aria-disabled={pending || undefined} onClick={(e) => { if (pending) e.preventDefault(); }} className={button}>{pending ? "Checking the key…" : "Save key"}</button>
         <span className="text-sm text-muted">Saved once the provider accepts it.</span>
       </div>
-      {state.error && <p role="alert" className={alert}>{state.error}</p>}
+      {error && <p role="alert" className={alert}>{error}</p>}
     </form>
   );
 }
 
-export function RemoveForm({ onRemoved, onKeep }: { onRemoved: (state: SettingsState) => void; onKeep: () => void }) {
-  const [state, action, pending] = useActionState<SettingsState, FormData>(removeModelKeyAction, {});
+export function RemoveForm({ action, pending, error, onKeep }: { action: (form: FormData) => void; pending: boolean; error: string; onKeep: () => void }) {
   const confirm = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     confirm.current?.focus();
   }, []);
-  useEffect(() => {
-    if (state.saved) onRemoved(state);
-  }, [state]);
   return (
     <form action={action} className="flex flex-col gap-3 text-sm">
       <p id="remove-warning">Remove the key? The workspace's runs that are going now stop, and Start asks for a new key.</p>
@@ -125,7 +129,7 @@ export function RemoveForm({ onRemoved, onKeep }: { onRemoved: (state: SettingsS
         <button type="submit" ref={confirm} aria-describedby="remove-warning" aria-disabled={pending || undefined} onClick={(e) => { if (pending) e.preventDefault(); }} className="h-10 border border-bad px-4 text-bad aria-disabled:cursor-wait aria-disabled:opacity-60">{pending ? "Removing…" : "Remove the key"}</button>
         <button type="button" onClick={onKeep} className="h-10 px-2 text-muted hover:text-ink">Keep the key</button>
       </div>
-      {state.error && <p role="alert" className={alert}>{state.error}</p>}
+      {error && <p role="alert" className={alert}>{error}</p>}
     </form>
   );
 }

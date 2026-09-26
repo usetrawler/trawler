@@ -29,7 +29,7 @@ function RenameForm({ name }: { name: string }) {
   return (
     <form action={action} className="flex flex-col gap-3">
       <label className="flex flex-col gap-2">
-        <span className="text-sm text-muted">Name, shown at the top of the panel on every page.</span>
+        <span className="text-sm text-muted">Name, shown at the top of the panel.</span>
         <input name="name" value={value} onChange={(e) => setValue(e.target.value)} autoComplete="off" aria-invalid={state.error ? true : undefined} aria-describedby={state.error ? "workspace-error" : undefined} className={`${field} font-sans`} />
       </label>
       <div className="flex flex-wrap items-center gap-3">
