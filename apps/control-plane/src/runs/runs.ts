@@ -65,6 +65,12 @@ export async function cancelRun(tx: Tx, orgId: string, runId: string): Promise<v
   await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date() }).where("run_id", "=", runId).where("status", "=", "queued").execute();
 }
 
+export async function cancelLiveRuns(tx: Tx, orgId: string): Promise<number> {
+  const live = await tx.selectFrom("runs").select("id").where("org_id", "=", orgId).where("status", "in", ["queued", "running"]).execute();
+  for (const run of live) await cancelRun(tx, orgId, run.id);
+  return live.length;
+}
+
 export function capSpent(run: { cost_usd: string; budget_usd: string; token_cap: string | null; tokens_used: string }): boolean {
   const overTokens = run.token_cap !== null && Number(run.tokens_used) >= Number(run.token_cap);
   return Number(run.cost_usd) >= Number(run.budget_usd) || overTokens;

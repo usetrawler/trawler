@@ -8,7 +8,7 @@ import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { setModelKey } from "../credentials/credentials.ts";
 import { createProject, ProjectNotFound } from "../projects/projects.ts";
-import { cancelRun, CannotJudgeAgain, judgeAgain, RunNotFound, runSummary, startRun, type StartRunOptions } from "./runs.ts";
+import { cancelLiveRuns, cancelRun, CannotJudgeAgain, judgeAgain, RunNotFound, runSummary, startRun, type StartRunOptions } from "./runs.ts";
 import { claimJob, completeJob, ingestEvents, InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage, releaseJob } from "./queue.ts";
 
 const t = await testDb();
@@ -151,6 +151,31 @@ describe("safety", () => {
     await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "error", error: "cancelled" });
     expect(await claimJob(t.db, keys)).toBeNull();
     expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.status).toBe("cancelled");
+  });
+
+  test("stopping a workspace's live runs cancels the queued and the going ones, and leaves finished runs and other workspaces alone", async () => {
+    await drain();
+    const finished = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    await drain();
+    const going = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const claimed = (await claimJob(t.db, keys))!;
+    expect(claimed.runId).toBe(going.id);
+    const waiting = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const elsewhere = await withOrg(t.db, "org-b", (tx) => startRun(tx, "org-b", other, keys, options));
+    const status = async (org: string, id: string) => (await withOrg(t.db, org, (tx) => runSummary(tx, org, id)))!.status;
+    const before = await status("org-a", finished.id);
+
+    expect(await withOrg(t.db, "org-a", (tx) => cancelLiveRuns(tx, "org-a"))).toBe(2);
+
+    expect([await status("org-a", finished.id), await status("org-a", going.id), await status("org-a", waiting.id), await status("org-b", elsewhere.id)]).toEqual([before, "cancelled", "cancelled", "queued"]);
+    const jobs = await t.db.selectFrom("jobs").select(["run_id", "status"]).where("run_id", "in", [going.id, waiting.id]).execute();
+    expect(jobs.filter((j) => j.run_id === waiting.id).every((j) => j.status === "cancelled")).toBe(true);
+    expect(jobs.filter((j) => j.run_id === going.id).map((j) => j.status).sort()).toEqual(["cancelled", "leased"]);
+    seq = 0;
+    expect(await ingestEvents(t.db, claimed.token, [ev({ type: "note", jobId: claimed.jobId, text: "x" })])).toEqual({ cancel: true });
+    await completeJob(t.db, claimed.token, { usage: usage(0), stoppedBy: "error", error: "cancelled" });
+    await withOrg(t.db, "org-b", (tx) => cancelRun(tx, "org-b", elsewhere.id));
+    await drain();
   });
 
   test("two claimers never get two jobs of the same run", async () => {
