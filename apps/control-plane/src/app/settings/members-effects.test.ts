@@ -8,6 +8,7 @@ const react = vi.hoisted(() => ({
   deps: [] as Array<unknown[] | undefined>,
   dispatched: [] as unknown[],
   set: [] as unknown[],
+  formPending: false,
 }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
@@ -18,6 +19,7 @@ vi.mock("react", async (original) => ({
   useState: (initial: unknown) => [initial, (value: unknown) => { react.set.push(value); }],
   startTransition: (work: () => void) => work(),
 }));
+vi.mock("react-dom", async (original) => ({ ...(await original<typeof import("react-dom")>()), useFormStatus: () => ({ pending: react.formPending }) }));
 vi.mock("./actions.ts", () => ({ inviteMemberAction: async () => ({}), revokeInvitationAction: async () => ({}), removeMemberAction: async () => ({}), changeRoleAction: async () => ({}) }));
 
 const { ConfirmRemoval, InviteForm, Members } = await import("./members.tsx");
@@ -110,6 +112,17 @@ test("each list form says what it sent, with the answer it replaces, and Remove 
   const held = draw(sending).find((n) => n.type === "button" && typeof n.props?.ref === "function")!;
   (held.props!.onClick as () => void)();
   expect(react.dispatched).toEqual([]);
+});
+
+test("the button of the form being sent says what it is doing, and the others keep their words", () => {
+  const submits = draw(idle()).filter((n) => typeof n.type === "function" && n.props?.working);
+  const labels = (pending: boolean) => {
+    react.formPending = pending;
+    return submits.map((n) => (n.type as (props: unknown) => { props: { children: unknown } })(n.props).props.children);
+  };
+  expect(labels(true)).toEqual(["Changing…", "Revoking…"]);
+  expect(labels(false)).toEqual(submits.map((n) => n.props!.children));
+  react.formPending = false;
 });
 
 test("the confirmation says what it sent, and Keep goes back to that row", () => {
