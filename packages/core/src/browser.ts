@@ -122,7 +122,8 @@ const SELECTOR_ENGINES = {
       const keyframeFields = new Set(["offset", "computedOffset", "easing", "composite"]);
       const up = (el) => el.parentElement ?? el.parentNode?.host;
       for (let el = root; el; el = up(el)) {
-        for (const animation of el.getAnimations({ subtree: true }).filter((a) => el === root || a.effect?.target === el)) {
+        const drawsText = (target) => target && (target === root || (target.textContent ?? "").trim() !== "");
+        for (const animation of el.getAnimations({ subtree: true }).filter((a) => (el === root ? drawsText(a.effect?.target) : a.effect?.target === el))) {
           if (animation.playState !== "running" || animation.timeline !== document.timeline || animation.effect?.getComputedTiming?.().progress == null) continue;
           const properties = (animation.effect?.getKeyframes?.() ?? []).flatMap((frame) => Object.keys(frame)).filter((key) => !keyframeFields.has(key));
           if (properties.some((key) => !looksOnly.test(key))) return [root];

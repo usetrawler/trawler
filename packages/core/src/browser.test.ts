@@ -249,6 +249,10 @@ beforeAll(async () => {
         return html(`<div id="box"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div><script>document.getElementById("box").animate([], { duration: 60000 });</script>`);
       case "/rounded-animation":
         return html(`<style>@keyframes morph{from{border-radius:0}to{border-radius:24px}} #box{background:#eee;animation:morph 400ms infinite alternate}</style><div id="box"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div>`);
+      case "/badge-beside":
+        return html(`<style>@keyframes bounce{from{transform:translateY(0)}to{transform:translateY(-6px)}} .badge{display:inline-block;animation:bounce 400ms infinite alternate}</style><p style="font:20px monospace;color:#ff0000">Key: <span>card-secret-1111</span> <span class="badge" style="color:#333">NEW</span></p><p>Plan: Team</p>`);
+      case "/icon-inside":
+        return html(`<style>@keyframes spin{to{transform:rotate(360deg)}} .icon{display:inline-block;width:12px;height:12px;border:2px solid #333;border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite}</style><p style="font:20px monospace;color:#ff0000">Key: card-secret-1111 <span class="icon"></span></p><p>Plan: Team</p>`);
       case "/fixed-below":
         return html(`<p>Short page</p><div style="position:fixed;left:20px;bottom:120px;height:0;font:20px monospace;color:#ff0000">card-secret-1111</div>`);
       case "/flicker":
@@ -1381,6 +1385,8 @@ describe("screenshots", () => {
   }, 60_000);
 
   test.each([
+    ["/badge-beside", "a badge beside it in the same line"],
+    ["/icon-inside", "a spinning icon without text inside its element"],
     ["/delayed-animation", "one still waiting to start"],
     ["/timer-animation", "one with no keyframes, used as a timer"],
     ["/rounded-animation", "one that only rounds corners"],
