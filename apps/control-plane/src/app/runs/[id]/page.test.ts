@@ -59,3 +59,9 @@ test("a run's page leads back to its project and the project's runs, without the
   expect(crumbs).toMatch(/<a href="\/projects\/p1"[^>]*>Acme<\/a>.*<a href="\/projects\/p1\/runs"[^>]*>Runs<\/a>.*<li aria-current="page"[^>]*>Run 0017<\/li>/);
   expect(html).not.toContain('aria-label="Progress"');
 });
+
+test("a run's page takes the shell's full width, as the mockup's report does", async () => {
+  state.access = { signedIn: true, member, run: { id: ID, projectId: "p1", number: 17 } };
+  const html = renderToStaticMarkup(await open());
+  expect(html).toMatch(/<div class="w-full"><nav aria-label="Breadcrumb"/);
+});

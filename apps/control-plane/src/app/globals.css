@@ -102,3 +102,9 @@ body {
     scroll-padding-top: 76px;
   }
 }
+
+@keyframes halo {
+  50% {
+    box-shadow: 0 0 0 12px transparent;
+  }
+}
