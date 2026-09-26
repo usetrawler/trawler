@@ -1180,7 +1180,7 @@ describe("screenshots", () => {
     expect(await shotsOf(`/moving-${motion}`, 3, typeAndClick("Move"))).toEqual([null, null, null]);
   }, 120_000);
 
-  test("screenshots asked for at once are taken one after the other, so none takes away another's masks", async () => {
+  test("screenshots asked for at once each keep their masks, as Playwright takes a page's screenshots one at a time", async () => {
     await withBrowser(async (b) => {
       await navigate(b, `${origin}/static-secret`);
       const shots = await Promise.all([b.screenshot(), b.screenshot(), b.screenshot()]);

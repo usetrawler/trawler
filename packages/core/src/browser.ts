@@ -348,23 +348,17 @@ export async function openBrowser(opts: {
       const text = frame.getByText(secrets);
       return [...masks, text, text.locator(`${LINE_AROUND}=line`), frame.locator(`${SECRET_FIELDS}=${Buffer.from(secrets.source).toString("base64")}`)];
     };
-    let capturing: Promise<unknown> = Promise.resolve();
-    const capture = async (page: Page, deliver: (shot: Screenshot | null) => void) => {
-      if (disconnected || dialogOpen) return deliver(null);
+    const capture = async (page: Page): Promise<Screenshot | null> => {
       const frames = page.frames();
-      try {
-        const { mask, placed } = await inTime(async () => {
-          const secrets = await secretsOnPage();
-          const mask = frames.flatMap((frame) => masksIn(frame, secrets));
-          return { mask, placed: await boxesOf(mask) };
-        });
-        const bytes = await page.screenshot({ type: "png", mask, maskColor: MASK_COLOR, caret: "hide", scale: "css", timeout: SCREENSHOT_MS });
-        const unmoved = (await inTime(() => boxesOf(mask))) === placed;
-        const sameFrames = page.frames().length === frames.length && page.frames().every((frame, i) => frame === frames[i]);
-        deliver(unmoved && sameFrames && bytes.byteLength <= MAX_ARTIFACT_BYTES ? { bytes: new Uint8Array(bytes), contentType: "image/png" } : null);
-      } finally {
-        deliver(null);
-      }
+      const { mask, placed } = await inTime(async () => {
+        const secrets = await secretsOnPage();
+        const mask = frames.flatMap((frame) => masksIn(frame, secrets));
+        return { mask, placed: await boxesOf(mask) };
+      });
+      const bytes = await page.screenshot({ type: "png", mask, maskColor: MASK_COLOR, caret: "hide", scale: "css", timeout: SCREENSHOT_MS });
+      const unmoved = (await inTime(() => boxesOf(mask))) === placed;
+      const sameFrames = page.frames().length === frames.length && page.frames().every((frame, i) => frame === frames[i]);
+      return unmoved && sameFrames && bytes.byteLength <= MAX_ARTIFACT_BYTES ? { bytes: new Uint8Array(bytes), contentType: "image/png" } : null;
     };
     const boxOf = async (element: ElementHandle) => {
       try {
@@ -479,12 +473,8 @@ export async function openBrowser(opts: {
       async screenshot() {
         const page = context.pages()[0];
         if (!page || disconnected || dialogOpen || page.url() === "about:blank") return null;
-        let late = false;
         let timer: NodeJS.Timeout | undefined;
-        const taken = new Promise<Screenshot | null>((deliver) => {
-          capturing = capturing.then(() => (late ? deliver(null) : capture(page, deliver))).catch(() => deliver(null));
-        });
-        const shot = await Promise.race([taken, new Promise<null>((resolve) => (timer = setTimeout(() => ((late = true), resolve(null)), 2 * SCREENSHOT_MS)))]);
+        const shot = await Promise.race([capture(page).catch(() => null), new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), 2 * SCREENSHOT_MS)))]);
         clearTimeout(timer);
         return shot;
       },
