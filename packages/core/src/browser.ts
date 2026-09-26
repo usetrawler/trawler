@@ -1,7 +1,7 @@
 import { createMCPClient } from "@ai-sdk/mcp";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createConnection } from "@playwright/mcp";
-import { chromium, selectors, type CDPSession, type ElementHandle, type Frame, type Locator, type Route } from "playwright";
+import { chromium, selectors, type CDPSession, type ElementHandle, type Frame, type Locator, type Page, type Route } from "playwright";
 import { jsonSchema, type Tool, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
 import { MAX_ARTIFACT_BYTES } from "@usetrawler/protocol";
@@ -69,16 +69,16 @@ const SELECTOR_ENGINES = {
       const text = document.createRange();
       text.selectNodeContents(root);
       const shown = text.getBoundingClientRect();
-      const slack = line / 2;
-      const covers = (el) => {
+      const covers = (el, slack) => {
         const box = el.getBoundingClientRect();
         return box.left - slack <= shown.left && box.top - slack <= shown.top && box.right + slack >= shown.right && box.bottom + slack >= shown.bottom;
       };
-      let widest = covers(root) ? root : null;
+      let widest = covers(root, line / 2) ? root : null;
+      const slack = widest ? line / 2 : 1;
       for (let el = root.parentElement ?? root.parentNode?.host; el; el = el.parentElement ?? el.parentNode?.host) {
         if (getComputedStyle(el).display === "contents") continue;
         if (widest && el.getBoundingClientRect().height > reach) break;
-        if (covers(el)) widest = el;
+        if (covers(el, slack)) widest = el;
       }
       return [widest ?? document.documentElement];
     },
@@ -331,6 +331,30 @@ export async function openBrowser(opts: {
       const text = frame.getByText(secrets);
       return [...masks, text, text.locator(`${LINE_AROUND}=line`), frame.locator(`${SECRET_FIELDS}=${Buffer.from(secrets.source).toString("base64")}`)];
     };
+    let capturing: Promise<unknown> = Promise.resolve();
+    const capture = async (page: Page, deliver: (shot: Screenshot | null) => void) => {
+      if (disconnected || dialogOpen) return deliver(null);
+      const frames = page.frames();
+      const animations = await context.newCDPSession(page);
+      let frozenSince: number | undefined;
+      try {
+        await animations.send("Animation.setPlaybackRate", { playbackRate: 0 });
+        frozenSince = performance.now();
+        const { mask, placed } = await inTime(async () => {
+          const secrets = await secretsOnPage();
+          const mask = frames.flatMap((frame) => masksIn(frame, secrets));
+          return { mask, placed: await boxesOf(mask) };
+        });
+        const bytes = await page.screenshot({ type: "png", mask, maskColor: MASK_COLOR, caret: "hide", scale: "css", timeout: SCREENSHOT_MS });
+        const unmoved = (await inTime(() => boxesOf(mask))) === placed;
+        const sameFrames = page.frames().length === frames.length && page.frames().every((frame, i) => frame === frames[i]);
+        deliver(unmoved && sameFrames && bytes.byteLength <= MAX_ARTIFACT_BYTES ? { bytes: new Uint8Array(bytes), contentType: "image/png" } : null);
+      } finally {
+        deliver(null);
+        if (frozenSince !== undefined) await catchUp(animations, performance.now() - frozenSince).catch(() => undefined);
+        await animations.detach().catch(() => undefined);
+      }
+    };
     const catchUp = async (animations: CDPSession, frozenMs: number) => {
       await animations.send("Animation.setPlaybackRate", { playbackRate: 2 });
       await new Promise((resolve) => setTimeout(resolve, frozenMs));
@@ -448,30 +472,12 @@ export async function openBrowser(opts: {
       async screenshot() {
         const page = context.pages()[0];
         if (!page || disconnected || dialogOpen || page.url() === "about:blank") return null;
-        const shoot = async (): Promise<Screenshot | null> => {
-          const frames = page.frames();
-          const animations = await context.newCDPSession(page);
-          let frozenSince: number | undefined;
-          try {
-            await animations.send("Animation.setPlaybackRate", { playbackRate: 0 });
-            frozenSince = performance.now();
-            const { mask, placed } = await inTime(async () => {
-              const secrets = await secretsOnPage();
-              const mask = frames.flatMap((frame) => masksIn(frame, secrets));
-              return { mask, placed: await boxesOf(mask) };
-            });
-            const bytes = await page.screenshot({ type: "png", mask, maskColor: MASK_COLOR, caret: "hide", scale: "css", timeout: SCREENSHOT_MS });
-            const unmoved = (await inTime(() => boxesOf(mask))) === placed;
-            const sameFrames = page.frames().length === frames.length && page.frames().every((frame, i) => frame === frames[i]);
-            if (!unmoved || !sameFrames || bytes.byteLength > MAX_ARTIFACT_BYTES) return null;
-            return { bytes: new Uint8Array(bytes), contentType: "image/png" };
-          } finally {
-            if (frozenSince !== undefined) await catchUp(animations, performance.now() - frozenSince).catch(() => undefined);
-            await animations.detach().catch(() => undefined);
-          }
-        };
+        let late = false;
         let timer: NodeJS.Timeout | undefined;
-        const shot = await Promise.race([shoot().catch(() => null), new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), 2 * SCREENSHOT_MS)))]);
+        const taken = new Promise<Screenshot | null>((deliver) => {
+          capturing = capturing.then(() => (late ? deliver(null) : capture(page, deliver))).catch(() => deliver(null));
+        });
+        const shot = await Promise.race([taken, new Promise<null>((resolve) => (timer = setTimeout(() => ((late = true), resolve(null)), 2 * SCREENSHOT_MS)))]);
         clearTimeout(timer);
         return shot;
       },

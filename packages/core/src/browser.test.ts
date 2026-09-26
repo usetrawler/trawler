@@ -188,6 +188,8 @@ beforeAll(async () => {
         return html(card({ heading: "Account settings", name: "Bea", secret: "card-secret-1111" }));
       case "/overflowing":
         return html(`<div style="font:20px sans-serif;padding:16px;border:1px solid #999;width:640px"><h2>Account settings</h2><p style="width:80px;white-space:nowrap;color:#ff0000">card-secret-1111 is the key</p><p>Plan: Team</p></div>`);
+      case "/overflow-edge":
+        return html(`<div id="parent" style="font:20px monospace"><p id="secret" style="width:100px;white-space:nowrap;color:#ff0000;margin:0">card-secret-11112</p></div><p>After</p><p>More</p><p>And more</p><p>Still more</p><script>const text = document.createRange(); text.selectNodeContents(document.getElementById("secret")); document.getElementById("parent").style.width = (text.getBoundingClientRect().width - 5) + "px";</script>`);
       case "/zero-height":
         return html(`<div style="font:20px sans-serif;padding:16px;border:1px solid #999;width:640px"><h2>Account settings</h2><div style="height:0;color:#ff0000">card-secret-1111</div><p>Plan: Team</p><p>Billing: monthly</p></div>`);
       case "/clock":
@@ -1171,6 +1173,16 @@ describe("screenshots", () => {
     expect(await Promise.all(shots.map((shot) => redPixels(shot!)))).toEqual([0, 0, 0, 0]);
   }, 120_000);
 
+  test("two screenshots asked for at once are taken one after the other, so neither lets the other's page move", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/moving-keyframes`);
+      await typeAndClick("Move")(b, await snapshot(b));
+      const shots = await Promise.all([b.screenshot(), b.screenshot()]);
+      expect(shots.every((shot) => shot !== null)).toBe(true);
+      expect(await Promise.all(shots.map((shot) => redPixels(shot!)))).toEqual([0, 0]);
+    });
+  }, 60_000);
+
   test("a password on an element a script moves by the wall clock gives no screenshot rather than one the masks may miss", async () => {
     expect(await shotsOf("/moving-wall-clock", 3, typeAndClick("Move"))).toEqual([null, null, null]);
   }, 120_000);
@@ -1223,8 +1235,9 @@ describe("screenshots", () => {
   test.each([
     ["/overflowing", "runs outside its box"],
     ["/zero-height", "sits in a box with no height"],
+    ["/overflow-edge", "runs just past the edge of the box around its own"],
   ])("a secret whose text %s is masked where it is drawn (%s)", async (path) => {
-    const [shot] = await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"));
+    const [shot] = await shotsOf(path, 1, async () => undefined, knowing(path === "/overflow-edge" ? "card-secret-11112" : "card-secret-1111"));
     expect(shot).not.toBeNull();
     expect(await redPixels(shot!)).toBe(0);
   }, 60_000);
