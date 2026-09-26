@@ -73,6 +73,13 @@ function checkUrl(raw: string): URL {
   return url;
 }
 
+function refuseUpgrades(req: http.ClientRequest, reject: (err: FetchRefused) => void): void {
+  req.on("upgrade", (res, socket) => {
+    socket.destroy();
+    reject(new FetchRefused("status", `HTTP ${res.statusCode}`));
+  });
+}
+
 function getOnce(url: URL, blocked: BlockList, timeoutMs: number): Promise<{ status: number; location?: string; body: string }> {
   const host = url.hostname.replace(/^\[|\]$/g, "");
   const literal = isIP(host);
@@ -99,6 +106,7 @@ function getOnce(url: URL, blocked: BlockList, timeoutMs: number): Promise<{ sta
       res.on("end", () => resolve({ status, body: Buffer.concat(chunks).toString("utf8") }));
       res.on("error", reject);
     });
+    refuseUpgrades(req, reject);
     req.on("timeout", () => req.destroy(new FetchRefused("timeout", "the page timed out")));
     req.on("error", (err: NodeJS.ErrnoException) => {
       if (err instanceof FetchRefused) return reject(err);
@@ -144,6 +152,11 @@ export function guardedFetch(options: { allowLoopback?: boolean } = {}): typeof 
     const body = typeof init.body === "string" ? init.body : undefined;
     return new Promise<Response>((resolve, reject) => {
       const req = https.request(url, { method: init.method ?? "GET", headers, agent: new https.Agent({ keepAlive: false }), lookup: guardedLookup(blocked), signal: init.signal ?? undefined }, (res) => {
+        const status = res.statusCode ?? 502;
+        if (status < 200 || status > 599) {
+          res.destroy();
+          return reject(new FetchRefused("status", `HTTP ${status}`));
+        }
         const chunks: Buffer[] = [];
         let size = 0;
         res.on("data", (chunk: Buffer) => {
@@ -152,13 +165,17 @@ export function guardedFetch(options: { allowLoopback?: boolean } = {}): typeof 
           chunks.push(chunk);
         });
         res.on("end", () => {
-          const status = res.statusCode ?? 502;
-          const responseHeaders = new Headers();
-          for (const [k, v] of Object.entries(res.headers)) if (typeof v === "string") responseHeaders.set(k, v);
-          resolve(new Response(status === 204 || status === 304 ? null : Buffer.concat(chunks), { status, headers: responseHeaders }));
+          try {
+            const responseHeaders = new Headers();
+            for (const [k, v] of Object.entries(res.headers)) if (typeof v === "string") responseHeaders.set(k, v);
+            resolve(new Response(status === 204 || status === 304 ? null : Buffer.concat(chunks), { status, headers: responseHeaders }));
+          } catch {
+            reject(new FetchRefused("status", `HTTP ${status}`));
+          }
         });
         res.on("error", reject);
       });
+      refuseUpgrades(req, reject);
       req.on("error", (err: NodeJS.ErrnoException) => reject(err.code === "EBLOCKED" ? new FetchRefused("private", "the address is not allowed") : err));
       if (body) req.write(body);
       req.end();
