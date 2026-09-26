@@ -70,9 +70,9 @@ beforeAll(async () => {
     const reply = replies.shift();
     if (reply && typeof reply === "object" && "delayMs" in reply) await new Promise((r) => setTimeout(r, (reply as { delayMs: number }).delayMs));
     if (reply && typeof reply === "object" && "status" in reply) {
-      const { status, body } = reply as { status: number; body: unknown };
+      const { status, body, raw } = reply as { status: number; body?: unknown; raw?: string };
       res.writeHead(status, { "content-type": "application/json" });
-      return res.end(JSON.stringify(body));
+      return res.end(raw ?? JSON.stringify(body));
     }
     res.writeHead(reply ? 200 : 500, { "content-type": "application/json" });
     res.end(JSON.stringify(reply ?? { error: { message: "no scripted reply" } }));
@@ -267,10 +267,15 @@ test("the proxy bounds a call by what is left of the cap, prices calls OpenRoute
   expect(await (await call()).json()).toEqual({ error: { code: 400, message: "the provider answered 400; its explanation was too long to show" } });
   expect(scrubberWith).not.toHaveBeenCalled();
 
-  for (const status of [200, 400]) {
-    replies = [{ status, body: null }];
-    expect(await (await call()).json()).toEqual({ error: { code: 502, message: "the provider sent an unreadable answer" } });
+  const unreadable: Array<[number, { body?: unknown; raw?: string }, number]> = [[200, { body: null }, 502], [400, { body: null }, 400], [404, { body: 123 }, 404], [200, { raw: "not json" }, 502], [400, { raw: "not json" }, 400]];
+  for (const [status, reply, code] of unreadable) {
+    replies = [{ status, ...reply }];
+    expect(await (await call()).json()).toEqual({ error: { code, message: "the provider sent an unreadable answer" } });
   }
+  replies = [{ status: 404, body: { error: { message: ["x"] } } }];
+  vi.mocked(scrubberWith).mockClear();
+  expect(await (await call()).json()).toEqual({ error: { code: 404, message: "the provider answered 404" } });
+  expect(scrubberWith).not.toHaveBeenCalled();
 
   replies = [{ ...textReply("slow"), delayMs: 300 }];
   const first = call();

@@ -131,9 +131,9 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
   try {
     parsed = JSON.parse(text);
   } catch {
-    return failure(502, "the provider sent an unreadable answer");
+    return failure(upstream.ok ? 502 : upstream.status, "the provider sent an unreadable answer");
   }
-  if (!parsed || typeof parsed !== "object") return failure(502, "the provider sent an unreadable answer");
+  if (!parsed || typeof parsed !== "object") return failure(upstream.ok ? 502 : upstream.status, "the provider sent an unreadable answer");
   if (!upstream.ok || parsed.error) {
     const explanation = parsed.error?.message;
     const message = typeof explanation !== "string"
