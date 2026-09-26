@@ -14,12 +14,16 @@ export function RunAgainButton({ runId }: { runId: string }) {
     });
   };
   return (
-    <div className="flex shrink-0 flex-col items-start gap-2 md:items-end">
-      <button type="button" aria-disabled={pending || undefined} onClick={again} className="flex h-[50px] items-center gap-[38px] bg-action px-[18px] font-mono text-xs text-[#17191c] uppercase hover:brightness-110 aria-disabled:cursor-wait aria-disabled:opacity-60">
+    <>
+      <button type="button" aria-disabled={pending || undefined} onClick={again} className="flex h-[50px] shrink-0 items-center gap-[38px] bg-action px-[18px] font-mono text-xs text-[#17191c] uppercase hover:brightness-110 aria-disabled:cursor-wait aria-disabled:opacity-60">
         {pending ? "Starting…" : "Run again"}
         <span aria-hidden>→</span>
       </button>
-      {error && <p role="alert" className="max-w-md border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
-    </div>
+      {error && (
+        <div className="md:flex md:basis-full md:justify-end">
+          <p role="alert" className="max-w-md border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>
+        </div>
+      )}
+    </>
   );
 }

@@ -193,8 +193,8 @@ export function RunLive({ initial }: { initial: Data }) {
   const { report } = view;
   return (
     <div className="flex flex-col gap-10">
-      <div className="flex flex-col items-start justify-between gap-6 md:flex-row md:items-end">
-        <div className="flex min-w-0 flex-col gap-3">
+      <div className="flex flex-col items-start justify-between gap-6 md:flex-row md:flex-wrap md:items-end">
+        <div className="flex min-w-0 flex-col gap-3 md:flex-1">
           <p className="font-mono text-xs tracking-[0.2em] text-action uppercase">
             {runTitle(run.number)} · {runStatusLabel(run.status)} · {host}
           </p>
