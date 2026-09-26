@@ -129,7 +129,7 @@ test("a claim released after its run was cancelled is cancelled, not queued fore
   const run = await startAndClaim();
   const job = await claimJob(t.db, keys);
   expect(job?.runId).toBe(run.id);
-  await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id));
+  await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id, "stopped"));
   await releaseJob(t.db, job!);
   const { rows } = await sql<{ status: string }>`select status from jobs where run_id = ${run.id}`.execute(t.db);
   expect(rows).toEqual([{ status: "cancelled" }]);

@@ -22,7 +22,7 @@ export async function cancelRunAction(runId: string): Promise<boolean> {
   if (!member || !UUID.test(runId)) return false;
   const { orgId } = member;
   try {
-    await withOrg(getDb(), orgId, (tx) => cancelRun(tx, orgId, runId));
+    await withOrg(getDb(), orgId, (tx) => cancelRun(tx, orgId, runId, "stopped"));
     return true;
   } catch (err) {
     if (!(err instanceof RunNotFound)) await logError("run could not be cancelled", { orgId, runId, err });

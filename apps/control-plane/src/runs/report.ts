@@ -1,4 +1,4 @@
-import type { RunSummary } from "./runs.ts";
+import type { CancelReason, RunSummary } from "./runs.ts";
 
 export type StageState = "waiting" | "active" | "done" | "skipped";
 export type PersonaState = "waiting" | "exploring" | "reached" | "missed" | "finished" | "failed" | "cancelled";
@@ -37,13 +37,13 @@ export function gaveNoVerdict(job: { status: string; stopped_by: string | null; 
   return job.status === "succeeded" && job.stopped_by === "budget" && (verdict === null || !job.requested);
 }
 
-function whyNotJudged(job: Job, runStatus: string, capSpent: boolean): string {
+function whyNotJudged(job: Job, runStatus: string, cancelReason: CancelReason | null, capSpent: boolean): string {
   if (job.status === "failed") {
     const detail = job.error ?? "no reason was recorded";
     return job.stopped_by === "error" && MODEL_FAULT.test(detail) ? `Model error: ${detail}` : `Failed: ${detail}`;
   }
   if (capSpent) return "The run's cap ran out before the judge answered.";
-  if (runStatus === "cancelled" && !job.requested) return "You stopped the run before the judge answered.";
+  if (runStatus === "cancelled" && !job.requested) return cancelReason === "key_removed" ? "The model key was removed before the judge answered." : "The run was stopped before the judge answered.";
   return job.error ? `Stopped: ${job.error}` : "The model call was refused before the judge answered.";
 }
 
@@ -98,7 +98,7 @@ export function runView(s: RunSummary) {
     refuted: settled.filter((f) => f.verdict === "refuted").map(withPersona),
     couldNotJudge: unsettled.map((f) => ({
       ...withPersona(f),
-      reason: judgingAgain(f) ? "Judging again…" : whyNotJudged(lastJudge(f)!, s.status, capSpent),
+      reason: judgingAgain(f) ? "Judging again…" : whyNotJudged(lastJudge(f)!, s.status, s.cancelReason, capSpent),
       action: (judgingAgain(f) ? "judging" : live ? "after_run" : capSpent ? "cap_spent" : "judge_again") as JudgeAgainState,
     })),
     notJudged: settled.filter((f) => !f.verdict).map((f) => ({ ...withPersona(f), reason: notJudgedReason(f, live) })),
@@ -107,13 +107,13 @@ export function runView(s: RunSummary) {
 
   const goalsReached = s.goals.filter((g) => g.status === "reached").length;
   const goalsTotal = s.personas.length * s.goalTexts.length;
-  return { live, rejudging, stages, personas, report, goalsReached, goalsTotal, headline: headline(s.status, report.confirmed.length, defects.length) };
+  return { live, rejudging, stages, personas, report, goalsReached, goalsTotal, headline: headline(s.status, s.cancelReason, report.confirmed.length, defects.length) };
 }
 
-function headline(status: string, confirmed: number, defects: number): string {
+function headline(status: string, cancelReason: CancelReason | null, confirmed: number, defects: number): string {
   if (status === "queued") return "Waiting for a runner.";
   if (status === "running") return "Your people are using the product.";
-  if (status === "cancelled") return "You stopped this run.";
+  if (status === "cancelled") return cancelReason === "key_removed" ? "Stopped when the model key was removed." : "This run was stopped.";
   if (status === "failed") return "This run could not finish.";
   const prefix = status === "stopped_budget" ? "Stopped at the cap. " : "";
   if (confirmed > 0) return `${prefix}${confirmed} ${confirmed === 1 ? "defect" : "defects"} confirmed by replay.`;

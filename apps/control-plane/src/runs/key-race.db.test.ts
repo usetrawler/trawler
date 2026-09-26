@@ -53,7 +53,7 @@ test("a run that checked the key first holds it: the removal waits, then cancels
     return run.id;
   });
   await inserted.gate;
-  const removing = withOrg(t.db, org, async (tx) => ((await removeModelKey(tx, org, addedAt)) ? cancelLiveRuns(tx, org) : null));
+  const removing = withOrg(t.db, org, async (tx) => ((await removeModelKey(tx, org, addedAt)) ? cancelLiveRuns(tx, org, "key_removed") : null));
   const waited = await someoneWaitsForALock();
   hold.open();
   await starting;
@@ -69,7 +69,7 @@ test("a removal that took the key first holds it: the start waits, then starts n
     if (!(await removeModelKey(tx, org, addedAt))) return null;
     deleted.open();
     await hold.gate;
-    return cancelLiveRuns(tx, org);
+    return cancelLiveRuns(tx, org, "key_removed");
   });
   await deleted.gate;
   const starting = withOrg(t.db, org, async (tx) => ((await keyStillStored(tx, org, "openrouter", null)) ? (await startRun(tx, org, project, keys, options)).id : "key gone"));

@@ -12,7 +12,7 @@ const state = vi.hoisted(() => ({
   removed: [] as Array<{ orgId: string; tx: unknown; addedAt?: Date }>,
   removeMatches: true,
   keyRemains: true,
-  cancelled: [] as Array<{ orgId: string; tx: unknown }>,
+  cancelled: [] as Array<{ orgId: string; tx: unknown; reason: string }>,
   live: 0,
   tenants: [] as string[],
   revalidated: [] as unknown[][],
@@ -41,7 +41,7 @@ vi.mock("../../credentials/credentials.ts", async (original) => ({
   removeModelKey: async (tx: unknown, orgId: string, addedAt?: Date) => { state.removed.push({ orgId, tx, addedAt }); return state.removeMatches; },
   modelKeyHint: async () => (state.keyRemains ? { provider: "openrouter", hint: "…zzzz", baseUrl: null } : null),
 }));
-vi.mock("../../runs/runs.ts", () => ({ cancelLiveRuns: async (tx: unknown, orgId: string) => { state.cancelled.push({ orgId, tx }); return state.live; } }));
+vi.mock("../../runs/runs.ts", () => ({ cancelLiveRuns: async (tx: unknown, orgId: string, reason: string) => { state.cancelled.push({ orgId, tx, reason }); return state.live; } }));
 vi.mock("../../llm/providers.ts", async (original) => ({
   ...(await original<typeof import("../../llm/providers.ts")>()),
   checkKey: async (endpoint: { baseUrl: string }) => {
@@ -132,7 +132,7 @@ test("removing the key also stops the workspace's runs that are going, in the sa
   state.live = 2;
   expect(await removeModelKeyAction({}, form({ addedAt: ADDED_AT }))).toEqual({ saved: true, stoppedRuns: 2 });
   expect(state.removed).toEqual([{ orgId: "org-1", tx: { tx: "org-1" }, addedAt: new Date(ADDED_AT) }]);
-  expect(state.cancelled).toEqual([{ orgId: "org-1", tx: state.removed[0]!.tx }]);
+  expect(state.cancelled).toEqual([{ orgId: "org-1", tx: state.removed[0]!.tx, reason: "key_removed" }]);
   expect(state.cancelled[0]!.tx).toBe(state.removed[0]!.tx);
   expect(state.revalidated).toEqual(EVERY_PAGE);
   state.live = 0;

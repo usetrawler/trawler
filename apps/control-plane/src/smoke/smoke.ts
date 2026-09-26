@@ -50,7 +50,7 @@ export async function handleSmokeStart(req: Request, deps: SmokeDeps): Promise<R
   });
   const runId = await withOrg(deps.db, SMOKE_ORG, async (tx) => {
     const leftOver = await tx.selectFrom("runs").select("id").where("org_id", "=", SMOKE_ORG).where("status", "in", ["queued", "running"]).execute();
-    for (const run of leftOver) await cancelRun(tx, SMOKE_ORG, run.id);
+    for (const run of leftOver) await cancelRun(tx, SMOKE_ORG, run.id, "stopped");
     await setModelKey(tx, SMOKE_ORG, { provider: "openrouter", key: modelKey }, "smoke", deps.keys);
     const projectId = await createProject(tx, SMOKE_ORG, SMOKE_PROJECT, deps.keys);
     const run = await startRun(tx, SMOKE_ORG, projectId, deps.keys, { ...SMOKE_RUN, agentModel: deps.model, judgeModel: deps.model, createdBy: "smoke", provider: "openrouter" });

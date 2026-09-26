@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 type Member = { userId: string; email: string; orgId: string; orgName: string; role: string };
-const state = vi.hoisted(() => ({ member: null as Member | null, tenants: [] as string[], judgedBy: [] as string[] }));
+const state = vi.hoisted(() => ({ member: null as Member | null, tenants: [] as string[], judgedBy: [] as string[], stopped: [] as Array<{ runId: string; reason: string }> }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("../../../server/auth.ts", () => ({ signedInMember: async (headers: Headers) => (headers.get("cookie") === "session=ana" ? state.member : null) }));
@@ -11,7 +11,7 @@ vi.mock("../../../server/log.ts", () => ({ logError: async () => {} }));
 vi.mock("../../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
 vi.mock("../../../runs/runs.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../runs/runs.ts")>()),
-  cancelRun: async () => {},
+  cancelRun: async (_tx: unknown, _orgId: string, runId: string, reason: string) => { state.stopped.push({ runId, reason }); return true; },
   judgeAgain: async (_tx: unknown, _orgId: string, _runId: string, _key: string, requestedBy: string) => { state.judgedBy.push(requestedBy); },
 }));
 
@@ -22,6 +22,7 @@ beforeEach(() => {
   state.member = null;
   state.tenants = [];
   state.judgedBy = [];
+  state.stopped = [];
 });
 
 test("a session that no longer belongs to any workspace can neither stop a run nor judge again, and nothing is read", async () => {
@@ -36,4 +37,5 @@ test("a run is stopped and judged again in the workspace the membership check re
   expect(await judgeAgainAction(RUN, "f1")).toEqual({});
   expect(state.tenants).toEqual(["org-2", "org-2"]);
   expect(state.judgedBy).toEqual(["u1"]);
+  expect(state.stopped).toEqual([{ runId: RUN, reason: "stopped" }]);
 });

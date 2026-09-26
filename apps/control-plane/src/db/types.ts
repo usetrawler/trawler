@@ -217,6 +217,7 @@ export interface RunEvents {
 export interface Runs {
   agent_model: string;
   budget_usd: Numeric;
+  cancel_reason: string | null;
   completion_usd_per_mtok: Numeric | null;
   config_snapshot: Json;
   cost_usd: Generated<Numeric>;
