@@ -1,13 +1,14 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
-const react = vi.hoisted(() => ({ state: {} as { error?: string }, pending: false, action: () => {} }));
+const react = vi.hoisted(() => ({ state: {} as { error?: string }, pending: false, action: () => {}, served: [] as unknown[] }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
-  useActionState: () => [react.state, react.action, react.pending],
+  useActionState: (serve: unknown) => { react.served.push(serve); return [react.state, react.action, react.pending]; },
 }));
 vi.mock("./actions.ts", () => ({ runAgainAction: async () => ({}) }));
 
 const { RunAgainButton } = await import("./run-again-button.tsx");
+const { runAgainAction } = await import("./actions.ts");
 
 type Node = { type?: unknown; props?: Record<string, unknown> & { children?: unknown } };
 const nodes = (node: unknown): Node[] => {
@@ -20,11 +21,12 @@ const alert = (tree: Node) => nodes(tree).find((node) => node.props?.role === "a
 const button = (tree: Node) => nodes(tree).find((node) => node.type === "button")!;
 
 beforeEach(() => {
-  Object.assign(react, { state: {}, pending: false, action: () => {} });
+  Object.assign(react, { state: {}, pending: false, action: () => {}, served: [] });
 });
 
 test("Run again sends the run's id through the form, so the framework follows the new run's redirect", () => {
   const tree = draw();
+  expect(react.served).toEqual([runAgainAction]);
   expect(tree.type).toBe("form");
   expect(tree.props!.action).toBe(react.action);
   expect(nodes(tree).find((node) => node.type === "input")?.props).toMatchObject({ type: "hidden", name: "runId", value: "run-1" });
