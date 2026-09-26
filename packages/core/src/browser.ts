@@ -262,13 +262,13 @@ function closedRootHides(root: DomNode, secrets: RegExp | null): boolean {
     .filter((node) => node.nodeType === 9)
     .some((document) => {
       let shown = "";
-      let cutShort = false;
       const closedParts: Array<[number, number]> = [];
+      const texts: Array<{ closed: boolean; cutShort: boolean }> = [];
       const read = (node: DomNode, closed: boolean) => {
         if (node.nodeType === 3) {
           const text = node.nodeValue.replace(invisible, "");
           if (closed) closedParts.push([shown.length, shown.length + text.length]);
-          cutShort ||= node.nodeValue.length > CDP_TEXT_LIMIT && node.nodeValue.endsWith("\u2026");
+          texts.push({ closed, cutShort: node.nodeValue.length > CDP_TEXT_LIMIT && node.nodeValue.endsWith("\u2026") });
           shown += text;
         } else if (!/^(HEAD|SCRIPT|NOSCRIPT|STYLE)$/i.test(node.nodeName)) {
           for (const child of flatChildrenOf(node)) read(child, closed || child.shadowRootType === "closed");
@@ -276,7 +276,7 @@ function closedRootHides(root: DomNode, secrets: RegExp | null): boolean {
       };
       read(document, false);
       if (closedParts.length === 0) return false;
-      if (cutShort) return true;
+      if (texts.some((text, i) => text.cutShort && (text.closed || texts[i - 1]?.closed || texts[i + 1]?.closed))) return true;
       everyMatch.lastIndex = 0;
       for (let match = everyMatch.exec(shown); match; match = everyMatch.exec(shown)) {
         const [start, end] = [match.index, match.index + match[0].length];

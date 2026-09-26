@@ -378,6 +378,10 @@ beforeAll(async () => {
         return html(`<closed-field></closed-field><p>Plan: Team</p><script>customElements.define("closed-field", class extends HTMLElement { constructor() { super(); const root = this.attachShadow({ mode: "closed" }); root.innerHTML = '<input aria-label="Key" style="width:400px;font:20px monospace;color:#ff0000">'; root.querySelector("input").value = "card-secret-1111"; } });</script>`);
       case "/closed-in-frame":
         return html(`<iframe style="width:600px;height:120px;border:0" srcdoc="${`<!doctype html>${closedCard("", "card-secret-1111")}`.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"></iframe>`);
+      case "/cut-beside-closed":
+        return html(`<p style="font:20px monospace;color:#ff0000;height:24px;overflow:hidden;margin:0">${" ".repeat(10500)}card-secret-<closed-b></closed-b></p><p>Plan: Team</p><script>customElements.define("closed-b", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "1111"; } });</script>`);
+      case "/closed-beside-long-text":
+        return html(`<closed-note>Help</closed-note><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><pre style="height:40px;overflow:hidden">${"log line ".repeat(1400)}</pre><script>customElements.define("closed-note", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "<slot></slot>"; } });</script>`);
       case "/closed-plain":
         return html(`<closed-note>Plan</closed-note><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><script>customElements.define("closed-note", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "<slot></slot>: Team"; } });</script>`);
       case "/pusher":
@@ -1559,7 +1563,7 @@ describe("screenshots", () => {
     expect(await redPixels(shot!)).toBe(0);
   }, 60_000);
 
-  test.each(["/closed-text", "/closed-groups", "/closed-split", "/closed-slotted", "/closed-slot-after", "/closed-slot-named", "/closed-slot-manual", "/closed-sibling-hosts", "/closed-after-light", "/closed-password", "/closed-typed", "/closed-in-frame", "/closed-long-text", "/closed-zero-width"])("a secret or password field inside a closed shadow root gives no screenshot (%s)", async (path) => {
+  test.each(["/closed-text", "/closed-groups", "/closed-split", "/closed-slotted", "/closed-slot-after", "/closed-slot-named", "/closed-slot-manual", "/closed-sibling-hosts", "/closed-after-light", "/closed-password", "/closed-typed", "/closed-in-frame", "/closed-long-text", "/closed-zero-width", "/cut-beside-closed"])("a secret or password field inside a closed shadow root gives no screenshot (%s)", async (path) => {
     expect(await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"))).toEqual([null]);
   }, 60_000);
 
@@ -1588,6 +1592,12 @@ describe("screenshots", () => {
   test("a secret in the page's title, which a screen capture does not show, does not stop the screenshot", async () => {
     const [shot] = await shotsOf("/title-secret", 1, async () => undefined, knowing("card-secret-1111"));
     expect(shot).not.toBeNull();
+  }, 60_000);
+
+  test("a long text away from a closed shadow root keeps the screenshot", async () => {
+    const [shot] = await shotsOf("/closed-beside-long-text", 1, async () => undefined, knowing("card-secret-1111"));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
   }, 60_000);
 
   test("a closed shadow root without a secret keeps the screenshot", async () => {
