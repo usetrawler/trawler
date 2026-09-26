@@ -4,7 +4,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 type Member = { userId: string; name: string; email: string; orgId: string; orgName: string; role: string };
 const state = vi.hoisted(() => ({
   member: null as { userId: string; name: string; email: string; orgId: string; orgName: string; role: string } | null,
-  runs: 0, counted: [] as Array<[string, string]>, tenants: [] as string[], shells: [] as string[],
+  runs: 0, counted: [] as Array<[string, string]>, tenants: [] as string[], shells: [] as string[], planned: [] as Array<Record<string, unknown>>,
 }));
 const ID = vi.hoisted(() => "0f8fad5b-d9cb-469f-a165-70867728950e");
 
@@ -36,7 +36,7 @@ vi.mock("../../../projects/overview.ts", async (original) => ({
   hostOf: (await original<typeof import("../../../projects/overview.ts")>()).hostOf,
   projectRunCount: async (_tx: unknown, orgId: string, id: string) => { state.counted.push([orgId, id]); return state.runs; },
 }));
-vi.mock("./plan-workspace.tsx", () => ({ PlanWorkspace: () => null }));
+vi.mock("./plan-workspace.tsx", () => ({ PlanWorkspace: (props: Record<string, unknown>) => { state.planned.push(props); return null; } }));
 
 const { default: ProjectPage } = await import("./page.tsx");
 const render = async () => renderToStaticMarkup(await ProjectPage({ params: Promise.resolve({ id: ID }) }));
@@ -47,6 +47,7 @@ beforeEach(() => {
   state.counted = [];
   state.tenants = [];
   state.shells = [];
+  state.planned = [];
 });
 
 test("a visitor who is not signed in, or no longer belongs to any workspace, is sent to sign in before anything is read", async () => {
@@ -79,4 +80,11 @@ test("a project without runs still offers its Runs tab, counted as none", async 
   const html = await render();
   expect(html).toContain(">Acme</h1>");
   expect(html).toMatch(new RegExp(`<a href="/projects/${ID}/runs" class="[^"]*">Runs<span[^>]*>0</span></a>`));
+});
+
+test("the Start panel is told whether the project has had a run, so the authorisation is asked only before the first", async () => {
+  await render();
+  state.runs = 3;
+  await render();
+  expect(state.planned.map((props) => props.authorisedBefore)).toEqual([false, true]);
 });

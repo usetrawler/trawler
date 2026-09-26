@@ -8,6 +8,7 @@ import { openRouterPrices, priceFor, type Price } from "../../../llm/prices.ts";
 import { projectExists, ProjectNotFound } from "../../../projects/projects.ts";
 import { freshEndpoint, withinListingLimit, type KeyInput } from "../../../llm/key-input.ts";
 import { checkModelCall, endpointFor, listModels, PREFERRED_MODELS, PROVIDER_LABEL, priceKey, type Endpoint, type Provider } from "../../../llm/providers.ts";
+import { projectRunCount } from "../../../projects/overview.ts";
 import { DEFAULT_RUN } from "../../../runs/models.ts";
 import { startRun } from "../../../runs/runs.ts";
 import { canManageBilling, signedInMember } from "../../../server/auth.ts";
@@ -76,12 +77,14 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   const projectId = String(form.get("projectId") ?? "");
   const modelId = String(form.get("model") ?? "").trim();
   const budgetUsd = Number(form.get("budget"));
-  if (form.get("authorised") !== "on") return { error: "Confirm that you may test this product." };
   if (!MODEL_ID.test(modelId)) return { error: "Choose a model or type its exact name." };
   if (!Number.isFinite(budgetUsd) || budgetUsd < 0.1 || budgetUsd > 50) return { error: "Set a cap between $0.10 and $50." };
   const member = await signedInMember(await headers());
   if (!member) redirect("/sign-in");
   const { orgId } = member;
+  if (form.get("authorised") !== "on" && !(UUID.test(projectId) && (await withOrg(getDb(), orgId, (tx) => projectRunCount(tx, orgId, projectId))) > 0)) {
+    return { error: "Confirm that you may test this product." };
+  }
   const refusal = betaRefusal(member.email);
   if (refusal) return { error: refusal };
   if (!UUID.test(projectId) || !(await withOrg(getDb(), orgId, (tx) => projectExists(tx, orgId, projectId)))) return { error: "The run could not start. Try again." };

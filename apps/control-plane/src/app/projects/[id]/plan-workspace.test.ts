@@ -10,11 +10,16 @@ const accounts: AccountView[] = [{ ref: "account-1", username: "kwame@acme.test"
 const ama: Persona = { id: "ama", name: "Ama", brief: "Brand new." };
 const kwame: Persona = { id: "kwame", name: "Kwame", brief: "Has an account.", accountRef: "account-1" };
 
-function render(initialPersonas: Persona[], initialAccounts: AccountView[]) {
-  return renderToStaticMarkup(createElement(PlanWorkspace, { projectId: "p1", projectName: "Acme", initialPersonas, initialGoals: [{ id: "g", instruction: "Send an invoice." }], initialAccounts, keyHint: null, canManageKey: true }));
+function render(initialPersonas: Persona[], initialAccounts: AccountView[], authorisedBefore = false) {
+  return renderToStaticMarkup(createElement(PlanWorkspace, { projectId: "p1", projectName: "Acme", initialPersonas, initialGoals: [{ id: "g", instruction: "Send an invoice." }], initialAccounts, keyHint: null, canManageKey: true, authorisedBefore }));
 }
 
 describe("PlanWorkspace", () => {
+  it("passes on to Start whether the project has had a run, so the box is asked only before the first", () => {
+    expect(render([ama], [])).toContain('name="authorised"');
+    expect(render([ama], [], true)).not.toContain('name="authorised"');
+  });
+
   it("says what people without a test account do, next to the way to add one", () => {
     const html = render([ama], []);
     expect(html).toContain("Your product needs sign-in? Add a test account");

@@ -18,8 +18,8 @@ function Submit({ blocked, pending }: { blocked?: string; pending: boolean }) {
   );
 }
 
-export function StartRun({ projectId, projectName, personas, keyHint: savedHint, canManageKey, blocked }: {
-  projectId: string; projectName: string; personas: number; keyHint: KeyHint | null; canManageKey: boolean; blocked?: string;
+export function StartRun({ projectId, projectName, personas, keyHint: savedHint, canManageKey, authorisedBefore, blocked }: {
+  projectId: string; projectName: string; personas: number; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; blocked?: string;
 }) {
   const [state, action, pending] = useActionState<StartState, FormData>(startRunAction, {});
   const keyHint = state.keyHint ?? savedHint;
@@ -126,10 +126,14 @@ export function StartRun({ projectId, projectName, personas, keyHint: savedHint,
       ) : (
         <input type="hidden" name="budget" value={DEFAULT_RUN.budgetUsd} />
       )}
-      <label className="flex items-start gap-3 text-sm">
-        <input type="checkbox" name="authorised" required checked={authorised} onChange={(e) => setAuthorised(e.target.checked)} className="mt-1 accent-[var(--action)]" />
-        <span>I am authorised to test this product. It is not a production system with real people&apos;s data.</span>
-      </label>
+      {authorisedBefore ? (
+        <p className="text-sm text-muted">Confirmed when this product&apos;s first run started: it may be tested, and it is not a production system with real people&apos;s data.</p>
+      ) : (
+        <label className="flex items-start gap-3 text-sm">
+          <input type="checkbox" name="authorised" required checked={authorised} onChange={(e) => setAuthorised(e.target.checked)} className="mt-1 accent-[var(--action)]" />
+          <span>I am authorised to test this product. It is not a production system with real people&apos;s data.</span>
+        </label>
+      )}
       {state.error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{state.error}</p>}
       <div className="flex flex-wrap items-center justify-end gap-3">
         {(blocked ?? noKey) && <p id="start-blocked" className="text-sm text-muted">{blocked ?? noKey}</p>}

@@ -85,8 +85,8 @@ function Accounts({ projectId, accounts, anyoneWithout, onChange }: { projectId:
   );
 }
 
-export function PlanWorkspace({ projectId, projectName, initialPersonas, initialGoals, initialAccounts, keyHint, canManageKey }: {
-  projectId: string; projectName: string; initialPersonas: Persona[]; initialGoals: Goal[]; initialAccounts: AccountView[]; keyHint: KeyHint | null; canManageKey: boolean;
+export function PlanWorkspace({ projectId, projectName, initialPersonas, initialGoals, initialAccounts, keyHint, canManageKey, authorisedBefore }: {
+  projectId: string; projectName: string; initialPersonas: Persona[]; initialGoals: Goal[]; initialAccounts: AccountView[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean;
 }) {
   const [saved, setSaved] = useState({ personas: initialPersonas, goals: initialGoals });
   const [personas, setPersonas] = useState(initialPersonas);
@@ -184,7 +184,7 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
         </div>
       )}
 
-      <StartRun projectId={projectId} projectName={projectName} personas={saved.personas.length} keyHint={keyHint} canManageKey={canManageKey} blocked={dirty ? "Save or discard your changes to the plan first." : undefined} />
+      <StartRun projectId={projectId} projectName={projectName} personas={saved.personas.length} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} blocked={dirty ? "Save or discard your changes to the plan first." : undefined} />
     </div>
   );
 }
