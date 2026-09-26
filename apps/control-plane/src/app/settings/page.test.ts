@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
   useActionState: (_action: unknown, initial: unknown) => [state.actionResult ?? initial, () => {}, false],
+  useReducer: (_reducer: unknown, initial: Record<string, unknown>) => [state.actionResult && "sent" in initial ? { ...initial, sent: { change: "invite", before: {} } } : initial, () => {}],
 }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
