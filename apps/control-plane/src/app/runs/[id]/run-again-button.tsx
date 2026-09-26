@@ -1,9 +1,19 @@
 "use client";
+import { unstable_rethrow } from "next/navigation";
 import { useActionState } from "react";
 import { runAgainAction, type RunAgainState } from "./actions.ts";
 
+export async function runAgain(previous: RunAgainState, form: FormData): Promise<RunAgainState> {
+  try {
+    return await runAgainAction(previous, form);
+  } catch (err) {
+    unstable_rethrow(err);
+    return { error: "The run could not start. Try again." };
+  }
+}
+
 export function RunAgainButton({ runId }: { runId: string }) {
-  const [state, action, pending] = useActionState<RunAgainState, FormData>(runAgainAction, {});
+  const [state, action, pending] = useActionState<RunAgainState, FormData>(runAgain, {});
   const failed = Boolean(state.error) && !pending;
   return (
     <form action={action} className="contents">
