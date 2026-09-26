@@ -3,7 +3,7 @@ import { APIError } from "better-auth/api";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { WORKSPACE_NAME_RULE } from "../../auth/plugins.ts";
+import { ADDRESS_HAS_A_WORKSPACE, WORKSPACE_NAME_RULE } from "../../auth/plugins.ts";
 import { modelKeyHint, removeModelKey, setModelKey } from "../../credentials/credentials.ts";
 import { withOrg } from "../../db/tenancy.ts";
 import { freshEndpoint, withinListingLimit } from "../../llm/key-input.ts";
@@ -12,6 +12,7 @@ import { cancelLiveRuns } from "../../runs/runs.ts";
 import { canManageBilling, getAuth, signedInMember, type Member } from "../../server/auth.ts";
 import { getDb, getKeyring } from "../../server/db.ts";
 import { readEnv } from "../../server/env.ts";
+import { logError } from "../../server/log.ts";
 
 export interface MembersState {
   error?: string;
@@ -86,29 +87,38 @@ export async function removeModelKeyAction(_previous: SettingsState, form: FormD
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const NOT_AN_ADDRESS = "Enter the email address they sign in with.";
+const MEMBERS_OWNERS_AND_ADMINS = "Only an owner or admin of this workspace can invite people or change who is in it.";
 const roleFrom = (value: FormDataEntryValue | null) => (value === "admin" ? "admin" : "member");
 const nameOf = (person: { name: string; email: string }) => person.name.trim() || person.email;
 const isOwner = (role: string) => role.split(",").map((r) => r.trim()).includes("owner");
 
-function refusal(err: APIError, fallback: string): string {
-  switch ((err.body as { code?: unknown } | undefined)?.code) {
-    case "USER_IS_ALREADY_INVITED_TO_THIS_ORGANIZATION":
-      return "That address is already invited. Its invitation is listed under Invited.";
+async function membersManager(): Promise<Member | { error: string }> {
+  const member = await manager();
+  revalidatePath("/settings");
+  return "error" in member ? { error: MEMBERS_OWNERS_AND_ADMINS } : member;
+}
+
+function refusal(code: unknown): string | null {
+  switch (code) {
+    case "INVALID_EMAIL":
+      return NOT_AN_ADDRESS;
+    case ADDRESS_HAS_A_WORKSPACE:
+      return "That address already has a Trawler workspace, and joining a second one is not possible yet.";
     case "USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION":
       return "That address is already in this workspace.";
+    case "USER_IS_ALREADY_INVITED_TO_THIS_ORGANIZATION":
+      return "That address is already invited. Its invitation is listed under Invited.";
     case "INVITATION_LIMIT_REACHED":
       return "This workspace already has 100 invitations waiting. Revoke some before inviting more.";
-    case "YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER":
-    case "YOU_CANNOT_LEAVE_THE_ORGANIZATION_WITHOUT_AN_OWNER":
-      return "A workspace keeps at least one owner.";
     case "YOU_ARE_NOT_ALLOWED_TO_INVITE_USERS_TO_THIS_ORGANIZATION":
     case "YOU_ARE_NOT_ALLOWED_TO_INVITE_USER_WITH_THIS_ROLE":
     case "YOU_ARE_NOT_ALLOWED_TO_CANCEL_THIS_INVITATION":
     case "YOU_ARE_NOT_ALLOWED_TO_DELETE_THIS_MEMBER":
     case "YOU_ARE_NOT_ALLOWED_TO_UPDATE_THIS_MEMBER":
-      return OWNERS_AND_ADMINS;
+      return MEMBERS_OWNERS_AND_ADMINS;
     default:
-      return fallback;
+      return null;
   }
 }
 
@@ -117,55 +127,53 @@ async function throughAuth(call: () => Promise<unknown>, fallback: string): Prom
     await call();
     return null;
   } catch (err) {
-    if (err instanceof APIError) return refusal(err, fallback);
-    throw err;
+    if (!(err instanceof APIError)) throw err;
+    const code = (err.body as { code?: unknown } | undefined)?.code;
+    const said = refusal(code);
+    if (said) return said;
+    await logError("a members change was refused for a reason the page does not name", { code: String(code), err });
+    return fallback;
   }
 }
 
 export async function inviteMemberAction(_previous: MembersState, form: FormData): Promise<MembersState> {
-  const member = await manager();
+  const member = await membersManager();
   if ("error" in member) return member;
   const email = String(form.get("email") ?? "").trim().toLowerCase();
-  if (email.length > 254 || !EMAIL.test(email)) return { error: "Enter the email address they sign in with." };
+  if (email.length > 254 || !EMAIL.test(email)) return { error: NOT_AN_ADDRESS };
+  if (!withinListingLimit(`invite:${member.userId}`)) return { error: "Too many invitations. Wait a few minutes and try again." };
   const auth = getAuth();
-  const home = await auth.workspaceOfEmail(email);
-  if (home === member.orgId) return { error: "That address is already in this workspace." };
-  if (home) return { error: "That address already has a Trawler workspace, and joining a second one is not possible yet." };
   const refused = await throughAuth(async () => auth.api.createInvitation({ headers: await headers(), body: { email, role: roleFrom(form.get("role")), organizationId: member.orgId } }), "The invitation could not be created. Try again.");
-  if (refused) return { error: refused };
-  revalidatePath("/settings");
-  return { invited: email };
+  return refused ? { error: refused } : { invited: email };
 }
 
 export async function revokeInvitationAction(_previous: MembersState, form: FormData): Promise<MembersState> {
-  const member = await manager();
+  const member = await membersManager();
   if ("error" in member) return member;
   const auth = getAuth();
   const invitation = (await auth.pendingInvitations(member.orgId)).find((i) => i.id === String(form.get("invitationId") ?? ""));
-  revalidatePath("/settings");
   if (!invitation) return { done: "That invitation was already revoked, used or expired." };
   const refused = await throughAuth(async () => auth.api.cancelInvitation({ headers: await headers(), body: { invitationId: invitation.id } }), "The invitation could not be revoked. Try again.");
   return refused ? { error: refused } : { done: `The invitation for ${invitation.email} is revoked.` };
 }
 
 export async function removeMemberAction(_previous: MembersState, form: FormData): Promise<MembersState> {
-  const member = await manager();
+  const member = await membersManager();
   if ("error" in member) return member;
   const auth = getAuth();
   const target = (await auth.workspaceMembers(member.orgId)).find((m) => m.id === String(form.get("memberId") ?? ""));
-  revalidatePath("/settings");
   if (!target) return { done: "That person is no longer in this workspace." };
   if (target.userId === member.userId) return { error: "You cannot remove yourself from the workspace here." };
+  if (isOwner(target.role)) return { error: "An owner is not removed here." };
   const refused = await throughAuth(async () => auth.api.removeMember({ headers: await headers(), body: { memberIdOrEmail: target.id, organizationId: member.orgId } }), "They could not be removed. Try again.");
   return refused ? { error: refused } : { done: `${nameOf(target)} is removed from this workspace.` };
 }
 
 export async function changeRoleAction(_previous: MembersState, form: FormData): Promise<MembersState> {
-  const member = await manager();
+  const member = await membersManager();
   if ("error" in member) return member;
   const auth = getAuth();
   const target = (await auth.workspaceMembers(member.orgId)).find((m) => m.id === String(form.get("memberId") ?? ""));
-  revalidatePath("/settings");
   if (!target) return { error: "That person is no longer in this workspace." };
   if (target.userId === member.userId) return { error: "You cannot change your own role." };
   if (isOwner(target.role)) return { error: "An owner's role is not changed here." };
