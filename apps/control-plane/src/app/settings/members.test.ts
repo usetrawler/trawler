@@ -46,6 +46,9 @@ test("an owner or admin can switch a member or an admin and remove them, but not
   expect(rowOf(html, "bo@acme.test")).toMatch(/<input type="hidden" name="role" value="member"\/><button type="submit"[^>]*>Make member<span class="sr-only"> bo@acme.test<\/span>/);
   expect(rowOf(html, "lee@acme.test")).toMatch(/<button type="button"[^>]*>Remove<span class="sr-only"> Lee<\/span><\/button>/);
   for (const untouchable of ["ana@acme.test", "cy@acme.test"]) expect(rowOf(html, untouchable)).not.toContain("<button");
+  const asAdmin = renderToStaticMarkup(createElement(Members, { members: members.map((m) => ({ ...m, you: m.id === "m-3" })), invitations, canManage: true, signInAt: "app.usetrawler.test" }));
+  expect(rowOf(asAdmin, "bo@acme.test")).not.toContain("<button");
+  expect(rowOf(asAdmin, "lee@acme.test")).toContain("Make admin");
 });
 
 test("Remove asks first, naming who goes and what they lose, and only for that row", () => {
@@ -74,6 +77,9 @@ test("what a change did is said once it is done, a refusal is an alert, and neit
   const refused = render();
   expect(listStatus(refused)).toBe("");
   expect(refused).toMatch(/<p role="alert"[^>]*>An owner&#x27;s role is not changed here.<\/p>/);
+  react.actions = [[{}, true], IDLE, IDLE];
+  react.states = [{ done: "Lee is now an admin." }];
+  expect(listStatus(render())).toBe("");
   react.actions = [[{}, true], IDLE, IDLE];
   react.states = [{ error: "An owner's role is not changed here." }];
   const sending = render();

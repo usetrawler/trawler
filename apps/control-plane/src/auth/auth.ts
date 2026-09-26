@@ -122,7 +122,7 @@ export function createAuth(options: AuthOptions) {
         .selectFrom("user")
         .innerJoin("member", "member.userId", "user.id")
         .select("member.organizationId")
-        .where(sql<string>`lower(${sql.ref("user.email")})`, "=", email.trim().toLowerCase())
+        .where("user.email", "=", email.trim().toLowerCase())
         .orderBy("member.createdAt")
         .executeTakeFirst()
     )?.organizationId ?? null;
