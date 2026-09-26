@@ -41,6 +41,7 @@ const HANDLE_READ_MS = 500;
 const SCREENSHOT_MS = 5000;
 const MASK_COLOR = "#17191c";
 const MASK_CHECK_MS = 2500;
+const STEADY_MS = 20;
 const SECRET_FIELDS = "trawler-secret-fields";
 const LINE_AROUND = "trawler-line-around";
 const MOVING = "trawler-moving";
@@ -117,14 +118,14 @@ const SELECTOR_ENGINES = {
   })`,
   [MOVING]: `({
     queryAll(root) {
-      const looksOnly = /^(opacity|color|background|boxShadow|textShadow|outline|border\\w*Color|fill|stroke|filter|visibility|caretColor|accentColor|textDecorationColor|columnRuleColor)/;
+      const looksOnly = /^(opacity|color|background|boxShadow|textShadow|outline|border\\w*(Color|Radius)|fill|stroke|filter|visibility|caretColor|accentColor|textDecorationColor|columnRuleColor)/;
       const keyframeFields = new Set(["offset", "computedOffset", "easing", "composite"]);
       const up = (el) => el.parentElement ?? el.parentNode?.host;
       for (let el = root; el; el = up(el)) {
         for (const animation of el.getAnimations({ subtree: true }).filter((a) => el === root || a.effect?.target === el)) {
-          if (animation.playState !== "running" || animation.timeline !== document.timeline) continue;
+          if (animation.playState !== "running" || animation.timeline !== document.timeline || animation.effect?.getComputedTiming?.().progress == null) continue;
           const properties = (animation.effect?.getKeyframes?.() ?? []).flatMap((frame) => Object.keys(frame)).filter((key) => !keyframeFields.has(key));
-          if (properties.length === 0 || properties.some((key) => !looksOnly.test(key))) return [root];
+          if (properties.some((key) => !looksOnly.test(key))) return [root];
         }
       }
       return [];
@@ -390,13 +391,18 @@ export async function openBrowser(opts: {
         const shown = frames.map((frame) => secretsIn(frame, secrets));
         const uncovered = await anyIn(shown.flatMap(({ text }) => (text ? [text.locator(`${LINE_AROUND}=uncovered`)] : [])));
         const moving = await anyIn(shown.flatMap(({ passwords, text, fields }) => [passwords, text, fields].flatMap((l) => (l ? [l.locator(`${MOVING}=1`)] : []))));
-        return { mask, placed: await boxesOf(mask), uncovered, moving };
+        return { mask, placed: await steadyBoxesOf(mask), uncovered, moving };
       });
-      if (uncovered || moving) return null;
+      if (uncovered || moving || placed === null) return null;
       const bytes = await page.screenshot({ type: "png", mask, maskColor: MASK_COLOR, caret: "hide", scale: "css", timeout: SCREENSHOT_MS });
       const unmoved = (await inTime(() => boxesOf(mask))) === placed;
       const sameFrames = page.frames().length === frames.length && page.frames().every((frame, i) => frame === frames[i]);
       return unmoved && sameFrames && bytes.byteLength <= MAX_ARTIFACT_BYTES ? { bytes: new Uint8Array(bytes), contentType: "image/png" } : null;
+    };
+    const steadyBoxesOf = async (mask: Locator[]) => {
+      const first = await boxesOf(mask);
+      await new Promise((resolve) => setTimeout(resolve, STEADY_MS));
+      return (await boxesOf(mask)) === first ? first : null;
     };
     const boxOf = async (element: ElementHandle) => {
       try {

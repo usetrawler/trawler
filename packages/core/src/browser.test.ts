@@ -243,6 +243,12 @@ beforeAll(async () => {
         return html(`<div style="visibility:hidden;font:20px monospace;color:#ff0000">card-sec<span style="visibility:visible">ret-1111</span> and more</div><p>Plan: Team</p>`);
       case "/animated-child":
         return html(`<style>@keyframes jump{0%,49.9%{transform:translateY(0)}50%,100%{transform:translateY(120px)}} b{display:inline-block;animation:jump 60ms infinite}</style><p style="font:20px monospace;color:#ff0000">card-sec<b>ret-1111</b></p>`);
+      case "/delayed-animation":
+        return html(`<style>@keyframes slide{from{transform:translateX(0)}to{transform:translateX(200px)}} #box{animation:slide 1s 60s}</style><div id="box"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div>`);
+      case "/timer-animation":
+        return html(`<div id="box"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div><script>document.getElementById("box").animate([], { duration: 60000 });</script>`);
+      case "/rounded-animation":
+        return html(`<style>@keyframes morph{from{border-radius:0}to{border-radius:24px}} #box{background:#eee;animation:morph 400ms infinite alternate}</style><div id="box"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div>`);
       case "/fixed-below":
         return html(`<p>Short page</p><div style="position:fixed;left:20px;bottom:120px;height:0;font:20px monospace;color:#ff0000">card-secret-1111</div>`);
       case "/flicker":
@@ -1370,6 +1376,16 @@ describe("screenshots", () => {
 
   test("an animation driven by scrolling does not stop the screenshot while the page stands still", async () => {
     const [shot] = await shotsOf("/scroll-driven", 1, async () => undefined, knowing("card-secret-1111"));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
+
+  test.each([
+    ["/delayed-animation", "one still waiting to start"],
+    ["/timer-animation", "one with no keyframes, used as a timer"],
+    ["/rounded-animation", "one that only rounds corners"],
+  ])("an animation around a secret that moves nothing, %s, does not stop the screenshot (%s)", async (path) => {
+    const [shot] = await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"));
     expect(shot).not.toBeNull();
     expect(await redPixels(shot!)).toBe(0);
   }, 60_000);
