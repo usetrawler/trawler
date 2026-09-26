@@ -43,7 +43,7 @@ export default function NotFound() {
           </div>
           <div aria-hidden className="flex h-[115px] items-center">
             <i className="h-[11px] w-[11px] flex-none rounded-full border-2 border-ink" />
-            <b className="h-0.5 flex-1 border-t-2 border-transparent bg-[linear-gradient(90deg,var(--action)_0_45%,transparent_45%_55%,var(--line)_55%)]" />
+            <b className="h-0.5 flex-1 border-t-2 border-transparent bg-origin-border bg-[linear-gradient(90deg,var(--action)_0_45%,transparent_45%_55%,var(--line)_55%)]" />
             <i className="h-[11px] w-[11px] flex-none rounded-full border-2 border-ink" />
             <strong className="grid h-9 w-9 place-items-center rounded-full border-2 border-action text-2xl leading-none text-action">×</strong>
           </div>
