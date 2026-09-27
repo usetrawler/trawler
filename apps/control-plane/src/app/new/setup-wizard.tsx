@@ -1,7 +1,7 @@
 "use client";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
-import type { ProductSummary } from "@usetrawler/core/setup";
+import type { ProductSummary, SignUp } from "@usetrawler/core/setup";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { describeProductAction, proposePeopleAction, readProductAction } from "./actions.ts";
 
@@ -14,11 +14,17 @@ const STEPS: { step: Step; title: string; working: string; done: string }[] = [
   { step: "propose", title: "People to try it", working: "Choosing people with different roles and goals…", done: "Ready" },
 ];
 
+const SIGN_UP_NOTE: Record<SignUp, string> = {
+  open: "People whose role anyone can have sign up; roles such as a reviewer or an administrator sign in with a test account.",
+  closed: "Everyone signs in with a test account, which you add on the plan before the run starts.",
+  unclear: "Trawler could not tell from the page. Setup decides per person; you can change it on the plan.",
+};
+
 type Feature = { title: string; summary: string; chosen: boolean };
 type Stage =
   | { kind: "address" }
   | { kind: "working"; step: Step; host: string }
-  | { kind: "context"; draftId: string; host: string; description: string; features: Feature[] };
+  | { kind: "context"; draftId: string; host: string; description: string; signUp: SignUp; features: Feature[] };
 
 async function outdatedAware<T>(call: () => Promise<T>, redo: string): Promise<T | { ok: false; error: string }> {
   try {
@@ -89,7 +95,7 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
     const described = await outdatedAware(() => describeProductAction(read.draftId), "Reload the page to analyse the product.");
     if (!described.ok) return (setError(described.error), setStage({ kind: "address" }));
     const summary = described.summary;
-    setStage({ kind: "context", draftId: read.draftId, host, description: initialDescription || summary.description, features: featuresFrom(summary, chosenBefore) });
+    setStage({ kind: "context", draftId: read.draftId, host, description: initialDescription || summary.description, signUp: summary.signUp, features: featuresFrom(summary, chosenBefore) });
   };
 
   const startedFor = useRef<string | null>(null);
@@ -152,7 +158,7 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
     const context = stage;
     setStage({ kind: "working", step: "propose", host: stage.host });
     start(async () => {
-      const res = await outdatedAware(() => proposePeopleAction({ draftId: context.draftId, description: context.description, features: context.features.filter((f) => f.chosen).map((f) => f.title) }), "Reload the page and start again.");
+      const res = await outdatedAware(() => proposePeopleAction({ draftId: context.draftId, description: context.description, signUp: context.signUp, features: context.features.filter((f) => f.chosen).map((f) => f.title) }), "Reload the page and start again.");
       if (res && !res.ok) {
         setError(res.error);
         setStage(context);
@@ -172,6 +178,15 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
           <span>Product context</span><span className="text-ok">AI draft · editable</span>
         </span>
         <textarea aria-label="What the product does" value={stage.description} maxLength={2000} rows={4} onChange={(e) => update({ description: e.target.value })} className="resize-y bg-transparent p-4 text-lg outline-none focus:bg-paper" />
+      </label>
+      <label className="flex flex-col gap-2">
+        <span className="text-sm">Can new people create an account themselves?</span>
+        <select value={stage.signUp} onChange={(e) => update({ signUp: e.target.value as SignUp })} className="h-11 border border-line bg-soft px-3 outline-none focus:border-ink">
+          <option value="open">Yes, anyone can sign up</option>
+          <option value="closed">No, accounts come from an invitation or an admin</option>
+          <option value="unclear">Not sure</option>
+        </select>
+        <span className="text-xs text-muted">{SIGN_UP_NOTE[stage.signUp]}</span>
       </label>
       <section className="flex flex-col gap-3" aria-labelledby="features-heading">
         <div className="flex items-end justify-between gap-4">

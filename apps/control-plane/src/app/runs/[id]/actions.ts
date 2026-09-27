@@ -8,7 +8,7 @@ import { providerArticle } from "../../../llm/provider-kinds.ts";
 import { checkModelCall, endpointFor, PROVIDER_LABEL, type Provider } from "../../../llm/providers.ts";
 import { DEFAULT_RUN } from "../../../runs/models.ts";
 import { isLive } from "../../../runs/report.ts";
-import { cancelRun, CannotJudgeAgain, judgeAgain, RunNotFound, startRun } from "../../../runs/runs.ts";
+import { cancelRun, CannotJudgeAgain, judgeAgain, NeedsAccount, RunNotFound, startRun } from "../../../runs/runs.ts";
 import { signedInMember } from "../../../server/auth.ts";
 import { betaRefusal } from "../../../server/beta.ts";
 import { getDb, getKeyring } from "../../../server/db.ts";
@@ -111,6 +111,7 @@ export async function runAgainAction(_previous: RunAgainState, form: FormData): 
     started = run.id;
   } catch (err) {
     if (err instanceof KeyGone) return { error: "The workspace's model key was removed or changed while the run was starting. Check the key and run it again." };
+    if (err instanceof NeedsAccount) return { error: `${err.message} Choose one on the plan, then run it again.` };
     await logError("run could not start again", { orgId, runId, err }, scrubberWith([endpoint.key]));
     return { error: "The run could not start. Try again." };
   }

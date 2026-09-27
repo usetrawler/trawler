@@ -311,10 +311,10 @@ const product = { url: "https://app.acme.test/", page: "Acme lets founders submi
 
 describe("describeProduct", () => {
   test("names the product, describes it and lists its features, most central first", async () => {
-    const summary = { name: "Acme", description: "A pitch board.", features: [{ title: " Submit a pitch ", summary: "Founders send a pitch." }, { title: "Review pitches", summary: "Reviewers approve." }, { title: "submit a pitch", summary: "dup" }, { title: " ", summary: "empty" }] };
+    const summary = { name: "Acme", description: "A pitch board.", signUp: "open", features: [{ title: " Submit a pitch ", summary: "Founders send a pitch." }, { title: "Review pitches", summary: "Reviewers approve." }, { title: "submit a pitch", summary: "dup" }, { title: " ", summary: "empty" }] };
     const model = scriptedModel([text(JSON.stringify(summary))]);
     const { summary: got, usage } = await describeProduct({ model, modelId: "mock", budget: new Budget(1), product });
-    expect(got).toEqual({ name: "Acme", description: "A pitch board.", features: [{ title: "Submit a pitch", summary: "Founders send a pitch." }, { title: "Review pitches", summary: "Reviewers approve." }] });
+    expect(got).toEqual({ name: "Acme", description: "A pitch board.", signUp: "open", features: [{ title: "Submit a pitch", summary: "Founders send a pitch." }, { title: "Review pitches", summary: "Reviewers approve." }] });
     expect(usage.steps).toBe(1);
     const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
     expect(prompt).toContain("Acme lets founders submit pitches");
@@ -322,7 +322,7 @@ describe("describeProduct", () => {
   });
 
   test("keeps at most six features and fails clearly when there are none", async () => {
-    const many = { name: "Acme", description: "d", features: Array.from({ length: 9 }, (_, i) => ({ title: `F${i}`, summary: "s" })) };
+    const many = { name: "Acme", description: "d", signUp: "unclear", features: Array.from({ length: 9 }, (_, i) => ({ title: `F${i}`, summary: "s" })) };
     expect((await describeProduct({ model: scriptedModel([text(JSON.stringify(many))]), modelId: "mock", budget: new Budget(1), product })).summary.features).toHaveLength(6);
     const none = describeProduct({ model: scriptedModel([text(JSON.stringify({ ...many, features: [] }))]), modelId: "mock", budget: new Budget(1), product });
     await expect(none).rejects.toBeInstanceOf(SetupModelFailed);
@@ -345,6 +345,13 @@ describe("proposePeople", () => {
     expect(prompt).toContain("Review pitches");
     expect(prompt).toContain("Pitches, reviewed.");
     expect(prompt).toMatch(/exercise these features and nothing else/);
+  });
+
+  test("when nobody can sign up, every person signs in to an existing account, whatever the model marked", async () => {
+    const model = scriptedModel([text(JSON.stringify(people))]);
+    const plan = await proposePeople({ model, modelId: "mock", budget: new Budget(1), product, name: "Acme", description: "d", features: ["Submit a pitch"], signUp: "closed" });
+    expect(plan.signsIn).toEqual(["founder", "reviewer"]);
+    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toMatch(/newUsersCanSignUp[^,]*closed/);
   });
 
   test("the confirmed description and features stay fenced as data", async () => {

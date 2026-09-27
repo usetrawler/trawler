@@ -17,7 +17,7 @@ beforeAll(async () => {
   await sql`insert into organization (id, name, slug, "createdAt") values ('org-a', 'A', 'a', now())`.execute(t.db);
 });
 
-const summary = { name: "Acme", description: "Invoices for freelancers.", features: [{ title: "Send an invoice", summary: "s" }, { title: "Get paid", summary: "s" }] };
+const summary = { name: "Acme", description: "Invoices for freelancers.", signUp: "open", features: [{ title: "Send an invoice", summary: "s" }, { title: "Get paid", summary: "s" }] };
 const people = { personas: [
   { id: "ana", name: "Ana", brief: "You invoice.", signsIn: false, goals: [{ id: "invoice", instruction: "Send an invoice." }] },
   { id: "tom", name: "Tom", brief: "You approve payments.", signsIn: true, goals: [{ id: "approve", instruction: "Approve a payment." }] },
@@ -165,4 +165,15 @@ test("proposing again never lets a project's origins outgrow what a run can load
   await proposeFromDraft(deps(model), { orgId: "org-wide", draftId: again, description: "d", features: ["Get paid"] });
   const config = await withOrg(t.db, "org-wide", (tx) => loadProjectConfig(tx, "org-wide", id, keys));
   expect(config.allowedOrigins).toHaveLength(20);
+});
+
+test("the sign-up answer is kept with the draft, and a product nobody can sign up to gets everyone signing in", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-closed', 'C', 'closed', now())`.execute(t.db);
+  const model = scriptedModel([text(JSON.stringify({ ...summary, signUp: "closed" })), text(JSON.stringify(people))]);
+  const draftId = await startDraft(deps(model), { orgId: "org-closed", url: "https://app.acme.test/" });
+  expect((await describeDraft(deps(model), { orgId: "org-closed", draftId })).signUp).toBe("closed");
+  expect((await describeDraft(deps(model), { orgId: "org-closed", draftId })).signUp).toBe("closed");
+  const id = await proposeFromDraft(deps(model), { orgId: "org-closed", draftId, description: "d", features: ["Get paid"], signUp: "closed" });
+  const editing = await withOrg(t.db, "org-closed", (tx) => projectForEditing(tx, "org-closed", id));
+  expect(editing?.personas.map((p) => [p.key, p.signs_in])).toEqual([["ana", true], ["tom", true]]);
 });

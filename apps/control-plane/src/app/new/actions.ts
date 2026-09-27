@@ -2,7 +2,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { createModel, MAX_CHOSEN_FEATURES, MAX_DESCRIPTION_CHARS, MAX_FEATURE_CHARS, SetupModelFailed, type ProductSummary } from "@usetrawler/core/setup";
+import { createModel, MAX_CHOSEN_FEATURES, MAX_DESCRIPTION_CHARS, MAX_FEATURE_CHARS, SetupModelFailed, SIGN_UP, type ProductSummary, type SignUp } from "@usetrawler/core/setup";
 import { signedInMember } from "../../server/auth.ts";
 import { getDb, getKeyring } from "../../server/db.ts";
 import { readEnv } from "../../server/env.ts";
@@ -85,9 +85,10 @@ const Chosen = z.object({
   draftId: z.string().regex(UUID),
   description: z.string().trim().max(MAX_DESCRIPTION_CHARS),
   features: z.array(z.string().trim().max(MAX_FEATURE_CHARS)).max(MAX_CHOSEN_FEATURES).transform((list) => list.filter(Boolean)),
+  signUp: z.enum(SIGN_UP).default("unclear"),
 });
 
-export async function proposePeopleAction(input: { draftId: string; description: string; features: string[] }): Promise<Result> {
+export async function proposePeopleAction(input: { draftId: string; description: string; features: string[]; signUp?: SignUp }): Promise<Result> {
   const chosen = Chosen.safeParse(input);
   if (!chosen.success) return { ok: false, error: `Keep the description under ${MAX_DESCRIPTION_CHARS.toLocaleString("en-GB")} characters and choose at most ${MAX_CHOSEN_FEATURES} features.` };
   if (chosen.data.features.length === 0) return { ok: false, error: "Choose at least one feature for the people to try." };

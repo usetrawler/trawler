@@ -143,7 +143,9 @@ const GoalProposal = z.object({ id: z.string(), instruction: z.string() });
 const PersonProposal = z.object({ id: z.string(), name: z.string(), brief: z.string(), signsIn: z.boolean(), goals: z.array(GoalProposal) });
 const ProposalSchema = z.object({ name: z.string(), description: z.string(), personas: z.array(PersonProposal) });
 const PeopleSchema = z.object({ personas: z.array(PersonProposal) });
-const SummarySchema = z.object({ name: z.string(), description: z.string(), features: z.array(z.object({ title: z.string(), summary: z.string() })) });
+export const SIGN_UP = ["open", "closed", "unclear"] as const;
+export type SignUp = (typeof SIGN_UP)[number];
+const SummarySchema = z.object({ name: z.string(), description: z.string(), signUp: z.enum(SIGN_UP), features: z.array(z.object({ title: z.string(), summary: z.string() })) });
 
 export class SetupModelFailed extends Error {}
 
@@ -218,6 +220,7 @@ export async function readProduct(opts: { url: string; docsUrl?: string; fetchTe
 export interface ProductSummary {
   name: string;
   description: string;
+  signUp: SignUp;
   features: { title: string; summary: string }[];
 }
 
@@ -229,7 +232,7 @@ export async function describeProduct(opts: { model: LanguageModel; modelId: str
     .filter((f) => f.title && !seen.has(f.title.toLowerCase()) && seen.add(f.title.toLowerCase()))
     .slice(0, MAX_FEATURES);
   if (features.length === 0) throw new SetupModelFailed("the setup model found no features on the page");
-  return { summary: { name: clip(answer.name, 100) || new URL(opts.product.url).hostname, description: clip(answer.description, 600), features }, usage };
+  return { summary: { name: clip(answer.name, 100) || new URL(opts.product.url).hostname, description: clip(answer.description, 600), signUp: answer.signUp, features }, usage };
 }
 
 export interface ProposedPlan {
@@ -269,12 +272,15 @@ export async function proposePeople(opts: {
   name: string;
   description: string;
   features: string[];
+  signUp?: SignUp;
 }): Promise<ProposedPlan & { usage: JobUsage }> {
   const description = clip(opts.description, MAX_DESCRIPTION_CHARS);
   const features = opts.features.map((f) => clip(f, MAX_FEATURE_CHARS)).filter(Boolean).slice(0, MAX_CHOSEN_FEATURES);
   if (features.length === 0) throw new RangeError("choose at least one feature");
-  const { answer, usage } = await ask(opts, PeopleSchema, setupPrompt({ ...opts.product, context: { description, features } }));
-  return { ...planFrom(opts.product, { name: opts.name, description }, answer.personas), usage };
+  const signUp = opts.signUp ?? "unclear";
+  const { answer, usage } = await ask(opts, PeopleSchema, setupPrompt({ ...opts.product, context: { description, features, signUp } }));
+  const plan = planFrom(opts.product, { name: opts.name, description }, answer.personas);
+  return { ...plan, signsIn: signUp === "closed" ? plan.project.personas.map((p) => p.id) : plan.signsIn, usage };
 }
 
 export async function proposeProject(opts: {
