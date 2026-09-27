@@ -44,6 +44,7 @@ export async function personWithoutAccount(tx: Tx, projectId: string): Promise<s
 }
 
 export async function startRun(tx: Tx, orgId: string, projectId: string, keys: Keyring, options: StartRunOptions): Promise<{ id: string; number: number }> {
+  await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forShare().execute();
   const config = await loadProjectConfig(tx, orgId, projectId, keys);
   const without = await personWithoutAccount(tx, projectId);
   if (without) throw new NeedsAccount(without);

@@ -8,7 +8,7 @@ import { providerArticle } from "../../../llm/provider-kinds.ts";
 import { checkModelCall, endpointFor, PROVIDER_LABEL, type Provider } from "../../../llm/providers.ts";
 import { DEFAULT_RUN } from "../../../runs/models.ts";
 import { isLive } from "../../../runs/report.ts";
-import { cancelRun, CannotJudgeAgain, judgeAgain, NeedsAccount, RunNotFound, startRun } from "../../../runs/runs.ts";
+import { cancelRun, CannotJudgeAgain, judgeAgain, NeedsAccount, personWithoutAccount, RunNotFound, startRun } from "../../../runs/runs.ts";
 import { signedInMember } from "../../../server/auth.ts";
 import { betaRefusal } from "../../../server/beta.ts";
 import { getDb, getKeyring } from "../../../server/db.ts";
@@ -78,6 +78,8 @@ export async function runAgainAction(_previous: RunAgainState, form: FormData): 
     stored: await modelKey(tx, orgId, keys),
   }));
   const { previous, stored } = found;
+  const without = previous && (await withOrg(getDb(), orgId, (tx) => personWithoutAccount(tx, previous.project_id)));
+  if (without) return { error: `${new NeedsAccount(without).message} Choose one on the plan, then run it again.` };
   if (!previous) return { error: "This run was not found." };
   if (isLive(previous.status)) return { error: "This run is still going. Run it again once it has finished." };
   if (!stored) return { error: "The workspace has no model key any more. An owner or admin can add one in Settings." };

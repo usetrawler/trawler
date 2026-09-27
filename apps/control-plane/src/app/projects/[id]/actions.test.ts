@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 type Member = { userId: string; email: string; orgId: string; orgName: string; role: string };
-const state = vi.hoisted(() => ({ member: null as Member | null, tenants: [] as string[], projectInWorkspace: true, keyChecks: 0, keysSaved: 0, keyStillStored: true, runsStarted: 0, stillAsked: [] as unknown[][], startedIn: [] as unknown[], revalidated: [] as string[] }));
+const state = vi.hoisted(() => ({ without: null as string | null, member: null as Member | null, tenants: [] as string[], projectInWorkspace: true, keyChecks: 0, keysSaved: 0, keyStillStored: true, runsStarted: 0, stillAsked: [] as unknown[][], startedIn: [] as unknown[], revalidated: [] as string[] }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({ redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); } }));
@@ -35,7 +35,7 @@ vi.mock("../../../llm/prices.ts", async (importOriginal) => ({
 }));
 vi.mock("../../../runs/runs.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../runs/runs.ts")>()),
-  personWithoutAccount: async () => null,
+  personWithoutAccount: async () => state.without,
   startRun: async (tx: unknown) => { state.startedIn.push(tx); state.runsStarted++; return { id: "run-1", number: 1 }; },
 }));
 
@@ -105,4 +105,14 @@ test("a run whose saved key is still there starts and opens, checked in the same
   expect(state.runsStarted).toBe(1);
   expect(state.stillAsked).toEqual([[state.startedIn[0], "org-1", "openrouter", null]]);
   expect(state.stillAsked[0]![0]).toBe(state.startedIn[0]);
+});
+
+test("Start refuses before checking the key while a signing-in person has no account", async () => {
+  state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-2", orgName: "Acme workspace", role: "owner" };
+  state.without = "Maya";
+  state.keyChecks = 0;
+  expect(await startRunAction({}, startForm({ apiKey: KEY }))).toEqual({ error: "Maya needs a test account to sign in." });
+  expect(state.keyChecks).toBe(0);
+  expect(state.keysSaved).toBe(0);
+  state.without = null;
 });

@@ -4,6 +4,7 @@ import type { KeyCheck } from "../../../llm/providers.ts";
 type Previous = { project_id: string; status: string; agent_model: string; judge_model: string; budget_usd: string; max_steps: number; replay_steps: number; provider: string; provider_base_url: string | null; prompt_usd_per_mtok: string | null; completion_usd_per_mtok: string | null };
 const state = vi.hoisted(() => ({
   signedIn: true,
+  without: null as string | null,
   refusal: null as string | null,
   previous: undefined as Previous | undefined,
   stored: null as null | { provider: string; key: string; baseUrl: string | null },
@@ -55,7 +56,8 @@ vi.mock("../../../runs/runs.ts", () => ({
   cancelRun: async () => {},
   judgeAgain: async () => {},
   CannotJudgeAgain: class extends Error {},
-  NeedsAccount: class extends Error {},
+  NeedsAccount: class extends Error { constructor(person: string) { super(`${person} needs a test account to sign in.`); } },
+  personWithoutAccount: async () => state.without,
   RunNotFound: class extends Error {},
   startRun: async (tx: unknown, orgId: string, projectId: string, _keys: unknown, options: unknown) => {
     if (state.startFails) throw state.startFails;
@@ -74,7 +76,7 @@ const runAgainAction = (runId: string) => {
 
 beforeEach(() => {
   Object.assign(state, {
-    signedIn: true, refusal: null, checks: {}, checked: [], price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }, started: [], asked: [], keyHeld: true, held: [], startFails: null, logged: [],
+    signedIn: true, without: null, refusal: null, checks: {}, checked: [], price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }, started: [], asked: [], keyHeld: true, held: [], startFails: null, logged: [],
     previous: { project_id: "project-1", status: "succeeded", agent_model: "deepseek/deepseek-v4.1-flash", judge_model: "deepseek/deepseek-v4.1-flash", budget_usd: "3.5000", max_steps: 90, replay_steps: 30, provider: "openrouter", provider_base_url: null, prompt_usd_per_mtok: null, completion_usd_per_mtok: null },
     stored: { provider: "openrouter", key: "sk-or-v1-" + "k".repeat(40), baseUrl: null },
   });
@@ -91,6 +93,13 @@ test("Run again starts the plan as it is now with the previous run's model, cap 
       provider: "openrouter", providerBaseUrl: null, price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }, tokenCap: null,
     },
   }]);
+});
+
+test("Run again refuses before paying for a model check while a signing-in person has no account", async () => {
+  state.without = "Maya";
+  expect(await runAgainAction(RUN)).toEqual({ error: "Maya needs a test account to sign in. Choose one on the plan, then run it again." });
+  expect(state.checked).toEqual([]);
+  expect(state.started).toEqual([]);
 });
 
 test("a run on a model without a known price runs again under the token cap, and a separate judge model is checked too", async () => {

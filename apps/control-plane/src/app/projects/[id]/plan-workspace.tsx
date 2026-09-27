@@ -47,8 +47,9 @@ export function SignIn({ projectId, person, accounts, onPick, onAccounts }: {
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const who = person.name || "this person";
-  const missing = Boolean(person.signsIn && !person.accountRef);
   const chosen = accounts.find((a) => a.ref === person.accountRef);
+  const missing = Boolean((person.signsIn || person.accountRef) && !chosen);
+  const noteId = `sign-in-${person.id}`;
   const add = () => start(async () => {
     const res = await addAccountAction(projectId, { username, password }).catch(outdated("Reload the page to add the account."));
     if (!res.ok) return setError(res.error);
@@ -67,10 +68,12 @@ export function SignIn({ projectId, person, accounts, onPick, onAccounts }: {
   });
   return (
     <div className="mt-2 flex flex-col gap-2 border-t border-line pt-3">
-      <p className="font-mono text-[11px] tracking-[0.15em] text-muted uppercase">Sign-in</p>
+      <p aria-hidden className="font-mono text-[11px] tracking-[0.15em] text-muted uppercase">Sign-in</p>
       <select
-        aria-label={`How ${who} gets in`}
-        value={person.accountRef ?? (person.signsIn ? "" : SIGNS_UP)}
+        aria-label={`Sign-in for ${who}`}
+        aria-invalid={missing || undefined}
+        aria-describedby={missing ? noteId : undefined}
+        value={chosen?.ref ?? (missing ? "" : SIGNS_UP)}
         onChange={(e) => onPick(e.target.value === SIGNS_UP ? { signsIn: false } : { accountRef: e.target.value || undefined, signsIn: true })}
         className={`h-9 min-w-0 border bg-soft px-2 text-sm text-ink ${missing ? "border-bad" : "border-line"}`}
       >
@@ -78,12 +81,12 @@ export function SignIn({ projectId, person, accounts, onPick, onAccounts }: {
         {accounts.map((a) => <option key={a.ref} value={a.ref}>Signs in as {a.username}</option>)}
         <option value={SIGNS_UP}>Signs up as a new user</option>
       </select>
-      {missing && <p className="text-xs text-bad">{who} needs a test account to sign in.</p>}
+      {missing && <p id={noteId} className="text-xs text-bad">{who} needs a test account to sign in.</p>}
       {!person.accountRef && !person.signsIn && <p className="text-xs text-muted">Signs up the way a new user would, if your product lets them, with an example.com address and a password Trawler makes up. Cannot receive email yet.</p>}
       {chosen && (
         <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted">
           <span className="font-mono">password {chosen.hint}</span>
-          <button type="button" disabled={pending} onClick={() => remove(chosen.ref)} className="underline-offset-4 hover:text-bad hover:underline disabled:opacity-60">Remove this account</button>
+          <button type="button" disabled={pending} onClick={() => remove(chosen.ref)} className="underline-offset-4 hover:text-bad hover:underline disabled:opacity-60">Remove {chosen.username} from the project</button>
         </p>
       )}
       {adding ? (
@@ -97,7 +100,7 @@ export function SignIn({ projectId, person, accounts, onPick, onAccounts }: {
           </div>
         </form>
       ) : (
-        <AddButton onClick={() => setAdding(true)}>Add account</AddButton>
+        <AddButton onClick={() => setAdding(true)}>Add account for {who}</AddButton>
       )}
       {error && <p role="alert" className="text-xs text-bad">{error}</p>}
     </div>
@@ -137,16 +140,22 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
   const onAccounts = (next: AccountView[], removed?: string) => {
     setAccounts(next);
     if (!removed) return;
-    const detach = (list: PlanPerson[]) => list.map((p) => (p.accountRef === removed ? { ...p, accountRef: undefined } : p));
+    const detach = (list: PlanPerson[]) => list.map((p) => (p.accountRef === removed ? { ...p, accountRef: undefined, signsIn: true } : p));
     setPersonas(detach);
     setSaved((s) => ({ ...s, personas: detach(s.personas) }));
   };
-  const withoutAccount = saved.personas.find((p) => p.signsIn && !p.accountRef);
+  const withoutAccount = saved.personas.find((p) => (p.signsIn || p.accountRef) && !accounts.some((a) => a.ref === p.accountRef));
   const save = () => startSaving(async () => {
     const plan = { personas, goals };
     const res = await savePlanAction(projectId, plan).catch(outdated("Copy your changes, reload the page, then make them again and save."));
     if (!res.ok) {
-      if ("accounts" in res) setAccounts(res.accounts);
+      if ("accounts" in res) {
+        const left = new Set(res.accounts.map((a) => a.ref));
+        const detach = (list: PlanPerson[]) => list.map((p) => (p.accountRef && !left.has(p.accountRef) ? { ...p, accountRef: undefined, signsIn: true } : p));
+        setAccounts(res.accounts);
+        setPersonas(detach);
+        setSaved((s) => ({ ...s, personas: detach(s.personas) }));
+      }
       return setError(res.error);
     }
     setError(null);

@@ -179,15 +179,17 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
         </span>
         <textarea aria-label="What the product does" value={stage.description} maxLength={2000} rows={4} onChange={(e) => update({ description: e.target.value })} className="resize-y bg-transparent p-4 text-lg outline-none focus:bg-paper" />
       </label>
-      <label className="flex flex-col gap-2">
-        <span className="text-sm">Can new people create an account themselves?</span>
-        <select value={stage.signUp} onChange={(e) => update({ signUp: e.target.value as SignUp })} className="h-11 border border-line bg-soft px-3 outline-none focus:border-ink">
-          <option value="open">Yes, anyone can sign up</option>
-          <option value="closed">No, accounts come from an invitation or an admin</option>
-          <option value="unclear">Not sure</option>
-        </select>
-        <span className="text-xs text-muted">{SIGN_UP_NOTE[stage.signUp]}</span>
-      </label>
+      <div className="flex flex-col gap-2">
+        <label className="flex flex-col gap-2">
+          <span className="text-sm">Can new people create an account themselves?</span>
+          <select aria-describedby="sign-up-note" value={stage.signUp} onChange={(e) => update({ signUp: e.target.value as SignUp })} className="h-11 border border-line bg-soft px-3 outline-none focus:border-ink">
+            <option value="open">Yes, anyone can sign up</option>
+            <option value="closed">No, accounts come from an invitation or an admin</option>
+            <option value="unclear">Not sure</option>
+          </select>
+        </label>
+        <p id="sign-up-note" className="text-xs text-muted">{SIGN_UP_NOTE[stage.signUp]}</p>
+      </div>
       <section className="flex flex-col gap-3" aria-labelledby="features-heading">
         <div className="flex items-end justify-between gap-4">
           <div>

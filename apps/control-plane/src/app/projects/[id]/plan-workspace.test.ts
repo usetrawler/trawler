@@ -36,11 +36,12 @@ describe("PlanWorkspace", () => {
   it("each card says how its person gets in, and the separate test accounts section is gone", () => {
     const html = render([ama, kwame], accounts);
     expect(html).not.toContain("Test accounts");
-    expect(html.match(/aria-label="How Ama gets in"/g)).toHaveLength(1);
+    expect(html.match(/aria-label="Sign-in for Ama"/g)).toHaveLength(1);
     expect(html).toMatch(/<option value="signs-up" selected="">Signs up as a new user<\/option>/);
     expect(html).toMatch(/<option value="account-1" selected="">Signs in as kwame@acme\.test<\/option>/);
     expect(html).toContain("password …1234");
-    expect(html.match(/>\+ Add account</g)).toHaveLength(2);
+    expect(html).toContain(">+ Add account for Ama<");
+    expect(html).toContain("Remove kwame@acme.test from the project");
   });
 
   it("a person who has to sign in without an account says so on the card, and Start refuses until one is chosen", () => {
@@ -49,5 +50,13 @@ describe("PlanWorkspace", () => {
     expect(html.match(/Ama needs a test account to sign in\./g)).toHaveLength(2);
     expect(html).toMatch(/id="start-blocked"[^>]*>Ama needs a test account to sign in\.</);
     expect(render([kwame], accounts)).not.toContain("needs a test account");
+    expect(html).toMatch(/aria-label="Sign-in for Ama" aria-invalid="true" aria-describedby="sign-in-ama"/);
+  });
+
+  it("an account that is gone never shows as someone else's: the card asks for one and Start refuses", () => {
+    const html = render([{ ...kwame, accountRef: "account-gone" }], accounts);
+    expect(html).toMatch(/<option value="" selected="">Choose a test account<\/option>/);
+    expect(html).not.toMatch(/<option value="account-1" selected="">/);
+    expect(html).toMatch(/id="start-blocked"[^>]*>Kwame needs a test account to sign in\.</);
   });
 });

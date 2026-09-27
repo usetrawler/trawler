@@ -56,7 +56,7 @@ const accounts = () => {
   const tree = SignIn({ projectId: "p1", person: { ...ama, accountRef: "account-1", signsIn: true }, accounts: [account], onPick, onAccounts: onChange });
   const [setAdding, setUsername, setPassword, setError] = react.setters;
   const add = () => (nodes(tree).find((node) => node.type === "form")!.props!.onSubmit as (event: { preventDefault: () => void }) => void)({ preventDefault: () => {} });
-  const remove = () => (nodes(tree).find((node) => node.type === "button" && text(node) === "Remove this account")!.props!.onClick as () => void)();
+  const remove = () => (nodes(tree).find((node) => node.type === "button" && text(node) === "Remove kwame@acme.test from the project")!.props!.onClick as () => void)();
   return { add, remove, onChange, onPick, setAdding: setAdding!, setUsername: setUsername!, setPassword: setPassword!, setError: setError! };
 };
 
