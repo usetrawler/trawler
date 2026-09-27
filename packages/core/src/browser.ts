@@ -257,8 +257,9 @@ const isPasswordField = (node: DomNode) =>
   node.nodeName.toUpperCase() === "INPUT" && (node.attributes ?? []).some((name, i, all) => i % 2 === 0 && name.toLowerCase() === "type" && all[i + 1]?.toLowerCase() === "password");
 function closedRootHides(root: DomNode, secrets: RegExp | null): boolean {
   const nodes = nodesOfDocuments(root);
-  if (nodes.some((node) => node.shadowRootType === "closed" && composedNodesOf(node).some(isPasswordField))) return true;
-  if (!secrets) return false;
+  const closedRoots = nodes.filter((node) => node.shadowRootType === "closed");
+  if (closedRoots.some((shadow) => composedNodesOf(shadow).some(isPasswordField))) return true;
+  if (!secrets || closedRoots.length === 0) return false;
   const byId = new Map(nodes.map((node) => [node.backendNodeId, node]));
   const flatChildrenOf = (node: DomNode): DomNode[] =>
     node.distributedNodes?.length ? node.distributedNodes.flatMap((slotted) => byId.get(slotted.backendNodeId) ?? []) : node.shadowRoots?.length ? node.shadowRoots : (node.children ?? []);
@@ -273,7 +274,7 @@ function closedRootHides(root: DomNode, secrets: RegExp | null): boolean {
         const text = blankShown || node.nodeValue.trim() ? node.nodeValue.replace(invisible, "") : "";
         if (closed) closedParts.push([shown.length, shown.length + text.length]);
         shown += text;
-      } else if (!/^(HEAD|SCRIPT|NOSCRIPT|STYLE)$/i.test(node.nodeName)) {
+      } else if (!(closed ? /^HEAD$/i : /^(HEAD|SCRIPT|NOSCRIPT|STYLE)$/i).test(node.nodeName)) {
         for (const child of flatChildrenOf(node)) read(child, closed || child.shadowRootType === "closed");
       }
     };
@@ -553,7 +554,9 @@ export async function openBrowser(opts: {
         try {
           await session.send("DOM.enable", { includeWhitespace: "all" });
           const { root } = (await session.send("DOM.getDocument", { depth: -1, pierce: true })) as { root: DomNode };
-          for (const node of nodesOfDocuments(root).filter((n) => n.nodeType === 3 && n.nodeValue.length > CDP_TEXT_LIMIT && n.nodeValue.endsWith("\u2026"))) {
+          const nodes = nodesOfDocuments(root);
+          if (!nodes.some((node) => node.shadowRootType === "closed")) continue;
+          for (const node of nodes.filter((n) => n.nodeType === 3 && n.nodeValue.length > CDP_TEXT_LIMIT && n.nodeValue.endsWith("\u2026"))) {
             const { outerHTML } = await session.send("DOM.getOuterHTML", { backendNodeId: node.backendNodeId });
             node.nodeValue = outerHTML.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, "\u00a0").replace(/&amp;/g, "&");
           }

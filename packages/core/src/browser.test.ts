@@ -399,6 +399,8 @@ beforeAll(async () => {
       case "/closed-flex-parts":
       case "/closed-grid-parts":
         return html(closedCard("", `<div style="display:${req.url === "/closed-flex-parts" ? "flex" : "inline-grid;grid-auto-flow:column"}"><span>card-sec</span>\n  <span>ret-1111</span></div>`));
+      case "/closed-style-shown":
+        return html(closedCard("", '<style style="display:block">/* card-secret-1111 */</style>'));
       case "/closed-phrase-words":
         return html(closedCard("", "<p><b>correct</b> <b>horse</b> <b>battery</b> <b>staple</b></p>"));
       case "/closed-invisible-needle":
@@ -1603,7 +1605,7 @@ describe("screenshots", () => {
     expect(await redPixels(shot!)).toBe(0);
   }, 60_000);
 
-  test.each(["/closed-text", "/closed-groups", "/closed-split", "/closed-slotted", "/closed-slot-after", "/closed-slot-named", "/closed-slot-manual", "/closed-sibling-hosts", "/closed-after-light", "/closed-password", "/closed-typed", "/closed-in-frame", "/closed-long-text", "/closed-zero-width", "/cut-beside-closed", "/cut-empty-beside-closed", "/cut-near-closed", "/closed-flex-parts", "/closed-grid-parts"])("a secret or password field inside a closed shadow root gives no screenshot (%s)", async (path) => {
+  test.each(["/closed-text", "/closed-groups", "/closed-split", "/closed-slotted", "/closed-slot-after", "/closed-slot-named", "/closed-slot-manual", "/closed-sibling-hosts", "/closed-after-light", "/closed-password", "/closed-typed", "/closed-in-frame", "/closed-long-text", "/closed-zero-width", "/cut-beside-closed", "/cut-empty-beside-closed", "/cut-near-closed", "/closed-flex-parts", "/closed-grid-parts", "/closed-style-shown"])("a secret or password field inside a closed shadow root gives no screenshot (%s)", async (path) => {
     expect(await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"))).toEqual([null]);
   }, 60_000);
 
