@@ -33,6 +33,14 @@ test("a session that no longer belongs to any workspace cannot change the plan o
   expect(state.tenants).toEqual([]);
 });
 
+test("a test account takes a password of any length up to 1000 characters", async () => {
+  state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-2", orgName: "Acme workspace", role: "member" };
+  expect(await addAccountAction(PROJECT, { username: "user", password: "pw12" })).toEqual({ ok: true, ref: "a1", accounts: [] });
+  const refused = { ok: false, error: "Enter the password the account signs in with (up to 1000 characters)." };
+  expect(await addAccountAction(PROJECT, { username: "user", password: "" })).toEqual(refused);
+  expect(await addAccountAction(PROJECT, { username: "user", password: "x".repeat(1001) })).toEqual(refused);
+});
+
 test("the plan and its test accounts change in the workspace the membership check returns", async () => {
   state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-2", orgName: "Acme workspace", role: "member" };
   expect(await savePlanAction(PROJECT, PLAN)).toEqual({ ok: true });
