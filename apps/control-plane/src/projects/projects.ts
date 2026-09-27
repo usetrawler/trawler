@@ -24,7 +24,7 @@ export function goalsPerPerson(personas: Persona[], goals: Goal[]): (Goal & { pe
 
 async function insertPlan(tx: Tx, orgId: string, projectId: string, personas: Persona[], goals: Goal[], signsIn: ReadonlySet<string> = new Set()) {
   if (personas.length) {
-    await tx.insertInto("personas").values(personas.map((p, i) => ({ org_id: orgId, project_id: projectId, key: p.id, name: p.name, brief: p.brief, account_ref: p.accountRef ?? null, signs_in: signsIn.has(p.id), position: i }))).execute();
+    await tx.insertInto("personas").values(personas.map((p, i) => ({ org_id: orgId, project_id: projectId, key: p.id, name: p.name, brief: p.brief, account_ref: p.accountRef ?? null, signs_in: signsIn.has(p.id) || p.accountRef !== undefined, position: i }))).execute();
   }
   const owned = goalsPerPerson(personas, goals);
   if (owned.length) {
