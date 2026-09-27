@@ -1,5 +1,5 @@
 import type { LanguageModel } from "ai";
-import { Budget, describeProduct, proposePeople, readProduct, type ProductPage, type ProductSummary } from "@usetrawler/core/setup";
+import { Budget, describeProduct, proposePeople, readProduct, SIGN_UP, type ProductPage, type ProductSummary, type SignUp } from "@usetrawler/core/setup";
 import { sql } from "kysely";
 import type { Database } from "../db/index.ts";
 import { asSystem, withOrg } from "../db/tenancy.ts";
@@ -103,20 +103,24 @@ export async function describeDraft(deps: SetupDeps, input: { orgId: string; dra
   if (!claimed) {
     const described = await draftOf(deps, input.orgId, input.draftId);
     if (!described.features) throw new DraftGone("the setup draft was already described without a result");
-    return { name: described.name ?? new URL(described.url).hostname, description: described.description ?? "", features: described.features as unknown as ProductSummary["features"] };
+    return {
+      name: described.name ?? new URL(described.url).hostname, description: described.description ?? "",
+      signUp: (SIGN_UP as readonly string[]).includes(described.sign_up ?? "") ? (described.sign_up as SignUp) : "unclear",
+      features: described.features as unknown as ProductSummary["features"],
+    };
   }
   const { summary } = await describeProduct({ model: deps.model, modelId: deps.modelId, budget: new Budget(SETUP_BUDGET_USD), product: productOf(draft) });
-  await withOrg(deps.db, input.orgId, (tx) => tx.updateTable("setup_drafts").set({ name: summary.name, description: summary.description, features: JSON.stringify(summary.features) }).where("id", "=", draft.id).execute());
+  await withOrg(deps.db, input.orgId, (tx) => tx.updateTable("setup_drafts").set({ name: summary.name, description: summary.description, sign_up: summary.signUp, features: JSON.stringify(summary.features) }).where("id", "=", draft.id).execute());
   return summary;
 }
 
-export async function proposeFromDraft(deps: SetupDeps, input: { orgId: string; draftId: string; description: string; features: string[] }): Promise<string> {
+export async function proposeFromDraft(deps: SetupDeps, input: { orgId: string; draftId: string; description: string; features: string[]; signUp?: SignUp }): Promise<string> {
   const draft = await draftOf(deps, input.orgId, input.draftId);
   await claimSetupAttempt(deps.db, input.orgId);
   const product = productOf(draft);
   const { project, signsIn } = await proposePeople({
     model: deps.model, modelId: deps.modelId, budget: new Budget(SETUP_BUDGET_USD), product,
-    name: draft.name ?? new URL(draft.url).hostname, description: input.description, features: input.features,
+    name: draft.name ?? new URL(draft.url).hostname, description: input.description, features: input.features, signUp: input.signUp,
   });
   const features = input.features.map((f) => f.trim()).filter(Boolean);
   return withOrg(deps.db, input.orgId, async (tx) => {

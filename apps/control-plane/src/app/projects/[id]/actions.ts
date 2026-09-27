@@ -10,7 +10,7 @@ import { freshEndpoint, withinListingLimit, type KeyInput } from "../../../llm/k
 import { checkModelCall, endpointFor, listModels, PREFERRED_MODELS, PROVIDER_LABEL, priceKey, type Endpoint, type Provider } from "../../../llm/providers.ts";
 import { projectRunCount } from "../../../projects/overview.ts";
 import { DEFAULT_RUN } from "../../../runs/models.ts";
-import { startRun } from "../../../runs/runs.ts";
+import { NeedsAccount, personWithoutAccount, startRun } from "../../../runs/runs.ts";
 import { canManageBilling, signedInMember } from "../../../server/auth.ts";
 import { betaRefusal } from "../../../server/beta.ts";
 import { getDb, getKeyring } from "../../../server/db.ts";
@@ -88,6 +88,8 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   const refusal = betaRefusal(member.email);
   if (refusal) return { error: refusal };
   if (!UUID.test(projectId) || !(await withOrg(getDb(), orgId, (tx) => projectExists(tx, orgId, projectId)))) return { error: "The run could not start. Try again." };
+  const without = await withOrg(getDb(), orgId, (tx) => personWithoutAccount(tx, projectId));
+  if (without) return { error: new NeedsAccount(without).message };
 
   const resolved = await endpointFrom(orgId, { key: String(form.get("apiKey") ?? ""), provider: String(form.get("provider") ?? ""), baseUrl: String(form.get("baseUrl") ?? "") });
   if ("error" in resolved) return { error: resolved.error };
@@ -123,6 +125,7 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
       revalidatePath(`/projects/${projectId}`);
       return { error: "The workspace's model key was removed or changed while the run was starting. Check the key and start again.", ...(keyHint ? { keyHint } : {}) };
     }
+    if (err instanceof NeedsAccount) return { error: err.message, ...(keyHint ? { keyHint } : {}) };
     if (!(err instanceof ProjectNotFound)) await logError("run could not start", { orgId, projectId, err }, scrubberWith([endpoint.key]));
     return { error: "The run could not start. Try again.", ...(keyHint ? { keyHint } : {}) };
   }

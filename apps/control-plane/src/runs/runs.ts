@@ -32,8 +32,22 @@ export function withoutSecrets(config: ProjectConfig) {
 
 export type ConfigSnapshot = ReturnType<typeof withoutSecrets>;
 
+export class NeedsAccount extends Error {
+  constructor(readonly person: string) {
+    super(`${person} needs a test account to sign in.`);
+  }
+}
+
+export async function personWithoutAccount(tx: Tx, projectId: string): Promise<string | null> {
+  const person = await tx.selectFrom("personas").select("name").where("project_id", "=", projectId).where("signs_in", "=", true).where("account_ref", "is", null).orderBy("position").executeTakeFirst();
+  return person?.name ?? null;
+}
+
 export async function startRun(tx: Tx, orgId: string, projectId: string, keys: Keyring, options: StartRunOptions): Promise<{ id: string; number: number }> {
+  await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forShare().execute();
   const config = await loadProjectConfig(tx, orgId, projectId, keys);
+  const without = await personWithoutAccount(tx, projectId);
+  if (without) throw new NeedsAccount(without);
   await sql`select pg_advisory_xact_lock(hashtextextended(${`runs:${orgId}`}, 0))`.execute(tx);
   const { next } = await tx.selectFrom("runs").select(sql<number>`coalesce(max(number), 0) + 1`.as("next")).where("org_id", "=", orgId).executeTakeFirstOrThrow();
   const run = await tx

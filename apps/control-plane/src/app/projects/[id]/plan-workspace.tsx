@@ -32,68 +32,83 @@ const outdated = (then: string) => (err: unknown) => {
   return { ok: false as const, error: updatedSinceOpened(then) };
 };
 
-const WITHOUT_ACCOUNT = "People without a test account sign up the way a new user would, if your product lets them, with an example.com address and a password Trawler makes up. They cannot receive email yet.";
+export type PlanPerson = Persona & { signsIn?: boolean };
 
-export function Accounts({ projectId, accounts, anyoneWithout, onChange }: { projectId: string; accounts: AccountView[]; anyoneWithout: boolean; onChange: (accounts: AccountView[], removed?: string) => void }) {
-  const [open, setOpen] = useState(accounts.length > 0);
+const SIGNS_UP = "signs-up";
+
+export function SignIn({ projectId, person, accounts, onPick, onAccounts }: {
+  projectId: string; person: PlanPerson; accounts: AccountView[];
+  onPick: (choice: { accountRef?: string; signsIn: boolean }) => void;
+  onAccounts: (accounts: AccountView[], removed?: string) => void;
+}) {
+  const [adding, setAdding] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  if (!open) return (
-    <div className="flex flex-col gap-1">
-      <AddButton onClick={() => setOpen(true)}>Your product needs sign-in? Add a test account</AddButton>
-      <p className="text-sm text-muted">{WITHOUT_ACCOUNT}</p>
-    </div>
-  );
+  const who = person.name || "this person";
+  const chosen = accounts.find((a) => a.ref === person.accountRef);
+  const missing = Boolean((person.signsIn || person.accountRef) && !chosen);
+  const noteId = `sign-in-${person.id}`;
+  const add = () => start(async () => {
+    const res = await addAccountAction(projectId, { username, password }).catch(outdated("Reload the page to add the account."));
+    if (!res.ok) return setError(res.error);
+    setError(null);
+    setUsername("");
+    setPassword("");
+    setAdding(false);
+    onAccounts(res.accounts);
+    onPick({ accountRef: res.ref, signsIn: true });
+  });
+  const remove = (ref: string) => start(async () => {
+    const res = await removeAccountAction(projectId, ref).catch(outdated("Reload the page to remove the account."));
+    if (!res.ok) return setError(res.error);
+    setError(null);
+    onAccounts(res.accounts, ref);
+  });
   return (
-    <section className="flex flex-col gap-3">
-      <Heading>Test accounts</Heading>
-      <p className="text-sm text-muted">Only for products with sign-in. Passwords are encrypted and never shown again; the agents type them without seeing them. A password shorter than 8 characters cannot be masked if your product shows it on a page.</p>
-      {anyoneWithout && <p className="text-sm text-muted">{WITHOUT_ACCOUNT}</p>}
-      {accounts.length > 0 && (
-        <ul className="flex flex-col gap-2">
-          {accounts.map((a) => (
-            <li key={a.ref} className="flex items-center justify-between gap-3 border border-line bg-panel px-4 py-2 text-sm">
-              <span className="truncate">{a.username}</span>
-              <span className="flex items-center gap-3">
-                <span className="font-mono text-xs text-muted">password {a.hint}</span>
-                <RemoveButton label={`Remove ${a.username}`} disabled={pending} onClick={() => start(async () => {
-                  const res = await removeAccountAction(projectId, a.ref).catch(outdated("Reload the page to remove the account."));
-                  if (!res.ok) return setError(res.error);
-                  setError(null);
-                  onChange(res.accounts, a.ref);
-                })} />
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <form
-        className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]"
-        onSubmit={(e) => {
-          e.preventDefault();
-          start(async () => {
-            const res = await addAccountAction(projectId, { username, password }).catch(outdated("Reload the page to add the account."));
-            if (!res.ok) return setError(res.error);
-            setError(null);
-            setUsername("");
-            setPassword("");
-            onChange(res.accounts);
-          });
-        }}
+    <div className="mt-2 flex flex-col gap-2 border-t border-line pt-3">
+      <p aria-hidden className="font-mono text-[11px] tracking-[0.15em] text-muted uppercase">Sign-in</p>
+      <select
+        aria-label={`Sign-in for ${who}`}
+        aria-invalid={missing || undefined}
+        aria-describedby={missing ? noteId : undefined}
+        value={chosen?.ref ?? (missing ? "" : SIGNS_UP)}
+        onChange={(e) => onPick(e.target.value === SIGNS_UP ? { signsIn: false } : { accountRef: e.target.value || undefined, signsIn: true })}
+        className={`h-9 min-w-0 border bg-soft px-2 text-sm text-ink ${missing ? "border-bad" : "border-line"}`}
       >
-        <input aria-label="Username or email" placeholder="Username or email" autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} className="h-10 border border-line bg-soft px-3 text-sm outline-none focus:border-ink" />
-        <input aria-label="Password" placeholder="Password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} className="h-10 border border-line bg-soft px-3 text-sm outline-none focus:border-ink" />
-        <button type="submit" disabled={pending} className="h-10 border border-ink px-4 text-sm disabled:opacity-60">{pending ? "Saving…" : "Add account"}</button>
-      </form>
-      {error && <p role="alert" className="text-sm text-bad">{error}</p>}
-    </section>
+        {missing && <option value="">Choose a test account</option>}
+        {accounts.map((a) => <option key={a.ref} value={a.ref}>Signs in as {a.username}</option>)}
+        <option value={SIGNS_UP}>Signs up as a new user</option>
+      </select>
+      {missing && <p id={noteId} className="text-xs text-bad">{who} needs a test account to sign in.</p>}
+      {!person.accountRef && !person.signsIn && <p className="text-xs text-muted">Signs up the way a new user would, if your product lets them, with an example.com address and a password Trawler makes up. Cannot receive email yet.</p>}
+      {chosen && (
+        <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted">
+          <span className="font-mono">password {chosen.hint}</span>
+          <button type="button" disabled={pending} onClick={() => remove(chosen.ref)} className="underline-offset-4 hover:text-bad hover:underline disabled:opacity-60">Remove {chosen.username} from the project</button>
+        </p>
+      )}
+      {adding ? (
+        <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); add(); }}>
+          <input aria-label={`Username or email for ${who}`} placeholder="Username or email" autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} className="h-9 min-w-0 border border-line bg-soft px-2 text-sm outline-none focus:border-ink" />
+          <input aria-label={`Password for ${who}`} placeholder="Password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} className="h-9 min-w-0 border border-line bg-soft px-2 text-sm outline-none focus:border-ink" />
+          <p className="text-xs text-muted">Encrypted, never shown again, typed without the model seeing it. Anyone on the plan can use it. A password shorter than 8 characters cannot be masked if your product shows it on a page.</p>
+          <div className="flex gap-2">
+            <button type="submit" disabled={pending} className="h-9 border border-ink px-3 text-sm disabled:opacity-60">{pending ? "Saving…" : "Add account"}</button>
+            <button type="button" onClick={() => { setAdding(false); setError(null); }} className="h-9 px-3 text-sm text-muted hover:text-ink">Cancel</button>
+          </div>
+        </form>
+      ) : (
+        <AddButton onClick={() => setAdding(true)}>Add account for {who}</AddButton>
+      )}
+      {error && <p role="alert" className="text-xs text-bad">{error}</p>}
+    </div>
   );
 }
 
 export function PlanWorkspace({ projectId, projectName, initialPersonas, initialGoals, initialAccounts, keyHint, canManageKey, authorisedBefore }: {
-  projectId: string; projectName: string; initialPersonas: Persona[]; initialGoals: Goal[]; initialAccounts: AccountView[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean;
+  projectId: string; projectName: string; initialPersonas: PlanPerson[]; initialGoals: Goal[]; initialAccounts: AccountView[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean;
 }) {
   const [saved, setSaved] = useState({ personas: initialPersonas, goals: initialGoals });
   const [personas, setPersonas] = useState(initialPersonas);
@@ -110,7 +125,7 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
-  const updatePersona = (i: number, patch: Partial<Persona>) => setPersonas((list) => list.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+  const updatePersona = (i: number, patch: Partial<PlanPerson>) => setPersonas((list) => list.map((p, j) => (j === i ? { ...p, ...patch } : p)));
   const updateGoal = (id: string, instruction: string) => setGoals((list) => list.map((g) => (g.id === id ? { ...g, instruction } : g)));
   const newGoal = (personaId: string, taken: Goal[]): Goal => ({ id: nextKey("goal", new Set(taken.map((g) => g.id))), instruction: "", personaId });
   const addPerson = () => {
@@ -122,11 +137,25 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
     setPersonas((list) => list.filter((p) => p.id !== id));
     setGoals((list) => list.filter((g) => g.personaId !== id));
   };
+  const onAccounts = (next: AccountView[], removed?: string) => {
+    setAccounts(next);
+    if (!removed) return;
+    const detach = (list: PlanPerson[]) => list.map((p) => (p.accountRef === removed ? { ...p, accountRef: undefined, signsIn: true } : p));
+    setPersonas(detach);
+    setSaved((s) => ({ ...s, personas: detach(s.personas) }));
+  };
+  const withoutAccount = saved.personas.find((p) => (p.signsIn || p.accountRef) && !accounts.some((a) => a.ref === p.accountRef));
   const save = () => startSaving(async () => {
     const plan = { personas, goals };
     const res = await savePlanAction(projectId, plan).catch(outdated("Copy your changes, reload the page, then make them again and save."));
     if (!res.ok) {
-      if ("accounts" in res) setAccounts(res.accounts);
+      if ("accounts" in res) {
+        const left = new Set(res.accounts.map((a) => a.ref));
+        const detach = (list: PlanPerson[]) => list.map((p) => (p.accountRef && !left.has(p.accountRef) ? { ...p, accountRef: undefined, signsIn: true } : p));
+        setAccounts(res.accounts);
+        setPersonas(detach);
+        setSaved((s) => ({ ...s, personas: detach(s.personas) }));
+      }
       return setError(res.error);
     }
     setError(null);
@@ -160,15 +189,13 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
                   ))}
                 </ol>
                 {own.length < MAX_GOALS_PER_PERSONA && <AddButton onClick={() => setGoals((list) => [...list, newGoal(p.id, list)])}>Add a goal</AddButton>}
-                {accounts.length > 0 && (
-                  <label className="mt-2 flex items-center gap-2 text-xs text-muted">
-                    Signs in as
-                    <select value={p.accountRef ?? ""} onChange={(e) => updatePersona(i, { accountRef: e.target.value || undefined })} className="h-8 border border-line bg-soft px-2 text-ink">
-                      <option value="">No account</option>
-                      {accounts.map((a) => <option key={a.ref} value={a.ref}>{a.username}</option>)}
-                    </select>
-                  </label>
-                )}
+                <SignIn
+                  projectId={projectId}
+                  person={p}
+                  accounts={accounts}
+                  onPick={({ accountRef, signsIn }) => updatePersona(i, { accountRef, signsIn })}
+                  onAccounts={onAccounts}
+                />
               </li>
             );
           })}
@@ -176,18 +203,6 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
         {personas.length < MAX_PERSONAS && <AddButton onClick={addPerson}>Add a person</AddButton>}
       </section>
 
-      <Accounts
-        projectId={projectId}
-        accounts={accounts}
-        anyoneWithout={personas.some((p) => !p.accountRef)}
-        onChange={(next, removed) => {
-          setAccounts(next);
-          if (!removed) return;
-          const detach = (list: Persona[]) => list.map((p) => (p.accountRef === removed ? { id: p.id, name: p.name, brief: p.brief } : p));
-          setPersonas(detach);
-          setSaved((s) => ({ ...s, personas: detach(s.personas) }));
-        }}
-      />
 
       {(dirty || error) && (
         <div role="region" aria-label="Unsaved plan" className="sticky bottom-4 z-10 flex flex-wrap items-center justify-between gap-3 border border-ink bg-paper p-4 shadow-lg">
@@ -199,7 +214,7 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
         </div>
       )}
 
-      <StartRun projectId={projectId} projectName={projectName} personas={saved.personas.length} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} blocked={dirty ? "Save or discard your changes to the plan first." : undefined} />
+      <StartRun projectId={projectId} projectName={projectName} personas={saved.personas.length} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} blocked={dirty ? "Save or discard your changes to the plan first." : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : undefined} />
     </div>
   );
 }

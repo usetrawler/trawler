@@ -191,3 +191,9 @@ test("a project exists only in its own workspace", async () => {
   expect(await withOrg(t.db, "org-b", (tx) => projectExists(tx, "org-b", id))).toBe(false);
   expect(await withOrg(t.db, "org-a", (tx) => projectExists(tx, "org-a", "0f8fad5b-d9cb-469f-a165-70867728950e"))).toBe(false);
 });
+
+test("a person with a test account always counts as signing in", async () => {
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  const editing = await withOrg(t.db, "org-a", (tx) => projectForEditing(tx, "org-a", id));
+  expect(editing?.personas.map((p) => [p.key, p.signs_in])).toEqual([["ana", true], ["lee", false]]);
+});

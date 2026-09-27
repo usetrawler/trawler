@@ -5,7 +5,7 @@ import { expect, test, vi } from "vitest";
 vi.mock("./actions.ts", () => ({ readProductAction: vi.fn(), describeProductAction: vi.fn(), proposePeopleAction: vi.fn() }));
 const { featuresFrom, SetupWizard } = await import("./setup-wizard.tsx");
 
-const summary = { name: "Acme", description: "d", features: [{ title: "Submit a pitch", summary: "a" }, { title: "Review pitches", summary: "b" }] };
+const summary = { name: "Acme", description: "d", signUp: "open" as const, features: [{ title: "Submit a pitch", summary: "a" }, { title: "Review pitches", summary: "b" }] };
 
 test("a new setup preselects the best match, the first feature", () => {
   expect(featuresFrom(summary).map((f) => [f.title, f.chosen])).toEqual([["Submit a pitch", true], ["Review pitches", false]]);
