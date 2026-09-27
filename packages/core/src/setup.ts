@@ -250,7 +250,7 @@ function planFrom(product: ProductPage, head: { name: string; description: strin
   if (personas.length === 0) throw new SetupModelFailed("the setup model proposed no personas with goals");
   const project = ProjectConfigSchema.parse({
     name: clip(head.name, 100) || new URL(product.url).hostname,
-    description: clip(head.description, 600),
+    description: head.description,
     targetUrl: product.url,
     ...(product.docsUrl ? { docsUrl: product.docsUrl } : {}),
     allowedOrigins: product.docsUrl ? [product.docsUrl] : [],
@@ -290,5 +290,5 @@ export async function proposeProject(opts: {
   if (opts.budget.exceeded) throw spent();
   const product = await readProduct(opts);
   const { answer, usage } = await ask(opts, ProposalSchema, setupPrompt({ ...product, focus }));
-  return { project: planFrom(product, answer, answer.personas).project, usage };
+  return { project: planFrom(product, { name: answer.name, description: clip(answer.description, 600) }, answer.personas).project, usage };
 }

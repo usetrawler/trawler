@@ -22,9 +22,9 @@ export function goalsPerPerson(personas: Persona[], goals: Goal[]): (Goal & { pe
   });
 }
 
-async function insertPlan(tx: Tx, orgId: string, projectId: string, personas: Persona[], goals: Goal[]) {
+async function insertPlan(tx: Tx, orgId: string, projectId: string, personas: Persona[], goals: Goal[], signsIn: ReadonlySet<string> = new Set()) {
   if (personas.length) {
-    await tx.insertInto("personas").values(personas.map((p, i) => ({ org_id: orgId, project_id: projectId, key: p.id, name: p.name, brief: p.brief, account_ref: p.accountRef ?? null, position: i }))).execute();
+    await tx.insertInto("personas").values(personas.map((p, i) => ({ org_id: orgId, project_id: projectId, key: p.id, name: p.name, brief: p.brief, account_ref: p.accountRef ?? null, signs_in: signsIn.has(p.id), position: i }))).execute();
   }
   const owned = goalsPerPerson(personas, goals);
   if (owned.length) {
@@ -33,15 +33,17 @@ async function insertPlan(tx: Tx, orgId: string, projectId: string, personas: Pe
 }
 
 const FocusSchema = z.string().trim().max(500).optional();
+const FeaturesSchema = z.array(z.string().trim().min(1).max(300)).max(10).default([]);
 
-export async function createProject(tx: Tx, orgId: string, config: ProjectConfig, keys: Keyring, extra: { focus?: string } = {}): Promise<string> {
+export async function createProject(tx: Tx, orgId: string, config: ProjectConfig, keys: Keyring, extra: { focus?: string; features?: string[]; signsIn?: string[] } = {}): Promise<string> {
   const valid = ProjectConfigSchema.parse(config);
   const focus = FocusSchema.parse(extra.focus) || null;
+  const features = FeaturesSchema.parse(extra.features);
   const { id } = await tx
     .insertInto("projects")
     .values({
       org_id: orgId, name: valid.name, target_url: valid.targetUrl, docs_url: valid.docsUrl ?? null,
-      description: valid.description, focus, allowed_origins: valid.allowedOrigins,
+      description: valid.description, focus, features, allowed_origins: valid.allowedOrigins,
     })
     .returning("id")
     .executeTakeFirstOrThrow();
@@ -51,7 +53,7 @@ export async function createProject(tx: Tx, orgId: string, config: ProjectConfig
       password_secret: keys.encrypt(a.password, accountContext(orgId, id, a.ref)), password_hint: last4(a.password),
     }))).execute();
   }
-  await insertPlan(tx, orgId, id, valid.personas, valid.goals);
+  await insertPlan(tx, orgId, id, valid.personas, valid.goals, new Set(extra.signsIn));
   const gates = [
     ...(valid.httpCredentials ? [{ kind: "basic_auth", name: valid.httpCredentials.username, value: null, secret: valid.httpCredentials.password }] : []),
     ...Object.entries(valid.extraHeaders).map(([name, value]) => ({ kind: "header", name, value, secret: null })),
@@ -107,10 +109,10 @@ export async function listProjects(tx: Tx, orgId: string) {
 }
 
 export async function projectForEditing(tx: Tx, orgId: string, projectId: string) {
-  const project = await tx.selectFrom("projects").select(["id", "name", "target_url", "docs_url", "description", "focus", "allowed_origins"]).where("id", "=", projectId).where("org_id", "=", orgId).executeTakeFirst();
+  const project = await tx.selectFrom("projects").select(["id", "name", "target_url", "docs_url", "description", "focus", "features", "allowed_origins"]).where("id", "=", projectId).where("org_id", "=", orgId).executeTakeFirst();
   if (!project) return null;
   const [personas, goals, accounts, gates] = await Promise.all([
-    tx.selectFrom("personas").select(["key", "name", "brief", "account_ref"]).where("project_id", "=", projectId).orderBy("position").execute(),
+    tx.selectFrom("personas").select(["key", "name", "brief", "account_ref", "signs_in"]).where("project_id", "=", projectId).orderBy("position").execute(),
     tx.selectFrom("goals").select(["key", "instruction", "persona_key"]).where("project_id", "=", projectId).orderBy("position").execute(),
     tx.selectFrom("target_accounts").select(["ref", "username", "password_hint"]).where("project_id", "=", projectId).orderBy("position").execute(),
     tx.selectFrom("target_gates").select(["kind", "name", "value", "secret_hint"]).where("project_id", "=", projectId).orderBy("position").execute(),
@@ -118,7 +120,7 @@ export async function projectForEditing(tx: Tx, orgId: string, projectId: string
   return { ...project, personas, goals, accounts, gates };
 }
 
-export async function replacePlan(tx: Tx, orgId: string, projectId: string, plan: { personas: Persona[]; goals: Goal[] }): Promise<void> {
+export async function replacePlan(tx: Tx, orgId: string, projectId: string, plan: { personas: Persona[]; goals: Goal[] }, signsIn?: string[]): Promise<void> {
   const project = await tx.selectFrom("projects").select("target_url").where("id", "=", projectId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
   if (!project) throw new ProjectNotFound();
   const refs = new Set((await tx.selectFrom("target_accounts").select("ref").where("project_id", "=", projectId).execute()).map((a) => a.ref));
@@ -130,9 +132,10 @@ export async function replacePlan(tx: Tx, orgId: string, projectId: string, plan
     const message = checked.error.issues.map((i) => i.message).join("; ");
     throw checked.error.issues.some((i) => i.path[0] === "personas" && i.path[2] === "accountRef") ? new UnknownAccount(message) : new Error(message);
   }
+  const signing = new Set(signsIn ?? (await tx.selectFrom("personas").select("key").where("project_id", "=", projectId).where("signs_in", "=", true).execute()).map((p) => p.key));
   await tx.deleteFrom("goals").where("project_id", "=", projectId).execute();
   await tx.deleteFrom("personas").where("project_id", "=", projectId).execute();
-  await insertPlan(tx, orgId, projectId, checked.data.personas, checked.data.goals);
+  await insertPlan(tx, orgId, projectId, checked.data.personas, checked.data.goals, signing);
   await tx.updateTable("projects").set({ updated_at: new Date() }).where("id", "=", projectId).execute();
 }
 
