@@ -23,7 +23,8 @@ export function goalsFor<G extends { personaId?: string }>(goals: G[], personaId
 
 export const MIN_SECRET_HEADER_LENGTH = 8;
 export const MAX_PERSONAS = 12;
-export const MAX_GOALS = 20;
+export const MAX_GOALS_PER_PERSONA = 20;
+export const MAX_GOALS = MAX_PERSONAS * MAX_GOALS_PER_PERSONA;
 export const MAX_ACCOUNTS = 20;
 
 const HEADER_NAME = z.string().regex(/^[A-Za-z0-9-]{1,100}$/, "header names are letters, digits and dashes");
@@ -69,7 +70,9 @@ export const ProjectConfigSchema = z
       }
     });
     p.personas.forEach((persona, i) => {
-      if (goalsFor(p.goals, persona.id).length === 0) ctx.addIssue({ code: "custom", path: ["personas", i], message: `persona ${persona.id} has no goals` });
+      const own = goalsFor(p.goals, persona.id).length;
+      if (own === 0) ctx.addIssue({ code: "custom", path: ["personas", i], message: `persona ${persona.id} has no goals` });
+      if (own > MAX_GOALS_PER_PERSONA) ctx.addIssue({ code: "custom", path: ["personas", i], message: `persona ${persona.id} has more than ${MAX_GOALS_PER_PERSONA} goals` });
     });
     const refs = new Set(p.accounts.map((a) => a.ref));
     p.personas.forEach((persona, i) => {

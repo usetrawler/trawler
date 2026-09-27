@@ -12,7 +12,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const text = (schema: z.ZodString) => z.string().trim().pipe(schema);
 const PlanInput = z.object({
   personas: z.array(PersonaSchema.extend({ name: text(PersonaSchema.shape.name), brief: text(PersonaSchema.shape.brief) })).max(MAX_PERSONAS),
-  goals: z.array(GoalSchema.extend({ instruction: text(GoalSchema.shape.instruction) })).max(MAX_GOALS),
+  goals: z.array(GoalSchema.extend({ instruction: text(GoalSchema.shape.instruction), personaId: GoalSchema.shape.personaId.unwrap() })).max(MAX_GOALS),
 });
 const AccountInput = TargetAccountSchema.omit({ ref: true }).extend({ username: text(TargetAccountSchema.shape.username) });
 
@@ -40,7 +40,8 @@ export async function savePlanAction(projectId: string, plan: unknown): Promise<
   const parsed = PlanInput.safeParse(plan);
   if (!parsed.success) return { ok: false, error: "Every person needs a name and a description, and every goal needs some text." };
   if (parsed.data.personas.length === 0) return { ok: false, error: "Keep at least one person." };
-  if (parsed.data.goals.length === 0) return { ok: false, error: "Keep at least one goal." };
+  const idle = parsed.data.personas.find((p) => !parsed.data.goals.some((g) => g.personaId === p.id));
+  if (idle) return { ok: false, error: `Give ${idle.name} at least one goal.` };
   try {
     await withOrg(getDb(), orgId, (tx) => replacePlan(tx, orgId, projectId, parsed.data));
     return { ok: true };

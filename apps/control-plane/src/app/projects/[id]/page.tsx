@@ -36,7 +36,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           projectId={project.id}
           projectName={project.name}
           initialPersonas={project.personas.map((p) => ({ id: p.key, name: p.name, brief: p.brief, ...(p.account_ref ? { accountRef: p.account_ref } : {}) }))}
-          initialGoals={project.goals.map((g) => ({ id: g.key, instruction: g.instruction }))}
+          initialGoals={project.goals.map((g) => ({ id: g.key, instruction: g.instruction, personaId: g.persona_key }))}
           initialAccounts={project.accounts.map((a) => ({ ref: a.ref, username: a.username, hint: a.password_hint }))}
           keyHint={keyHint}
           canManageKey={canManageBilling(member)}

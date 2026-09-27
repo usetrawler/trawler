@@ -163,7 +163,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
     goals: goals.map((g) => ({ personaKey: g.persona_key, goal: g.goal, status: g.status, note: g.note })),
     target: snapshot.targetUrl,
     personas: snapshot.personas.map((p) => ({ id: p.id, name: p.name })),
-    goalTexts: snapshot.goals.map((g) => ({ id: g.id, instruction: g.instruction })),
+    goalTexts: snapshot.goals.map((g) => ({ id: g.id, instruction: g.instruction, ...(g.personaId ? { personaId: g.personaId } : {}) })),
     activity: activity.map((a) => ({ id: String(a.id), at: a.at, personaKey: a.persona_key, kind: a.kind, text: activityText(a.payload as unknown as RunEvent, goalText, findingTitle) })),
   };
 }

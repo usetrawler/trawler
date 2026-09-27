@@ -83,6 +83,24 @@ test("reaching one of several goals is not reported as reaching the goal", () =>
   expect(view.personas[0]!.state).toBe("finished");
 });
 
+test("each person is shown and counted only with their own goals, and a goal from an older run with no owner counts for everyone", () => {
+  const view = runView(summary({
+    status: "succeeded",
+    goalTexts: [{ id: "g", instruction: "Get in." }, { id: "submit", instruction: "Submit a pitch.", personaId: "ana" }, { id: "review", instruction: "Review a pitch.", personaId: "lee" }],
+    jobs: [job("role_session", "succeeded", { persona_key: "ana" }), job("role_session", "succeeded", { persona_key: "lee" })],
+    goals: [
+      { personaKey: "ana", goal: "g", status: "reached", note: "" },
+      { personaKey: "ana", goal: "submit", status: "reached", note: "" },
+      { personaKey: "lee", goal: "g", status: "reached", note: "" },
+    ],
+  }));
+  expect(view.personas.map((p) => [p.id, p.state, p.goals.map((g) => g.id)])).toEqual([
+    ["ana", "reached", ["g", "submit"]],
+    ["lee", "finished", ["g", "review"]],
+  ]);
+  expect(view.goalsTotal).toBe(4);
+});
+
 const replayed = { replay: { completed: true, observed: "Internal Server Error", blockedAt: null } };
 const judged = (status: string, extra: Partial<RunSummary["jobs"][number]> = {}) => job("judge", status, { finding_key: "ana:f1", ...extra });
 const modelError = { stopped_by: "error", error: "the model ran out of room before it gave a verdict (2 tries)" };

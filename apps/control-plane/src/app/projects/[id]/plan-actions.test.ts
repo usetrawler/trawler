@@ -18,7 +18,7 @@ vi.mock("../../../projects/projects.ts", async (importOriginal) => ({
 
 const { addAccountAction, removeAccountAction, savePlanAction } = await import("./plan-actions.ts");
 const PROJECT = "0f8fad5b-d9cb-469f-a165-70867728950e";
-const PLAN = { personas: [{ id: "ama", name: "Ama", brief: "Runs a design studio." }], goals: [{ id: "sign-up", instruction: "Create an account." }] };
+const PLAN = { personas: [{ id: "ama", name: "Ama", brief: "Runs a design studio." }], goals: [{ id: "sign-up", instruction: "Create an account.", personaId: "ama" }] };
 const ACCOUNT = { username: "owner@acme.test", password: "hunter22-secret" };
 
 beforeEach(() => {
@@ -30,6 +30,15 @@ test("a session that no longer belongs to any workspace cannot change the plan o
   expect(await savePlanAction(PROJECT, PLAN)).toEqual({ ok: false, error: "Sign in again to save." });
   expect(await addAccountAction(PROJECT, ACCOUNT)).toEqual({ ok: false, error: "Sign in again to add an account." });
   expect(await removeAccountAction(PROJECT, "a1")).toEqual({ ok: false, error: "Sign in again to remove an account." });
+  expect(state.tenants).toEqual([]);
+});
+
+test("every goal belongs to a person, and every person needs a goal", async () => {
+  state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-2", orgName: "Acme workspace", role: "member" };
+  const shared = { ...PLAN, goals: [{ id: "sign-up", instruction: "Create an account." }] };
+  expect(await savePlanAction(PROJECT, shared)).toMatchObject({ ok: false });
+  const idle = { ...PLAN, personas: [...PLAN.personas, { id: "kofi", name: "Kofi", brief: "Reviews the work." }] };
+  expect(await savePlanAction(PROJECT, idle)).toEqual({ ok: false, error: "Give Kofi at least one goal." });
   expect(state.tenants).toEqual([]);
 });
 
