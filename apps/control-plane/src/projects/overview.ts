@@ -59,7 +59,7 @@ function runLines(tx: Tx, orgId: string) {
         .where((f) => f.not(f.exists(f.selectFrom("jobs as j").select("j.id").whereRef("j.run_id", "=", "f.run_id").whereRef("j.finding_key", "=", "f.key").where("j.kind", "=", "judge").where("j.requested_by", "is not", null).where("j.status", "in", ["queued", "leased"]))))
         .as("confirmed"),
       eb.selectFrom("goal_outcomes as g").select((g) => g.fn.countAll<string>().as("n")).whereRef("g.run_id", "=", "r.id").where("g.status", "=", "reached").as("goals_reached"),
-      sql<number>`jsonb_array_length(r.config_snapshot -> 'personas') * jsonb_array_length(r.config_snapshot -> 'goals')`.as("goals_total"),
+      sql<number>`(SELECT count(*) FROM jsonb_array_elements(r.config_snapshot -> 'personas') p JOIN jsonb_array_elements(r.config_snapshot -> 'goals') g ON g ->> 'personaId' IS NULL OR g ->> 'personaId' = p ->> 'id')`.as("goals_total"),
     ]);
 }
 

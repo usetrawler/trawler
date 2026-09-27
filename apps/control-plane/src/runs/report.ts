@@ -1,3 +1,4 @@
+import { goalsFor } from "@usetrawler/protocol";
 import type { CancelReason, RunSummary } from "./runs.ts";
 
 export type StageState = "waiting" | "active" | "done" | "skipped";
@@ -70,15 +71,16 @@ export function runView(s: RunSummary) {
     const job = s.jobs.find((j) => j.kind === "role_session" && j.persona_key === p.id);
     const goals = s.goals.filter((g) => g.personaKey === p.id);
     const findings = s.findings.filter((f) => f.personaKey === p.id);
+    const own = goalsFor(s.goalTexts, p.id);
     const reached = goals.filter((g) => g.status === "reached").length;
     let state: PersonaState = "waiting";
     if (job?.status === "failed") state = "failed";
-    else if (job?.status === "succeeded") state = goals.some((g) => g.status === "failed") ? "missed" : reached === s.goalTexts.length ? "reached" : "finished";
+    else if (job?.status === "succeeded") state = goals.some((g) => g.status === "failed") ? "missed" : reached === own.length ? "reached" : "finished";
     else if (!live || job?.status === "cancelled") state = "cancelled";
     else if (job?.status === "leased") state = "exploring";
     return {
       id: p.id, name: p.name, state, error: job?.error ?? null,
-      goals: s.goalTexts.map((g) => {
+      goals: own.map((g) => {
         const outcome = goals.find((o) => o.goal === g.id);
         return { id: g.id, goal: g.instruction, status: outcome?.status ?? null, note: outcome?.note ?? "" };
       }),
@@ -106,7 +108,7 @@ export function runView(s: RunSummary) {
   };
 
   const goalsReached = s.goals.filter((g) => g.status === "reached").length;
-  const goalsTotal = s.personas.length * s.goalTexts.length;
+  const goalsTotal = s.personas.reduce((sum, p) => sum + goalsFor(s.goalTexts, p.id).length, 0);
   return { live, rejudging, stages, personas, report, goalsReached, goalsTotal, headline: headline(s.status, s.cancelReason, report.confirmed.length, defects.length) };
 }
 

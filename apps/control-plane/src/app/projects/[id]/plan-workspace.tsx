@@ -1,7 +1,7 @@
 "use client";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
-import { MAX_GOALS, MAX_PERSONAS, type Goal, type Persona } from "@usetrawler/protocol";
+import { MAX_GOALS_PER_PERSONA, MAX_PERSONAS, type Goal, type Persona } from "@usetrawler/protocol";
 import type { KeyHint } from "../../../credentials/credentials.ts";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { addAccountAction, removeAccountAction, savePlanAction, type AccountView } from "./plan-actions.ts";
@@ -111,7 +111,17 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
   }, [dirty]);
 
   const updatePersona = (i: number, patch: Partial<Persona>) => setPersonas((list) => list.map((p, j) => (j === i ? { ...p, ...patch } : p)));
-  const updateGoal = (i: number, instruction: string) => setGoals((list) => list.map((g, j) => (j === i ? { ...g, instruction } : g)));
+  const updateGoal = (id: string, instruction: string) => setGoals((list) => list.map((g) => (g.id === id ? { ...g, instruction } : g)));
+  const newGoal = (personaId: string, taken: Goal[]): Goal => ({ id: nextKey("goal", new Set(taken.map((g) => g.id))), instruction: "", personaId });
+  const addPerson = () => {
+    const id = nextKey("person", new Set(personas.map((p) => p.id)));
+    setPersonas((list) => [...list, { id, name: "", brief: "" }]);
+    setGoals((list) => [...list, newGoal(id, list)]);
+  };
+  const removePerson = (id: string) => {
+    setPersonas((list) => list.filter((p) => p.id !== id));
+    setGoals((list) => list.filter((g) => g.personaId !== id));
+  };
   const save = () => startSaving(async () => {
     const plan = { personas, goals };
     const res = await savePlanAction(projectId, plan).catch(outdated("Copy your changes, reload the page, then make them again and save."));
@@ -127,45 +137,43 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
     <div className="flex flex-col gap-10">
       <section className="flex flex-col gap-3">
         <Heading>These people will try it</Heading>
+        <p className="text-sm text-muted">Each person has their own goals, so give an administrator what only an administrator can do.</p>
         <ul className="grid gap-3 sm:grid-cols-2">
-          {personas.map((p, i) => (
-            <li key={p.id} className="flex flex-col gap-2 border border-line bg-panel p-4">
-              <div className="flex items-start gap-2">
-                <input aria-label={`Name of person ${i + 1}`} value={p.name} maxLength={100} onChange={(e) => updatePersona(i, { name: e.target.value })} className={`${field} font-bold`} />
-                {personas.length > 1 && <RemoveButton label={`Remove ${p.name || "this person"}`} onClick={() => setPersonas((list) => list.filter((_, j) => j !== i))} />}
-              </div>
-              <textarea aria-label={`What ${p.name || "this person"} is like`} value={p.brief} maxLength={2000} rows={3} onChange={(e) => updatePersona(i, { brief: e.target.value })} className={`${field} resize-y text-sm text-muted`} />
-              {accounts.length > 0 && (
-                <label className="flex items-center gap-2 text-xs text-muted">
-                  Signs in as
-                  <select value={p.accountRef ?? ""} onChange={(e) => updatePersona(i, { accountRef: e.target.value || undefined })} className="h-8 border border-line bg-soft px-2 text-ink">
-                    <option value="">No account</option>
-                    {accounts.map((a) => <option key={a.ref} value={a.ref}>{a.username}</option>)}
-                  </select>
-                </label>
-              )}
-            </li>
-          ))}
+          {personas.map((p, i) => {
+            const own = goals.filter((g) => g.personaId === p.id);
+            const who = p.name || "this person";
+            return (
+              <li key={p.id} className="flex flex-col gap-2 border border-line bg-panel p-4">
+                <div className="flex items-start gap-2">
+                  <input aria-label={`Name of person ${i + 1}`} value={p.name} maxLength={100} onChange={(e) => updatePersona(i, { name: e.target.value })} className={`${field} font-bold`} />
+                  {personas.length > 1 && <RemoveButton label={`Remove ${who}`} onClick={() => removePerson(p.id)} />}
+                </div>
+                <textarea aria-label={`What ${who} is like`} value={p.brief} maxLength={2000} rows={3} onChange={(e) => updatePersona(i, { brief: e.target.value })} className={`${field} resize-y text-sm text-muted`} />
+                <p className="mt-2 font-mono text-[11px] tracking-[0.15em] text-muted uppercase">Goals</p>
+                <ol aria-label={`Goals of ${who}`} className="flex flex-col gap-1">
+                  {own.map((g, n) => (
+                    <li key={g.id} className="flex items-start gap-2">
+                      <span className="pt-1 font-mono text-xs text-muted">{String(n + 1).padStart(2, "0")}</span>
+                      <textarea aria-label={`Goal ${n + 1} of ${who}`} value={g.instruction} maxLength={1000} rows={1} onChange={(e) => updateGoal(g.id, e.target.value)} className={`${field} field-sizing-content resize-none text-sm`} />
+                      {own.length > 1 && <RemoveButton label={`Remove goal ${n + 1} of ${who}`} onClick={() => setGoals((list) => list.filter((x) => x.id !== g.id))} />}
+                    </li>
+                  ))}
+                </ol>
+                {own.length < MAX_GOALS_PER_PERSONA && <AddButton onClick={() => setGoals((list) => [...list, newGoal(p.id, list)])}>Add a goal</AddButton>}
+                {accounts.length > 0 && (
+                  <label className="mt-2 flex items-center gap-2 text-xs text-muted">
+                    Signs in as
+                    <select value={p.accountRef ?? ""} onChange={(e) => updatePersona(i, { accountRef: e.target.value || undefined })} className="h-8 border border-line bg-soft px-2 text-ink">
+                      <option value="">No account</option>
+                      {accounts.map((a) => <option key={a.ref} value={a.ref}>{a.username}</option>)}
+                    </select>
+                  </label>
+                )}
+              </li>
+            );
+          })}
         </ul>
-        {personas.length < MAX_PERSONAS && (
-          <AddButton onClick={() => setPersonas((list) => [...list, { id: nextKey("person", new Set(list.map((p) => p.id))), name: "", brief: "" }])}>Add a person</AddButton>
-        )}
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <Heading>What they want to get done</Heading>
-        <ol className="flex flex-col gap-2">
-          {goals.map((g, i) => (
-            <li key={g.id} className="flex items-start gap-3 border-b border-line pb-2">
-              <span className="pt-1 font-mono text-xs text-muted">{String(i + 1).padStart(2, "0")}</span>
-              <textarea aria-label={`Goal ${i + 1}`} value={g.instruction} maxLength={1000} rows={1} onChange={(e) => updateGoal(i, e.target.value)} className={`${field} field-sizing-content resize-none`} />
-              {goals.length > 1 && <RemoveButton label={`Remove goal ${i + 1}`} onClick={() => setGoals((list) => list.filter((_, j) => j !== i))} />}
-            </li>
-          ))}
-        </ol>
-        {goals.length < MAX_GOALS && (
-          <AddButton onClick={() => setGoals((list) => [...list, { id: nextKey("goal", new Set(list.map((g) => g.id))), instruction: "" }])}>Add a goal</AddButton>
-        )}
+        {personas.length < MAX_PERSONAS && <AddButton onClick={addPerson}>Add a person</AddButton>}
       </section>
 
       <Accounts

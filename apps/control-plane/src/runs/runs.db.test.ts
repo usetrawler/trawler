@@ -87,7 +87,7 @@ describe("a whole run", () => {
     expect(summary!.findings).toEqual([expect.objectContaining({ key: "ana:f1", personaKey: "ana", verdict: "confirmed", replay: { completed: true, observed: "Internal Server Error", blockedAt: null } })]);
     expect(summary!.goals).toEqual([{ personaKey: "ana", goal: "g", status: "failed", note: "500" }]);
     expect(summary!.personas).toEqual([{ id: "ana", name: "Ana" }, { id: "lee", name: "Lee" }]);
-    expect(summary!.goalTexts).toEqual([{ id: "g", instruction: "Get in." }]);
+    expect(summary!.goalTexts).toEqual([{ id: "g", instruction: "Get in.", personaId: "ana" }, { id: "g-lee", instruction: "Get in.", personaId: "lee" }]);
     expect(summary!.activity.map((a) => [a.personaKey, a.text])).toEqual([
       [null, "Confirmed: Broken save"],
       ["ana", "Goal not reached: Get in."],

@@ -55,17 +55,11 @@ const proposal = {
   name: "Acme",
   description: "Invoicing for freelancers.",
   personas: [
-    { id: "freelancer", name: "Ana", brief: "You send ten invoices a month." },
-    { id: "Accountant Tom", name: "Tom", brief: "You check numbers for clients." },
-    { id: "freelancer", name: "Lee", brief: "You are switching from spreadsheets." },
-    { id: "", name: "Mo", brief: "You run a small studio." },
-    { id: "fifth", name: "Extra", brief: "You should be dropped." },
-  ],
-  goals: [
-    { id: "sign-up", instruction: "Get into the product." },
-    { id: "first invoice!", instruction: "Send a first invoice." },
-    { id: "get-paid", instruction: "Know when a client has paid." },
-    { id: "export", instruction: "Give your accountant last month's numbers." },
+    { id: "freelancer", name: "Ana", brief: "You send ten invoices a month.", goals: [{ id: "sign-up", instruction: "Get into the product." }, { id: "first invoice!", instruction: "Send a first invoice." }] },
+    { id: "Accountant Tom", name: "Tom", brief: "You check numbers for clients.", goals: [{ id: "export", instruction: "Get last month's numbers out." }] },
+    { id: "freelancer", name: "Lee", brief: "You are switching from spreadsheets.", goals: [{ id: "sign-up", instruction: "Get into the product." }, { id: "get-paid", instruction: "Know when a client has paid." }] },
+    { id: "", name: "Mo", brief: "You run a small studio.", goals: [{ id: "invite", instruction: "Bring a colleague in." }] },
+    { id: "fifth", name: "Extra", brief: "You should be dropped.", goals: [{ id: "extra", instruction: "Dropped with the person." }] },
   ],
 };
 
@@ -121,21 +115,33 @@ describe("proposeProject", () => {
     expect(project.allowedOrigins).toEqual(["https://app.acme.test", "https://docs.acme.test"]);
     expect(project.personas.map((p) => p.id)).toEqual(["freelancer", "accountant-tom", "freelancer-2", "persona-4"]);
     expect(project.personas.every((p) => p.accountRef === undefined)).toBe(true);
-    expect(project.goals.map((g) => g.id)).toEqual(["sign-up", "first-invoice", "get-paid", "export"]);
+    expect(project.goals.map((g) => [g.personaId, g.id])).toEqual([
+      ["freelancer", "sign-up"],
+      ["freelancer", "first-invoice"],
+      ["accountant-tom", "export"],
+      ["freelancer-2", "sign-up-2"],
+      ["freelancer-2", "get-paid"],
+      ["persona-4", "invite"],
+    ]);
     expect(usage.steps).toBe(1);
     const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
     expect(prompt).toContain("Acme at https://app.acme.test/");
     expect(prompt).toContain("Acme at https://docs.acme.test/start");
     expect(prompt).toMatch(/only if the product has accounts/);
     expect(prompt).toMatch(/something done in the product/);
+    expect(prompt).toMatch(/include each role/);
   });
 
   test("keeps model output within limits and falls back to sensible values", async () => {
     const long = {
       name: "   ",
       description: " x ".repeat(2000),
-      personas: [{ id: "a", name: "  Ana  ", brief: "  You invoice.  " }, { id: "b", name: " ", brief: "dropped" }, { id: "c", name: "N".repeat(500), brief: "B".repeat(5000) }],
-      goals: Array.from({ length: 9 }, (_, i) => ({ id: `g${i}`, instruction: i === 0 ? "   " : ` Goal ${i} ` })),
+      personas: [
+        { id: "a", name: "  Ana  ", brief: "  You invoice.  ", goals: Array.from({ length: 7 }, (_, i) => ({ id: `g${i}`, instruction: i === 0 ? "   " : ` Goal ${i} ` })) },
+        { id: "b", name: " ", brief: "dropped", goals: [{ id: "b", instruction: "Dropped." }] },
+        { id: "c", name: "N".repeat(500), brief: "B".repeat(5000), goals: [{ id: "c", instruction: "Look around." }] },
+        { id: "d", name: "Dee", brief: "You have nothing to do.", goals: [{ id: "d", instruction: "  " }] },
+      ],
     };
     const { project, usage } = await propose(scriptedModel([text(JSON.stringify(long))], 0.002)).promise;
     expect(project.name).toBe("app.acme.test");
@@ -143,9 +149,9 @@ describe("proposeProject", () => {
     expect(project.personas.map((p) => p.name)).toEqual(["Ana", "N".repeat(100)]);
     expect(project.personas[0]!.brief).toBe("You invoice.");
     expect(project.personas[1]!.brief.length).toBeLessThanOrEqual(800);
-    expect(project.goals.map((g) => g.instruction)).toEqual(["Goal 1", "Goal 2", "Goal 3", "Goal 4", "Goal 5", "Goal 6"]);
+    expect(project.goals.map((g) => g.instruction)).toEqual(["Goal 1", "Goal 2", "Goal 3", "Goal 4", "Look around."]);
     expect(usage.costUsd).toBeCloseTo(0.002, 10);
-    const tooLong = { ...proposal, personas: [{ id: "Zoë " + "x".repeat(80), name: "Zoë", brief: "b" }], goals: [{ id: "g", instruction: "I".repeat(1000) }] };
+    const tooLong = { ...proposal, personas: [{ id: "Zoë " + "x".repeat(80), name: "Zoë", brief: "b", goals: [{ id: "g", instruction: "I".repeat(1000) }] }] };
     const capped = (await propose(scriptedModel([text(JSON.stringify(tooLong))])).promise).project;
     expect(capped.goals[0]!.instruction.length).toBe(300);
     expect(capped.personas[0]!.id.startsWith("zoe-")).toBe(true);
@@ -186,7 +192,7 @@ describe("proposeProject", () => {
   });
 
   test("says clearly when there are no personas", async () => {
-    const { promise } = propose(scriptedModel([text(JSON.stringify({ ...proposal, personas: [{ id: "x", name: " ", brief: "b" }] }))]));
+    const { promise } = propose(scriptedModel([text(JSON.stringify({ ...proposal, personas: [{ id: "x", name: " ", brief: "b", goals: [{ id: "g", instruction: "Do it." }] }] }))]));
     await expect(promise).rejects.toThrow(/no personas/);
     await expect(promise).rejects.toBeInstanceOf(SetupModelFailed);
   });
@@ -222,10 +228,10 @@ describe("proposeProject", () => {
     expect(fetched).toEqual([]);
   });
 
-  test("fails with a readable reason when the proposal has no personas or goals", async () => {
-    const model = scriptedModel([text(JSON.stringify({ ...proposal, goals: [] }))]);
+  test("fails with a readable reason when no person has a goal", async () => {
+    const model = scriptedModel([text(JSON.stringify({ ...proposal, personas: proposal.personas.map((p) => ({ ...p, goals: [] })) }))]);
     const { promise } = propose(model);
-    await expect(promise).rejects.toThrow(/no goals/);
+    await expect(promise).rejects.toThrow(/no personas with goals/);
     await expect(promise).rejects.toBeInstanceOf(SetupModelFailed);
   });
 

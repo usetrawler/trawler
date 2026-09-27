@@ -1,5 +1,5 @@
 import { sql } from "kysely";
-import { ProjectConfigSchema } from "@usetrawler/protocol";
+import { goalsFor, ProjectConfigSchema } from "@usetrawler/protocol";
 import { setModelKey } from "../credentials/credentials.ts";
 import type { Database } from "../db/index.ts";
 import { withOrg } from "../db/tenancy.ts";
@@ -71,7 +71,7 @@ export async function handleSmokeStatus(req: Request, runId: string, deps: Smoke
     finished: !isLive(summary.status),
     costUsd: summary.costUsd,
     goalsReached: summary.goals.filter((g) => g.status === "reached").length,
-    goalsTotal: summary.personas.length * summary.goalTexts.length,
+    goalsTotal: summary.personas.reduce((sum, p) => sum + goalsFor(summary.goalTexts, p.id).length, 0),
     jobs: summary.jobs.map((j) => ({ kind: j.kind, status: j.status, stoppedBy: j.stopped_by, error: j.error })),
   });
 }

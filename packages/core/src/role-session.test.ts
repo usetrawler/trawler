@@ -62,6 +62,20 @@ describe("runRoleSession", () => {
     expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "finish" });
   });
 
+  test("a person is given and scored only on their own goals and the shared ones", async () => {
+    const team = ProjectConfigSchema.parse({
+      ...project,
+      personas: [...project.personas, { id: "admin", name: "Dana", brief: "You review.", accountRef: "admin" }],
+      goals: [project.goals[0], { ...project.goals[1], personaId: "solo" }, { id: "review", instruction: "Approve a pitch.", personaId: "admin" }],
+    });
+    const model = scriptedModel([reached("sign-up"), reached("review"), finish]);
+    const { result } = await run(model, { project: team, persona: team.personas[1]!, scrubber: SecretScrubber.forProject(team) }).promise;
+    expect(result.goals.map((g) => [g.goal, g.status])).toEqual([["sign-up", "reached"], ["review", "reached"]]);
+    const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
+    expect(prompt).toContain("Approve a pitch.");
+    expect(prompt).not.toContain("Send an invoice.");
+  });
+
   test("a refused finish keeps the session going", async () => {
     const model = scriptedModel([finish, reached("sign-up"), reached("invoice"), finish]);
     const { result, usage } = await run(model).promise;

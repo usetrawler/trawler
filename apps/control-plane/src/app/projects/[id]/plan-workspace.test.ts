@@ -10,11 +10,24 @@ const accounts: AccountView[] = [{ ref: "account-1", username: "kwame@acme.test"
 const ama: Persona = { id: "ama", name: "Ama", brief: "Brand new." };
 const kwame: Persona = { id: "kwame", name: "Kwame", brief: "Has an account.", accountRef: "account-1" };
 
-function render(initialPersonas: Persona[], initialAccounts: AccountView[], authorisedBefore = false) {
-  return renderToStaticMarkup(createElement(PlanWorkspace, { projectId: "p1", projectName: "Acme", initialPersonas, initialGoals: [{ id: "g", instruction: "Send an invoice." }], initialAccounts, keyHint: null, canManageKey: true, authorisedBefore }));
+function render(initialPersonas: Persona[], initialAccounts: AccountView[], authorisedBefore = false, initialGoals = initialPersonas.map((p, i) => ({ id: `g${i}`, instruction: "Send an invoice.", personaId: p.id }))) {
+  return renderToStaticMarkup(createElement(PlanWorkspace, { projectId: "p1", projectName: "Acme", initialPersonas, initialGoals, initialAccounts, keyHint: null, canManageKey: true, authorisedBefore }));
 }
 
 describe("PlanWorkspace", () => {
+  it("shows each person's own goals on their card", () => {
+    const html = render([ama, kwame], accounts, false, [
+      { id: "submit", instruction: "Submit a pitch.", personaId: "ama" },
+      { id: "review", instruction: "Review a pitch.", personaId: "kwame" },
+      { id: "approve", instruction: "Approve a pitch.", personaId: "kwame" },
+    ]);
+    const cards = html.split('aria-label="Goals of ').slice(1);
+    expect(cards[0]).toMatch(/^Ama"[\s\S]*Submit a pitch\.(?![\s\S]*Review a pitch)/);
+    expect(cards[1]).toMatch(/^Kwame"[\s\S]*Review a pitch\.[\s\S]*Approve a pitch\./);
+    expect(html).toContain('aria-label="Remove goal 1 of Kwame"');
+    expect(html).not.toContain('aria-label="Remove goal 1 of Ama"');
+  });
+
   it("passes on to Start whether the project has had a run, so the box is asked only before the first", () => {
     expect(render([ama], [])).toContain('name="authorised"');
     expect(render([ama], [], true)).not.toContain('name="authorised"');

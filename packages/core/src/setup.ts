@@ -5,7 +5,7 @@ import { type Budget, tallyStep } from "./llm.ts";
 import { setupPrompt } from "./prompts.ts";
 
 const MAX_PERSONAS = 4;
-const MAX_GOALS = 6;
+const MAX_GOALS_PER_PERSONA = 4;
 const PAGE_CHARS = 12_000;
 const DOCS_CHARS = 8_000;
 const MAX_FOCUS_CHARS = 500;
@@ -137,8 +137,7 @@ function uniqueIds<T extends { id: string }>(items: T[], fallback: string): T[] 
 const ProposalSchema = z.object({
   name: z.string(),
   description: z.string(),
-  personas: z.array(z.object({ id: z.string(), name: z.string(), brief: z.string() })),
-  goals: z.array(z.object({ id: z.string(), instruction: z.string() })),
+  personas: z.array(z.object({ id: z.string(), name: z.string(), brief: z.string(), goals: z.array(z.object({ id: z.string(), instruction: z.string() })) })),
 });
 type Proposal = z.infer<typeof ProposalSchema>;
 
@@ -210,12 +209,16 @@ export async function proposeProject(opts: {
     throw new SetupModelFailed(`the setup model could not propose a project: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
   if (proposal === null) throw new SetupModelFailed(`${noPlan(finishReason, tries)}${tries < SETUP_REPLIES ? "; the setup budget is spent" : ""}`);
-  const personas = uniqueIds(proposal.personas.filter((p) => p.name.trim() && p.brief.trim()).slice(0, MAX_PERSONAS), "persona")
-    .map((p) => ({ id: p.id, name: clip(p.name, 100), brief: clip(p.brief, 800) }));
-  const goals = uniqueIds(proposal.goals.filter((g) => g.instruction.trim()).slice(0, MAX_GOALS), "goal")
-    .map((g) => ({ id: g.id, instruction: clip(g.instruction, 300) }));
-  if (personas.length === 0) throw new SetupModelFailed("the setup model proposed no personas");
-  if (goals.length === 0) throw new SetupModelFailed("the setup model proposed no goals");
+  const proposed = uniqueIds(
+    proposal.personas.filter((p) => p.name.trim() && p.brief.trim() && p.goals.some((g) => g.instruction.trim())).slice(0, MAX_PERSONAS),
+    "persona",
+  );
+  const personas = proposed.map((p) => ({ id: p.id, name: clip(p.name, 100), brief: clip(p.brief, 800) }));
+  const goals = uniqueIds(
+    proposed.flatMap((p) => p.goals.filter((g) => g.instruction.trim()).slice(0, MAX_GOALS_PER_PERSONA).map((g) => ({ ...g, personaId: p.id }))),
+    "goal",
+  ).map((g) => ({ id: g.id, instruction: clip(g.instruction, 300), personaId: g.personaId }));
+  if (personas.length === 0) throw new SetupModelFailed("the setup model proposed no personas with goals");
 
   const project = ProjectConfigSchema.parse({
     name: clip(proposal.name, 100) || new URL(url).hostname,

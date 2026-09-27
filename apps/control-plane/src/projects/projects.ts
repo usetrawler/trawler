@@ -7,12 +7,28 @@ import { last4, type Keyring } from "../lib/secrets.ts";
 const accountContext = (orgId: string, projectId: string, ref: string) => [orgId, "target_account", projectId, ref, "password"];
 const gateContext = (orgId: string, projectId: string, kind: string, name: string) => [orgId, "target_gate", projectId, kind, kind === "basic_auth" ? "password" : name];
 
+export function goalsPerPerson(personas: Persona[], goals: Goal[]): (Goal & { personaId: string })[] {
+  const taken = new Set(goals.map((g) => g.id));
+  return goals.flatMap((g) => {
+    if (g.personaId !== undefined) return [{ ...g, personaId: g.personaId }];
+    return personas.map((p, i) => {
+      if (i === 0) return { ...g, personaId: p.id };
+      const base = `${g.id.slice(0, 30)}-${p.id.slice(0, 26)}`;
+      let id = base;
+      for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
+      taken.add(id);
+      return { ...g, id, personaId: p.id };
+    });
+  });
+}
+
 async function insertPlan(tx: Tx, orgId: string, projectId: string, personas: Persona[], goals: Goal[]) {
   if (personas.length) {
     await tx.insertInto("personas").values(personas.map((p, i) => ({ org_id: orgId, project_id: projectId, key: p.id, name: p.name, brief: p.brief, account_ref: p.accountRef ?? null, position: i }))).execute();
   }
-  if (goals.length) {
-    await tx.insertInto("goals").values(goals.map((g, i) => ({ org_id: orgId, project_id: projectId, key: g.id, instruction: g.instruction, position: i }))).execute();
+  const owned = goalsPerPerson(personas, goals);
+  if (owned.length) {
+    await tx.insertInto("goals").values(owned.map((g, i) => ({ org_id: orgId, project_id: projectId, key: g.id, instruction: g.instruction, persona_key: g.personaId, position: i }))).execute();
   }
 }
 
@@ -74,7 +90,7 @@ export async function loadProjectConfig(tx: Tx, orgId: string, projectId: string
     description: project.description,
     allowedOrigins: project.allowed_origins,
     personas: personas.map((p) => ({ id: p.key, name: p.name, brief: p.brief, ...(p.account_ref ? { accountRef: p.account_ref } : {}) })),
-    goals: goals.map((g) => ({ id: g.key, instruction: g.instruction })),
+    goals: goals.map((g) => ({ id: g.key, instruction: g.instruction, personaId: g.persona_key })),
     accounts: accounts.map((a) => ({ ref: a.ref, username: a.username, password: keys.decrypt(a.password_secret, accountContext(orgId, projectId, a.ref)) })),
     ...(basic ? { httpCredentials: { username: basic.name, password: keys.decrypt(basic.secret!, gateContext(orgId, projectId, "basic_auth", basic.name)) } } : {}),
     extraHeaders: Object.fromEntries(gates.filter((g) => g.kind === "header").map((g) => [g.name, g.value ?? ""])),
@@ -95,7 +111,7 @@ export async function projectForEditing(tx: Tx, orgId: string, projectId: string
   if (!project) return null;
   const [personas, goals, accounts, gates] = await Promise.all([
     tx.selectFrom("personas").select(["key", "name", "brief", "account_ref"]).where("project_id", "=", projectId).orderBy("position").execute(),
-    tx.selectFrom("goals").select(["key", "instruction"]).where("project_id", "=", projectId).orderBy("position").execute(),
+    tx.selectFrom("goals").select(["key", "instruction", "persona_key"]).where("project_id", "=", projectId).orderBy("position").execute(),
     tx.selectFrom("target_accounts").select(["ref", "username", "password_hint"]).where("project_id", "=", projectId).orderBy("position").execute(),
     tx.selectFrom("target_gates").select(["kind", "name", "value", "secret_hint"]).where("project_id", "=", projectId).orderBy("position").execute(),
   ]);
@@ -114,8 +130,8 @@ export async function replacePlan(tx: Tx, orgId: string, projectId: string, plan
     const message = checked.error.issues.map((i) => i.message).join("; ");
     throw checked.error.issues.some((i) => i.path[0] === "personas" && i.path[2] === "accountRef") ? new UnknownAccount(message) : new Error(message);
   }
-  await tx.deleteFrom("personas").where("project_id", "=", projectId).execute();
   await tx.deleteFrom("goals").where("project_id", "=", projectId).execute();
+  await tx.deleteFrom("personas").where("project_id", "=", projectId).execute();
   await insertPlan(tx, orgId, projectId, checked.data.personas, checked.data.goals);
   await tx.updateTable("projects").set({ updated_at: new Date() }).where("id", "=", projectId).execute();
 }

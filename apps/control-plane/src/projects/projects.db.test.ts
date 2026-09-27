@@ -18,7 +18,7 @@ const config = ProjectConfigSchema.parse({
   docsUrl: "https://docs.acme.test/start",
   description: "Invoices.",
   personas: [{ id: "ana", name: "Ana", brief: "You invoice.", accountRef: "ana" }, { id: "lee", name: "Lee", brief: "You browse." }],
-  goals: [{ id: "sign-in", instruction: "Get in." }, { id: "invoice", instruction: "Send an invoice." }],
+  goals: [{ id: "sign-in", instruction: "Get in.", personaId: "ana" }, { id: "invoice", instruction: "Send an invoice.", personaId: "ana" }, { id: "browse", instruction: "Find the prices.", personaId: "lee" }],
   accounts: [{ ref: "zed", username: "zed@acme.test", password: "zed-password-1" }, { ref: "ana", username: "ana@acme.test", password: "hunter22-secret" }],
   httpCredentials: { username: "staging", password: "gate-pass-123" },
   extraHeaders: { "x-env": "stg" },
@@ -35,6 +35,17 @@ test("a project round-trips to exactly the config the runner uses", async () => 
   const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys, { focus: "invoices" }));
   const loaded = await withOrg(t.db, "org-a", (tx) => loadProjectConfig(tx, "org-a", id, keys));
   expect(loaded).toEqual(config);
+});
+
+test("a goal meant for everyone is copied onto each person under its own id", async () => {
+  const shared = ProjectConfigSchema.parse({ ...config, goals: [{ id: "sign-in", instruction: "Get in." }, { id: "sign-in-lee", instruction: "Taken." , personaId: "lee" }] });
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", shared, keys));
+  const loaded = await withOrg(t.db, "org-a", (tx) => loadProjectConfig(tx, "org-a", id, keys));
+  expect(loaded.goals).toEqual([
+    { id: "sign-in", instruction: "Get in.", personaId: "ana" },
+    { id: "sign-in-lee-2", instruction: "Get in.", personaId: "lee" },
+    { id: "sign-in-lee", instruction: "Taken.", personaId: "lee" },
+  ]);
 });
 
 test("secrets are stored encrypted and never come back from list or edit queries", async () => {

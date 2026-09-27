@@ -102,6 +102,7 @@ export interface Goals {
   instruction: string;
   key: string;
   org_id: string;
+  persona_key: string;
   position: number;
   project_id: string;
 }
