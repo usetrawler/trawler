@@ -254,7 +254,7 @@ test("the finding a judge just answered takes the focus, without scrolling the p
   expect(focused).toHaveBeenCalledOnce();
 });
 
-test("a finding named in the address opens when the page loads or the address changes to it, clear of the sticky header, and opening or closing it keeps the address in step, so going back from its capture finds it open", () => {
+test("a finding named in the address opens when the page loads or the address changes to it, clear of the sticky header, and opening or closing it, or opening one of its captures, keeps the address in step, so going back from a capture finds its finding open", () => {
   const listeners = new Map<string, () => void>();
   const location = { hash: "#finding-ana%3Af1", pathname: "/runs/run-1", search: "?from=list" };
   const replaceState = vi.fn();
@@ -292,6 +292,13 @@ test("a finding named in the address opens when the page loads or the address ch
   location.hash = "#finding-ana%3Af2";
   toggle({ currentTarget: { open: false } });
   expect(replaceState).toHaveBeenCalledTimes(2);
+
+  const openCapture = nodes(tree).find((node) => node.props && "screenshots" in node.props)!.props!.onOpen as () => void;
+  openCapture();
+  expect(replaceState).toHaveBeenLastCalledWith(null, "", "#finding-ana%3Af1");
+  location.hash = "#finding-ana%3Af1";
+  openCapture();
+  expect(replaceState).toHaveBeenCalledTimes(3);
 });
 
 test("the status line says when the page lost contact, or when the run is gone", () => {

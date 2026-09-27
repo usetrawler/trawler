@@ -141,10 +141,12 @@ export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused 
     window.addEventListener("hashchange", openWhenAddressed);
     return () => window.removeEventListener("hashchange", openWhenAddressed);
   }, [anchor]);
+  const address = () => {
+    if (window.location.hash !== `#${anchor}`) window.history.replaceState(null, "", `#${anchor}`);
+  };
   const keepInAddress = (event: { currentTarget: { open: boolean } }) => {
-    const addressed = window.location.hash === `#${anchor}`;
-    if (event.currentTarget.open && !addressed) window.history.replaceState(null, "", `#${anchor}`);
-    else if (!event.currentTarget.open && addressed) window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    if (event.currentTarget.open) address();
+    else if (window.location.hash === `#${anchor}`) window.history.replaceState(null, "", window.location.pathname + window.location.search);
   };
   return (
     <li id={anchor} className="border-b border-line bg-panel last:border-b-0 tall:scroll-mt-24">
@@ -165,7 +167,7 @@ export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused 
             <p className="mb-1 text-muted">Steps</p>
             <ol className="list-decimal pl-5 break-words">{f.reproduction.map((step, i) => <li key={i}>{step}</li>)}</ol>
           </div>
-          <FindingScreenshots title={f.title} screenshots={f.screenshots} />
+          <FindingScreenshots title={f.title} screenshots={f.screenshots} onOpen={address} />
           <p><span className="text-muted">What happened: </span>{f.observed}</p>
           {replay?.observed && <p><span className="text-muted">What the replay saw: </span>{replay.observed}</p>}
           {detail && <p className="break-words"><span className="text-muted">Why it was not judged: </span>{detail}</p>}

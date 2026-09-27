@@ -5,7 +5,7 @@ import { CaptureFrame, FindingScreenshots } from "./finding-screenshots.tsx";
 
 const REPORTED = "11111111-1111-4111-8111-111111111111";
 const REPLAYED = "22222222-2222-4222-8222-222222222222";
-const render = (reported: string | null, replayed: string | null) => renderToStaticMarkup(createElement(FindingScreenshots, { title: "Save fails", screenshots: { reported, replayed } }));
+const render = (reported: string | null, replayed: string | null) => renderToStaticMarkup(createElement(FindingScreenshots, { title: "Save fails", screenshots: { reported, replayed }, onOpen: () => {} }));
 const figures = (html: string) => html.match(/<figure.*?<\/figure>/g) ?? [];
 
 test("a replayed defect shows the page when it was reported next to where the replay ended, side by side only when the card is wide enough, with their captions level", () => {
@@ -41,11 +41,11 @@ test("the captures say that passwords and other secrets are blacked out, a singl
 test("a capture that fails to load says it could not be loaded instead of showing a broken image", () => {
   const shot = { id: REPORTED, caption: "when reported", alt: "The page" };
   const onFailed = vi.fn();
-  const image = findImage(CaptureFrame({ shot, failed: false, onFailed })) as ReactElement<{ src: string; onError: () => void }> | null;
+  const image = findImage(CaptureFrame({ shot, failed: false, onFailed, onOpen: vi.fn() })) as ReactElement<{ src: string; onError: () => void }> | null;
   expect(image?.props.src).toBe(`/api/artifacts/${REPORTED}`);
   image!.props.onError();
   expect(onFailed).toHaveBeenCalledOnce();
-  const gone = renderToStaticMarkup(CaptureFrame({ shot, failed: true, onFailed }) as ReactElement);
+  const gone = renderToStaticMarkup(CaptureFrame({ shot, failed: true, onFailed, onOpen: vi.fn() }) as ReactElement);
   expect(gone).toContain(">This screen capture could not be loaded.</p>");
   expect(gone).not.toContain("<img");
 });
@@ -53,7 +53,7 @@ test("a capture that fails to load says it could not be loaded instead of showin
 test("a capture that failed before the page became interactive is noticed once it does, while one still loading or loaded is left alone", () => {
   const shot = { id: REPORTED, caption: "when reported", alt: "The page" };
   const onFailed = vi.fn();
-  const image = findImage(CaptureFrame({ shot, failed: false, onFailed })) as ReactElement<{ ref: (img: Partial<HTMLImageElement> | null) => void }> | null;
+  const image = findImage(CaptureFrame({ shot, failed: false, onFailed, onOpen: vi.fn() })) as ReactElement<{ ref: (img: Partial<HTMLImageElement> | null) => void }> | null;
   image!.props.ref({ complete: false, naturalWidth: 0 });
   image!.props.ref({ complete: true, naturalWidth: 1280 });
   image!.props.ref(null);
@@ -62,14 +62,23 @@ test("a capture that failed before the page became interactive is noticed once i
   expect(onFailed).toHaveBeenCalledOnce();
 });
 
+test("opening a capture first names its finding in the address, so going back returns to that finding", () => {
+  const onOpen = vi.fn();
+  const captures = elements(FindingScreenshots({ title: "Save fails", screenshots: { reported: REPORTED, replayed: REPLAYED }, onOpen })).filter((element) => element.props.shot);
+  expect(captures.map((element) => element.props.onOpen)).toEqual([onOpen, onOpen]);
+  const link = elements(CaptureFrame({ shot: { id: REPORTED, caption: "when reported", alt: "The page" }, failed: false, onFailed: vi.fn(), onOpen })).find((element) => element.type === "a")!;
+  expect(link.props.href).toBe(`/captures/${REPORTED}`);
+  (link.props.onClick as () => void)();
+  expect(onOpen).toHaveBeenCalledOnce();
+});
+
+function elements(node: unknown): ReactElement<Record<string, unknown>>[] {
+  if (Array.isArray(node)) return node.flatMap(elements);
+  if (!node || typeof node !== "object") return [];
+  const element = node as ReactElement<Record<string, unknown> & { children?: unknown }>;
+  return [element, ...elements(element.props?.children)];
+}
+
 function findImage(node: unknown): ReactElement | null {
-  if (!node || typeof node !== "object") return null;
-  const element = node as ReactElement<{ children?: unknown }>;
-  if (element.type === "img") return element;
-  const children = element.props?.children;
-  for (const child of Array.isArray(children) ? children : [children]) {
-    const found = findImage(child);
-    if (found) return found;
-  }
-  return null;
+  return elements(node).find((element) => element.type === "img") ?? null;
 }
