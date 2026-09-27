@@ -2,13 +2,18 @@ import { generateText, NoObjectGeneratedError, NoOutputGeneratedError, Output, t
 import { z } from "zod";
 import { ProjectConfigSchema, type JobUsage, type ProjectConfig } from "@usetrawler/protocol";
 import { type Budget, tallyStep } from "./llm.ts";
-import { setupPrompt } from "./prompts.ts";
+import { describePrompt, setupPrompt } from "./prompts.ts";
 
 const MAX_PERSONAS = 4;
 const MAX_GOALS_PER_PERSONA = 4;
 const PAGE_CHARS = 12_000;
 const DOCS_CHARS = 8_000;
 const MAX_FOCUS_CHARS = 500;
+export const MAX_FEATURES = 6;
+export const MAX_CHOSEN_FEATURES = 10;
+export const MAX_FEATURE_TITLE = 80;
+export const MAX_FEATURE_CHARS = 300;
+export const MAX_DESCRIPTION_CHARS = 2000;
 const SETUP_OUTPUT_TOKENS = 16_000;
 const SETUP_REPLIES = 2;
 
@@ -134,12 +139,11 @@ function uniqueIds<T extends { id: string }>(items: T[], fallback: string): T[] 
   });
 }
 
-const ProposalSchema = z.object({
-  name: z.string(),
-  description: z.string(),
-  personas: z.array(z.object({ id: z.string(), name: z.string(), brief: z.string(), goals: z.array(z.object({ id: z.string(), instruction: z.string() })) })),
-});
-type Proposal = z.infer<typeof ProposalSchema>;
+const GoalProposal = z.object({ id: z.string(), instruction: z.string() });
+const PersonProposal = z.object({ id: z.string(), name: z.string(), brief: z.string(), signsIn: z.boolean(), goals: z.array(GoalProposal) });
+const ProposalSchema = z.object({ name: z.string(), description: z.string(), personas: z.array(PersonProposal) });
+const PeopleSchema = z.object({ personas: z.array(PersonProposal) });
+const SummarySchema = z.object({ name: z.string(), description: z.string(), features: z.array(z.object({ title: z.string(), summary: z.string() })) });
 
 export class SetupModelFailed extends Error {}
 
@@ -150,26 +154,127 @@ function noPlan(finishReason: string | undefined, tries: number): string {
   return `the setup model gave no usable plan (${count})`;
 }
 
-async function askForProposal(opts: { model: LanguageModel; budget: Budget }, prompt: string, usage: JobUsage): Promise<{ proposal: Proposal | null; finishReason?: string }> {
+async function askOnce<T>(opts: { model: LanguageModel; budget: Budget }, schema: z.ZodType<T>, prompt: string, usage: JobUsage): Promise<{ answer: T | null; finishReason?: string }> {
   let result;
   try {
     result = await generateText({
       model: opts.model,
-      output: Output.object({ schema: ProposalSchema }),
+      output: Output.object({ schema }),
       prompt,
       maxOutputTokens: SETUP_OUTPUT_TOKENS,
       onStepEnd: (step) => void tallyStep(usage, opts.budget, step),
     });
   } catch (err) {
-    if (NoObjectGeneratedError.isInstance(err)) return { proposal: null, finishReason: err.finishReason };
+    if (NoObjectGeneratedError.isInstance(err)) return { answer: null, finishReason: err.finishReason };
     throw err;
   }
   try {
-    return { proposal: result.output, finishReason: result.finishReason };
+    return { answer: result.output as T, finishReason: result.finishReason };
   } catch (err) {
-    if (NoOutputGeneratedError.isInstance(err)) return { proposal: null, finishReason: result.finishReason };
+    if (NoOutputGeneratedError.isInstance(err)) return { answer: null, finishReason: result.finishReason };
     throw err;
   }
+}
+
+async function ask<T>(opts: { model: LanguageModel; modelId: string; budget: Budget }, schema: z.ZodType<T>, prompt: string): Promise<{ answer: T; usage: JobUsage }> {
+  if (opts.budget.exceeded) throw spent();
+  const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
+  let answer: T | null = null;
+  let finishReason: string | undefined;
+  let tries = 0;
+  try {
+    while (answer === null && tries < SETUP_REPLIES && !opts.budget.exceeded) {
+      tries++;
+      ({ answer, finishReason } = await askOnce(opts, schema, prompt, usage));
+    }
+  } catch (err) {
+    throw new SetupModelFailed(`the setup model could not propose a project: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+  }
+  if (answer === null) throw new SetupModelFailed(`${noPlan(finishReason, tries)}${tries < SETUP_REPLIES ? "; the setup budget is spent" : ""}`);
+  return { answer, usage };
+}
+
+const spent = () => new Error("the budget is already spent, so no project was proposed");
+
+export interface ProductPage {
+  url: string;
+  docsUrl?: string;
+  page: string;
+  docs?: string;
+}
+
+export async function readProduct(opts: { url: string; docsUrl?: string; fetchText: (url: string) => Promise<string> }): Promise<ProductPage> {
+  const url = httpAddress(opts.url);
+  const docsUrl = opts.docsUrl?.trim() ? httpAddress(opts.docsUrl.trim()) : undefined;
+  const [pageRead, docsRead] = await Promise.allSettled([opts.fetchText(url), docsUrl ? opts.fetchText(docsUrl) : Promise.resolve(undefined)]);
+  if (pageRead.status === "rejected") {
+    const reason = pageRead.reason instanceof Error ? pageRead.reason.message : String(pageRead.reason);
+    throw new Error(`could not read ${url}: ${reason}`);
+  }
+  const docs = docsRead.status === "fulfilled" && docsRead.value !== undefined ? pageText(docsRead.value, DOCS_CHARS) : undefined;
+  return { url, ...(docsUrl ? { docsUrl } : {}), page: pageText(pageRead.value, PAGE_CHARS), ...(docs !== undefined ? { docs } : {}) };
+}
+
+export interface ProductSummary {
+  name: string;
+  description: string;
+  features: { title: string; summary: string }[];
+}
+
+export async function describeProduct(opts: { model: LanguageModel; modelId: string; budget: Budget; product: ProductPage }): Promise<{ summary: ProductSummary; usage: JobUsage }> {
+  const { answer, usage } = await ask(opts, SummarySchema, describePrompt(opts.product));
+  const seen = new Set<string>();
+  const features = answer.features
+    .map((f) => ({ title: clip(f.title, MAX_FEATURE_TITLE), summary: clip(f.summary, 300) }))
+    .filter((f) => f.title && !seen.has(f.title.toLowerCase()) && seen.add(f.title.toLowerCase()))
+    .slice(0, MAX_FEATURES);
+  if (features.length === 0) throw new SetupModelFailed("the setup model found no features on the page");
+  return { summary: { name: clip(answer.name, 100) || new URL(opts.product.url).hostname, description: clip(answer.description, 600), features }, usage };
+}
+
+export interface ProposedPlan {
+  project: ProjectConfig;
+  signsIn: string[];
+}
+
+function planFrom(product: ProductPage, head: { name: string; description: string }, proposed: z.infer<typeof PersonProposal>[]): ProposedPlan {
+  const people = uniqueIds(
+    proposed.filter((p) => p.name.trim() && p.brief.trim() && p.goals.some((g) => g.instruction.trim())).slice(0, MAX_PERSONAS),
+    "persona",
+  );
+  const personas = people.map((p) => ({ id: p.id, name: clip(p.name, 100), brief: clip(p.brief, 800) }));
+  const goals = uniqueIds(
+    people.flatMap((p) => p.goals.filter((g) => g.instruction.trim()).slice(0, MAX_GOALS_PER_PERSONA).map((g) => ({ ...g, personaId: p.id }))),
+    "goal",
+  ).map((g) => ({ id: g.id, instruction: clip(g.instruction, 300), personaId: g.personaId }));
+  if (personas.length === 0) throw new SetupModelFailed("the setup model proposed no personas with goals");
+  const project = ProjectConfigSchema.parse({
+    name: clip(head.name, 100) || new URL(product.url).hostname,
+    description: head.description,
+    targetUrl: product.url,
+    ...(product.docsUrl ? { docsUrl: product.docsUrl } : {}),
+    allowedOrigins: product.docsUrl ? [product.docsUrl] : [],
+    personas,
+    goals,
+    accounts: [],
+  });
+  return { project, signsIn: people.filter((p) => p.signsIn).map((p) => p.id) };
+}
+
+export async function proposePeople(opts: {
+  model: LanguageModel;
+  modelId: string;
+  budget: Budget;
+  product: ProductPage;
+  name: string;
+  description: string;
+  features: string[];
+}): Promise<ProposedPlan & { usage: JobUsage }> {
+  const description = clip(opts.description, MAX_DESCRIPTION_CHARS);
+  const features = opts.features.map((f) => clip(f, MAX_FEATURE_CHARS)).filter(Boolean).slice(0, MAX_CHOSEN_FEATURES);
+  if (features.length === 0) throw new RangeError("choose at least one feature");
+  const { answer, usage } = await ask(opts, PeopleSchema, setupPrompt({ ...opts.product, context: { description, features } }));
+  return { ...planFrom(opts.product, { name: opts.name, description }, answer.personas), usage };
 }
 
 export async function proposeProject(opts: {
@@ -181,54 +286,9 @@ export async function proposeProject(opts: {
   budget: Budget;
   fetchText: (url: string) => Promise<string>;
 }): Promise<{ project: ProjectConfig; usage: JobUsage }> {
-  const url = httpAddress(opts.url);
-  const docsUrl = opts.docsUrl?.trim() ? httpAddress(opts.docsUrl.trim()) : undefined;
   const focus = opts.focus?.trim() ? clip(opts.focus, MAX_FOCUS_CHARS) : undefined;
-  const spent = () => new Error("the budget is already spent, so no project was proposed");
   if (opts.budget.exceeded) throw spent();
-  const [pageRead, docsRead] = await Promise.allSettled([opts.fetchText(url), docsUrl ? opts.fetchText(docsUrl) : Promise.resolve(undefined)]);
-  if (pageRead.status === "rejected") {
-    const reason = pageRead.reason instanceof Error ? pageRead.reason.message : String(pageRead.reason);
-    throw new Error(`could not read ${url}: ${reason}`);
-  }
-  const page = pageText(pageRead.value, PAGE_CHARS);
-  const docs = docsRead.status === "fulfilled" && docsRead.value !== undefined ? pageText(docsRead.value, DOCS_CHARS) : undefined;
-  if (opts.budget.exceeded) throw spent();
-
-  const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
-  const prompt = setupPrompt({ url, page, docs, focus });
-  let proposal: Proposal | null = null;
-  let finishReason: string | undefined;
-  let tries = 0;
-  try {
-    while (proposal === null && tries < SETUP_REPLIES && !opts.budget.exceeded) {
-      tries++;
-      ({ proposal, finishReason } = await askForProposal(opts, prompt, usage));
-    }
-  } catch (err) {
-    throw new SetupModelFailed(`the setup model could not propose a project: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
-  }
-  if (proposal === null) throw new SetupModelFailed(`${noPlan(finishReason, tries)}${tries < SETUP_REPLIES ? "; the setup budget is spent" : ""}`);
-  const proposed = uniqueIds(
-    proposal.personas.filter((p) => p.name.trim() && p.brief.trim() && p.goals.some((g) => g.instruction.trim())).slice(0, MAX_PERSONAS),
-    "persona",
-  );
-  const personas = proposed.map((p) => ({ id: p.id, name: clip(p.name, 100), brief: clip(p.brief, 800) }));
-  const goals = uniqueIds(
-    proposed.flatMap((p) => p.goals.filter((g) => g.instruction.trim()).slice(0, MAX_GOALS_PER_PERSONA).map((g) => ({ ...g, personaId: p.id }))),
-    "goal",
-  ).map((g) => ({ id: g.id, instruction: clip(g.instruction, 300), personaId: g.personaId }));
-  if (personas.length === 0) throw new SetupModelFailed("the setup model proposed no personas with goals");
-
-  const project = ProjectConfigSchema.parse({
-    name: clip(proposal.name, 100) || new URL(url).hostname,
-    description: clip(proposal.description, 600),
-    targetUrl: url,
-    ...(docsUrl ? { docsUrl } : {}),
-    allowedOrigins: docsUrl ? [docsUrl] : [],
-    personas,
-    goals,
-    accounts: [],
-  });
-  return { project, usage };
+  const product = await readProduct(opts);
+  const { answer, usage } = await ask(opts, ProposalSchema, setupPrompt({ ...product, focus }));
+  return { project: planFrom(product, { name: answer.name, description: clip(answer.description, 600) }, answer.personas).project, usage };
 }

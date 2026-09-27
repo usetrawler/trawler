@@ -15,7 +15,7 @@ vi.mock("../../server/shell.ts", () => ({
     return { user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [], runs: 0 } };
   },
 }));
-vi.mock("./new-project-form.tsx", () => ({ NewProjectForm: () => null }));
+vi.mock("./setup-wizard.tsx", () => ({ SetupWizard: ({ intro }: { intro: unknown }) => intro }));
 
 const { default: NewProjectPage } = await import("./page.tsx");
 

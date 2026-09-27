@@ -189,6 +189,7 @@ export interface Personas {
   org_id: string;
   position: number;
   project_id: string;
+  signs_in: Generated<boolean>;
 }
 
 export interface Projects {
@@ -196,6 +197,7 @@ export interface Projects {
   created_at: Generated<Timestamp>;
   description: Generated<string>;
   docs_url: string | null;
+  features: Generated<string[]>;
   focus: string | null;
   id: Generated<string>;
   name: string;
@@ -259,6 +261,22 @@ export interface SetupAttempts {
   org_id: string;
 }
 
+export interface SetupDrafts {
+  created_at: Generated<Timestamp>;
+  described_at: Timestamp | null;
+  description: string | null;
+  docs: string | null;
+  docs_url: string | null;
+  features: Json | null;
+  id: Generated<string>;
+  name: string | null;
+  org_id: string;
+  origins: Generated<string[]>;
+  page: string;
+  project_id: string | null;
+  url: string;
+}
+
 export interface TargetAccounts {
   id: Generated<string>;
   org_id: string;
@@ -320,6 +338,7 @@ export interface DB {
   runs: Runs;
   session: Session;
   setup_attempts: SetupAttempts;
+  setup_drafts: SetupDrafts;
   target_accounts: TargetAccounts;
   target_gates: TargetGates;
   user: User;

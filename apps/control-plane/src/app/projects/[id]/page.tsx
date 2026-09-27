@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { AppShell } from "../../../components/app-shell.tsx";
@@ -31,6 +32,10 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         <div className="flex flex-col gap-3">
           <p className="text-lg text-muted">{project.description}</p>
           {project.focus && <p className="text-sm">Focus: <span className="text-muted">{project.focus}</span></p>}
+          <p className="text-sm">
+            {project.features.length > 0 && <>Features: <span className="text-muted">{project.features.join(" · ")}</span> · </>}
+            <Link href={`/projects/${project.id}/features`} className="underline underline-offset-4 hover:text-action">{project.features.length > 0 ? "Change features" : "Choose features and propose people"}</Link>
+          </p>
         </div>
         <PlanWorkspace
           projectId={project.id}

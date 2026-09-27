@@ -1,19 +1,19 @@
 "use server";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { createModel, SetupModelFailed } from "@usetrawler/core/setup";
+import { z } from "zod";
+import { createModel, MAX_CHOSEN_FEATURES, MAX_DESCRIPTION_CHARS, MAX_FEATURE_CHARS, SetupModelFailed, type ProductSummary } from "@usetrawler/core/setup";
 import { signedInMember } from "../../server/auth.ts";
 import { getDb, getKeyring } from "../../server/db.ts";
 import { readEnv } from "../../server/env.ts";
 import { logError, writeLog } from "../../server/log.ts";
 import { FetchRefused, safeFetchText, type RefusalReason } from "../../setup/safe-fetch.ts";
-import { proposeFromUrl, SetupLimited } from "../../setup/propose.ts";
+import { describeDraft, DraftGone, proposeFromDraft, SetupLimited, startDraft, type SetupDeps } from "../../setup/propose.ts";
+import { ProjectNotFound } from "../../projects/projects.ts";
 
-export interface SetupState {
-  error?: string;
-  url?: string;
-  focus?: string;
-}
+type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 function normalise(raw: string): string {
   const trimmed = raw.trim();
@@ -34,30 +34,70 @@ function friendly(err: unknown): string {
   if (err instanceof FetchRefused) return err.reason === "status" ? `The page answered with an error (${err.message}).` : MESSAGES[err.reason];
   if (err instanceof SetupLimited) return "You have started many new projects recently. Try again in a few minutes.";
   if (err instanceof SetupModelFailed) return "Trawler's setup model could not write a plan this time. Try again in a moment.";
+  if (err instanceof DraftGone) return "This setup has expired. Start again from the product's address.";
+  if (err instanceof ProjectNotFound) return "This project is gone.";
   return "We could not build a plan for this page. Try again in a moment.";
 }
 
-export async function startSetup(_previous: SetupState, form: FormData): Promise<SetupState> {
-  const url = String(form.get("url") ?? "");
-  const focus = String(form.get("focus") ?? "").slice(0, 500);
+async function setupFor(): Promise<{ orgId: string; deps: SetupDeps } | { error: string }> {
   const member = await signedInMember(await headers());
   if (!member) redirect("/sign-in");
-  const { orgId } = member;
-  if (!url.trim()) return { error: "Paste the address of the product to test.", url, focus };
-  if (url.length > 2048) return { error: MESSAGES.too_long, url: url.slice(0, 2048), focus };
-  const setup = readEnv().setup;
-  if (!setup) return { error: "Setup is not configured on this server.", url, focus };
+  const env = readEnv();
+  const setup = env.setup;
+  if (!setup) return { error: "Setup is not configured on this server." };
+  const model = createModel({ modelId: setup.model, apiKey: setup.apiKey, baseURL: env.openRouterUrl });
+  return { orgId: member.orgId, deps: { db: getDb(), keys: getKeyring(), model, modelId: setup.model, fetchText: (u: string) => safeFetchText(u) } };
+}
+
+async function failed(err: unknown, orgId: string, what: string): Promise<{ ok: false; error: string }> {
+  if (err instanceof FetchRefused) await writeLog("info", "setup refused the address", { orgId, reason: err.reason });
+  else if (err instanceof SetupLimited) await writeLog("info", "setup is rate limited", { orgId });
+  else if (!(err instanceof DraftGone) && !(err instanceof ProjectNotFound)) await logError(what, { orgId, err });
+  return { ok: false, error: friendly(err) };
+}
+
+export async function readProductAction(input: { url?: string; projectId?: string }): Promise<Result<{ draftId: string }>> {
+  const url = typeof input.url === "string" ? input.url : "";
+  const projectId = typeof input.projectId === "string" && UUID.test(input.projectId) ? input.projectId : undefined;
+  if (!projectId && !url.trim()) return { ok: false, error: "Paste the address of the product to test." };
+  if (url.length > 2048) return { ok: false, error: MESSAGES.too_long };
+  const setup = await setupFor();
+  if ("error" in setup) return { ok: false, error: setup.error };
+  try {
+    return { ok: true, draftId: await startDraft(setup.deps, { orgId: setup.orgId, ...(projectId ? { projectId } : { url: normalise(url) }) }) };
+  } catch (err) {
+    return failed(err, setup.orgId, "setup could not read the page");
+  }
+}
+
+export async function describeProductAction(draftId: string): Promise<Result<{ summary: ProductSummary }>> {
+  if (typeof draftId !== "string" || !UUID.test(draftId)) return { ok: false, error: friendly(new DraftGone()) };
+  const setup = await setupFor();
+  if ("error" in setup) return { ok: false, error: setup.error };
+  try {
+    return { ok: true, summary: await describeDraft(setup.deps, { orgId: setup.orgId, draftId }) };
+  } catch (err) {
+    return failed(err, setup.orgId, "setup could not describe the product");
+  }
+}
+
+const Chosen = z.object({
+  draftId: z.string().regex(UUID),
+  description: z.string().trim().max(MAX_DESCRIPTION_CHARS),
+  features: z.array(z.string().trim().max(MAX_FEATURE_CHARS)).max(MAX_CHOSEN_FEATURES).transform((list) => list.filter(Boolean)),
+});
+
+export async function proposePeopleAction(input: { draftId: string; description: string; features: string[] }): Promise<Result> {
+  const chosen = Chosen.safeParse(input);
+  if (!chosen.success) return { ok: false, error: `Keep the description under ${MAX_DESCRIPTION_CHARS.toLocaleString("en-GB")} characters and choose at most ${MAX_CHOSEN_FEATURES} features.` };
+  if (chosen.data.features.length === 0) return { ok: false, error: "Choose at least one feature for the people to try." };
+  const setup = await setupFor();
+  if ("error" in setup) return { ok: false, error: setup.error };
   let projectId: string;
   try {
-    projectId = await proposeFromUrl(
-      { db: getDb(), keys: getKeyring(), model: createModel({ modelId: setup.model, apiKey: setup.apiKey }), modelId: setup.model, fetchText: (u) => safeFetchText(u) },
-      { orgId, url: normalise(url), focus },
-    );
+    projectId = await proposeFromDraft(setup.deps, { orgId: setup.orgId, ...chosen.data });
   } catch (err) {
-    if (err instanceof FetchRefused) await writeLog("info", "setup refused the address", { orgId, reason: err.reason });
-    else if (err instanceof SetupLimited) await writeLog("info", "setup is rate limited", { orgId });
-    else await logError("setup failed", { orgId, err });
-    return { error: friendly(err), url, focus };
+    return failed(err, setup.orgId, "setup could not propose people");
   }
   redirect(`/projects/${projectId}`);
 }
