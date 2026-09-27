@@ -20,7 +20,7 @@ const actions = vi.hoisted(() => ({ savePlanAction: vi.fn(), addAccountAction: v
 vi.mock("./plan-actions.ts", () => actions);
 vi.mock("./start-run.tsx", () => ({ StartRun: () => null }));
 
-const { Accounts, PlanWorkspace } = await import("./plan-workspace.tsx");
+const { PlanWorkspace, SignIn } = await import("./plan-workspace.tsx");
 const { UnrecognizedActionError } = await import("next/dist/client/components/unrecognized-action-error.js");
 
 type Node = { type?: unknown; props?: Record<string, unknown> & { children?: unknown } };
@@ -50,12 +50,14 @@ const changedPlan = () => {
 };
 
 const accounts = () => {
+  react.values = [true];
   const onChange = vi.fn();
-  const tree = Accounts({ projectId: "p1", accounts: [account], anyoneWithout: false, onChange });
-  const [, setUsername, setPassword, setError] = react.setters;
+  const onPick = vi.fn();
+  const tree = SignIn({ projectId: "p1", person: { ...ama, accountRef: "account-1", signsIn: true }, accounts: [account], onPick, onAccounts: onChange });
+  const [setAdding, setUsername, setPassword, setError] = react.setters;
   const add = () => (nodes(tree).find((node) => node.type === "form")!.props!.onSubmit as (event: { preventDefault: () => void }) => void)({ preventDefault: () => {} });
-  const remove = () => (nodes(tree).find((node) => node.props?.label === "Remove kwame@acme.test")!.props!.onClick as () => void)();
-  return { add, remove, onChange, setUsername: setUsername!, setPassword: setPassword!, setError: setError! };
+  const remove = () => (nodes(tree).find((node) => node.type === "button" && text(node) === "Remove this account")!.props!.onClick as () => void)();
+  return { add, remove, onChange, onPick, setAdding: setAdding!, setUsername: setUsername!, setPassword: setPassword!, setError: setError! };
 };
 
 test("Save plan on a page left open across an update says the changes cannot be saved from it, and leaves them on screen to copy", async () => {
@@ -92,6 +94,8 @@ test("adding or removing a test account on a page left open across an update say
   expect(actions.removeAccountAction).toHaveBeenCalledWith("p1", "account-1");
   expect(panel.setError).toHaveBeenLastCalledWith("Trawler has been updated since this page opened. Reload the page to remove the account.");
   expect(panel.onChange).not.toHaveBeenCalled();
+  expect(panel.onPick).not.toHaveBeenCalled();
+  expect(panel.setAdding).not.toHaveBeenCalled();
   expect(panel.setUsername).not.toHaveBeenCalled();
   expect(panel.setPassword).not.toHaveBeenCalled();
 });
@@ -108,13 +112,15 @@ test("any other failure of adding or removing a test account goes on to the erro
   expect(panel.setError).not.toHaveBeenCalled();
 });
 
-test("an account the server adds or removes still reaches the plan", async () => {
+test("an account added on a card reaches the plan and becomes that person's, and a removed one leaves it", async () => {
   actions.addAccountAction.mockResolvedValue({ ok: true, accounts: [account], ref: "account-1" });
   actions.removeAccountAction.mockResolvedValue({ ok: true, accounts: [] });
   const panel = accounts();
   panel.add();
   await Promise.all(react.started);
   expect(panel.onChange).toHaveBeenLastCalledWith([account]);
+  expect(panel.onPick).toHaveBeenLastCalledWith({ accountRef: "account-1", signsIn: true });
+  expect(panel.setAdding).toHaveBeenLastCalledWith(false);
   panel.remove();
   await Promise.all(react.started);
   expect(panel.onChange).toHaveBeenLastCalledWith([], "account-1");

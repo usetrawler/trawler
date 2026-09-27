@@ -11,7 +11,7 @@ import { logError, scrubberWith } from "../../../server/log.ts";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const text = (schema: z.ZodString) => z.string().trim().pipe(schema);
 const PlanInput = z.object({
-  personas: z.array(PersonaSchema.extend({ name: text(PersonaSchema.shape.name), brief: text(PersonaSchema.shape.brief) })).max(MAX_PERSONAS),
+  personas: z.array(PersonaSchema.extend({ name: text(PersonaSchema.shape.name), brief: text(PersonaSchema.shape.brief), signsIn: z.boolean().optional() })).max(MAX_PERSONAS),
   goals: z.array(GoalSchema.extend({ instruction: text(GoalSchema.shape.instruction), personaId: GoalSchema.shape.personaId.unwrap() })).max(MAX_GOALS),
 });
 const AccountInput = TargetAccountSchema.omit({ ref: true }).extend({ username: text(TargetAccountSchema.shape.username) });
@@ -43,7 +43,9 @@ export async function savePlanAction(projectId: string, plan: unknown): Promise<
   const idle = parsed.data.personas.find((p) => !parsed.data.goals.some((g) => g.personaId === p.id));
   if (idle) return { ok: false, error: `Give ${idle.name} at least one goal.` };
   try {
-    await withOrg(getDb(), orgId, (tx) => replacePlan(tx, orgId, projectId, parsed.data));
+    const personas = parsed.data.personas.map(({ signsIn: _, ...persona }) => persona);
+    const signsIn = parsed.data.personas.filter((p) => p.signsIn || p.accountRef).map((p) => p.id);
+    await withOrg(getDb(), orgId, (tx) => replacePlan(tx, orgId, projectId, { personas, goals: parsed.data.goals }, signsIn));
     return { ok: true };
   } catch (err) {
     if (err instanceof UnknownAccount) return { ok: false, error: "An account you picked was removed. Choose another one and save again.", accounts: await accountsOf(orgId, projectId) };

@@ -7,8 +7,8 @@ import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { setModelKey } from "../credentials/credentials.ts";
-import { createProject, ProjectNotFound } from "../projects/projects.ts";
-import { cancelLiveRuns, cancelRun, CannotJudgeAgain, judgeAgain, RunNotFound, runSummary, startRun, type StartRunOptions } from "./runs.ts";
+import { createProject, loadProjectConfig, ProjectNotFound, replacePlan } from "../projects/projects.ts";
+import { cancelLiveRuns, cancelRun, CannotJudgeAgain, judgeAgain, NeedsAccount, RunNotFound, runSummary, startRun, type StartRunOptions } from "./runs.ts";
 import { claimJob, completeJob, ingestEvents, InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage, releaseJob } from "./queue.ts";
 
 const t = await testDb();
@@ -670,4 +670,16 @@ describe("screenshots", () => {
     expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.findings[0]!.screenshots).toEqual({ reported, replayed });
     await drain();
   });
+});
+
+test("a run does not start while a person who has to sign in has no account, and starts once they have one", async () => {
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys, { signsIn: ["lee"] }));
+  const refused = withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", id, keys, options));
+  await expect(refused).rejects.toBeInstanceOf(NeedsAccount);
+  await expect(refused).rejects.toThrow("Lee needs a test account to sign in.");
+  const { rows } = await sql<{ n: number }>`select count(*)::int as n from runs where project_id = ${id}`.execute(t.db);
+  expect(rows[0]!.n).toBe(0);
+  const plan = await withOrg(t.db, "org-a", (tx) => loadProjectConfig(tx, "org-a", id, keys));
+  await withOrg(t.db, "org-a", (tx) => replacePlan(tx, "org-a", id, { personas: plan.personas.map((p) => ({ ...p, accountRef: "ana" })), goals: plan.goals }));
+  await expect(withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", id, keys, options))).resolves.toMatchObject({ id: expect.any(String) });
 });

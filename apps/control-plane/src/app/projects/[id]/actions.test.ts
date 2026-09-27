@@ -35,6 +35,7 @@ vi.mock("../../../llm/prices.ts", async (importOriginal) => ({
 }));
 vi.mock("../../../runs/runs.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../runs/runs.ts")>()),
+  personWithoutAccount: async () => null,
   startRun: async (tx: unknown) => { state.startedIn.push(tx); state.runsStarted++; return { id: "run-1", number: 1 }; },
 }));
 

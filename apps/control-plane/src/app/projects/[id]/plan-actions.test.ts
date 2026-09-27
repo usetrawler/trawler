@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 type Member = { userId: string; email: string; orgId: string; orgName: string; role: string };
-const state = vi.hoisted(() => ({ member: null as Member | null, tenants: [] as string[] }));
+const state = vi.hoisted(() => ({ member: null as Member | null, tenants: [] as string[], replaced: [] as unknown[][] }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("../../../server/auth.ts", () => ({ signedInMember: async (headers: Headers) => (headers.get("cookie") === "session=ana" ? state.member : null) }));
@@ -10,7 +10,7 @@ vi.mock("../../../server/log.ts", () => ({ logError: async () => {}, scrubberWit
 vi.mock("../../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
 vi.mock("../../../projects/projects.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../projects/projects.ts")>()),
-  replacePlan: async () => {},
+  replacePlan: async (...args: unknown[]) => { state.replaced.push(args.slice(3)); },
   addAccount: async () => "a1",
   removeAccount: async () => {},
   projectForEditing: async () => ({ accounts: [] }),
@@ -56,4 +56,17 @@ test("the plan and its test accounts change in the workspace the membership chec
   expect(await addAccountAction(PROJECT, ACCOUNT)).toEqual({ ok: true, ref: "a1", accounts: [] });
   expect(await removeAccountAction(PROJECT, "a1")).toEqual({ ok: true, accounts: [] });
   expect(state.tenants).toEqual(["org-2", "org-2", "org-2", "org-2", "org-2"]);
+});
+
+test("who signs in is saved with the plan: anyone with an account, and anyone marked as needing one", async () => {
+  state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-2", orgName: "Acme workspace", role: "member" };
+  state.replaced = [];
+  const plan = {
+    personas: [{ ...PLAN.personas[0], signsIn: true }, { id: "kofi", name: "Kofi", brief: "b", accountRef: "a1" }, { id: "lee", name: "Lee", brief: "b", signsIn: false }],
+    goals: ["ama", "kofi", "lee"].map((personaId) => ({ id: `g-${personaId}`, instruction: "x", personaId })),
+  };
+  expect(await savePlanAction(PROJECT, plan)).toEqual({ ok: true });
+  const [saved, signsIn] = state.replaced[0] as [{ personas: object[] }, string[]];
+  expect(saved.personas.every((p) => !("signsIn" in p))).toBe(true);
+  expect(signsIn).toEqual(["ama", "kofi"]);
 });

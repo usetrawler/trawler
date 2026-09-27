@@ -55,6 +55,7 @@ vi.mock("../../../runs/runs.ts", () => ({
   cancelRun: async () => {},
   judgeAgain: async () => {},
   CannotJudgeAgain: class extends Error {},
+  NeedsAccount: class extends Error {},
   RunNotFound: class extends Error {},
   startRun: async (tx: unknown, orgId: string, projectId: string, _keys: unknown, options: unknown) => {
     if (state.startFails) throw state.startFails;

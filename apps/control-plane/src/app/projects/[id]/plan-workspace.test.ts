@@ -3,14 +3,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { Persona } from "@usetrawler/protocol";
 import type { AccountView } from "./plan-actions.ts";
+import type { PlanPerson } from "./plan-workspace.tsx";
 import { PlanWorkspace } from "./plan-workspace.tsx";
 
-const WITHOUT_ACCOUNT = "People without a test account sign up the way a new user would, if your product lets them, with an example.com address and a password Trawler makes up. They cannot receive email yet.";
 const accounts: AccountView[] = [{ ref: "account-1", username: "kwame@acme.test", hint: "…1234" }];
 const ama: Persona = { id: "ama", name: "Ama", brief: "Brand new." };
 const kwame: Persona = { id: "kwame", name: "Kwame", brief: "Has an account.", accountRef: "account-1" };
 
-function render(initialPersonas: Persona[], initialAccounts: AccountView[], authorisedBefore = false, initialGoals = initialPersonas.map((p, i) => ({ id: `g${i}`, instruction: "Send an invoice.", personaId: p.id }))) {
+function render(initialPersonas: PlanPerson[], initialAccounts: AccountView[], authorisedBefore = false, initialGoals = initialPersonas.map((p, i) => ({ id: `g${i}`, instruction: "Send an invoice.", personaId: p.id }))) {
   return renderToStaticMarkup(createElement(PlanWorkspace, { projectId: "p1", projectName: "Acme", initialPersonas, initialGoals, initialAccounts, keyHint: null, canManageKey: true, authorisedBefore }));
 }
 
@@ -33,18 +33,21 @@ describe("PlanWorkspace", () => {
     expect(render([ama], [], true)).not.toContain('name="authorised"');
   });
 
-  it("says what people without a test account do, next to the way to add one", () => {
-    const html = render([ama], []);
-    expect(html).toContain("Your product needs sign-in? Add a test account");
-    expect(html).toContain(WITHOUT_ACCOUNT);
+  it("each card says how its person gets in, and the separate test accounts section is gone", () => {
+    const html = render([ama, kwame], accounts);
+    expect(html).not.toContain("Test accounts");
+    expect(html.match(/aria-label="How Ama gets in"/g)).toHaveLength(1);
+    expect(html).toMatch(/<option value="signs-up" selected="">Signs up as a new user<\/option>/);
+    expect(html).toMatch(/<option value="account-1" selected="">Signs in as kwame@acme\.test<\/option>/);
+    expect(html).toContain("password …1234");
+    expect(html.match(/>\+ Add account</g)).toHaveLength(2);
   });
 
-  it("says it with the test accounts while someone still has none, and not once everyone has one", () => {
-    const mixed = render([ama, kwame], accounts);
-    expect(mixed).toContain("Test accounts");
-    expect(mixed).toContain(WITHOUT_ACCOUNT);
-    const everyone = render([kwame], accounts);
-    expect(everyone).toContain("Test accounts");
-    expect(everyone).not.toContain(WITHOUT_ACCOUNT);
+  it("a person who has to sign in without an account says so on the card, and Start refuses until one is chosen", () => {
+    const html = render([{ ...ama, signsIn: true }, kwame], accounts);
+    expect(html).toMatch(/<option value="" selected="">Choose a test account<\/option>/);
+    expect(html.match(/Ama needs a test account to sign in\./g)).toHaveLength(2);
+    expect(html).toMatch(/id="start-blocked"[^>]*>Ama needs a test account to sign in\.</);
+    expect(render([kwame], accounts)).not.toContain("needs a test account");
   });
 });
