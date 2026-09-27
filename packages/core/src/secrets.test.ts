@@ -179,9 +179,14 @@ describe("SecretScrubber.forProject", () => {
     const basic = Buffer.from("staging:gate-pass-1").toString("base64");
     expect(s.scrub(`first-pass second-pass gate-pass-1 Basic ${basic} bypass-token-123 production`)).toBe("••• ••• ••• Basic ••• ••• production");
   });
-  test("leaves passwords too short to find reliably unmasked and still masks the long ones", () => {
-    const s = SecretScrubber.forProject({ accounts: [{ password: "user" }, { password: "hunter22-secret" }], httpCredentials: { username: "u", password: "p" }, secretHeaders: {} });
+  test("leaves passwords too short to mask reliably unmasked and masks those of 8 characters and more", () => {
+    const s = SecretScrubber.forProject({ accounts: [{ password: "user" }, { password: "pw8chars" }], httpCredentials: { username: "u", password: "p" }, secretHeaders: {} });
     expect(Buffer.from("u:p").toString("base64")).toBe("dTpw");
-    expect(s.scrub("Username: user, then hunter22-secret, then p and dTpw")).toBe("Username: user, then •••, then p and dTpw");
+    expect(s.scrub("Username: user, then pw8chars, then p and dTpw")).toBe("Username: user, then •••, then p and dTpw");
+  });
+  test("masks the basic-auth token when it is long enough, even when the password alone is not", () => {
+    const s = SecretScrubber.forProject({ accounts: [], httpCredentials: { username: "staging", password: "pw" }, secretHeaders: {} });
+    const token = Buffer.from("staging:pw").toString("base64");
+    expect(s.scrub(`Basic ${token} and pw`)).toBe("Basic ••• and pw");
   });
 });

@@ -117,6 +117,8 @@ beforeAll(async () => {
         req.on("end", () => html(`<h1>Saved</h1><p>Your password is ${new URLSearchParams(body).get("password")}</p>`));
         return;
       }
+      case "/readonly-password":
+        return html(`<input aria-label="Password" type="password" readonly>`);
       case "/pin":
         return html(`<input aria-label="PIN" type="password" maxlength="6"><button onclick="document.getElementById('echo').textContent = 'Your PIN is ' + document.querySelector('input').value">Echo</button><p id="echo"></p>`);
       case "/signup": {
@@ -900,9 +902,33 @@ describe("password fields", () => {
     await withBrowser(async (b) => {
       await navigate(b, `${origin}/pin`);
       const snap = await snapshot(b);
-      expect(await b.fillField(refOf(snap, "PIN"), "4821", "password")).toBe("typed the password");
+      expect(await b.fillField(refOf(snap, "PIN"), "482193", "password")).toBe("typed the password");
       await b.tools.browser_click!.execute!({ target: refOf(snap, "Echo"), element: "Echo" }, ctx);
-      expect(await snapshot(b)).toContain("Your PIN is 4821");
+      const shown = await snapshot(b);
+      expect(shown).toContain("Your PIN is 482193");
+      expect(shown).toMatch(/textbox \\"PIN\\"[^\\]*: •••/);
+      expect(await b.fillField(refOf(snap, "PIN"), "4821937", "password")).toBe("failed: the field takes at most 6 characters, fewer than the password has, so nothing was typed");
+    });
+  }, 60_000);
+
+  test("the model never reads a password too short to scrub from the field it was typed into", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, origin);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "pw12", "password")).toBe("typed the password");
+      const shown = await snapshot(b);
+      expect(shown).toMatch(/textbox \\"Password\\"[^\\]*: •••/);
+      expect(shown).not.toContain("pw12");
+    });
+  }, 60_000);
+
+  test("a failed fill of a password too short to scrub does not repeat it", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/readonly-password`);
+      const snap = await snapshot(b);
+      const out = await b.fillField(refOf(snap, "Password"), "pw12", "password");
+      expect(out).toMatch(/^failed: /);
+      expect(out).not.toContain("pw12");
     });
   }, 60_000);
 
@@ -911,7 +937,8 @@ describe("password fields", () => {
       await navigate(b, origin);
       const snap = await snapshot(b);
       expect(await b.fillField(refOf(snap, "Password"), "pw12", "password")).toBe("typed the password");
-      await b.tools.browser_type!.execute!({ target: refOf(snap, "Email"), text: "pw12@acme.test", element: "email" }, ctx);
+      const first = (await b.tools.browser_type!.execute!({ target: refOf(snap, "Email"), text: "pw12@acme.test", element: "email" }, ctx)) as { isError?: boolean };
+      expect(first.isError).toBeFalsy();
       const again = (await b.tools.browser_type!.execute!({ target: refOf(snap, "Email"), text: "kwame@acme.test", element: "email" }, ctx)) as { isError?: boolean };
       expect(again.isError).toBeFalsy();
     });
@@ -1011,6 +1038,20 @@ describe("password fields", () => {
       await b.tools.browser_click!.execute!({ target: refOf(snap, "Reset"), element: "Reset" }, ctx);
       await navigate(b, `${origin}/placeholder`);
       expect(await snapshot(b)).toContain("Forgot password? Change your password below.");
+    });
+  }, 60_000);
+
+  test("a word the page puts into a field after a password too short to scrub never becomes a secret", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/reset-to-placeholder`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "pwd", "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Reset"), element: "Reset" }, ctx);
+      await navigate(b, `${origin}/placeholder`);
+      const shown = await snapshot(b);
+      expect(shown).toContain("Forgot password? Change your password below.");
+      const search = (await b.tools.browser_type!.execute!({ target: refOf(shown, "Search"), text: "password reset", element: "search" }, ctx)) as { isError?: boolean };
+      expect(search.isError).toBeFalsy();
     });
   }, 60_000);
 
