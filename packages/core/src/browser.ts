@@ -680,7 +680,7 @@ export async function openBrowser(opts: {
       async fillField(ref, text, kind) {
         const failure = (result: McpResult) => {
           const detail = opts.scrubber.scrub(textOf(result));
-          return `failed: ${kind === "password" && text.length < MIN_SECRET_LENGTH ? detail.split("\nCall log:")[0]!.split(text).join(MASK) : detail}`;
+          return `failed: ${kind === "password" && text.length < MIN_SECRET_LENGTH ? detail.split("\nCall log:")[0]! : detail}`;
         };
         if (kind === "password") {
           const mark = randomUUID();
