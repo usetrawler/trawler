@@ -121,6 +121,8 @@ beforeAll(async () => {
         return html(`<input aria-label="Password" type="password" placeholder="Enter your password">`);
       case "/password-colon-label":
         return html(`<input aria-label="Password: at least 4 characters" type="password">`);
+      case "/signed-in-as":
+        return html(`<p>admin</p><input aria-label="Password" type="password">`);
       case "/readonly-password":
         return html(`<input aria-label="Password" type="password" readonly>`);
       case "/pin":
@@ -938,6 +940,17 @@ describe("password fields", () => {
       const after = await snapshot(b);
       expect(after).toContain("•••");
       expect(after).not.toContain(shown);
+    });
+  }, 60_000);
+
+  test("page text that happens to equal a password too short to scrub stays readable, only the field is hidden", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/signed-in-as`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "admin", "password")).toBe("typed the password");
+      const shown = await snapshot(b);
+      expect(shown).toMatch(/paragraph[^\\]*: admin/);
+      expect(shown).toMatch(/textbox \\"Password\\"[^\\]*: •••/);
     });
   }, 60_000);
 

@@ -360,16 +360,29 @@ function textOf(result: unknown): string {
   return ((result as McpResult)?.content ?? []).map((c) => c.text ?? "").join("\n");
 }
 
-const SNAPSHOT_ENTRY_VALUE = /^(\s*- (?:'(?:[^'\n]|'')*'|[^'\n][^\n]*?)): (.*)$/gm;
+const SNAPSHOT_ENTRY = /^(\s*)- ('(?:[^'\n]|'')*'|[^'\n][^\n]*?)(?:: (.*)|(:))?$/;
 
-function withSnapshotValuesMasked<T>(value: T, values: Set<string>): T {
+function withFieldValuesMasked<T>(value: T, values: Set<string>): T {
   if (values.size === 0) return value;
   const normal = (s: string) => s.replace(/\s+/g, " ").trim();
   const wanted = new Set([...values].map(normal));
   const unquoted = (s: string) => (/^'.*'$/.test(s) ? s.slice(1, -1).replace(/''/g, "'") : /^".*"$/.test(s) ? s.slice(1, -1).replace(/\\(.)/g, "$1") : s);
   const holds = (shown: string) => wanted.has(normal(shown)) || wanted.has(normal(unquoted(shown)));
+  const maskFields = (text: string) => {
+    let field: number | null = null;
+    return text.split("\n").map((line) => {
+      const entry = SNAPSHOT_ENTRY.exec(line);
+      if (!entry) return line;
+      const [, indent = "", key = "", inline, children] = entry;
+      if (field !== null && indent.length <= field) field = null;
+      if (field !== null) return indent.length === field + 2 && key === "text" && inline !== undefined && holds(inline) ? `${indent}- text: ${MASK}` : line;
+      if (!/^textbox\b/.test(unquoted(key))) return line;
+      if (children) field = indent.length;
+      return inline !== undefined && holds(inline) ? `${indent}- ${key}: ${MASK}` : line;
+    }).join("\n");
+  };
   const walk = (v: unknown): unknown => {
-    if (typeof v === "string") return v.replace(SNAPSHOT_ENTRY_VALUE, (line, head: string, shown: string) => (holds(shown) ? `${head}: ${MASK}` : line));
+    if (typeof v === "string") return maskFields(v);
     if (Array.isArray(v)) return v.map(walk);
     if (v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
     return v;
@@ -519,7 +532,7 @@ export async function openBrowser(opts: {
         live.add(value);
         if ([...typedPasswords].some((typed) => typed.length >= MIN_SECRET_LENGTH && (keptFrom(value, typed) || keptFrom(typed, value)))) keepSecret(value);
       }
-      return withSnapshotValuesMasked(live.scrub(opts.scrubber.scrub(result)), tooShortToScrub);
+      return withFieldValuesMasked(live.scrub(opts.scrubber.scrub(result)), tooShortToScrub);
     };
     const focusCheck = async () => {
       const held = await liveFilled();
