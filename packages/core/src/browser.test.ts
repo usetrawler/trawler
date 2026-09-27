@@ -296,6 +296,10 @@ beforeAll(async () => {
         return html(`<p style="font:20px monospace;color:#ff0000">Key: card-s&#847;ecret-1111</p><p>Plan: Team</p>`);
       case "/invisible-separator":
         return html(`<p style="font:20px monospace;color:#ff0000">Key: card-&#8291;secret-1111</p><p>Plan: Team</p>`);
+      case "/script-shown":
+        return html(`<script type="application/json" style="display:block;font:20px monospace;color:#ff0000">{"token":"card-secret-1111"}</script><p>Plan: Team</p>`);
+      case "/style-shown":
+        return html(`<style style="display:block;font:20px monospace;color:#ff0000">/* card-secret-1111 */</style><p>Plan: Team</p>`);
       case "/zero-width-field":
         return html(`<input aria-label="Key" style="width:400px;font:20px monospace;color:#ff0000" value="card-&#8203;secret-1111"><p>Plan: Team</p>`);
       case "/head-shown":
@@ -392,6 +396,9 @@ beforeAll(async () => {
         return html(`<p id="line" style="font:20px monospace;color:#ff0000;height:24px;overflow:hidden;margin:0">${" ".repeat(10500)}card-secret-<closed-b></closed-b></p><p>Plan: Team</p><script>customElements.define("closed-b", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "1111"; } }); const line = document.getElementById("line"); line.insertBefore(document.createTextNode("\\u200b"), line.lastElementChild);</script>`);
       case "/cut-near-closed":
         return html(`<p style="font:6px monospace;height:30px;overflow:hidden;margin:0">${"lorem ipsum ".repeat(900)}card-sec<b style="font:20px monospace;color:#ff0000">ret-</b><closed-b></closed-b></p><p>Plan: Team</p><script>customElements.define("closed-b", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = '<span style="font:20px monospace;color:#ff0000">1111</span>'; } });</script>`);
+      case "/closed-flex-parts":
+      case "/closed-grid-parts":
+        return html(closedCard("", `<div style="display:${req.url === "/closed-flex-parts" ? "flex" : "inline-grid;grid-auto-flow:column"}"><span>card-sec</span>\n  <span>ret-1111</span></div>`));
       case "/closed-phrase-words":
         return html(closedCard("", "<p><b>correct</b> <b>horse</b> <b>battery</b> <b>staple</b></p>"));
       case "/closed-invisible-needle":
@@ -400,6 +407,10 @@ beforeAll(async () => {
         return html(`<input aria-label="Key" style="width:400px;font:20px monospace;color:#ff0000" value="key&#8203;value-7777"><p>Plan: Team</p>`);
       case "/head-contents":
         return html(`<style>head { display: contents } title { display: block; font: 20px monospace; color: #ff0000 }</style><p>Plan: Team</p><script>document.head.append(Object.assign(document.createElement("title"), { textContent: "card-secret-1111" }));</script>`);
+      case "/cut-spaces-before-closed":
+        return html(`<p style="font:6px monospace;height:30px;overflow:hidden;margin:0">${"lorem ipsum ".repeat(900)}correct horse</p>${" ".repeat(200)}<p style="font:20px monospace;color:#ff0000;margin:0"><closed-b></closed-b></p><p>Plan: Team</p><script>customElements.define("closed-b", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "battery staple"; } });</script>`);
+      case "/cut-nbsp-before-closed":
+        return html(`<p style="font:6px monospace;height:30px;overflow:hidden;margin:0">${"lorem ipsum ".repeat(900)}correct&nbsp;horse<closed-b></closed-b></p><p>Plan: Team</p><script>customElements.define("closed-b", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = '<span style="font:20px monospace;color:#ff0000"> battery staple</span>'; } });</script>`);
       case "/closed-beside-long-text":
         return html(`<closed-note>Help</closed-note><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><pre style="height:40px;overflow:hidden">${"log line ".repeat(1400)}</pre><script>customElements.define("closed-note", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "<slot></slot>"; } });</script>`);
       case "/closed-after-long-text":
@@ -1515,6 +1526,8 @@ describe("screenshots", () => {
     ["/bidi-isolate", "has a part wrapped in bidirectional isolates"],
     ["/grapheme-joiner", "has a combining grapheme joiner in it"],
     ["/invisible-separator", "has an invisible separator in it"],
+    ["/script-shown", "is in a script the page's styles show"],
+    ["/style-shown", "is in a style sheet the page's styles show"],
     ["/head-contents", "is in the page's title, which the page's styles show through a head with no box"],
   ])("a secret whose text %s is masked where it is drawn (%s)", async (path) => {
     const [shot] = await shotsOf(path, 1, async () => undefined, knowing(path === "/overflow-edge" ? "card-secret-11112" : "card-secret-1111"));
@@ -1590,7 +1603,7 @@ describe("screenshots", () => {
     expect(await redPixels(shot!)).toBe(0);
   }, 60_000);
 
-  test.each(["/closed-text", "/closed-groups", "/closed-split", "/closed-slotted", "/closed-slot-after", "/closed-slot-named", "/closed-slot-manual", "/closed-sibling-hosts", "/closed-after-light", "/closed-password", "/closed-typed", "/closed-in-frame", "/closed-long-text", "/closed-zero-width", "/cut-beside-closed", "/cut-empty-beside-closed", "/cut-near-closed"])("a secret or password field inside a closed shadow root gives no screenshot (%s)", async (path) => {
+  test.each(["/closed-text", "/closed-groups", "/closed-split", "/closed-slotted", "/closed-slot-after", "/closed-slot-named", "/closed-slot-manual", "/closed-sibling-hosts", "/closed-after-light", "/closed-password", "/closed-typed", "/closed-in-frame", "/closed-long-text", "/closed-zero-width", "/cut-beside-closed", "/cut-empty-beside-closed", "/cut-near-closed", "/closed-flex-parts", "/closed-grid-parts"])("a secret or password field inside a closed shadow root gives no screenshot (%s)", async (path) => {
     expect(await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"))).toEqual([null]);
   }, 60_000);
 
@@ -1621,8 +1634,12 @@ describe("screenshots", () => {
     expect(shot).not.toBeNull();
   }, 60_000);
 
-  test("a secret with words in separate elements inside a closed shadow root gives no screenshot", async () => {
-    expect(await shotsOf("/closed-phrase-words", 1, async () => undefined, knowing("correct horse battery staple"))).toEqual([null]);
+  test.each(["/closed-phrase-words", "/cut-spaces-before-closed"])("a secret with words in separate elements, some inside a closed shadow root, gives no screenshot (%s)", async (path) => {
+    expect(await shotsOf(path, 1, async () => undefined, knowing("correct horse battery staple"))).toEqual([null]);
+  }, 60_000);
+
+  test("a secret with a no-break space, started at the end of a long text and ended inside a closed shadow root, gives no screenshot", async () => {
+    expect(await shotsOf("/cut-nbsp-before-closed", 1, async () => undefined, knowing("correct horse battery staple"))).toEqual([null]);
   }, 60_000);
 
   test("a secret that itself holds a zero-width space is recognised inside a closed shadow root and in a field", async () => {

@@ -53,7 +53,7 @@ const FLAT_TEXT_OF = `(cache) => {
       const invisible = /${INVISIBLE}/gu;
       const flatTextOf = (node) => {
         if (node.nodeType === Node.TEXT_NODE) return node.data.replace(invisible, "");
-        if (node.nodeType === Node.ELEMENT_NODE && node.matches("script, noscript, style")) return "";
+        if (node.nodeType === Node.ELEMENT_NODE && node.matches("script, noscript, style") && !node.checkVisibility()) return "";
         let text = cache.get(node);
         if (text === undefined) cache.set(node, (text = flatChildrenOf(node).map(flatTextOf).join("")));
         return text;
@@ -113,8 +113,8 @@ const SELECTOR_ENGINES = {
         for (let text = texts.nextNode(); text; text = texts.nextNode()) if (/${INVISIBLE}/u.test(text.data) && !text.parentElement?.closest("script, style, noscript")) return true;
         return false;
       };
-      const headShown = [...(document.head?.querySelectorAll("*") ?? [])].some((el) => el.checkVisibility());
-      if (shadowRoots.length === 0 && !headShown && !showsInvisible()) return [];
+      const hiddenShown = [...(document.head?.querySelectorAll("*") ?? []), ...document.querySelectorAll("script, style")].some((el) => el.checkVisibility());
+      if (shadowRoots.length === 0 && !hiddenShown && !showsInvisible()) return [];
       return [root, ...shadowRoots]
         .flatMap((tree) => [...tree.querySelectorAll("*")])
         .filter((el) => (!document.head?.contains(el) || el.checkVisibility()) && shows(el) && !flatChildrenOf(el).some((child) => child.nodeType === Node.ELEMENT_NODE && shows(child)));
@@ -264,34 +264,29 @@ function closedRootHides(root: DomNode, secrets: RegExp | null): boolean {
     node.distributedNodes?.length ? node.distributedNodes.flatMap((slotted) => byId.get(slotted.backendNodeId) ?? []) : node.shadowRoots?.length ? node.shadowRoots : (node.children ?? []);
   const everyMatch = new RegExp(secrets.source, "gi");
   const invisible = new RegExp(INVISIBLE, "gu");
-  return nodes
-    .filter((node) => node.nodeType === 9)
-    .some((document) => {
-      let shown = "";
-      const closedParts: Array<[number, number]> = [];
-      const cutEnds: number[] = [];
-      const read = (node: DomNode, closed: boolean) => {
-        if (node.nodeType === 3) {
-          const text = node.nodeValue.replace(invisible, "");
-          if (closed) closedParts.push([shown.length, shown.length + text.length]);
-          shown += text;
-          if (node.nodeValue.length > CDP_TEXT_LIMIT && node.nodeValue.endsWith("\u2026")) cutEnds.push(closed ? -1 : shown.length);
-        } else if (!/^(HEAD|SCRIPT|NOSCRIPT|STYLE)$/i.test(node.nodeName)) {
-          for (const child of flatChildrenOf(node)) read(child, closed || child.shadowRootType === "closed");
-        }
-      };
-      read(document, false);
-      if (closedParts.length === 0) return false;
-      const longestNeedle = secrets.source.length;
-      if (cutEnds.some((end) => end < 0 || closedParts.some(([from]) => from >= end && from - end < longestNeedle))) return true;
-      everyMatch.lastIndex = 0;
-      for (let match = everyMatch.exec(shown); match; match = everyMatch.exec(shown)) {
-        const [start, end] = [match.index, match.index + match[0].length];
-        if (closedParts.some(([from, to]) => from < end && start < to)) return true;
-        everyMatch.lastIndex = match.index + 1;
+  const readings = nodes.filter((node) => node.nodeType === 9).flatMap((document) => [{ document, blankShown: true }, { document, blankShown: false }]);
+  return readings.some(({ document, blankShown }) => {
+    let shown = "";
+    const closedParts: Array<[number, number]> = [];
+    const read = (node: DomNode, closed: boolean) => {
+      if (node.nodeType === 3) {
+        const text = blankShown || node.nodeValue.trim() ? node.nodeValue.replace(invisible, "") : "";
+        if (closed) closedParts.push([shown.length, shown.length + text.length]);
+        shown += text;
+      } else if (!/^(HEAD|SCRIPT|NOSCRIPT|STYLE)$/i.test(node.nodeName)) {
+        for (const child of flatChildrenOf(node)) read(child, closed || child.shadowRootType === "closed");
       }
-      return false;
-    });
+    };
+    read(document, false);
+    if (closedParts.length === 0) return false;
+    everyMatch.lastIndex = 0;
+    for (let match = everyMatch.exec(shown); match; match = everyMatch.exec(shown)) {
+      const [start, end] = [match.index, match.index + match[0].length];
+      if (closedParts.some(([from, to]) => from < end && start < to)) return true;
+      everyMatch.lastIndex = match.index + 1;
+    }
+    return false;
+  });
 }
 function fieldStateOf(el: any, mark: string) {
   return {
@@ -558,6 +553,10 @@ export async function openBrowser(opts: {
         try {
           await session.send("DOM.enable", { includeWhitespace: "all" });
           const { root } = (await session.send("DOM.getDocument", { depth: -1, pierce: true })) as { root: DomNode };
+          for (const node of nodesOfDocuments(root).filter((n) => n.nodeType === 3 && n.nodeValue.length > CDP_TEXT_LIMIT && n.nodeValue.endsWith("\u2026"))) {
+            const { outerHTML } = await session.send("DOM.getOuterHTML", { backendNodeId: node.backendNodeId });
+            node.nodeValue = outerHTML.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, "\u00a0").replace(/&amp;/g, "&");
+          }
           if (closedRootHides(root, secrets)) return true;
         } finally {
           await session.detach().catch(() => undefined);
