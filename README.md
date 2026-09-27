@@ -103,7 +103,7 @@ Then export your key, with your own in place of `sk-or-…`, in every terminal y
 export OPENROUTER_API_KEY="sk-or-…"
 ```
 
-Run the commands below from the `trawler` directory. Anywhere else, `npx` looks for `trawler-runner` on the npm registry, where Trawler has not published it; if it offers to install a package, say no.
+Run the commands below from the `trawler` directory. Anywhere else, `npx` offers to install `trawler-runner` from the npm registry, where that name holds only Trawler's placeholder: it prints how to run the runner from a checkout, and stops.
 
 ### 1. Propose a plan
 
