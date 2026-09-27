@@ -98,7 +98,7 @@ export async function screenCapture(db: Database, orgId: string, id: string) {
       .innerJoin("jobs as j", "j.id", "a.job_id")
       .innerJoin("runs as r", "r.id", "a.run_id")
       .leftJoin("findings as f", (join) => join.onRef("f.run_id", "=", "a.run_id").onRef("f.key", "=", "a.finding_key"))
-      .select(["a.id", "a.run_id", "r.number", "r.project_id", "j.kind", "f.title"])
+      .select(["a.id", "a.run_id", "r.number", "r.project_id", "j.kind", "f.key", "f.title"])
       .where("a.id", "=", id)
       .where("a.org_id", "=", orgId)
       .where("a.kind", "=", "screenshot")
@@ -106,5 +106,5 @@ export async function screenCapture(db: Database, orgId: string, id: string) {
       .where("a.discarded_at", "is", null)
       .executeTakeFirst(),
   );
-  return found ? { id: found.id, runId: found.run_id, runNumber: found.number, projectId: found.project_id, replay: found.kind === "replay", findingTitle: found.title } : null;
+  return found ? { id: found.id, runId: found.run_id, runNumber: found.number, projectId: found.project_id, replay: found.kind === "replay", findingKey: found.key, findingTitle: found.title } : null;
 }

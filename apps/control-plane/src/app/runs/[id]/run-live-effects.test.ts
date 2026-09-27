@@ -235,11 +235,13 @@ test("a run that is gone is not fetched again, even while it is live", async () 
   expect(fetched).not.toHaveBeenCalled();
 });
 
+const finding = { key: "ana:f1", personaKey: "ana", personaName: "Ana", kind: "defect", goal: "g1", goalText: "Get an account.", title: "Saving fails", observed: "A 500 page.", reproduction: ["Open.", "Save."], severity: "high", replay: null, verdict: "confirmed" };
+
 test("the finding a judge just answered takes the focus, without scrolling the page", () => {
   const focus = vi.fn();
   const focused = vi.fn();
   react.refs = [{ current: { focus } }];
-  const f = { key: "ana:f1", personaKey: "ana", personaName: "Ana", kind: "defect", goal: "g1", goalText: "Get an account.", title: "Saving fails", observed: "A 500 page.", reproduction: ["Open.", "Save."], severity: "high", replay: null, verdict: "confirmed" };
+  const f = finding;
   FindingRow({ f: f as never, n: 1, focus: true, onFocused: focused });
   react.effects[0]!();
   expect(focus).toHaveBeenCalledWith({ preventScroll: true });
@@ -250,6 +252,53 @@ test("the finding a judge just answered takes the focus, without scrolling the p
   react.effects[0]!();
   expect(focus).toHaveBeenCalledOnce();
   expect(focused).toHaveBeenCalledOnce();
+});
+
+test("a finding named in the address opens when the page loads or the address changes to it, clear of the sticky header, and opening or closing it, or opening one of its captures, keeps the address in step, so going back from a capture finds its finding open", () => {
+  const listeners = new Map<string, () => void>();
+  const location = { hash: "#finding-ana%3Af1", pathname: "/runs/run-1", search: "?from=list" };
+  const replaceState = vi.fn();
+  const removeEventListener = vi.fn();
+  vi.stubGlobal("window", { location, history: { replaceState }, addEventListener: (type: string, listener: () => void) => listeners.set(type, listener), removeEventListener });
+  const details = { open: false };
+  react.refs = [{ current: null }, { current: details }];
+  const tree = FindingRow({ f: finding as never, n: 1 });
+  const row = nodes(tree)[0]!;
+  expect(row.type).toBe("li");
+  expect(row.props!.id).toBe("finding-ana%3Af1");
+  expect(row.props!.className).toMatch(/\btall:scroll-mt-24\b/);
+
+  const stop = react.effects[1]!() as () => void;
+  expect(details.open).toBe(true);
+  details.open = false;
+  location.hash = "#finding-ana%3Af2";
+  listeners.get("hashchange")!();
+  expect(details.open).toBe(false);
+  location.hash = "#finding-ana%3Af1";
+  listeners.get("hashchange")!();
+  expect(details.open).toBe(true);
+  stop();
+  expect(removeEventListener).toHaveBeenCalledWith("hashchange", listeners.get("hashchange"));
+
+  const toggle = nodes(tree).find((node) => node.type === "details")!.props!.onToggle as (event: { currentTarget: { open: boolean } }) => void;
+  location.hash = "";
+  toggle({ currentTarget: { open: true } });
+  expect(replaceState).toHaveBeenLastCalledWith(null, "", "#finding-ana%3Af1");
+  location.hash = "#finding-ana%3Af1";
+  toggle({ currentTarget: { open: true } });
+  expect(replaceState).toHaveBeenCalledOnce();
+  toggle({ currentTarget: { open: false } });
+  expect(replaceState).toHaveBeenLastCalledWith(null, "", "/runs/run-1?from=list");
+  location.hash = "#finding-ana%3Af2";
+  toggle({ currentTarget: { open: false } });
+  expect(replaceState).toHaveBeenCalledTimes(2);
+
+  const openCapture = nodes(tree).find((node) => node.props && "screenshots" in node.props)!.props!.onOpen as () => void;
+  openCapture();
+  expect(replaceState).toHaveBeenLastCalledWith(null, "", "#finding-ana%3Af1");
+  location.hash = "#finding-ana%3Af1";
+  openCapture();
+  expect(replaceState).toHaveBeenCalledTimes(3);
 });
 
 test("the status line says when the page lost contact, or when the run is gone", () => {
