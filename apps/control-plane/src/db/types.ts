@@ -263,6 +263,7 @@ export interface SetupAttempts {
 
 export interface SetupDrafts {
   created_at: Generated<Timestamp>;
+  described_at: Timestamp | null;
   description: string | null;
   docs: string | null;
   docs_url: string | null;

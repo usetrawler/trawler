@@ -28,7 +28,7 @@ vi.mock("../../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: 
 vi.mock("../../../credentials/credentials.ts", () => ({ modelKeyHint: async () => null }));
 vi.mock("../../../projects/projects.ts", () => ({
   projectForEditing: async (_tx: unknown, _orgId: string, id: string) => ({
-    id, name: "Acme", target_url: "https://app.acme.test/", docs_url: null, description: "Invoices.", focus: null, allowed_origins: [],
+    id, name: "Acme", target_url: "https://app.acme.test/", docs_url: null, description: "Invoices.", focus: null, features: ["Send an invoice"], allowed_origins: [],
     personas: [], goals: [], accounts: [], gates: [],
   }),
 }));
@@ -74,6 +74,12 @@ test("the plan is the project's Plan tab, next to its Runs with their number, wi
   expect(html).not.toContain('aria-label="Progress"');
   expect(html).toMatch(new RegExp(`<a href="/projects/${ID}#start"[^>]*>New run<`));
   expect(html).toMatch(/>Project · <a href="https:\/\/app\.acme\.test\/"[^>]*>app\.acme\.test</);
+});
+
+test("the plan shows the features it was set up for, with a way to change them", async () => {
+  const html = await render();
+  expect(html).toContain("Send an invoice");
+  expect(html).toMatch(new RegExp(`<a [^>]*href="/projects/${ID}/features"[^>]*>Change features</a>`));
 });
 
 test("a project without runs still offers its Runs tab, counted as none", async () => {

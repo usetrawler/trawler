@@ -5,9 +5,10 @@ import { scriptedModel, text } from "../../../../packages/core/src/testing.ts";
 import { withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
-import { addAccount, loadProjectConfig, projectForEditing } from "../projects/projects.ts";
+import { addAccount, loadProjectConfig, projectForEditing, replacePlan } from "../projects/projects.ts";
 import { describeDraft, DraftGone, proposeFromDraft, SETUP_LIMITS, SetupLimited, startDraft, type SetupDeps } from "./propose.ts";
 import { FetchRefused } from "./safe-fetch.ts";
+import { SetupModelFailed } from "@usetrawler/core/setup";
 
 const t = await testDb();
 afterAll(() => t.drop());
@@ -48,13 +49,15 @@ test("changing a project's features proposes its people again and keeps its test
   const first = await startDraft(deps(model), { orgId: "org-a", url: "https://app.acme.test/" });
   await describeDraft(deps(model), { orgId: "org-a", draftId: first });
   const id = await proposeFromDraft(deps(model), { orgId: "org-a", draftId: first, description: "d", features: ["Send an invoice"] });
-  await withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "tom@acme.test", password: "pw" }, keys));
+  const ref = await withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "tom@acme.test", password: "pw" }, keys));
+  const planned = await withOrg(t.db, "org-a", (tx) => loadProjectConfig(tx, "org-a", id, keys));
+  await withOrg(t.db, "org-a", (tx) => replacePlan(tx, "org-a", id, { personas: planned.personas.map((p) => (p.id === "tom" ? { ...p, accountRef: ref } : p)), goals: planned.goals }));
   const again = await startDraft(deps(model), { orgId: "org-a", projectId: id });
   await describeDraft(deps(model), { orgId: "org-a", draftId: again });
   expect(await proposeFromDraft(deps(model), { orgId: "org-a", draftId: again, description: "Approvals.", features: ["Get paid"] })).toBe(id);
   const editing = await withOrg(t.db, "org-a", (tx) => projectForEditing(tx, "org-a", id));
   expect(editing).toMatchObject({ description: "Approvals.", features: ["Get paid"] });
-  expect(editing?.personas.map((p) => p.key)).toEqual(["tom"]);
+  expect(editing?.personas.map((p) => [p.key, p.account_ref, p.signs_in])).toEqual([["tom", ref, true]]);
   expect(editing?.accounts.map((a) => a.username)).toEqual(["tom@acme.test"]);
 });
 
@@ -102,4 +105,49 @@ test("a claim waits for a concurrent claim in the same workspace and sees its at
   await holder;
   await expect(claim).rejects.toBeInstanceOf(SetupLimited);
   expect(fetched).toBe(0);
+});
+
+test("a draft is described once: asking again returns the same answer without calling the model", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-once', 'O', 'once', now())`.execute(t.db);
+  const model = scriptedModel([text(JSON.stringify(summary))]);
+  const draftId = await startDraft(deps(model), { orgId: "org-once", url: "https://app.acme.test/" });
+  expect(await describeDraft(deps(model), { orgId: "org-once", draftId })).toEqual(summary);
+  expect(await describeDraft(deps(model), { orgId: "org-once", draftId })).toEqual(summary);
+  expect(model.doGenerateCalls).toHaveLength(1);
+  const failing = scriptedModel([text("not json"), text("not json")]);
+  const broken = await startDraft(deps(failing), { orgId: "org-once", url: "https://app.acme.test/" });
+  await expect(describeDraft(deps(failing), { orgId: "org-once", draftId: broken })).rejects.toBeInstanceOf(SetupModelFailed);
+  await expect(describeDraft(deps(failing), { orgId: "org-once", draftId: broken })).rejects.toBeInstanceOf(DraftGone);
+  expect(failing.doGenerateCalls).toHaveLength(2);
+});
+
+test("a draft proposes people once, even when asked twice at the same time", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-twice', 'T', 'twice', now())`.execute(t.db);
+  const model = scriptedModel([text(JSON.stringify(summary)), text(JSON.stringify(people)), text(JSON.stringify(people))]);
+  const draftId = await startDraft(deps(model), { orgId: "org-twice", url: "https://twice.acme.test/" });
+  await describeDraft(deps(model), { orgId: "org-twice", draftId });
+  const both = await Promise.allSettled([0, 1].map(() => proposeFromDraft(deps(model), { orgId: "org-twice", draftId, description: "d", features: ["Get paid"] })));
+  expect(both.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+  expect(both.filter((r) => r.status === "rejected" && r.reason instanceof DraftGone)).toHaveLength(1);
+  const { rows } = await sql<{ n: number }>`select count(*)::int as n from projects where target_url = 'https://twice.acme.test/'`.execute(t.db);
+  expect(rows[0]!.n).toBe(1);
+});
+
+test("saving the plan keeps who signs in, and a draft older than a day is gone and cleared", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-keep', 'K', 'keep', now())`.execute(t.db);
+  const model = scriptedModel([text(JSON.stringify(summary)), text(JSON.stringify(people))]);
+  const draftId = await startDraft(deps(model), { orgId: "org-keep", url: "https://app.acme.test/" });
+  await describeDraft(deps(model), { orgId: "org-keep", draftId });
+  const id = await proposeFromDraft(deps(model), { orgId: "org-keep", draftId, description: "d", features: ["Get paid"] });
+  const planned = await withOrg(t.db, "org-keep", (tx) => loadProjectConfig(tx, "org-keep", id, keys));
+  await withOrg(t.db, "org-keep", (tx) => replacePlan(tx, "org-keep", id, { personas: planned.personas.map((p) => ({ ...p, name: `${p.name}!` })), goals: planned.goals }));
+  const editing = await withOrg(t.db, "org-keep", (tx) => projectForEditing(tx, "org-keep", id));
+  expect(editing?.personas.map((p) => [p.key, p.signs_in])).toEqual([["ana", false], ["tom", true]]);
+
+  const old = await startDraft(deps(model), { orgId: "org-keep", url: "https://app.acme.test/" });
+  await sql`update setup_drafts set created_at = now() - interval '25 hours' where id = ${old}`.execute(t.db);
+  await expect(describeDraft(deps(model), { orgId: "org-keep", draftId: old })).rejects.toBeInstanceOf(DraftGone);
+  await startDraft(deps(model), { orgId: "org-x", url: "https://other.test/" });
+  const { rows } = await sql<{ n: number }>`select count(*)::int as n from setup_drafts where id = ${old}`.execute(t.db);
+  expect(rows[0]!.n).toBe(0);
 });

@@ -89,7 +89,7 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
     const described = await outdatedAware(() => describeProductAction(read.draftId), "Reload the page to analyse the product.");
     if (!described.ok) return (setError(described.error), setStage({ kind: "address" }));
     const summary = described.summary;
-    setStage({ kind: "context", draftId: read.draftId, host, description: initialDescription ?? summary.description, features: featuresFrom(summary, chosenBefore) });
+    setStage({ kind: "context", draftId: read.draftId, host, description: initialDescription || summary.description, features: featuresFrom(summary, chosenBefore) });
   };
 
   const startedFor = useRef<string | null>(null);
@@ -103,7 +103,7 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
     return (
       <div className="flex flex-col gap-4">
         {intro}
-        <p className="max-w-xl text-muted">Trawler reads {projectHost} again, lists what the product does, and proposes people for the features you choose. Proposing replaces the people and goals on the plan; test accounts stay.</p>
+        <p className="max-w-xl text-muted">Trawler reads {projectHost} again, lists what the product does, and proposes people for the features you choose. Proposing replaces the people and goals on the plan. Test accounts stay; check who signs in with them afterwards.</p>
         {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
         <button type="button" onClick={analyse} disabled={pending} className="flex h-12 items-center justify-between gap-6 self-start bg-action px-5 font-mono text-sm tracking-[0.12em] text-[#17191c] uppercase transition hover:brightness-110 disabled:opacity-70">
           Read the product again <span aria-hidden>→</span>
@@ -200,7 +200,7 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
           <button type="submit" className="h-11 border border-ink px-4 font-mono text-xs tracking-[0.12em] uppercase">Add</button>
         </form>
       </section>
-      {projectId && <p className="text-sm text-muted">Proposing replaces the people and goals on the plan. Test accounts stay.</p>}
+      {projectId && <p className="text-sm text-muted">Proposing replaces the people and goals on the plan. Test accounts stay; check who signs in with them afterwards.</p>}
       {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
       <div className="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
         <button type="button" onClick={() => { setError(null); setStage({ kind: "address" }); }} className="text-sm text-muted hover:text-ink">← Back</button>

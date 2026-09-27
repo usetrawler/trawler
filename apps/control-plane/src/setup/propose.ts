@@ -2,7 +2,7 @@ import type { LanguageModel } from "ai";
 import { Budget, describeProduct, proposePeople, readProduct, type ProductPage, type ProductSummary } from "@usetrawler/core/setup";
 import { sql } from "kysely";
 import type { Database } from "../db/index.ts";
-import { withOrg } from "../db/tenancy.ts";
+import { asSystem, withOrg } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
 import { createProject, ProjectNotFound, replacePlan } from "../projects/projects.ts";
 import { FetchRefused } from "./safe-fetch.ts";
@@ -57,10 +57,12 @@ function productOf(draft: { url: string; docs_url: string | null; page: string; 
 
 export async function startDraft(deps: SetupDeps, input: { orgId: string; url?: string; projectId?: string }): Promise<string> {
   let url = input.url ?? "";
+  let docsUrl: string | undefined;
   if (input.projectId) {
     const project = await withOrg(deps.db, input.orgId, (tx) => tx.selectFrom("projects").select(["target_url", "docs_url"]).where("id", "=", input.projectId!).where("org_id", "=", input.orgId).executeTakeFirst());
     if (!project) throw new ProjectNotFound();
     url = project.target_url;
+    docsUrl = project.docs_url ?? undefined;
   }
   await claimSetupAttempt(deps.db, input.orgId);
   const productUrl = URL.canParse(url) ? new URL(url).href : url;
@@ -70,6 +72,7 @@ export async function startDraft(deps: SetupDeps, input: { orgId: string; url?: 
   try {
     product = await readProduct({
       url,
+      docsUrl,
       fetchText: async (u) => {
         try {
           const { text, finalUrl } = await deps.fetchText(u);
@@ -84,8 +87,8 @@ export async function startDraft(deps: SetupDeps, input: { orgId: string; url?: 
   } catch (err) {
     throw refusal ?? err;
   }
+  await asSystem(deps.db, (tx) => tx.deleteFrom("setup_drafts").where("created_at", "<", sql<Date>`now() - make_interval(hours => ${DRAFT_HOURS})`).execute());
   return withOrg(deps.db, input.orgId, async (tx) => {
-    await tx.deleteFrom("setup_drafts").where("org_id", "=", input.orgId).where("created_at", "<", sql<Date>`now() - make_interval(hours => ${DRAFT_HOURS})`).execute();
     const { id } = await tx.insertInto("setup_drafts").values({
       org_id: input.orgId, project_id: input.projectId ?? null, url: product.url, docs_url: product.docsUrl ?? null, page: product.page, docs: product.docs ?? null, origins: [...origins],
     }).returning("id").executeTakeFirstOrThrow();
@@ -95,6 +98,12 @@ export async function startDraft(deps: SetupDeps, input: { orgId: string; url?: 
 
 export async function describeDraft(deps: SetupDeps, input: { orgId: string; draftId: string }): Promise<ProductSummary> {
   const draft = await draftOf(deps, input.orgId, input.draftId);
+  const claimed = await withOrg(deps.db, input.orgId, (tx) => tx.updateTable("setup_drafts").set({ described_at: new Date() }).where("id", "=", draft.id).where("described_at", "is", null).returning("id").executeTakeFirst());
+  if (!claimed) {
+    const described = await draftOf(deps, input.orgId, input.draftId);
+    if (!described.features) throw new DraftGone("the setup draft was already described without a result");
+    return { name: described.name ?? new URL(described.url).hostname, description: described.description ?? "", features: described.features as unknown as ProductSummary["features"] };
+  }
   const { summary } = await describeProduct({ model: deps.model, modelId: deps.modelId, budget: new Budget(SETUP_BUDGET_USD), product: productOf(draft) });
   await withOrg(deps.db, input.orgId, (tx) => tx.updateTable("setup_drafts").set({ name: summary.name, description: summary.description, features: JSON.stringify(summary.features) }).where("id", "=", draft.id).execute());
   return summary;
@@ -110,15 +119,21 @@ export async function proposeFromDraft(deps: SetupDeps, input: { orgId: string; 
   });
   const features = input.features.map((f) => f.trim()).filter(Boolean);
   return withOrg(deps.db, input.orgId, async (tx) => {
+    const taken = await tx.deleteFrom("setup_drafts").where("id", "=", draft.id).returning("id").executeTakeFirst();
+    if (!taken) throw new DraftGone("the setup draft was already used");
     let projectId = draft.project_id;
     if (projectId) {
-      await replacePlan(tx, input.orgId, projectId, { personas: project.personas, goals: project.goals }, signsIn);
-      await tx.updateTable("projects").set({ description: project.description, features }).where("id", "=", projectId).execute();
+      const before = await tx.selectFrom("personas").select(["key", "account_ref"]).where("project_id", "=", projectId).execute();
+      const accountOf = new Map(before.map((p) => [p.key, p.account_ref]));
+      const personas = project.personas.map((p) => (accountOf.get(p.id) ? { ...p, accountRef: accountOf.get(p.id)! } : p));
+      await replacePlan(tx, input.orgId, projectId, { personas, goals: project.goals }, signsIn);
+      const current = await tx.selectFrom("projects").select("allowed_origins").where("id", "=", projectId).executeTakeFirstOrThrow();
+      const allowedOrigins = [...new Set([...current.allowed_origins, ...draft.origins])].slice(0, 20);
+      await tx.updateTable("projects").set({ description: project.description, features, allowed_origins: allowedOrigins }).where("id", "=", projectId).execute();
     } else {
       const config = { ...project, allowedOrigins: [...new Set([...project.allowedOrigins, ...draft.origins])] };
       projectId = await createProject(tx, input.orgId, config, deps.keys, { features, signsIn });
     }
-    await tx.deleteFrom("setup_drafts").where("id", "=", draft.id).execute();
     return projectId;
   });
 }

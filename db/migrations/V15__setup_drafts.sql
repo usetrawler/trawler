@@ -10,6 +10,7 @@ CREATE TABLE setup_drafts (
   name text CHECK (length(name) <= 100),
   description text CHECK (length(description) <= 2000),
   features jsonb,
+  described_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   FOREIGN KEY (project_id, org_id) REFERENCES projects (id, org_id) ON DELETE CASCADE
 );
