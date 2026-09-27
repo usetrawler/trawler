@@ -43,6 +43,7 @@ async function claimSetupAttempt(db: Database, orgId: string): Promise<void> {
 export class DraftGone extends Error {}
 
 const DRAFT_HOURS = 24;
+const MAX_OTHER_ORIGINS = 19;
 
 async function draftOf(deps: SetupDeps, orgId: string, draftId: string) {
   const draft = await withOrg(deps.db, orgId, (tx) => tx.selectFrom("setup_drafts").selectAll().where("id", "=", draftId).where("org_id", "=", orgId)
@@ -128,7 +129,11 @@ export async function proposeFromDraft(deps: SetupDeps, input: { orgId: string; 
       const personas = project.personas.map((p) => (accountOf.get(p.id) ? { ...p, accountRef: accountOf.get(p.id)! } : p));
       await replacePlan(tx, input.orgId, projectId, { personas, goals: project.goals }, signsIn);
       const current = await tx.selectFrom("projects").select("allowed_origins").where("id", "=", projectId).executeTakeFirstOrThrow();
-      const allowedOrigins = [...new Set([...current.allowed_origins, ...draft.origins])].slice(0, 20);
+      const target = new URL(draft.url).origin;
+      const allowedOrigins = [...current.allowed_origins];
+      for (const origin of draft.origins) {
+        if (origin !== target && !allowedOrigins.includes(origin) && allowedOrigins.length < MAX_OTHER_ORIGINS) allowedOrigins.push(origin);
+      }
       await tx.updateTable("projects").set({ description: project.description, features, allowed_origins: allowedOrigins }).where("id", "=", projectId).execute();
     } else {
       const config = { ...project, allowedOrigins: [...new Set([...project.allowedOrigins, ...draft.origins])] };

@@ -151,3 +151,18 @@ test("saving the plan keeps who signs in, and a draft older than a day is gone a
   const { rows } = await sql<{ n: number }>`select count(*)::int as n from setup_drafts where id = ${old}`.execute(t.db);
   expect(rows[0]!.n).toBe(0);
 });
+
+test("proposing again never lets a project's origins outgrow what a run can load", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-wide', 'W', 'wide', now())`.execute(t.db);
+  const model = scriptedModel([text(JSON.stringify(summary)), text(JSON.stringify(people)), text(JSON.stringify(summary)), text(JSON.stringify(people))]);
+  const first = await startDraft(deps(model, reads("https://app.acme.test/")), { orgId: "org-wide", url: "https://app.acme.test/" });
+  await describeDraft(deps(model), { orgId: "org-wide", draftId: first });
+  const id = await proposeFromDraft(deps(model), { orgId: "org-wide", draftId: first, description: "d", features: ["Get paid"] });
+  const many = Array.from({ length: 19 }, (_, i) => `https://o${i}.acme.test`);
+  await sql`update projects set allowed_origins = ${many} where id = ${id}`.execute(t.db);
+  const again = await startDraft(deps(model), { orgId: "org-wide", projectId: id });
+  await describeDraft(deps(model), { orgId: "org-wide", draftId: again });
+  await proposeFromDraft(deps(model), { orgId: "org-wide", draftId: again, description: "d", features: ["Get paid"] });
+  const config = await withOrg(t.db, "org-wide", (tx) => loadProjectConfig(tx, "org-wide", id, keys));
+  expect(config.allowedOrigins).toHaveLength(20);
+});
