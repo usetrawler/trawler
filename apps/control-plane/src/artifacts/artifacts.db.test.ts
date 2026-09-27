@@ -153,14 +153,16 @@ test("a screen capture opens with its run and finding in its own workspace only,
   const finding = { id: "f1", kind: "defect", goal: "g", title: "Saving fails", observed: "An error page", reproduction: ["Open the form", "Click Save"], severity: "high" };
   await ingestEvents(t.db, session.token, [{ seq: 1, at, jobId: session.jobId, type: "finding", finding }] as never, session.jobId);
   const reported = await stored(session, PNG, { query: "kind=screenshot&finding=f1" });
+  const unnamed = await stored(session, PNG, { query: "kind=screenshot" });
   await done(session);
   const replay = (await claimJob(t.db, keys))!;
   const replayed = await stored(replay, PNG, { query: "kind=screenshot" });
   const { number } = (await sql<{ number: number }>`select number from runs where id = ${session.runId}`.execute(t.db)).rows[0]!;
-  const place = { runId: session.runId, runNumber: number, projectId: expect.any(String), findingTitle: "Saving fails" };
+  const place = { runId: session.runId, runNumber: number, projectId: expect.any(String), findingKey: "ana:f1", findingTitle: "Saving fails" };
 
   expect(await screenCapture(t.db, "org-a", reported)).toEqual({ id: reported, replay: false, ...place });
   expect(await screenCapture(t.db, "org-a", replayed)).toEqual({ id: replayed, replay: true, ...place });
+  expect(await screenCapture(t.db, "org-a", unnamed)).toEqual({ id: unnamed, replay: false, ...place, findingKey: null, findingTitle: null });
   expect(await screenCapture(t.db, "org-b", reported)).toBeNull();
   expect(await screenCapture(t.db, "org-a", "not-a-capture")).toBeNull();
   await sql`update artifacts set stored_at = null where id = ${reported}`.execute(t.db);

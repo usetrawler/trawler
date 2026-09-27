@@ -9,16 +9,12 @@ export function CaptureFrame({ shot, failed, onFailed }: { shot: Shot; failed: b
   };
   return (
     <figure className="relative row-span-2 grid min-w-0 grid-rows-subgrid gap-2 border border-line bg-paper p-3">
-      <figcaption className="flex items-start justify-between gap-3 font-mono text-[11px] tracking-[0.15em] text-muted uppercase">
-        <span>Screen capture · {shot.caption}</span>
-        {!failed && <span aria-hidden="true">↗</span>}
-      </figcaption>
+      <figcaption className="font-mono text-[11px] tracking-[0.15em] text-muted uppercase">Screen capture · {shot.caption}</figcaption>
       {failed ? (
         <p className="text-sm text-muted">This screen capture could not be loaded.</p>
       ) : (
-        <a href={`/captures/${shot.id}`} target="_blank" rel="noreferrer" className="block self-start border border-line bg-panel after:absolute after:inset-0 hover:border-ink">
+        <a href={`/captures/${shot.id}`} className="block self-start border border-line bg-panel after:absolute after:inset-0 hover:border-ink">
           <img ref={failedBeforeHydration} src={`/api/artifacts/${shot.id}`} alt={shot.alt} width={1280} height={720} loading="lazy" onError={onFailed} className="relative z-[1] block h-auto w-full" />
-          <span className="sr-only"> (opens in a new tab)</span>
         </a>
       )}
     </figure>

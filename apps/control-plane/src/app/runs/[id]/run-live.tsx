@@ -3,6 +3,7 @@ import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState, useTransition } from "react";
 import type { runView, StageState, PersonaState } from "../../../runs/report.ts";
 import type { RunSummary } from "../../../runs/runs.ts";
+import { findingAnchor } from "../../../runs/finding-anchor.ts";
 import { runStatusLabel } from "../../../runs/status.ts";
 import { initials } from "../../../components/initials.ts";
 import { LocalTime } from "../../../components/local-time.tsx";
@@ -125,14 +126,29 @@ function judgedText(report: View["report"], key: string): string {
 export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused }: { f: ReportFinding; n: number; mark?: string; note?: string; detail?: string; action?: React.ReactNode; focus?: boolean; onFocused?: () => void }) {
   const replay = f.replay as { observed: string } | null;
   const summary = useRef<HTMLElement>(null);
+  const details = useRef<HTMLDetailsElement>(null);
+  const anchor = findingAnchor(f.key);
   useEffect(() => {
     if (!focus) return;
     summary.current?.focus({ preventScroll: true });
     onFocused?.();
   }, [focus, onFocused]);
+  useEffect(() => {
+    const openWhenAddressed = () => {
+      if (window.location.hash === `#${anchor}` && details.current) details.current.open = true;
+    };
+    openWhenAddressed();
+    window.addEventListener("hashchange", openWhenAddressed);
+    return () => window.removeEventListener("hashchange", openWhenAddressed);
+  }, [anchor]);
+  const keepInAddress = (event: { currentTarget: { open: boolean } }) => {
+    const addressed = window.location.hash === `#${anchor}`;
+    if (event.currentTarget.open && !addressed) window.history.replaceState(null, "", `#${anchor}`);
+    else if (!event.currentTarget.open && addressed) window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  };
   return (
-    <li className="border-b border-line bg-panel last:border-b-0">
-      <details className="group">
+    <li id={anchor} className="border-b border-line bg-panel last:border-b-0 tall:scroll-mt-24">
+      <details ref={details} onToggle={keepInAddress} className="group">
         <summary ref={summary} className="grid cursor-pointer list-none grid-cols-[75px_minmax(0,1fr)_85px_18px] items-start gap-3.5 p-[17px] max-md:grid-cols-1 [&::-webkit-details-marker]:hidden">
           <span className={`inline-flex w-max px-1.5 py-[5px] font-mono text-[10px] text-[#17191c] uppercase ${SEVERITY_TONE[f.severity] ?? "bg-soft"}`}>{f.severity}<span className="sr-only"> severity</span></span>
           <span className="min-w-0">

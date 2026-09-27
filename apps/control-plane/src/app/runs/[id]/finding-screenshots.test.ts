@@ -14,14 +14,15 @@ test("a replayed defect shows the page when it was reported next to where the re
   expect(html).not.toMatch(/\bsm:grid-cols-2\b/);
   const [reported, replayed] = figures(html);
   expect(reported).toMatch(/^<figure class="[^"]*\brow-span-2 grid\b[^"]*\bgrid-rows-subgrid\b/);
-  expect(reported).toMatch(/<figcaption[^>]*><span>Screen capture · when reported<\/span><span aria-hidden="true">↗<\/span><\/figcaption>/);
-  expect(replayed).toContain("<span>Screen capture · where the replay ended</span>");
+  expect(reported).toMatch(/<figcaption[^>]*>Screen capture · when reported<\/figcaption>/);
+  expect(replayed).toMatch(/<figcaption[^>]*>Screen capture · where the replay ended<\/figcaption>/);
   expect(replayed).toContain('alt="The page where the replay of “Save fails” ended"');
 });
 
-test("each capture keeps its 16:9 place while it loads, nothing covers it, and the whole frame opens a page that stays valid in a new tab", () => {
+test("each capture keeps its 16:9 place while it loads, nothing covers it, and the whole frame opens its page in the same tab", () => {
   const [reported] = figures(render(REPORTED, null));
-  expect(reported).toMatch(new RegExp(`<a href="/captures/${REPORTED}" target="_blank" rel="noreferrer"[^>]*><img src="/api/artifacts/${REPORTED}" alt="The page when “Save fails” was reported" width="1280" height="720" loading="lazy"[^>]*/><span class="sr-only"> \\(opens in a new tab\\)</span></a>`));
+  expect(reported).toMatch(new RegExp(`<a href="/captures/${REPORTED}" class="[^"]*"><img src="/api/artifacts/${REPORTED}" alt="The page when “Save fails” was reported" width="1280" height="720" loading="lazy"[^>]*/></a>`));
+  expect(reported).not.toMatch(/target=|new tab|↗/);
   expect(reported).toMatch(/^<figure class="relative\b/);
   expect(reported).toMatch(/<img [^>]*class="relative z-\[1\] /);
   expect(reported).toMatch(/<a href="\/captures\/[^"]*" [^>]*class="[^"]*\bafter:absolute after:inset-0\b/);
@@ -47,7 +48,6 @@ test("a capture that fails to load says it could not be loaded instead of showin
   const gone = renderToStaticMarkup(CaptureFrame({ shot, failed: true, onFailed }) as ReactElement);
   expect(gone).toContain(">This screen capture could not be loaded.</p>");
   expect(gone).not.toContain("<img");
-  expect(gone).not.toContain("↗");
 });
 
 test("a capture that failed before the page became interactive is noticed once it does, while one still loading or loaded is left alone", () => {
