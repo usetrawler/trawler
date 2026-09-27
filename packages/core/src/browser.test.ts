@@ -288,6 +288,14 @@ beforeAll(async () => {
         return html(`<p style="font:20px monospace;color:#ff0000">Key: card-&#8203;secret-&#8203;1111</p><p>Plan: Team</p>`);
       case "/soft-hyphen":
         return html(`<p style="font:20px monospace;color:#ff0000">Key: card-sec&shy;ret-1111</p><p>Plan: Team</p>`);
+      case "/direction-mark":
+        return html(`<p style="font:20px monospace;color:#ff0000">Key: card-&#8206;secret-1111</p><p>Plan: Team</p>`);
+      case "/bidi-isolate":
+        return html(`<p style="font:20px monospace;color:#ff0000">Key: card-&#8294;secret&#8297;-1111</p><p>Plan: Team</p>`);
+      case "/grapheme-joiner":
+        return html(`<p style="font:20px monospace;color:#ff0000">Key: card-s&#847;ecret-1111</p><p>Plan: Team</p>`);
+      case "/invisible-separator":
+        return html(`<p style="font:20px monospace;color:#ff0000">Key: card-&#8291;secret-1111</p><p>Plan: Team</p>`);
       case "/zero-width-field":
         return html(`<input aria-label="Key" style="width:400px;font:20px monospace;color:#ff0000" value="card-&#8203;secret-1111"><p>Plan: Team</p>`);
       case "/head-shown":
@@ -380,8 +388,22 @@ beforeAll(async () => {
         return html(`<iframe style="width:600px;height:120px;border:0" srcdoc="${`<!doctype html>${closedCard("", "card-secret-1111")}`.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"></iframe>`);
       case "/cut-beside-closed":
         return html(`<p style="font:20px monospace;color:#ff0000;height:24px;overflow:hidden;margin:0">${" ".repeat(10500)}card-secret-<closed-b></closed-b></p><p>Plan: Team</p><script>customElements.define("closed-b", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "1111"; } });</script>`);
+      case "/cut-empty-beside-closed":
+        return html(`<p id="line" style="font:20px monospace;color:#ff0000;height:24px;overflow:hidden;margin:0">${" ".repeat(10500)}card-secret-<closed-b></closed-b></p><p>Plan: Team</p><script>customElements.define("closed-b", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "1111"; } }); const line = document.getElementById("line"); line.insertBefore(document.createTextNode("\\u200b"), line.lastElementChild);</script>`);
+      case "/cut-near-closed":
+        return html(`<p style="font:6px monospace;height:30px;overflow:hidden;margin:0">${"lorem ipsum ".repeat(900)}card-sec<b style="font:20px monospace;color:#ff0000">ret-</b><closed-b></closed-b></p><p>Plan: Team</p><script>customElements.define("closed-b", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = '<span style="font:20px monospace;color:#ff0000">1111</span>'; } });</script>`);
+      case "/closed-phrase-words":
+        return html(closedCard("", "<p><b>correct</b> <b>horse</b> <b>battery</b> <b>staple</b></p>"));
+      case "/closed-invisible-needle":
+        return html(closedCard("", "key&#8203;value-7777"));
+      case "/field-invisible-needle":
+        return html(`<input aria-label="Key" style="width:400px;font:20px monospace;color:#ff0000" value="key&#8203;value-7777"><p>Plan: Team</p>`);
+      case "/head-contents":
+        return html(`<style>head { display: contents } title { display: block; font: 20px monospace; color: #ff0000 }</style><p>Plan: Team</p><script>document.head.append(Object.assign(document.createElement("title"), { textContent: "card-secret-1111" }));</script>`);
       case "/closed-beside-long-text":
         return html(`<closed-note>Help</closed-note><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><pre style="height:40px;overflow:hidden">${"log line ".repeat(1400)}</pre><script>customElements.define("closed-note", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "<slot></slot>"; } });</script>`);
+      case "/closed-after-long-text":
+        return html(`<p style="font:20px monospace;color:#ff0000">card-secret-1111</p><pre style="height:40px;overflow:hidden">${"log line ".repeat(1400)}</pre><p style="height:20px;overflow:hidden">${"filler text ".repeat(600)}</p><closed-note>Help</closed-note><script>customElements.define("closed-note", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "<slot></slot>"; } });</script>`);
       case "/closed-plain":
         return html(`<closed-note>Plan</closed-note><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><script>customElements.define("closed-note", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "<slot></slot>: Team"; } });</script>`);
       case "/pusher":
@@ -1489,6 +1511,11 @@ describe("screenshots", () => {
     ["/soft-hyphen", "has a soft hyphen in it"],
     ["/head-shown", "is in the page's title, which the page's styles show"],
     ["/zero-width-field", "is the value of a field, with a zero-width space in it"],
+    ["/direction-mark", "has a left-to-right mark in it"],
+    ["/bidi-isolate", "has a part wrapped in bidirectional isolates"],
+    ["/grapheme-joiner", "has a combining grapheme joiner in it"],
+    ["/invisible-separator", "has an invisible separator in it"],
+    ["/head-contents", "is in the page's title, which the page's styles show through a head with no box"],
   ])("a secret whose text %s is masked where it is drawn (%s)", async (path) => {
     const [shot] = await shotsOf(path, 1, async () => undefined, knowing(path === "/overflow-edge" ? "card-secret-11112" : "card-secret-1111"));
     expect(shot).not.toBeNull();
@@ -1563,7 +1590,7 @@ describe("screenshots", () => {
     expect(await redPixels(shot!)).toBe(0);
   }, 60_000);
 
-  test.each(["/closed-text", "/closed-groups", "/closed-split", "/closed-slotted", "/closed-slot-after", "/closed-slot-named", "/closed-slot-manual", "/closed-sibling-hosts", "/closed-after-light", "/closed-password", "/closed-typed", "/closed-in-frame", "/closed-long-text", "/closed-zero-width", "/cut-beside-closed"])("a secret or password field inside a closed shadow root gives no screenshot (%s)", async (path) => {
+  test.each(["/closed-text", "/closed-groups", "/closed-split", "/closed-slotted", "/closed-slot-after", "/closed-slot-named", "/closed-slot-manual", "/closed-sibling-hosts", "/closed-after-light", "/closed-password", "/closed-typed", "/closed-in-frame", "/closed-long-text", "/closed-zero-width", "/cut-beside-closed", "/cut-empty-beside-closed", "/cut-near-closed"])("a secret or password field inside a closed shadow root gives no screenshot (%s)", async (path) => {
     expect(await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"))).toEqual([null]);
   }, 60_000);
 
@@ -1594,8 +1621,19 @@ describe("screenshots", () => {
     expect(shot).not.toBeNull();
   }, 60_000);
 
-  test("a long text away from a closed shadow root keeps the screenshot", async () => {
-    const [shot] = await shotsOf("/closed-beside-long-text", 1, async () => undefined, knowing("card-secret-1111"));
+  test("a secret with words in separate elements inside a closed shadow root gives no screenshot", async () => {
+    expect(await shotsOf("/closed-phrase-words", 1, async () => undefined, knowing("correct horse battery staple"))).toEqual([null]);
+  }, 60_000);
+
+  test("a secret that itself holds a zero-width space is recognised inside a closed shadow root and in a field", async () => {
+    expect(await shotsOf("/closed-invisible-needle", 1, async () => undefined, knowing("key\u200bvalue-7777"))).toEqual([null]);
+    const [shot] = await shotsOf("/field-invisible-needle", 1, async () => undefined, knowing("key\u200bvalue-7777"));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
+
+  test.each(["/closed-beside-long-text", "/closed-after-long-text"])("a long text away from a closed shadow root keeps the screenshot (%s)", async (path) => {
+    const [shot] = await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"));
     expect(shot).not.toBeNull();
     expect(await redPixels(shot!)).toBe(0);
   }, 60_000);

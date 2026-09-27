@@ -46,11 +46,11 @@ const SECRET_FIELDS = "trawler-secret-fields";
 const FLAT_TEXT = "trawler-flat-text";
 const LINE_AROUND = "trawler-line-around";
 const MOVING = "trawler-moving";
-const INVISIBLE = "[\\u00ad\\u200b-\\u200d\\u2060\\ufeff]";
+const INVISIBLE = "\\p{Default_Ignorable_Code_Point}";
 const DECODED_SECRETS = `(encoded) => new RegExp(new TextDecoder().decode(Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0))), "i")`;
 const FLAT_CHILDREN_OF = `(node) => (node.localName === "slot" && node.getRootNode() instanceof ShadowRoot ? node.assignedNodes({ flatten: true }) : [...(node.shadowRoot ?? node).childNodes])`;
 const FLAT_TEXT_OF = `(cache) => {
-      const invisible = new RegExp("${INVISIBLE}", "g");
+      const invisible = /${INVISIBLE}/gu;
       const flatTextOf = (node) => {
         if (node.nodeType === Node.TEXT_NODE) return node.data.replace(invisible, "");
         if (node.nodeType === Node.ELEMENT_NODE && node.matches("script, noscript, style")) return "";
@@ -81,7 +81,7 @@ const SELECTOR_ENGINES = {
   [SECRET_FIELDS]: `({
     queryAll(root, encoded) {
       const decoded = (${DECODED_SECRETS})(encoded);
-      const invisible = new RegExp("${INVISIBLE}", "g");
+      const invisible = /${INVISIBLE}/gu;
       const secrets = { test: (value) => decoded.test(value.replace(invisible, "")) };
       const found = [];
       const visit = (scope) => {
@@ -108,7 +108,13 @@ const SELECTOR_ENGINES = {
       const flatTextOf = (${FLAT_TEXT_OF})(new Map());
       const shows = (node) => secrets.test(flatTextOf(node));
       const shadowRoots = (${SHADOW_ROOTS_UNDER})(root);
-      if (shadowRoots.length === 0 && !document.head?.checkVisibility() && !new RegExp("${INVISIBLE}").test(document.documentElement.textContent ?? "")) return [];
+      const showsInvisible = () => {
+        const texts = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_TEXT);
+        for (let text = texts.nextNode(); text; text = texts.nextNode()) if (/${INVISIBLE}/u.test(text.data) && !text.parentElement?.closest("script, style, noscript")) return true;
+        return false;
+      };
+      const headShown = [...(document.head?.querySelectorAll("*") ?? [])].some((el) => el.checkVisibility());
+      if (shadowRoots.length === 0 && !headShown && !showsInvisible()) return [];
       return [root, ...shadowRoots]
         .flatMap((tree) => [...tree.querySelectorAll("*")])
         .filter((el) => (!document.head?.contains(el) || el.checkVisibility()) && shows(el) && !flatChildrenOf(el).some((child) => child.nodeType === Node.ELEMENT_NODE && shows(child)));
@@ -257,26 +263,27 @@ function closedRootHides(root: DomNode, secrets: RegExp | null): boolean {
   const flatChildrenOf = (node: DomNode): DomNode[] =>
     node.distributedNodes?.length ? node.distributedNodes.flatMap((slotted) => byId.get(slotted.backendNodeId) ?? []) : node.shadowRoots?.length ? node.shadowRoots : (node.children ?? []);
   const everyMatch = new RegExp(secrets.source, "gi");
-  const invisible = new RegExp(INVISIBLE, "g");
+  const invisible = new RegExp(INVISIBLE, "gu");
   return nodes
     .filter((node) => node.nodeType === 9)
     .some((document) => {
       let shown = "";
       const closedParts: Array<[number, number]> = [];
-      const texts: Array<{ closed: boolean; cutShort: boolean }> = [];
+      const cutEnds: number[] = [];
       const read = (node: DomNode, closed: boolean) => {
         if (node.nodeType === 3) {
           const text = node.nodeValue.replace(invisible, "");
           if (closed) closedParts.push([shown.length, shown.length + text.length]);
-          texts.push({ closed, cutShort: node.nodeValue.length > CDP_TEXT_LIMIT && node.nodeValue.endsWith("\u2026") });
           shown += text;
+          if (node.nodeValue.length > CDP_TEXT_LIMIT && node.nodeValue.endsWith("\u2026")) cutEnds.push(closed ? -1 : shown.length);
         } else if (!/^(HEAD|SCRIPT|NOSCRIPT|STYLE)$/i.test(node.nodeName)) {
           for (const child of flatChildrenOf(node)) read(child, closed || child.shadowRootType === "closed");
         }
       };
       read(document, false);
       if (closedParts.length === 0) return false;
-      if (texts.some((text, i) => text.cutShort && (text.closed || texts[i - 1]?.closed || texts[i + 1]?.closed))) return true;
+      const longestNeedle = secrets.source.length;
+      if (cutEnds.some((end) => end < 0 || closedParts.some(([from]) => from >= end && from - end < longestNeedle))) return true;
       everyMatch.lastIndex = 0;
       for (let match = everyMatch.exec(shown); match; match = everyMatch.exec(shown)) {
         const [start, end] = [match.index, match.index + match[0].length];
@@ -514,7 +521,7 @@ export async function openBrowser(opts: {
         const value = await readValue(h);
         if (value.length >= MIN_SECRET_LENGTH && value !== valuesBeforeTyping.get(h)) filledValues.push(value);
       }
-      const needles = [...new Set([...opts.scrubber.browserNeedles(), ...typedSecrets, ...filledValues].map((n) => n.trim()))].filter((n) => n.length >= MIN_SECRET_LENGTH).sort((a, b) => b.length - a.length);
+      const needles = [...new Set([...opts.scrubber.browserNeedles(), ...typedSecrets, ...filledValues].map((n) => n.replace(new RegExp(INVISIBLE, "gu"), "").trim()))].filter((n) => n.length >= MIN_SECRET_LENGTH).sort((a, b) => b.length - a.length);
       return needles.length > 0 ? new RegExp(needles.map((n) => escapedForRegExp(n).replace(/\s+/g, "\\s+")).join("|"), "i") : null;
     };
     const secretsIn = (frame: Frame, secrets: RegExp | null) => {
@@ -549,6 +556,7 @@ export async function openBrowser(opts: {
         });
         if (!session) continue;
         try {
+          await session.send("DOM.enable", { includeWhitespace: "all" });
           const { root } = (await session.send("DOM.getDocument", { depth: -1, pierce: true })) as { root: DomNode };
           if (closedRootHides(root, secrets)) return true;
         } finally {
