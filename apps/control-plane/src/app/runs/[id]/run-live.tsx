@@ -149,7 +149,7 @@ export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused 
     else if (window.location.hash === `#${anchor}`) window.history.replaceState(null, "", window.location.pathname + window.location.search);
   };
   return (
-    <li id={anchor} className="border-b border-line bg-panel last:border-b-0 tall:scroll-mt-24">
+    <li id={anchor} className="border-b border-line bg-panel last:border-b-0">
       <details ref={details} onToggle={keepInAddress} className="group">
         <summary ref={summary} className="grid cursor-pointer list-none grid-cols-[75px_minmax(0,1fr)_85px_18px] items-start gap-3.5 p-[17px] max-md:grid-cols-1 [&::-webkit-details-marker]:hidden">
           <span className={`inline-flex w-max px-1.5 py-[5px] font-mono text-[10px] text-[#17191c] uppercase ${SEVERITY_TONE[f.severity] ?? "bg-soft"}`}>{f.severity}<span className="sr-only"> severity</span></span>
@@ -370,6 +370,17 @@ export function RunLive({ initial }: { initial: Data }) {
     setAnnouncement((a) => ({ text: finished.map((k) => judgedText(view.report, k)).join(" "), n: a.n + 1 }));
     if (document.activeElement === document.body) setFocusKey(finished[0]!);
   }, [view.report]);
+  useEffect(() => {
+    const showAddressedFinding = () => {
+      const finding = document.getElementById(window.location.hash.slice(1));
+      if (!finding) return;
+      const { top, bottom } = finding.getBoundingClientRect();
+      if (top > 0 || bottom <= 0) finding.scrollIntoView();
+    };
+    showAddressedFinding();
+    window.addEventListener("hashchange", showAddressedFinding);
+    return () => window.removeEventListener("hashchange", showAddressedFinding);
+  }, []);
 
   const host = URL.canParse(run.target) ? new URL(run.target).host : run.target;
   const { report } = view;
