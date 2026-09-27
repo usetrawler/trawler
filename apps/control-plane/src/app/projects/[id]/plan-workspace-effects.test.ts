@@ -32,7 +32,7 @@ const nodes = (node: unknown): Node[] => {
 const text = (node: unknown): string => (typeof node === "string" ? node : Array.isArray(node) ? node.map(text).join("") : node && typeof node === "object" ? text((node as Node).props?.children ?? "") : "");
 
 const ama: Persona = { id: "ama", name: "Ama", brief: "Brand new." };
-const goals = [{ id: "g", instruction: "Send an invoice." }];
+const goals = [{ id: "g", instruction: "Send an invoice.", personaId: "ama" }];
 const account = { ref: "account-1", username: "kwame@acme.test", hint: "…1234" };
 const outdated = () => new UnrecognizedActionError("Server action not found.");
 

@@ -6,11 +6,7 @@ WITH ranked AS (
 )
 INSERT INTO goals (org_id, project_id, key, instruction, position, persona_key)
 SELECT g.org_id, g.project_id,
-  CASE
-    WHEN length(r.key) <= 29 AND NOT EXISTS (SELECT 1 FROM goals t WHERE t.project_id = g.project_id AND t.key = left(g.key, 30) || '-' || r.key)
-      THEN left(g.key, 30) || '-' || r.key
-    ELSE left(g.key, 30) || '-' || substr(md5(g.key || '/' || r.key), 1, 12)
-  END,
+  left(g.key, 30) || '-' || left(r.key, 16) || '-' || substr(md5(g.key || '/' || r.key), 1, 8),
   g.instruction, g.position + 1000 * (r.rank - 1), r.key
 FROM goals g
 JOIN ranked r ON r.project_id = g.project_id AND r.rank > 1
