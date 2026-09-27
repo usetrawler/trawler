@@ -254,7 +254,7 @@ test("the finding a judge just answered takes the focus, without scrolling the p
   expect(focused).toHaveBeenCalledOnce();
 });
 
-test("a finding named in the address opens when the page loads or the address changes to it, clear of the sticky header, and opening or closing it, or opening one of its captures, keeps the address in step, so going back from a capture finds its finding open", () => {
+test("a finding named in the address opens when the page loads or the address changes to it, and opening or closing it, or opening one of its captures, keeps the address in step, so going back from a capture finds its finding open", () => {
   const listeners = new Map<string, () => void>();
   const location = { hash: "#finding-ana%3Af1", pathname: "/runs/run-1", search: "?from=list" };
   const replaceState = vi.fn();
@@ -266,7 +266,6 @@ test("a finding named in the address opens when the page loads or the address ch
   const row = nodes(tree)[0]!;
   expect(row.type).toBe("li");
   expect(row.props!.id).toBe("finding-ana%3Af1");
-  expect(row.props!.className).toMatch(/\btall:scroll-mt-24\b/);
 
   const stop = react.effects[1]!() as () => void;
   expect(details.open).toBe(true);
@@ -299,6 +298,25 @@ test("a finding named in the address opens when the page loads or the address ch
   location.hash = "#finding-ana%3Af1";
   openCapture();
   expect(replaceState).toHaveBeenCalledTimes(3);
+});
+
+test("the page brings the finding named in its address into view once that finding has opened, on load and when the address changes", () => {
+  const listeners = new Map<string, () => void>();
+  const location = { hash: "#finding-ana%3Af1" };
+  const removeEventListener = vi.fn();
+  vi.stubGlobal("window", { location, addEventListener: (type: string, listener: () => void) => listeners.set(type, listener), removeEventListener });
+  const scrollIntoView = vi.fn();
+  vi.stubGlobal("document", { hidden: false, activeElement: null, body: {}, getElementById: (id: string) => (id === "finding-ana%3Af1" ? { scrollIntoView } : null) });
+  draw(data("succeeded"));
+  const stop = react.effects.at(-1)!() as () => void;
+  expect(scrollIntoView).toHaveBeenCalledOnce();
+  listeners.get("hashchange")!();
+  expect(scrollIntoView).toHaveBeenCalledTimes(2);
+  location.hash = "";
+  listeners.get("hashchange")!();
+  expect(scrollIntoView).toHaveBeenCalledTimes(2);
+  stop();
+  expect(removeEventListener).toHaveBeenCalledWith("hashchange", listeners.get("hashchange"));
 });
 
 test("the status line says when the page lost contact, or when the run is gone", () => {
