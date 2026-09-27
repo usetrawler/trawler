@@ -1393,7 +1393,7 @@ describe("screenshots", () => {
   test("a password the page changed after it was typed is masked where the page repeats it", async () => {
     const swap = (b: Browser, snap: string) => b.tools.browser_click!.execute!({ target: refOf(snap, "Swap"), element: "swap" }, ctx);
     const first = await screenshotAfter("first-secret-1", "/swap-echo", swap);
-    const second = await screenshotAfter("other-secret-2", "/swap-echo", swap);
+    const second = await screenshotAfter("fresh-secret-2", "/swap-echo", swap);
     expect(await differingRegion(first, second)).toBeNull();
   }, 120_000);
 
@@ -1410,7 +1410,7 @@ describe("screenshots", () => {
       if (!taken.shot) throw new Error("no screenshot was taken");
       return taken.shot;
     };
-    expect(await differingRegion(await shotAfter("first-secret-1"), await shotAfter("other-secret-2"))).toBeNull();
+    expect(await differingRegion(await shotAfter("first-secret-1"), await shotAfter("fresh-secret-2"))).toBeNull();
   }, 120_000);
 
   test("a password the page repeats inside a line of text is masked with its whole line, so its length does not show", async () => {
