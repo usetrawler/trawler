@@ -1,6 +1,6 @@
 import { format, inspect, type InspectOptions } from "node:util";
 
-const MASK = "•••";
+export const MASK = "•••";
 export const MIN_SECRET_LENGTH = 8;
 
 function jsonEscaped(s: string): string {
