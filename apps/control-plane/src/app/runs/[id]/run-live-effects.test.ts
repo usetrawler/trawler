@@ -300,16 +300,21 @@ test("a finding named in the address opens when the page loads or the address ch
   expect(replaceState).toHaveBeenCalledTimes(3);
 });
 
-test("the page brings the finding named in its address into view once that finding has opened, on load and when the address changes", () => {
+test("once the finding named in its address has opened, the page brings it into view, on load and when the address changes, unless the top of the view is already within it", () => {
   const listeners = new Map<string, () => void>();
   const location = { hash: "#finding-ana%3Af1" };
   const removeEventListener = vi.fn();
   vi.stubGlobal("window", { location, addEventListener: (type: string, listener: () => void) => listeners.set(type, listener), removeEventListener });
   const scrollIntoView = vi.fn();
-  vi.stubGlobal("document", { hidden: false, activeElement: null, body: {}, getElementById: (id: string) => (id === "finding-ana%3Af1" ? { scrollIntoView } : null) });
+  let box = { top: 647, bottom: 1500 };
+  vi.stubGlobal("document", { hidden: false, activeElement: null, body: {}, getElementById: (id: string) => (id === "finding-ana%3Af1" ? { scrollIntoView, getBoundingClientRect: () => box } : null) });
   draw(data("succeeded"));
   const stop = react.effects.at(-1)!() as () => void;
   expect(scrollIntoView).toHaveBeenCalledOnce();
+  box = { top: -83, bottom: 700 };
+  listeners.get("hashchange")!();
+  expect(scrollIntoView).toHaveBeenCalledOnce();
+  box = { top: -900, bottom: -10 };
   listeners.get("hashchange")!();
   expect(scrollIntoView).toHaveBeenCalledTimes(2);
   location.hash = "";

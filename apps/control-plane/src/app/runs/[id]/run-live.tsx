@@ -371,7 +371,12 @@ export function RunLive({ initial }: { initial: Data }) {
     if (document.activeElement === document.body) setFocusKey(finished[0]!);
   }, [view.report]);
   useEffect(() => {
-    const showAddressedFinding = () => document.getElementById(window.location.hash.slice(1))?.scrollIntoView();
+    const showAddressedFinding = () => {
+      const finding = document.getElementById(window.location.hash.slice(1));
+      if (!finding) return;
+      const { top, bottom } = finding.getBoundingClientRect();
+      if (top > 0 || bottom <= 0) finding.scrollIntoView();
+    };
     showAddressedFinding();
     window.addEventListener("hashchange", showAddressedFinding);
     return () => window.removeEventListener("hashchange", showAddressedFinding);
