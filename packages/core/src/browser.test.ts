@@ -117,6 +117,10 @@ beforeAll(async () => {
         req.on("end", () => html(`<h1>Saved</h1><p>Your password is ${new URLSearchParams(body).get("password")}</p>`));
         return;
       }
+      case "/password-placeholder":
+        return html(`<input aria-label="Password" type="password" placeholder="Enter your password">`);
+      case "/password-colon-label":
+        return html(`<input aria-label="Password: at least 4 characters" type="password">`);
       case "/readonly-password":
         return html(`<input aria-label="Password" type="password" readonly>`);
       case "/pin":
@@ -919,6 +923,21 @@ describe("password fields", () => {
       const shown = await snapshot(b);
       expect(shown).toMatch(/textbox \\"Password\\"[^\\]*: •••/);
       expect(shown).not.toContain("pw12");
+    });
+  }, 60_000);
+
+  test.each([
+    ["a placeholder that differs from its name", "/password-placeholder", "Password", "pw12", "pw12"],
+    ["a name with a colon", "/password-colon-label", "Password: at least 4 characters", "pw12", "pw12"],
+    ["spaces the page view collapses", "/", "Password", " pw  1", "pw 1"],
+  ])("a password too short to scrub stays hidden in a field with %s", async (_, path, name, password, shown) => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}${path}`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, name), password, "password")).toBe("typed the password");
+      const after = await snapshot(b);
+      expect(after).toContain("•••");
+      expect(after).not.toContain(shown);
     });
   }, 60_000);
 
