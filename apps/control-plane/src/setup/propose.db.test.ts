@@ -18,7 +18,7 @@ beforeAll(async () => {
 
 const proposal = {
   name: "Acme", description: "Invoices.",
-  personas: [{ id: "ana", name: "Ana", brief: "You invoice.", goals: [{ id: "invoice", instruction: "Send an invoice." }] }],
+  personas: [{ id: "ana", name: "Ana", brief: "You invoice.", signsIn: false, goals: [{ id: "invoice", instruction: "Send an invoice." }] }],
 };
 
 test("a URL becomes a draft project in the organisation, including where the page redirected", async () => {
