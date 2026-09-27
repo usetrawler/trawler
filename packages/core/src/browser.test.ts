@@ -177,7 +177,7 @@ beforeAll(async () => {
       case "/swap-echo":
         return html(`<input aria-label="Password" type="password"><button onclick="const p = document.querySelector('input'); p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value">Swap</button><p id="echo"></p>`);
       case "/swap-later-slow":
-        return html(`<input aria-label="Password" type="password" oninput="clearTimeout(window.swap); window.swap = setTimeout(() => { const p = this; p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value; const real = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); Object.defineProperty(p, 'value', { get() { const until = Date.now() + 900; while (Date.now() < until) {} return real.get.call(this); }, set(v) { real.set.call(this, v); } }); }, 300)"><p id="echo"></p>`);
+        return html(`<input aria-label="Password" type="password" oninput="clearTimeout(window.swap); window.swap = setTimeout(() => { const p = this; p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value; document.getElementById('state').textContent = 'Swapped'; const real = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); Object.defineProperty(p, 'value', { get() { const until = Date.now() + 900; while (Date.now() < until) {} return real.get.call(this); }, set(v) { real.set.call(this, v); } }); }, 300)"><p id="echo"></p><p id="state">Waiting</p>`);
       case "/reveal-clear":
         return html(`<input aria-label="Password" type="password"><button onclick="const o=document.querySelector('input');const n=document.createElement('input');n.type='text';n.setAttribute('aria-label','Password');n.value=o.value;o.replaceWith(n)">Show password</button><button onclick="document.querySelector('input').value=''">Clear</button>`);
       case "/moving-keyframes":
@@ -1210,6 +1210,35 @@ describe("screenshots", () => {
     }
   }
 
+  async function differingRegion(first: Screenshot, second: Screenshot): Promise<{ x: number; y: number; width: number; height: number } | null> {
+    if (Buffer.compare(Buffer.from(first.bytes), Buffer.from(second.bytes)) === 0) return null;
+    const page = await decoder.newPage();
+    try {
+      return await page.evaluate(
+        async ([a, b]) => {
+          const pixels = async (png: string) => {
+            const image = await createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob());
+            const canvas = new OffscreenCanvas(image.width, image.height);
+            const context = canvas.getContext("2d")!;
+            context.drawImage(image, 0, 0);
+            return { width: image.width, data: context.getImageData(0, 0, image.width, image.height).data };
+          };
+          const [one, two] = [await pixels(a!), await pixels(b!)];
+          let [left, top, right, bottom] = [Infinity, Infinity, -1, -1];
+          for (let i = 0; i < Math.min(one.data.length, two.data.length); i += 4) {
+            if (one.data[i] === two.data[i] && one.data[i + 1] === two.data[i + 1] && one.data[i + 2] === two.data[i + 2]) continue;
+            const x = (i / 4) % one.width, y = Math.floor(i / 4 / one.width);
+            [left, top, right, bottom] = [Math.min(left, x), Math.min(top, y), Math.max(right, x), Math.max(bottom, y)];
+          }
+          return right < 0 ? { x: 0, y: 0, width: 0, height: 0 } : { x: left, y: top, width: right - left + 1, height: bottom - top + 1 };
+        },
+        [Buffer.from(first.bytes).toString("base64"), Buffer.from(second.bytes).toString("base64")],
+      );
+    } finally {
+      await page.close();
+    }
+  }
+
   async function shotsOf(path: string, count: number, setUp: (b: Browser, snap: string) => Promise<unknown>, extra: Partial<Parameters<typeof openBrowser>[0]> = {}): Promise<Array<Screenshot | null>> {
     const shots: Array<Screenshot | null> = [];
     await withBrowser(async (b) => {
@@ -1365,14 +1394,23 @@ describe("screenshots", () => {
     const swap = (b: Browser, snap: string) => b.tools.browser_click!.execute!({ target: refOf(snap, "Swap"), element: "swap" }, ctx);
     const first = await screenshotAfter("first-secret-1", "/swap-echo", swap);
     const second = await screenshotAfter("other-secret-2", "/swap-echo", swap);
-    expect(Buffer.compare(Buffer.from(first.bytes), Buffer.from(second.bytes))).toBe(0);
+    expect(await differingRegion(first, second)).toBeNull();
   }, 120_000);
 
   test("a password the page changed on its own after it was typed is masked even when reading the field is slow", async () => {
-    const settle = () => new Promise((r) => setTimeout(r, 700));
-    const first = await screenshotAfter("first-secret-1", "/swap-later-slow", settle);
-    const second = await screenshotAfter("other-secret-2", "/swap-later-slow", settle);
-    expect(Buffer.compare(Buffer.from(first.bytes), Buffer.from(second.bytes))).toBe(0);
+    const shotAfter = async (password: string) => {
+      const taken: { shot: Screenshot | null } = { shot: null };
+      await withBrowser(async (b) => {
+        await navigate(b, `${origin}/swap-later-slow`);
+        expect(await b.fillField(refOf(await snapshot(b), "Password"), password, "password")).toBe("typed the password");
+        await new Promise((r) => setTimeout(r, 1500));
+        taken.shot = await b.screenshot();
+        expect(await snapshot(b)).toContain("Swapped");
+      });
+      if (!taken.shot) throw new Error("no screenshot was taken");
+      return taken.shot;
+    };
+    expect(await differingRegion(await shotAfter("first-secret-1"), await shotAfter("other-secret-2"))).toBeNull();
   }, 120_000);
 
   test("a password the page repeats inside a line of text is masked with its whole line, so its length does not show", async () => {
