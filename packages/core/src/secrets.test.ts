@@ -179,4 +179,9 @@ describe("SecretScrubber.forProject", () => {
     const basic = Buffer.from("staging:gate-pass-1").toString("base64");
     expect(s.scrub(`first-pass second-pass gate-pass-1 Basic ${basic} bypass-token-123 production`)).toBe("••• ••• ••• Basic ••• ••• production");
   });
+  test("leaves passwords too short to find reliably unmasked and still masks the long ones", () => {
+    const s = SecretScrubber.forProject({ accounts: [{ password: "user" }, { password: "hunter22-secret" }], httpCredentials: { username: "u", password: "p" }, secretHeaders: {} });
+    expect(Buffer.from("u:p").toString("base64")).toBe("dTpw");
+    expect(s.scrub("Username: user, then hunter22-secret, then p and dTpw")).toBe("Username: user, then •••, then p and dTpw");
+  });
 });

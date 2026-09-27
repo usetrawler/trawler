@@ -16,7 +16,7 @@ export const GoalSchema = z.strictObject({
 });
 export type Goal = z.infer<typeof GoalSchema>;
 
-export const MIN_PASSWORD_LENGTH = 8;
+export const MIN_SECRET_HEADER_LENGTH = 8;
 export const MAX_PERSONAS = 12;
 export const MAX_GOALS = 20;
 export const MAX_ACCOUNTS = 20;
@@ -28,7 +28,7 @@ const MAX_ORIGINS = 20;
 export const TargetAccountSchema = z.strictObject({
   ref: z.string().min(1).max(100),
   username: z.string().min(1).max(320),
-  password: z.string().min(MIN_PASSWORD_LENGTH).max(1000),
+  password: z.string().min(1).max(1000),
 });
 export type TargetAccount = z.infer<typeof TargetAccountSchema>;
 
@@ -46,9 +46,9 @@ export const ProjectConfigSchema = z
     personas: z.array(PersonaSchema).min(1).max(MAX_PERSONAS),
     goals: z.array(GoalSchema).min(1).max(MAX_GOALS),
     accounts: z.array(TargetAccountSchema).max(MAX_ACCOUNTS).default([]),
-    httpCredentials: z.strictObject({ username: z.string().min(1).max(320).regex(/^[\x20-\x39\x3b-\x7e\x80-\xff]+$/, "basic auth usernames are plain Latin-1 text without colons"), password: z.string().min(MIN_PASSWORD_LENGTH).max(1000) }).optional(),
+    httpCredentials: z.strictObject({ username: z.string().min(1).max(320).regex(/^[\x20-\x39\x3b-\x7e\x80-\xff]+$/, "basic auth usernames are plain Latin-1 text without colons"), password: z.string().min(1).max(1000) }).optional(),
     extraHeaders: z.record(HEADER_NAME, HEADER_VALUE).default({}),
-    secretHeaders: z.record(HEADER_NAME, HEADER_VALUE.min(MIN_PASSWORD_LENGTH)).default({}),
+    secretHeaders: z.record(HEADER_NAME, HEADER_VALUE.min(MIN_SECRET_HEADER_LENGTH)).default({}),
   })
   .superRefine((p, ctx) => {
     for (const id of duplicates(p.goals.map((g) => g.id))) ctx.addIssue({ code: "custom", path: ["goals"], message: `duplicate goal id ${id}` });

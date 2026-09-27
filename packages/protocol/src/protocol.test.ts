@@ -66,9 +66,11 @@ describe("ProjectConfig", () => {
   test("rejects empty basic-auth credentials", () => {
     expect(() => ProjectConfigSchema.parse({ ...project, httpCredentials: { username: "u", password: "" } })).toThrow();
   });
-  test("rejects passwords too short to be scrubbed reliably", () => {
-    expect(() => ProjectConfigSchema.parse({ ...project, accounts: [{ ...project.accounts[0], password: "abc1234" }] })).toThrow();
-    expect(() => ProjectConfigSchema.parse({ ...project, httpCredentials: { username: "u", password: "abc1234" } })).toThrow();
+  test("accepts account and basic-auth passwords of 1 to 1000 characters", () => {
+    const account = (password: string) => ProjectConfigSchema.safeParse({ ...project, accounts: [{ ...project.accounts[0], password }] }).success;
+    expect([account("a"), account("abc1234"), account("x".repeat(1000))]).toEqual([true, true, true]);
+    expect([account(""), account("x".repeat(1001))]).toEqual([false, false]);
+    expect(ProjectConfigSchema.parse({ ...project, httpCredentials: { username: "u", password: "pw" } }).httpCredentials?.password).toBe("pw");
   });
   test("secret headers must be long enough to scrub, plain headers need not", () => {
     expect(() => ProjectConfigSchema.parse({ ...project, secretHeaders: { "x-key": "k7Qz9aP" } })).toThrow();

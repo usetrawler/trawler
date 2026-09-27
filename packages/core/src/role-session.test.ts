@@ -325,6 +325,15 @@ describe("runRoleSession", () => {
     expect(second).not.toContain("admin-pass-9");
   });
 
+  test("sign_in types a password too short to mask", async () => {
+    const short = ProjectConfigSchema.parse({ ...project, accounts: [{ ref: "solo", username: "k@acme.test", password: "pw12" }] });
+    const typed: string[] = [];
+    const model = scriptedModel([toolCall("sign_in", { account: "solo", usernameField: "e3", passwordField: "e4" }), reached("sign-up"), reached("invoice"), finish]);
+    const { result } = await run(model, { project: short, scrubber: SecretScrubber.forProject(short), fillField: async (ref, text) => (typed.push(`${ref}=${text}`), "typed") }).promise;
+    expect(typed).toEqual(["e3=k@acme.test", "e4=pw12"]);
+    expect(result.stoppedBy).toBe("finish");
+  });
+
   test("rejects a maxSteps that could never stop", async () => {
     await expect(run(scriptedModel([]), { maxSteps: 0 }).promise).rejects.toThrow(RangeError);
   });

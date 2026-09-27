@@ -137,7 +137,7 @@ export function sessionTools(opts: {
         const a = opts.accounts.find((x) => x.ref === account);
         if (!a && opts.accounts.length === 0) return "rejected: you have no stored account; for an account you created, type its email yourself and fill its password with type_own_password";
         if (!a) return `rejected: unknown account ${account}; known: ${opts.accounts.map((x) => x.ref).join(", ")}`;
-        opts.scrubber.add(a.password);
+        if (a.password.length >= MIN_SECRET_LENGTH) opts.scrubber.add(a.password);
         return opts.inBrowser(async () => {
           try {
             const username = await opts.fillField(usernameField, a.username, "username");

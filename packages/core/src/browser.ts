@@ -670,7 +670,7 @@ export async function openBrowser(opts: {
           if (typeof probe?.origin !== "string" || !isAllowed(probe.origin)) return "failed: the page is not an allowed origin, so the password was not typed";
           if (probe.type !== "password") return "failed: the target is not a password field, so the password was not typed";
           const limit = typeof probe.maxLength === "number" && probe.maxLength >= 0 ? probe.maxLength : undefined;
-          if (limit !== undefined && limit < MIN_SECRET_LENGTH) return `failed: the field takes at most ${limit} characters, too few to keep a password hidden, so nothing was typed`;
+          if (limit !== undefined && limit < text.length && limit < MIN_SECRET_LENGTH) return `failed: the field takes at most ${limit} characters, too few to keep a password hidden, so nothing was typed`;
           if (limit !== undefined && limit < text.length) keepSecret(text.slice(0, limit));
           const field = await findMarked(mark);
           if (!field) return "failed: the password field could not be found again, so the password was not typed";
@@ -679,7 +679,7 @@ export async function openBrowser(opts: {
         }
         const out = (await type({ target: ref, element: kind === "password" ? "password field" : "username field", text }, internalCall)) as McpResult;
         if (kind === "password") {
-          typedSecrets.add(text);
+          if (text.length >= MIN_SECRET_LENGTH) typedSecrets.add(text);
           typedPasswords.add(text);
           const held = filled.at(-1);
           if (held) {

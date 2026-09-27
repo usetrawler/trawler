@@ -41,12 +41,12 @@ export class SecretScrubber {
     secretHeaders: Record<string, string>;
   }): SecretScrubber {
     const scrubber = new SecretScrubber();
-    for (const account of project.accounts) scrubber.add(account.password);
+    for (const account of project.accounts) if (account.password.length >= MIN_SECRET_LENGTH) scrubber.add(account.password);
     if (project.httpCredentials) {
       const { username, password } = project.httpCredentials;
       const basic = Buffer.from(`${username}:${password}`).toString("base64");
-      scrubber.add(password);
-      scrubber.add(basic);
+      if (password.length >= MIN_SECRET_LENGTH) scrubber.add(password);
+      if (basic.length >= MIN_SECRET_LENGTH) scrubber.add(basic);
     }
     for (const value of Object.values(project.secretHeaders)) scrubber.add(value);
     return scrubber;

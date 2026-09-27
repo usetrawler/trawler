@@ -896,6 +896,27 @@ describe("password fields", () => {
     });
   }, 60_000);
 
+  test("a password short enough for a short field is typed into it, and stays unmasked like any text that short", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/pin`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "PIN"), "4821", "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Echo"), element: "Echo" }, ctx);
+      expect(await snapshot(b)).toContain("Your PIN is 4821");
+    });
+  }, 60_000);
+
+  test("a field whose text contains a password too short to mask can still be typed into", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, origin);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "pw12", "password")).toBe("typed the password");
+      await b.tools.browser_type!.execute!({ target: refOf(snap, "Email"), text: "pw12@acme.test", element: "email" }, ctx);
+      const again = (await b.tools.browser_type!.execute!({ target: refOf(snap, "Email"), text: "kwame@acme.test", element: "email" }, ctx)) as { isError?: boolean };
+      expect(again.isError).toBeFalsy();
+    });
+  }, 60_000);
+
   test("a password a field shortens behind an alert is hidden once the alert is answered, and after the form is sent", async () => {
     await withBrowser(async (b) => {
       await navigate(b, `${origin}/alert-short`);
