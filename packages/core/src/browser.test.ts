@@ -176,6 +176,8 @@ beforeAll(async () => {
         return html(`<p>API key: sk-live-other-2</p><input aria-label="Key" value="sk-live-other-2"><input aria-label="Hint" placeholder="sk-live-other-2">`);
       case "/swap-echo":
         return html(`<input aria-label="Password" type="password"><button onclick="const p = document.querySelector('input'); p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value">Swap</button><p id="echo"></p>`);
+      case "/swap-later-slow":
+        return html(`<input aria-label="Password" type="password" oninput="clearTimeout(window.swap); window.swap = setTimeout(() => { const p = this; p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value; const real = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); Object.defineProperty(p, 'value', { get() { const until = Date.now() + 900; while (Date.now() < until) {} return real.get.call(this); }, set(v) { real.set.call(this, v); } }); }, 300)"><p id="echo"></p>`);
       case "/reveal-clear":
         return html(`<input aria-label="Password" type="password"><button onclick="const o=document.querySelector('input');const n=document.createElement('input');n.type='text';n.setAttribute('aria-label','Password');n.value=o.value;o.replaceWith(n)">Show password</button><button onclick="document.querySelector('input').value=''">Clear</button>`);
       case "/moving-keyframes":
@@ -1363,6 +1365,13 @@ describe("screenshots", () => {
     const swap = (b: Browser, snap: string) => b.tools.browser_click!.execute!({ target: refOf(snap, "Swap"), element: "swap" }, ctx);
     const first = await screenshotAfter("first-secret-1", "/swap-echo", swap);
     const second = await screenshotAfter("other-secret-2", "/swap-echo", swap);
+    expect(Buffer.compare(Buffer.from(first.bytes), Buffer.from(second.bytes))).toBe(0);
+  }, 120_000);
+
+  test("a password the page changed on its own after it was typed is masked even when reading the field is slow", async () => {
+    const settle = () => new Promise((r) => setTimeout(r, 700));
+    const first = await screenshotAfter("first-secret-1", "/swap-later-slow", settle);
+    const second = await screenshotAfter("other-secret-2", "/swap-later-slow", settle);
     expect(Buffer.compare(Buffer.from(first.bytes), Buffer.from(second.bytes))).toBe(0);
   }, 120_000);
 

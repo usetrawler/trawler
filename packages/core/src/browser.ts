@@ -514,8 +514,8 @@ export async function openBrowser(opts: {
     const secretsOnPage = async () => {
       const filledValues = [];
       for (const h of await liveFilled()) {
-        const value = await readValue(h);
-        if (value.length >= MIN_SECRET_LENGTH && value !== valuesBeforeTyping.get(h)) filledValues.push(value);
+        const value = await h.evaluate((el: any) => String(el.value ?? "")).catch(() => null);
+        if (value !== null && value.length >= MIN_SECRET_LENGTH && value !== valuesBeforeTyping.get(h)) filledValues.push(value);
       }
       const needles = [...new Set([...opts.scrubber.browserNeedles(), ...typedSecrets, ...filledValues].map((n) => n.replace(new RegExp(INVISIBLE, "gu"), "").trim()))].filter((n) => n.length >= MIN_SECRET_LENGTH).sort((a, b) => b.length - a.length);
       return needles.length > 0 ? new RegExp(needles.map((n) => escapedForRegExp(n).replace(/\s+/g, "\\s+")).join("|"), "i") : null;
