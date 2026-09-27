@@ -13,8 +13,13 @@ export type Persona = z.infer<typeof PersonaSchema>;
 export const GoalSchema = z.strictObject({
   id: z.string().max(60).regex(/^[a-z0-9-]+$/),
   instruction: z.string().min(1).max(1000),
+  personaId: z.string().max(60).regex(/^[a-z0-9-]+$/).optional(),
 });
 export type Goal = z.infer<typeof GoalSchema>;
+
+export function goalsFor<G extends { personaId?: string }>(goals: G[], personaId: string): G[] {
+  return goals.filter((g) => g.personaId === undefined || g.personaId === personaId);
+}
 
 export const MIN_SECRET_HEADER_LENGTH = 8;
 export const MAX_PERSONAS = 12;
@@ -57,6 +62,15 @@ export const ProjectConfigSchema = z
     if (new Set([target, ...p.allowedOrigins]).size > MAX_ORIGINS) ctx.addIssue({ code: "custom", path: ["allowedOrigins"], message: `at most ${MAX_ORIGINS} origins including the target` });
     for (const ref of duplicates(p.accounts.map((a) => a.ref))) ctx.addIssue({ code: "custom", path: ["accounts"], message: `duplicate account ref ${ref}` });
     for (const name of duplicates([...Object.keys(p.extraHeaders), ...Object.keys(p.secretHeaders)].map((h) => h.toLowerCase()))) ctx.addIssue({ code: "custom", path: ["extraHeaders"], message: `header ${name} is set more than once` });
+    const personaIds = new Set(p.personas.map((x) => x.id));
+    p.goals.forEach((goal, i) => {
+      if (goal.personaId !== undefined && !personaIds.has(goal.personaId)) {
+        ctx.addIssue({ code: "custom", path: ["goals", i, "personaId"], message: `goal ${goal.id} belongs to unknown persona ${goal.personaId}` });
+      }
+    });
+    p.personas.forEach((persona, i) => {
+      if (goalsFor(p.goals, persona.id).length === 0) ctx.addIssue({ code: "custom", path: ["personas", i], message: `persona ${persona.id} has no goals` });
+    });
     const refs = new Set(p.accounts.map((a) => a.ref));
     p.personas.forEach((persona, i) => {
       if (persona.accountRef !== undefined && !refs.has(persona.accountRef)) {

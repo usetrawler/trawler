@@ -1,6 +1,6 @@
 import type { LanguageModel } from "ai";
 import { Budget, judge, runReplay, runRoleSession, SecretScrubber, type Browser } from "@usetrawler/core";
-import { MAX_URL, type ProjectConfig, type RoleResult, type RunEventInput } from "@usetrawler/protocol";
+import { goalsFor, MAX_URL, type ProjectConfig, type RoleResult, type RunEventInput } from "@usetrawler/protocol";
 import type { RunSummary } from "./run-dir.ts";
 
 const CLOSE_TIMEOUT_MS = 10_000;
@@ -70,7 +70,7 @@ export async function localRun(opts: {
       const error = failure(scrubber, err);
       recordFailure(jobId, "role_session", error);
       return {
-        result: { persona: persona.id, goals: opts.project.goals.map((g) => ({ goal: g.id, status: "not_attempted", note: "" })), findings: [], stoppedBy: "error", error },
+        result: { persona: persona.id, goals: goalsFor(opts.project.goals, persona.id).map((g) => ({ goal: g.id, status: "not_attempted", note: "" })), findings: [], stoppedBy: "error", error },
         usage: noUsage(opts.agentModelId),
       };
     });

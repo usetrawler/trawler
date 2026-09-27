@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { FindingSchema, ProjectConfigSchema, RunEventSchema } from "./index.ts";
+import { FindingSchema, goalsFor, ProjectConfigSchema, RunEventSchema } from "./index.ts";
 
 const project = {
   name: "Acme",
@@ -12,6 +12,23 @@ const project = {
 };
 
 describe("ProjectConfig", () => {
+  test("gives each person their own goals and the shared ones", () => {
+    const admin = { id: "admin", name: "Dana", brief: "You review pitches." };
+    const cfg = ProjectConfigSchema.parse({
+      ...project,
+      personas: [project.personas[0], admin],
+      goals: [...project.goals, { id: "submit", instruction: "Submit a pitch.", personaId: "solo" }, { id: "review", instruction: "Review a pitch.", personaId: "admin" }],
+    });
+    expect(goalsFor(cfg.goals, "solo").map((g) => g.id)).toEqual(["sign-up", "submit"]);
+    expect(goalsFor(cfg.goals, "admin").map((g) => g.id)).toEqual(["sign-up", "review"]);
+  });
+
+  test("refuses a goal for an unknown person and a person with no goals", () => {
+    expect(() => ProjectConfigSchema.parse({ ...project, goals: [{ ...project.goals[0], personaId: "ghost" }] })).toThrow(/unknown persona ghost/);
+    const admin = { id: "admin", name: "Dana", brief: "You review pitches." };
+    expect(() => ProjectConfigSchema.parse({ ...project, personas: [project.personas[0], admin], goals: [{ ...project.goals[0], personaId: "solo" }] })).toThrow(/persona admin has no goals/);
+  });
+
   test("accepts a complete config", () => {
     expect(ProjectConfigSchema.parse(project).personas).toHaveLength(1);
   });

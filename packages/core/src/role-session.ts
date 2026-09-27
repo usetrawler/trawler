@@ -1,6 +1,6 @@
 import type { LanguageModel, ToolSet } from "ai";
 import type { Screenshot } from "./browser.ts";
-import type { JobUsage, Persona, ProjectConfig, RoleResult, RunEventInput } from "@usetrawler/protocol";
+import { goalsFor, type JobUsage, type Persona, type ProjectConfig, type RoleResult, type RunEventInput } from "@usetrawler/protocol";
 import { browserQueue, runAgentLoop } from "./agent-loop.ts";
 import type { Budget } from "./llm.ts";
 import { rolePrompt, sessionStatus } from "./prompts.ts";
@@ -27,7 +27,8 @@ export async function runRoleSession(opts: {
   if (!Number.isInteger(opts.maxSteps) || opts.maxSteps < 1) throw new RangeError(`maxSteps must be a positive integer, got ${opts.maxSteps}`);
   const jobId = `role:${opts.persona.id}`;
   const emit = (e: RunEventInput) => opts.emit(opts.scrubber.scrub(e));
-  const state = newSessionState(opts.project.goals);
+  const goals = goalsFor(opts.project.goals, opts.persona.id);
+  const state = newSessionState(goals);
   const queue = browserQueue(opts.browserTools, (ok) => (state.page = ok ? "seen" : "stale"));
   const { screenshot, keepScreenshot } = opts;
   const capture = screenshot && keepScreenshot
@@ -49,7 +50,7 @@ export async function runRoleSession(opts: {
   };
   const base = rolePrompt({
     persona: opts.persona, targetUrl: opts.project.targetUrl, docsUrl: opts.project.docsUrl,
-    goals: opts.project.goals, accountRef: opts.persona.accountRef,
+    goals, accountRef: opts.persona.accountRef,
     signUpEmail: opts.persona.accountRef ? undefined : madeUpEmail(opts.persona.id),
   });
   const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
