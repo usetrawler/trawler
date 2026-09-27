@@ -10,7 +10,7 @@ import { createProject } from "../projects/projects.ts";
 import { handleArtifactUpload, type RunnerApiDeps } from "../runner-api/handlers.ts";
 import { claimJob, completeJob, ingestEvents, releaseJobForShutdown, type JobAssignment } from "../runs/queue.ts";
 import { cancelRun, startRun } from "../runs/runs.ts";
-import { artifactLink } from "./artifacts.ts";
+import { artifactLink, screenCapture } from "./artifacts.ts";
 import { MAX_FAILURES_PER_RUN, removeExpiredArtifacts } from "./cleanup.ts";
 import { s3Store, type ArtifactStore } from "./store.ts";
 import { testStorage } from "./test-storage.ts";
@@ -145,6 +145,29 @@ test("a replay's screenshot belongs to the finding it replays, whatever the uplo
   const replay = await claimJob(t.db, keys);
   expect(replay).toMatchObject({ kind: "replay", runId: session.runId });
   expect((await rowOf(await stored(replay!, PNG, { query: "kind=screenshot&finding=f9" }))).finding_key).toBe("ana:f1");
+});
+
+test("a screen capture opens with its run and finding in its own workspace only, and never while pending or once discarded", async () => {
+  const session = await leasedJob();
+  const at = new Date().toISOString();
+  const finding = { id: "f1", kind: "defect", goal: "g", title: "Saving fails", observed: "An error page", reproduction: ["Open the form", "Click Save"], severity: "high" };
+  await ingestEvents(t.db, session.token, [{ seq: 1, at, jobId: session.jobId, type: "finding", finding }] as never, session.jobId);
+  const reported = await stored(session, PNG, { query: "kind=screenshot&finding=f1" });
+  await done(session);
+  const replay = (await claimJob(t.db, keys))!;
+  const replayed = await stored(replay, PNG, { query: "kind=screenshot" });
+  const { number } = (await sql<{ number: number }>`select number from runs where id = ${session.runId}`.execute(t.db)).rows[0]!;
+  const place = { runId: session.runId, runNumber: number, projectId: expect.any(String), findingTitle: "Saving fails" };
+
+  expect(await screenCapture(t.db, "org-a", reported)).toEqual({ id: reported, replay: false, ...place });
+  expect(await screenCapture(t.db, "org-a", replayed)).toEqual({ id: replayed, replay: true, ...place });
+  expect(await screenCapture(t.db, "org-b", reported)).toBeNull();
+  expect(await screenCapture(t.db, "org-a", "not-a-capture")).toBeNull();
+  await sql`update artifacts set stored_at = null where id = ${reported}`.execute(t.db);
+  expect(await screenCapture(t.db, "org-a", reported)).toBeNull();
+  await sql`update artifacts set stored_at = now(), discarded_at = now() where id = ${reported}`.execute(t.db);
+  expect(await screenCapture(t.db, "org-a", reported)).toBeNull();
+  await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", session.runId, "stopped"));
 });
 
 test("an upload is refused, leaving no file and no row, without the job's own live token, with a wrong type or signature, or when too large", async () => {
@@ -385,9 +408,9 @@ test("the database refuses a row whose key is not its own, also for a type the k
   await insert(t.db, own, MAX_ARTIFACT_BYTES);
 });
 
-test("without storage configured, uploads answer 503", async () => {
+test("without storage configured, uploads answer 501, which the runner does not try again", async () => {
   const job = await leasedJob();
-  expect((await handleArtifactUpload(upload(job, PNG), job.jobId, { ...deps, artifacts: undefined })).status).toBe(503);
+  expect((await handleArtifactUpload(upload(job, PNG), job.jobId, { ...deps, artifacts: undefined })).status).toBe(501);
 });
 
 test("a short-lived link serves the file with its type, only to the workspace that owns it, which the database enforces too", async () => {
@@ -396,6 +419,7 @@ test("a short-lived link serves the file with its type, only to the workspace th
   const link = await artifactLink(t.db, store, "org-a", id);
   expect(link).toMatch(/X-Amz-Expires=300/);
   expect(link).not.toMatch(/x-amz-checksum-mode/i);
+  expect(link).toContain("response-cache-control=private%2C%20no-store");
   const res = await fetch(link!);
   expect(res.status).toBe(200);
   expect(res.headers.get("content-type")).toBe("image/png");

@@ -623,3 +623,51 @@ describe("judge again", () => {
     await completeJob(t.db, judge.token, { usage: usage(0), stoppedBy: "budget" });
   });
 });
+
+describe("screenshots", () => {
+  async function screenshot(job: { jobId: string }, run: string, findingKey: string | null, state: { id?: string; at?: string; stored?: boolean; discarded?: boolean } = {}) {
+    const row = await sql<{ id: string }>`insert into artifacts (id, org_id, run_id, job_id, finding_key, kind, content_type, size_bytes, storage_key, created_at, stored_at, discarded_at)
+      select k.id, 'org-a', ${run}::uuid, ${job.jobId}::uuid, ${findingKey}, 'screenshot', 'image/png', 10, ${`orgs/org-a/runs/${run}/`} || k.id || '.png',
+        ${state.at ?? "2026-09-01T10:05:00Z"}::timestamptz, ${state.stored === false ? null : sql`now()`}, ${state.discarded ? sql`now()` : null}
+      from (select coalesce(${state.id ?? null}::uuid, gen_random_uuid()) as id) k returning id`.execute(t.db);
+    return row.rows[0]!.id;
+  }
+
+  test("a finding carries the latest stored screenshot from its session and from its replay; a pending or discarded one, or one for another finding, never", async () => {
+    await drain();
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const session = (await claimJob(t.db, keys))!;
+    seq = 0;
+    await ingestEvents(t.db, session.token, [
+      ev({ type: "job_started", jobId: session.jobId, kind: "role_session" }),
+      ev({ type: "finding", jobId: session.jobId, finding: defect }),
+      ev({ type: "finding", jobId: session.jobId, finding: { ...defect, id: "f2", title: "Broken load" } }),
+    ]);
+    const reported = await screenshot(session, run.id, "ana:f1", { id: "00000000-0000-4000-8000-000000000001", at: "2026-09-01T10:02:00Z" });
+    await screenshot(session, run.id, "ana:f1", { id: "ffffffff-ffff-4fff-bfff-ffffffffffff", at: "2026-09-01T10:01:00Z" });
+    await screenshot(session, run.id, "ana:f1", { at: "2026-09-01T10:03:00Z", stored: false });
+    await screenshot(session, run.id, "ana:f1", { at: "2026-09-01T10:04:00Z", discarded: true });
+    await completeJob(t.db, session.token, { usage: usage(0), stoppedBy: "finish" });
+    await completeJob(t.db, (await claimJob(t.db, keys))!.token, { usage: usage(0), stoppedBy: "finish" });
+    const replay = (await claimJob(t.db, keys))!;
+    expect(replay.finding?.id).toBe("ana:f1");
+    const replayed = await screenshot(replay, run.id, "ana:f1", { id: "00000000-0000-4000-8000-000000000003", at: "2026-09-01T10:06:00Z" });
+    await screenshot(replay, run.id, "ana:f1", { id: "00000000-0000-4000-8000-000000000002", at: "2026-09-01T10:06:00Z" });
+
+    const findings = (await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.findings;
+    expect(findings.map((f) => [f.key, f.screenshots])).toEqual([
+      ["ana:f1", { reported, replayed }],
+      ["ana:f2", { reported: null, replayed: null }],
+    ]);
+    await drain();
+
+    const next = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const again = (await claimJob(t.db, keys))!;
+    seq = 0;
+    await ingestEvents(t.db, again.token, [ev({ type: "job_started", jobId: again.jobId, kind: "role_session" }), ev({ type: "finding", jobId: again.jobId, finding: defect })]);
+    const own = await screenshot(again, next.id, "ana:f1");
+    expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", next.id)))!.findings.map((f) => f.screenshots)).toEqual([{ reported: own, replayed: null }]);
+    expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.findings[0]!.screenshots).toEqual({ reported, replayed });
+    await drain();
+  });
+});

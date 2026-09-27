@@ -3,9 +3,10 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { chromium, type Browser as PlaywrightBrowser } from "playwright";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { BROWSER_TOOLS, openBrowser, type Browser } from "./browser.ts";
-import { SecretScrubber } from "./secrets.ts";
+import { BROWSER_TOOLS, openBrowser, type Browser, type Screenshot } from "./browser.ts";
+import { MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
 import { newSessionState, ownPasswordTool, type FillField } from "./session-tools.ts";
 
 const ctx = { toolCallId: "t", messages: [], context: {} };
@@ -19,6 +20,30 @@ let foreignOrigin = "";
 const seen: Record<string, IncomingMessage["headers"]> = {};
 const foreignHits: string[] = [];
 const signups: Array<{ email: string | null; password: string | null; confirm: string | null }> = [];
+
+const MOTIONS: Record<string, string> = {
+  keyframes: `echo.className = "fly"`,
+  waapi: `echo.animate([{ transform: "translateY(0)" }, { transform: "translateY(300px)" }], { duration: 200, iterations: Infinity, direction: "alternate" })`,
+  transition: `echo.style.transition = "transform .2s linear"; let low = false; const flip = () => { low = !low; echo.style.transform = low ? "translateY(300px)" : "translateY(0)"; }; flip(); setInterval(flip, 200)`,
+  "frame-clock": `const t0 = performance.now(); const step = (t) => { echo.style.transform = "translateY(" + (150 + 150 * Math.sin((t - t0) / 30)) + "px)"; requestAnimationFrame(step); }; requestAnimationFrame(step)`,
+  "wall-clock": `const t0 = performance.now(); const step = () => { echo.style.transform = "translateY(" + (150 + 150 * Math.sin((performance.now() - t0) / 30)) + "px)"; requestAnimationFrame(step); }; requestAnimationFrame(step)`,
+};
+
+function moving(motion: string): string {
+  return `<style>body{margin:0;font:20px monospace} #echo{position:absolute;top:80px;left:20px;margin:0;color:#ff0000} @keyframes fly{from{transform:translateY(0)}to{transform:translateY(300px)}} .fly{animation:fly .2s linear infinite alternate}</style><input aria-label="Password" type="password" oninput="document.getElementById('echo').textContent = this.value"><button onclick="const echo = document.getElementById('echo'); ${MOTIONS[motion]!.replace(/"/g, "&quot;")}">Move</button><p id="echo"></p>`;
+}
+
+function narrowColumn(inner: string): string {
+  return `<div style="width:120px;font:16px sans-serif"><p>Account</p><p>Plan: Team</p>${inner}<p>Billing: monthly</p><p>Seats: 5</p><p>Region: EU</p></div>`;
+}
+
+function card(c: { heading: string; name: string; secret: string }): string {
+  return `<div style="font:20px sans-serif;padding:16px;border:1px solid #999;width:640px"><h2>${c.heading}</h2><span>Password: </span><span style="color:#ff0000">${c.secret}</span><p>Plan: Team</p><label>Name <input aria-label="Name" value="${c.name}"></label></div>`;
+}
+
+function closedCard(light: string, shadow: string): string {
+  return `<closed-card style="display:block;font:20px monospace;color:#ff0000">${light}</closed-card><p>Plan: Team</p><script>customElements.define("closed-card", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = ${JSON.stringify(shadow)}; } });</script>`;
+}
 
 function listen(s: Server): Promise<string> {
   return new Promise((r) => s.listen(0, "127.0.0.1", () => {
@@ -47,7 +72,7 @@ beforeAll(async () => {
     seen[req.url ?? ""] = req.headers;
     const html = (body: string) => {
       res.setHeader("content-type", "text/html");
-      res.end(`<html><body>${body}</body></html>`);
+      res.end(`<!doctype html><html><body>${body}</body></html>`);
     };
     switch (req.url) {
       case "/":
@@ -129,6 +154,316 @@ beforeAll(async () => {
         return res.end(JSON.stringify({ prefetch: [{ source: "list", urls: [`${foreignOrigin}/header-prefetch`] }] }));
       case "/neuter":
         return html(`<input aria-label="Password" type="password"><button onclick="const p=document.querySelector('input');p.type='text';p.removeAttribute('data-trawler-secret')">Show</button><button onclick="const p=document.querySelector('input');p.type='text';p.removeAttribute('data-trawler-secret');p.value=p.value.slice(0,6)+'X'+p.value.slice(6)">Tamper</button>`);
+      case "/text-a":
+        return html(`<h1>Invoice 1001</h1>`);
+      case "/text-b":
+        return html(`<h1>Invoice 2002</h1>`);
+      case "/frame-remount":
+        return html(`<iframe src="/remount" style="width:640px;height:160px;border:0"></iframe>`);
+      case "/echo-upper":
+        return html(`<input aria-label="Password" type="password" oninput="document.getElementById('echo').textContent = this.value.toUpperCase()"><p>Saved as <b id="echo"></b> for you.</p>`);
+      case "/echo-inline":
+        return html(`<input aria-label="Password" type="password" oninput="document.getElementById('echo').textContent = this.value"><p>You typed <b id="echo"></b> just now.</p>`);
+      case "/echo-encoded-a":
+        return html(`<p>Posted to /login?password=Alpha%26Secret%231111</p>`);
+      case "/echo-encoded-b":
+        return html(`<p>Posted to /login?password=Bravo%26Secret%232222</p>`);
+      case "/toast":
+        return html(`<style>@keyframes fade{from{opacity:1}to{opacity:.9}} #toast{animation:fade 3s forwards}</style><p id="toast" onanimationend="this.remove()">Could not save: error 500</p>`);
+      case "/api-key-a":
+        return html(`<p>API key: sk-live-first-1</p><input aria-label="Key" value="sk-live-first-1"><input aria-label="Hint" placeholder="sk-live-first-1">`);
+      case "/api-key-b":
+        return html(`<p>API key: sk-live-other-2</p><input aria-label="Key" value="sk-live-other-2"><input aria-label="Hint" placeholder="sk-live-other-2">`);
+      case "/swap-echo":
+        return html(`<input aria-label="Password" type="password"><button onclick="const p = document.querySelector('input'); p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value">Swap</button><p id="echo"></p>`);
+      case "/swap-later-slow":
+        return html(`<input aria-label="Password" type="password" oninput="clearTimeout(window.swap); window.swap = setTimeout(() => { const p = this; p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value; document.getElementById('state').textContent = 'Swapped'; const real = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); Object.defineProperty(p, 'value', { get() { const until = Date.now() + 900; while (Date.now() < until) {} return real.get.call(this); }, set(v) { real.set.call(this, v); } }); }, 300)"><p id="echo"></p><p id="state">Waiting</p>`);
+      case "/reveal-clear":
+        return html(`<input aria-label="Password" type="password"><button onclick="const o=document.querySelector('input');const n=document.createElement('input');n.type='text';n.setAttribute('aria-label','Password');n.value=o.value;o.replaceWith(n)">Show password</button><button onclick="document.querySelector('input').value=''">Clear</button>`);
+      case "/moving-keyframes":
+      case "/moving-waapi":
+      case "/moving-transition":
+      case "/moving-frame-clock":
+      case "/moving-wall-clock":
+        return html(moving(req.url.slice("/moving-".length)));
+      case "/churn":
+        return html(`<div id="top" style="height:30px"></div><input aria-label="Other" style="width:200px"><input aria-label="Password" type="password"><button onclick="const o = document.querySelector('input[type=password]'); const n = document.createElement('input'); n.setAttribute('aria-label', 'Password'); n.style.cssText = 'width:600px;font:20px monospace;color:#ff0000'; n.value = o.value; o.replaceWith(n); setInterval(() => { const top = document.getElementById('top'); if (top.firstChild) top.firstChild.remove(); else top.append(document.createElement('input')); }, 4)">Show password</button>`);
+      case "/hidden-value":
+        return html(`<input aria-label="Password" type="password"><button onclick="const o = document.querySelector('input'); const n = document.createElement('input'); n.setAttribute('aria-label', 'Password'); n.style.cssText = 'width:600px;font:20px monospace'; n.value = o.value; o.replaceWith(n); Object.defineProperty(n, 'value', { get: () => '' })">Show password</button>`);
+      case "/card":
+        return html(card({ heading: "Account settings", name: "Ana", secret: "card-secret-1111" }));
+      case "/card-other-heading":
+        return html(card({ heading: "Billing overview", name: "Ana", secret: "card-secret-1111" }));
+      case "/card-other-field":
+        return html(card({ heading: "Account settings", name: "Bea", secret: "card-secret-1111" }));
+      case "/overflowing":
+      case "/overflowing-other":
+        return html(`<h1>${req.url === "/overflowing" ? "Settings" : "Preferences"}</h1><div style="font:20px sans-serif;padding:16px;border:1px solid #999;width:640px"><h2>Account settings</h2><p style="width:80px;white-space:nowrap;color:#ff0000">card-secret-1111 is the key</p><p>Plan: Team</p></div>`);
+      case "/tight-line":
+        return html(`<p style="font:20px monospace;line-height:0;color:#ff0000">card-secret-1111</p><p>Plan: Team</p><p>Billing: monthly</p>`);
+      case "/tight-height":
+        return html(`<p style="font:20px monospace;height:13px;margin:0;color:#ff0000">card-secret-1111</p><p>Plan: Team</p><p>Billing: monthly</p>`);
+      case "/tight-width":
+        return html(`<p id="secret" style="font:20px monospace;white-space:nowrap;color:#ff0000">card-secret-1111</p><p>Plan: Team</p><script>const text = document.createRange(); text.selectNodeContents(document.getElementById("secret")); document.getElementById("secret").style.width = (text.getBoundingClientRect().width - 8) + "px";</script>`);
+      case "/clip-one-axis":
+        return html(`<div style="height:32px;overflow-x:clip;width:220px;font:20px/24px monospace;color:#ff0000">first-line card-secret-1111</div><p>Plan: Team</p><p>Billing: monthly</p>`);
+      case "/contents-hidden":
+        return html(narrowColumn(`<div style="display:contents;overflow:hidden"><p style="width:80px;white-space:nowrap;font:20px monospace;color:#ff0000">card-secret-1111 is here</p></div>`));
+      case "/inline-hidden":
+        return html(narrowColumn(`<p style="width:100px"><a href="#" style="overflow:hidden"><span style="display:inline-block;width:80px;white-space:nowrap;font:20px monospace;color:#ff0000">card-secret-1111 is here</span></a></p>`));
+      case "/clip-margin":
+        return html(narrowColumn(`<div style="width:90px;overflow:clip;overflow-clip-margin:200px;white-space:nowrap;font:20px monospace;color:#ff0000">card-secret-1111 and more</div>`));
+      case "/moves-when-masked":
+        return html(`<p id="echo" style="font:20px monospace;color:#ff0000">card-secret-1111</p><script>new MutationObserver((records) => { if (records.some((r) => [...r.addedNodes].some((n) => n.nodeType === 1))) document.getElementById("echo").style.transform = "translateY(120px)"; }).observe(document.documentElement, { childList: true });</script>`);
+      case "/collapsed":
+      case "/collapsed-plain":
+        return html(`<p>Keys</p><div style="max-height:0;overflow:hidden"><p style="font:20px monospace;color:#ff0000">Your key is ${req.url === "/collapsed" ? "card-secret-1111" : "not-a-secret-00"}</p></div><p style="font:20px monospace;color:#0000ff">Plan: Team, billed monthly</p>`);
+      case "/select-list":
+        return html(`<select size="3" style="font:20px monospace;color:#ff0000;width:300px"><option>first</option><option>card-secret-1111</option><option>third</option></select><p>Plan: Team</p>`);
+      case "/select-closed":
+        return html(`<select style="font:20px monospace;color:#ff0000;width:300px"><option selected>card-secret-1111</option><option>other</option></select><p>Plan: Team</p>`);
+      case "/broken-image":
+        return html(`<img alt="card-secret-1111" src="https://blocked.example/key.png" style="font:20px monospace;color:#ff0000"><p>Plan: Team</p>`);
+      case "/slow-steps":
+        return html(`<style>@keyframes hop{from{transform:translateX(0)}to{transform:translateX(200px)}} #echo{display:inline-block;animation:hop 20s steps(2) infinite}</style><p style="font:20px monospace;color:#ff0000">Key: <span id="echo">card-secret-1111</span></p>`);
+      case "/glowing-field":
+        return html(`<style>@keyframes glow{from{box-shadow:0 0 0 #09f}to{box-shadow:0 0 12px #09f}} input{animation:glow 1s infinite alternate}</style><input aria-label="Password" type="password" value="field-secret-1">`);
+      case "/row-hidden":
+        return html(narrowColumn(`<table style="font:20px monospace"><tr style="overflow:hidden"><td>Key</td><td style="max-width:40px;white-space:nowrap;color:#ff0000">card-secret-1111 is the key</td></tr><tr><td>Plan</td><td>Team</td></tr></table>`));
+      case "/row-span":
+        return html(`<table style="font:20px monospace"><tr style="overflow:hidden"><td>Key</td><td rowspan="3" style="vertical-align:bottom;color:#ff0000">card-secret-1111</td></tr><tr><td>Row two</td></tr><tr><td>Row three</td></tr></table>`);
+      case "/closed-details":
+      case "/closed-details-plain":
+        return html(`<details><summary style="font:20px monospace;color:#0000ff">Show the key</summary><p style="font:20px monospace;color:#ff0000">${req.url === "/closed-details" ? "card-secret-1111" : "not-a-secret-00"}</p></details><p>Plan: Team</p>`);
+      case "/contents-text":
+        return html(`<p style="font:20px monospace;color:#ff0000">Key: <span style="display:contents">card-secret-1111</span> for the API</p><p>Plan: Team</p>`);
+      case "/slot-fallback":
+        return html(`<key-card></key-card><p>Plan: Team</p><script>customElements.define("key-card", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<p style="font:20px monospace;color:#ff0000"><slot>card-secret-1111</slot></p>'; } });</script>`);
+      case "/flicker-container":
+        return html(`<style>@keyframes hop{from{transform:translateX(0)}to{transform:translateX(200px)}} #box{animation:hop 20s steps(2) infinite}</style><div id="box"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div>`);
+      case "/shaking-field":
+        return html(`<style>@keyframes hop{from{transform:translateX(0)}to{transform:translateX(200px)}} input{animation:hop 20s steps(2) infinite}</style><input aria-label="Password" type="password" value="field-secret-1">`);
+      case "/scroll-driven":
+        return html(`<style>@keyframes rise{from{transform:translateY(20px)}to{transform:translateY(0)}} #box{animation:rise linear both;animation-timeline:scroll(root)}</style><div id="box"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div><div style="height:2000px"></div>`);
+      case "/hidden-parent-split":
+        return html(`<div style="visibility:hidden;font:20px monospace;color:#ff0000">card-sec<span style="visibility:visible">ret-1111</span> and more</div><p>Plan: Team</p>`);
+      case "/animated-child":
+        return html(`<style>@keyframes hop{from{transform:translateY(0)}to{transform:translateY(120px)}} b{display:inline-block;animation:hop 20s steps(2) infinite}</style><p style="font:20px monospace;color:#ff0000">card-sec<b>ret-1111</b></p>`);
+      case "/delayed-animation":
+        return html(`<style>@keyframes slide{from{transform:translateX(0)}to{transform:translateX(200px)}} #box{animation:slide 1s 60s}</style><div id="box"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div>`);
+      case "/timer-animation":
+        return html(`<div id="box"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div><script>document.getElementById("box").animate([], { duration: 60000 });</script>`);
+      case "/rounded-animation":
+        return html(`<style>@keyframes morph{from{border-radius:0}to{border-radius:24px}} #box{background:#eee;animation:morph 400ms infinite alternate}</style><div id="box"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div>`);
+      case "/badge-beside":
+        return html(`<style>@keyframes bounce{from{transform:translateY(0)}to{transform:translateY(-6px)}} .badge{display:inline-block;animation:bounce 400ms infinite alternate}</style><p style="font:20px monospace;color:#ff0000">Key: <span>card-secret-1111</span> <span class="badge" style="color:#333">NEW</span></p><p>Plan: Team</p>`);
+      case "/icon-inside":
+        return html(`<style>@keyframes spin{to{transform:rotate(360deg)}} .icon{display:inline-block;width:12px;height:12px;border:2px solid #333;border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite}</style><p style="font:20px monospace;color:#ff0000">Key: card-secret-1111 <span class="icon"></span></p><p>Plan: Team</p>`);
+      case "/shadow-split":
+        return html(`<split-key style="visibility:hidden;font:20px monospace;color:#ff0000">card-sec</split-key><p>Plan: Team</p><script>customElements.define("split-key", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<slot></slot><span style="visibility:visible">ret-1111</span>'; } });</script>`);
+      case "/shadow-split-nested":
+        return html(`<div style="visibility:hidden;font:20px monospace;color:#ff0000">card-sec<split-tail></split-tail> and more</div><p>Plan: Team</p><script>customElements.define("split-tail", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<span style="visibility:visible">ret-1111</span>'; } });</script>`);
+      case "/shadow-text":
+      case "/shadow-lit":
+      case "/shadow-groups": {
+        const inner = { "/shadow-text": "card-secret-1111", "/shadow-lit": "<!--?lit$1$-->card-secret-1111<!---->", "/shadow-groups": "<span>card-</span><span>secret-</span><span>1111</span>" }[req.url];
+        return html(`<key-view></key-view><p>Plan: Team</p><script>customElements.define("key-view", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<style>:host{display:block;font:20px monospace;color:#ff0000}</style>${inner}'; } });</script>`);
+      }
+      case "/shadow-split-apart":
+        return html(`<div style="height:160px"><split-apart style="font:20px monospace;color:#ff0000">card-sec</split-apart></div><p>Plan: Team</p><script>customElements.define("split-apart", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<style>:host{display:block;height:24px}</style><slot></slot><div style="margin:80px 0 0 200px">ret-1111</div>'; } });</script>`);
+      case "/shadow-escaping-part":
+        return html(`<div style="position:relative;height:260px"><escaping-part style="display:block;overflow:hidden;height:24px;font:20px monospace;color:#ff0000">card-sec</escaping-part></div><p>Plan: Team</p><script>customElements.define("escaping-part", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<slot></slot><span style="position:absolute;left:300px;top:200px">ret-1111</span>'; } });</script>`);
+      case "/escaping-part":
+        return html(`<div style="position:relative;height:260px"><div style="overflow:hidden;height:24px;font:20px monospace;color:#ff0000">card-sec<span style="position:absolute;left:300px;top:200px">ret-1111</span></div></div><p>Plan: Team</p>`);
+      case "/slotted-escaping":
+        return html(`<div style="position:relative;height:260px"><slotted-away style="display:block;overflow:hidden;height:24px;font:20px monospace;color:#ff0000">card-secret-1111</slotted-away></div><p>Plan: Team</p><script>customElements.define("slotted-away", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<div style="position:absolute;left:300px;top:200px"><slot></slot></div>'; } });</script>`);
+      case "/shadow-slot-after":
+        return html(`<slot-after style="display:block;font:20px monospace;color:#ff0000">ret-1111</slot-after><p>Plan: Team</p><script>customElements.define("slot-after", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = "card-sec<slot></slot>"; } });</script>`);
+      case "/shadow-slot-named":
+        return html(`<slot-named style="display:block;font:20px monospace;color:#ff0000"><span slot="tail">ret-1111</span></slot-named><p>Plan: Team</p><script>customElements.define("slot-named", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = 'card-sec<slot name="tail"></slot>'; } });</script>`);
+      case "/shadow-slot-nested":
+        return html(`<div style="position:relative;height:260px"><slot-nest style="display:block;font:20px monospace;color:#ff0000"><span style="position:absolute;left:300px;top:200px">ret-1111</span></slot-nest></div><p>Plan: Team</p><script>customElements.define("slot-nest", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = "<div>card-sec<slot></slot></div>"; } });</script>`);
+      case "/contents-relative":
+      case "/contents-sticky":
+        return html(`<div style="overflow:hidden;width:100px;height:30px;font:20px monospace;color:#ff0000"><span style="display:contents;position:${req.url === "/contents-relative" ? "relative" : "sticky"}"><p style="position:absolute;top:120px;left:20px;white-space:nowrap;margin:0">card-secret-1111</p></span></div><p>Plan: Team</p>`);
+      case "/zero-width":
+        return html(`<p style="font:20px monospace;color:#ff0000">Key: card-&#8203;secret-&#8203;1111</p><p>Plan: Team</p>`);
+      case "/soft-hyphen":
+        return html(`<p style="font:20px monospace;color:#ff0000">Key: card-sec&shy;ret-1111</p><p>Plan: Team</p>`);
+      case "/direction-mark":
+        return html(`<p style="font:20px monospace;color:#ff0000">Key: card-&#8206;secret-1111</p><p>Plan: Team</p>`);
+      case "/bidi-isolate":
+        return html(`<p style="font:20px monospace;color:#ff0000">Key: card-&#8294;secret&#8297;-1111</p><p>Plan: Team</p>`);
+      case "/grapheme-joiner":
+        return html(`<p style="font:20px monospace;color:#ff0000">Key: card-s&#847;ecret-1111</p><p>Plan: Team</p>`);
+      case "/invisible-separator":
+        return html(`<p style="font:20px monospace;color:#ff0000">Key: card-&#8291;secret-1111</p><p>Plan: Team</p>`);
+      case "/script-shown":
+        return html(`<script type="application/json" style="display:block;font:20px monospace;color:#ff0000">{"token":"card-secret-1111"}</script><p>Plan: Team</p>`);
+      case "/style-shown":
+        return html(`<style style="display:block;font:20px monospace;color:#ff0000">/* card-secret-1111 */</style><p>Plan: Team</p>`);
+      case "/zero-width-field":
+        return html(`<input aria-label="Key" style="width:400px;font:20px monospace;color:#ff0000" value="card-&#8203;secret-1111"><p>Plan: Team</p>`);
+      case "/head-shown":
+        return html(`<style>head, title { display: block; font: 20px monospace; color: #ff0000 }</style><p>Plan: Team</p><script>document.head.append(Object.assign(document.createElement("title"), { textContent: "card-secret-1111" }));</script>`);
+      case "/shadow-moving-part":
+        return html(`<key-view></key-view><p>Plan: Team</p><script>customElements.define("key-view", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<style>:host{display:block;font:20px monospace;color:#ff0000} @keyframes hop{to{transform:translateY(120px)}} .hop{display:inline-block;animation:hop 20s steps(2) infinite}</style><span>card-</span><span class="hop">secret-</span><span>1111</span>'; } });</script>`);
+      case "/nested-moving-part":
+        return html(`<p style="font:20px monospace;color:#ff0000">card-<key-tail></key-tail></p><p>Plan: Team</p><script>customElements.define("key-tail", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<style>@keyframes hop{to{transform:translateY(120px)}} span{display:inline-block;animation:hop 20s steps(2) infinite}</style><span>secret-1111</span>'; } });</script>`);
+      case "/moving-component":
+        return html(`<style>@keyframes hop{to{transform:translateY(120px)}} key-tail{display:inline-block;animation:hop 20s steps(2) infinite}</style><p style="font:20px monospace;color:#ff0000">card-<key-tail></key-tail></p><p>Plan: Team</p><script>customElements.define("key-tail", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).textContent = "secret-1111"; } });</script>`);
+      case "/slotted-carried":
+        return html(`<carry-host style="display:block;font:20px monospace;color:#ff0000">secret-1111</carry-host><p>Plan: Team</p><script>customElements.define("carry-host", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<style>@keyframes carry{to{transform:translateY(120px)}} .carry{display:inline-block;animation:carry 20s steps(2) infinite}</style>card-<span class="carry"><slot></slot></span>'; } });</script>`);
+      case "/slotted-carried-element":
+        return html(`<carry-host style="display:block;font:20px monospace;color:#ff0000"><p>card-secret-1111</p></carry-host><p>Plan: Team</p><script>customElements.define("carry-host", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<style>@keyframes carry{to{transform:translateY(120px)}} .carry{animation:carry 20s steps(2) infinite}</style><div class="carry"><slot></slot></div>'; } });</script>`);
+      case "/sibling-pusher":
+        return html(`<style>@keyframes push{from{height:0}to{height:160px}} .pusher{animation:push 20s steps(2) infinite}</style><div class="pusher"></div><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><p>Plan: Team</p>`);
+      case "/pusher-elsewhere":
+        return html(`<style>@keyframes push{from{height:0}to{height:160px}} .pusher{animation:push 20s steps(2) infinite}</style><header><p>Banner</p><div class="pusher"></div></header><main><section><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></section></main>`);
+      case "/frame-pushed":
+        return html(`<style>@keyframes push{from{height:0}to{height:160px}} .pusher{animation:push 20s steps(2) infinite}</style><div class="pusher"></div><iframe style="width:600px;height:80px;border:0" srcdoc="<p style='font:20px monospace;color:#ff0000'>card-secret-1111</p>"></iframe>`);
+      case "/frame-carried":
+        return html(`<style>@keyframes carry{to{transform:translateY(120px)}} .carrier{animation:carry 20s steps(2) infinite}</style><div class="carrier"><iframe style="width:600px;height:80px;border:0" srcdoc="<p style='font:20px monospace;color:#ff0000'>card-secret-1111</p>"></iframe></div>`);
+      case "/shadow-card":
+      case "/shadow-card-other":
+        return html(`<key-card></key-card><script>customElements.define("key-card", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<div style="font:20px sans-serif;width:640px"><h2>${req.url === "/shadow-card" ? "Settings" : "Preferences"}</h2><p>Plan: Team</p><p>Key: <span style="color:#ff0000">card-secret-1111</span></p><p>Billing: monthly</p><p>Seats: 5</p></div>'; } });</script>`);
+      case "/animated-underline":
+        return html(`<style>@keyframes underline{from{width:0}to{width:100%}} .card{position:relative;width:420px;padding:8px} .card::after{content:"";position:absolute;left:0;bottom:0;height:2px;background:#333;animation:underline 1s linear infinite alternate}</style><div class="card"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div><p>Plan: Team</p>`);
+      case "/svg-status-dot":
+        return html(`<style>@keyframes pulse{from{r:3px}to{r:7px}} circle{animation:pulse 600ms ease-in-out infinite alternate}</style><p><svg width="16" height="16"><circle cx="8" cy="8" r="5" fill="#2a2"></circle></svg> Online</p><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><p>Plan: Team</p>`);
+      case "/frame-nested-carried":
+        return html(`<style>@keyframes carry{to{transform:translateY(120px)}} .carrier{animation:carry 20s steps(2) infinite}</style><div class="carrier"><iframe style="width:640px;height:120px;border:0" srcdoc="${`<iframe style='width:600px;height:80px;border:0' srcdoc='&lt;p style=&quot;font:20px monospace;color:#ff0000&quot;&gt;card-secret-1111&lt;/p&gt;'></iframe>`.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"></iframe></div>`);
+      case "/clip-reveal":
+        return html(`<style>@keyframes reveal{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}} .banner{animation:reveal 1s linear infinite}</style><p class="banner">New plans available</p><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><p>Plan: Team</p>`);
+      case "/backdrop-pulse":
+        return html(`<style>@keyframes glass{from{backdrop-filter:blur(0)}to{backdrop-filter:blur(4px)}} .glass{padding:8px;animation:glass 800ms linear infinite alternate}</style><div class="glass">Status</div><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><p>Plan: Team</p>`);
+      case "/zindex-step":
+        return html(`<style>@keyframes lift{from{z-index:1}to{z-index:5}} .tile{position:relative;animation:lift 400ms steps(2) infinite}</style><div class="tile">Tile</div><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><p>Plan: Team</p>`);
+      case "/title-secret":
+        return html(`<style>@keyframes load{from{width:10%}to{width:90%}} .bar{height:4px;background:#333;animation:load 1s linear infinite}</style><div class="bar"></div><plan-note></plan-note><p>Hello</p><script>document.title = "Inbox - card-secret-1111"; customElements.define("plan-note", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = "Plan: Team"; } });</script>`);
+      case "/emphasis-pusher":
+        return html(`<style>@keyframes marks{from{text-emphasis-style:none}to{text-emphasis-style:filled}} .note{font:20px/1 sans-serif;text-emphasis-position:under;animation:marks 20s steps(2) infinite}</style><p class="note">Heads up<br>Read this<br>Then this</p><p style="font:20px monospace;color:#ff0000">card-secret-1111</p>`);
+      case "/slotted-part-moving":
+        return html(`<style>@keyframes hop{to{transform:translateY(120px)}} .hop{display:inline-block;animation:hop 20s steps(2) infinite}</style><part-host style="display:block;font:20px monospace;color:#ff0000"><span class="hop">ret-1111</span></part-host><p>Plan: Team</p><script>customElements.define("part-host", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<div id="wrap">card-sec<slot></slot></div>'; } });</script>`);
+      case "/emphasis-tint":
+        return html(`<style>@keyframes tint{to{text-emphasis-color:#999}} .key{font:20px monospace;color:#ff0000;text-emphasis:filled #ccc;animation:tint 800ms linear infinite alternate}</style><p class="key">card-secret-1111</p><p>Plan: Team</p>`);
+      case "/fixed-progress":
+        return html(`<style>@keyframes load{from{width:0}to{width:100%}} .bar{position:fixed;top:0;left:0;height:4px;background:#333;animation:load 1s linear infinite}</style><div class="bar"></div><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><p>Plan: Team</p>`);
+      case "/popover-growing":
+        return html(`<style>@keyframes grow{from{height:0}to{height:80px}} .menu{position:absolute;top:120px;left:300px;width:160px;background:#eee} .menu div{animation:grow 1s linear infinite alternate}</style><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><p>Plan: Team</p><div class="menu"><div></div></div>`);
+      case "/shaking-sibling":
+        return html(`<style>@keyframes shake{from{left:0}to{left:8px}} .shake{position:relative;animation:shake 80ms linear infinite alternate}</style><p class="shake">Wrong password</p><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><p>Plan: Team</p>`);
+      case "/closed-text":
+        return html(closedCard("", "card-secret-1111"));
+      case "/closed-groups":
+        return html(closedCard("", "<span>card-</span><span>secret-</span><span>1111</span>"));
+      case "/closed-split":
+        return html(closedCard("card-sec", "<slot></slot><span>ret-1111</span>"));
+      case "/closed-slotted":
+        return html(`<div style="position:relative;height:260px"><closed-away style="display:block;overflow:hidden;height:24px;font:20px monospace;color:#ff0000">card-secret-1111</closed-away></div><p>Plan: Team</p><script>customElements.define("closed-away", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = '<div style="position:absolute;left:300px;top:200px"><slot></slot></div>'; } });</script>`);
+      case "/closed-slot-after":
+        return html(closedCard("ret-1111", "card-sec<slot></slot>"));
+      case "/closed-slot-named":
+        return html(closedCard('<span slot="tail">ret-1111</span>', 'card-sec<slot name="tail"></slot>'));
+      case "/closed-slot-manual":
+        return html(`<closed-manual style="display:block;font:20px monospace;color:#ff0000">ret-1111</closed-manual><p>Plan: Team</p><script>customElements.define("closed-manual", class extends HTMLElement { constructor() { super(); const root = this.attachShadow({ mode: "closed", slotAssignment: "manual" }); root.innerHTML = "card-sec<slot></slot>"; root.querySelector("slot").assign(this.firstChild); } });</script>`);
+      case "/closed-sibling-hosts":
+        return html(`<p style="font:20px monospace;color:#ff0000"><closed-a></closed-a><closed-b></closed-b></p><p>Plan: Team</p><script>customElements.define("closed-a", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "card-secret-"; } }); customElements.define("closed-b", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "1111"; } });</script>`);
+      case "/closed-after-light":
+        return html(`<p style="font:20px monospace;color:#ff0000">card-secret-<closed-b></closed-b></p><p>Plan: Team</p><script>customElements.define("closed-b", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "1111"; } });</script>`);
+      case "/closed-password-tail":
+        return html(`<p style="font:20px monospace;color:#ff0000">moving-s<closed-tail></closed-tail></p><p>Plan: Team</p><script>customElements.define("closed-tail", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "ecret-1"; } });</script>`);
+      case "/phrase-newline":
+        return html(`<p style="font:20px monospace;color:#ff0000">correct
+          horse battery-42</p><p>Plan: Team</p>`);
+      case "/phrase-nbsp":
+        return html(`<p style="font:20px monospace;color:#ff0000">correct&nbsp;horse battery-42</p><p>Plan: Team</p>`);
+      case "/phrase-double":
+        return html(`<p style="font:20px monospace;color:#ff0000">correct  horse battery-42</p><p>Plan: Team</p>`);
+      case "/closed-phrase":
+        return html(closedCard("", "correct&nbsp;horse battery-42"));
+      case "/closed-long-text":
+        return html(closedCard("", `<p style="margin:0">${" ".repeat(10500)}card-secret-1111</p>`));
+      case "/closed-zero-width":
+        return html(closedCard("", "card-&#8203;secret-&#8203;1111"));
+      case "/closed-password":
+        return html(closedCard("", '<input aria-label="Password" type="password" value="closed-pass-1">'));
+      case "/closed-typed":
+        return html(`<closed-field></closed-field><p>Plan: Team</p><script>customElements.define("closed-field", class extends HTMLElement { constructor() { super(); const root = this.attachShadow({ mode: "closed" }); root.innerHTML = '<input aria-label="Key" style="width:400px;font:20px monospace;color:#ff0000">'; root.querySelector("input").value = "card-secret-1111"; } });</script>`);
+      case "/closed-in-frame":
+        return html(`<iframe style="width:600px;height:120px;border:0" srcdoc="${`<!doctype html>${closedCard("", "card-secret-1111")}`.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"></iframe>`);
+      case "/cut-beside-closed":
+        return html(`<p style="font:20px monospace;color:#ff0000;height:24px;overflow:hidden;margin:0">${" ".repeat(10500)}card-secret-<closed-b></closed-b></p><p>Plan: Team</p><script>customElements.define("closed-b", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "1111"; } });</script>`);
+      case "/cut-empty-beside-closed":
+        return html(`<p id="line" style="font:20px monospace;color:#ff0000;height:24px;overflow:hidden;margin:0">${" ".repeat(10500)}card-secret-<closed-b></closed-b></p><p>Plan: Team</p><script>customElements.define("closed-b", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "1111"; } }); const line = document.getElementById("line"); line.insertBefore(document.createTextNode("\\u200b"), line.lastElementChild);</script>`);
+      case "/cut-near-closed":
+        return html(`<p style="font:6px monospace;height:30px;overflow:hidden;margin:0">${"lorem ipsum ".repeat(900)}card-sec<b style="font:20px monospace;color:#ff0000">ret-</b><closed-b></closed-b></p><p>Plan: Team</p><script>customElements.define("closed-b", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = '<span style="font:20px monospace;color:#ff0000">1111</span>'; } });</script>`);
+      case "/closed-flex-parts":
+      case "/closed-grid-parts":
+        return html(closedCard("", `<div style="display:${req.url === "/closed-flex-parts" ? "flex" : "inline-grid;grid-auto-flow:column"}"><span>card-sec</span>\n  <span>ret-1111</span></div>`));
+      case "/closed-style-shown":
+        return html(closedCard("", '<style style="display:block">/* card-secret-1111 */</style>'));
+      case "/closed-phrase-words":
+        return html(closedCard("", "<p><b>correct</b> <b>horse</b> <b>battery</b> <b>staple</b></p>"));
+      case "/closed-invisible-needle":
+        return html(closedCard("", "key&#8203;value-7777"));
+      case "/field-invisible-needle":
+        return html(`<input aria-label="Key" style="width:400px;font:20px monospace;color:#ff0000" value="key&#8203;value-7777"><p>Plan: Team</p>`);
+      case "/head-contents":
+        return html(`<style>head { display: contents } title { display: block; font: 20px monospace; color: #ff0000 }</style><p>Plan: Team</p><script>document.head.append(Object.assign(document.createElement("title"), { textContent: "card-secret-1111" }));</script>`);
+      case "/cut-spaces-before-closed":
+        return html(`<p style="font:6px monospace;height:30px;overflow:hidden;margin:0">${"lorem ipsum ".repeat(900)}correct horse</p>${" ".repeat(200)}<p style="font:20px monospace;color:#ff0000;margin:0"><closed-b></closed-b></p><p>Plan: Team</p><script>customElements.define("closed-b", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "battery staple"; } });</script>`);
+      case "/cut-nbsp-before-closed":
+        return html(`<p style="font:6px monospace;height:30px;overflow:hidden;margin:0">${"lorem ipsum ".repeat(900)}correct&nbsp;horse<closed-b></closed-b></p><p>Plan: Team</p><script>customElements.define("closed-b", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = '<span style="font:20px monospace;color:#ff0000"> battery staple</span>'; } });</script>`);
+      case "/closed-beside-long-text":
+        return html(`<closed-note>Help</closed-note><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><pre style="height:40px;overflow:hidden">${"log line ".repeat(1400)}</pre><script>customElements.define("closed-note", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "<slot></slot>"; } });</script>`);
+      case "/closed-after-long-text":
+        return html(`<p style="font:20px monospace;color:#ff0000">card-secret-1111</p><pre style="height:40px;overflow:hidden">${"log line ".repeat(1400)}</pre><p style="height:20px;overflow:hidden">${"filler text ".repeat(600)}</p><closed-note>Help</closed-note><script>customElements.define("closed-note", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "<slot></slot>"; } });</script>`);
+      case "/closed-plain":
+        return html(`<closed-note>Plan</closed-note><p style="font:20px monospace;color:#ff0000">card-secret-1111</p><script>customElements.define("closed-note", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "<slot></slot>: Team"; } });</script>`);
+      case "/pusher":
+        return html(`<style>@keyframes push{from{height:0}to{height:160px}} .pusher{display:inline-block;width:4px;animation:push 20s steps(2) infinite}</style><p style="font:20px monospace;color:#ff0000"><span class="pusher"></span>card-secret-1111</p>`);
+      case "/big-icon":
+      case "/big-icon-other":
+        return html(`<style>@keyframes spin{to{transform:rotate(360deg)}} .icon{display:inline-block;width:30px;height:30px;background:#333;animation:spin 1s linear infinite}</style><h1>${req.url === "/big-icon" ? "Settings" : "Preferences"}</h1><p style="font:20px/24px monospace;color:#ff0000">Key: card-secret-1111 <span class="icon"></span></p><p>Plan: Team</p><p>Billing: monthly</p><p>Seats: 5</p>`);
+      case "/custom-timeline":
+        return html(`<p id="echo" style="font:20px monospace;color:#ff0000">card-secret-1111</p><script>document.getElementById("echo").animate([{ transform: "translateX(0)" }, { transform: "translateX(200px)" }], { duration: 20000, easing: "steps(2)", iterations: Infinity, timeline: new DocumentTimeline() });</script>`);
+      case "/decorated-card":
+        return html(`<style>@keyframes turn{to{transform:rotate(360deg)}} .card{position:relative;overflow:hidden;padding:16px;width:420px} .card::before{content:"";position:absolute;inset:-50%;background:conic-gradient(#eee,#ccc,#eee);animation:turn 3s linear infinite;z-index:-1}</style><div class="card"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div>`);
+      case "/pushing-before":
+        return html(`<style>@keyframes grow{from{height:0}to{height:160px}} .card::before{content:"";display:block;animation:grow 20s steps(2) infinite}</style><div class="card"><p style="font:20px monospace;color:#ff0000">card-secret-1111</p></div>`);
+      case "/fixed-below":
+        return html(`<p>Short page</p><div style="position:fixed;left:20px;bottom:120px;height:0;font:20px monospace;color:#ff0000">card-secret-1111</div>`);
+      case "/flicker":
+        return html(`<style>@keyframes jump{0%,49.9%{transform:translateY(0)}50%,100%{transform:translateY(120px)}} #echo{font:20px monospace;color:#ff0000;animation:jump 60ms infinite}</style><p id="echo">card-secret-1111</p>`);
+      case "/static-secret":
+        return html(`<p style="font:20px monospace;color:#ff0000">Your key is card-secret-1111</p><p>Plan: Team</p>`);
+      case "/scroll-code":
+      case "/scroll-code-other":
+        return html(`<div style="font:16px sans-serif;width:640px"><h2>${req.url === "/scroll-code" ? "Use the API" : "Call the API"}</h2><pre style="overflow:auto;width:300px;font:14px monospace;color:#ff0000">curl -H "Authorization: Bearer card-secret-1111" https://api.example.com/v1/projects?limit=100</pre><p>Paragraph below</p><p>Another paragraph</p><p>And another</p></div>`);
+      case "/ellipsis":
+      case "/ellipsis-other":
+        return html(`<div style="font:16px sans-serif"><h2>${req.url === "/ellipsis" ? "API keys" : "Access keys"}</h2><table><tr><td>Production</td><td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#ff0000">card-secret-1111-and-a-long-tail</td></tr><tr><td>Plan</td><td>Team</td></tr><tr><td>Region</td><td>EU</td></tr><tr><td>Seats</td><td>5</td></tr></table><p>Paragraph below</p></div>`);
+      case "/overflow-edge":
+        return html(`<div id="parent" style="font:20px monospace"><p id="secret" style="width:100px;white-space:nowrap;color:#ff0000;margin:0">card-secret-11112</p></div><p>After</p><p>More</p><p>And more</p><p>Still more</p><script>const text = document.createRange(); text.selectNodeContents(document.getElementById("secret")); document.getElementById("parent").style.width = (text.getBoundingClientRect().width - 5) + "px";</script>`);
+      case "/zero-height":
+        return html(`<div style="font:20px sans-serif;padding:16px;border:1px solid #999;width:640px"><h2>Account settings</h2><div style="height:0;color:#ff0000">card-secret-1111</div><p>Plan: Team</p><p>Billing: monthly</p></div>`);
+      case "/clock":
+        return html(`<style>@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}} #spinner{width:20px;height:20px;background:#333;animation:spin 1s linear infinite}</style><div id="spinner"></div><button onclick="document.getElementById('drift').textContent = 'behind by ' + Math.round(performance.now() - document.timeline.currentTime) + ' ms'">Clock</button><p id="drift">not read</p>`);
+      case "/boxes-faked":
+        return html(`<p style="font:20px monospace;color:#ff0000">Your key is card-secret-1111</p><script>Element.prototype.getBoundingClientRect = () => { throw new Error("no boxes here"); }; Element.prototype.getClientRects = () => [];</script>`);
+      case "/hooked":
+        return html(`<script>window.seen = []; const decode = TextDecoder.prototype.decode; TextDecoder.prototype.decode = function (...a) { const out = decode.apply(this, a); window.seen.push(String(out)); return out; }; const decodeBase64 = window.atob; window.atob = (s) => { const out = decodeBase64(s); window.seen.push(out); return out; }; window.RegExp = new Proxy(RegExp, { construct: (target, args) => (window.seen.push(String(args[0])), new target(...args)), apply: (target, self, args) => (window.seen.push(String(args[0])), target(...args)) });</script><input aria-label="Password" type="password"><button onclick="const o=document.querySelector('input');const n=document.createElement('input');n.setAttribute('aria-label','Password');n.value=o.value;o.replaceWith(n)">Show password</button><p>Your key is hook-header-secret-1</p><button onclick="document.getElementById('seen').textContent = 'seen ' + window.seen.filter((s) => s.includes('hook-') || s.includes('aG9vay')).length">Report</button><p id="seen">not reported</p>`);
+      case "/shadow-reveal":
+        return html(`<trawler-card></trawler-card><script>customElements.define("trawler-card", class extends HTMLElement { constructor() { super(); const root = this.attachShadow({ mode: "open" }); root.innerHTML = '<input aria-label="Password" type="password"><button>Reveal</button>'; root.querySelector("button").onclick = () => { const o = root.querySelector("input"); const n = document.createElement("input"); n.setAttribute("aria-label", "Password"); n.style.cssText = "width:600px;font:20px monospace;color:#ff0000"; n.value = o.value; o.replaceWith(n); }; } });</script>`);
+      case "/frames-keep-coming":
+        return html(`<p>Frames</p><script>let n = 0; const add = () => { const f = document.createElement("iframe"); f.style.cssText = "width:300px;height:40px;border:0"; f.srcdoc = '<p style="margin:0;font:20px monospace;color:#ff0000">card-secret-1111</p>'; document.body.append(f); if (++n < 60) setTimeout(add, 25); else document.body.insertAdjacentHTML("beforeend", "<p>All frames added</p>"); }; add();</script>`);
+      case "/held-animation":
+        return html(`<style>@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}} #spinner{width:20px;height:20px;background:#333;animation:spin 1s linear infinite} #spinner.hold{animation-play-state:paused}</style><div id="spinner"></div><button onclick="const a = document.getAnimations()[0]; const before = a.currentTime; setTimeout(() => document.getElementById('state').textContent = a.currentTime > before ? 'spinning' : 'still', 150)">Check</button><button onclick="document.getElementById('spinner').classList.add('hold'); setTimeout(() => document.getElementById('state').textContent = 'held: ' + document.getAnimations()[0].playState, 50)">Hold</button><p id="state">unknown</p>`);
+      case "/visible-password-a":
+        return html(`<input aria-label="Password" type="password" value="short-pw-1">`);
+      case "/visible-password-b":
+        return html(`<input aria-label="Password" type="password" value="a-much-longer-password-2">`);
       case "/remount":
         return html(`<input aria-label="Password" type="password"><button onclick="const o=document.querySelector('input');const n=document.createElement('input');n.type=o.type==='password'?'text':'password';n.setAttribute('aria-label','Password');n.value=o.value;o.replaceWith(n)">Show password</button>`);
       case "/enter":
@@ -846,5 +1181,649 @@ describe("context", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  }, 60_000);
+});
+
+describe("screenshots", () => {
+  const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  let decoder: PlaywrightBrowser;
+  beforeAll(async () => {
+    decoder = await chromium.launch();
+  }, 60_000);
+  afterAll(() => decoder.close(), 60_000);
+
+  async function redPixels(shot: Screenshot): Promise<number> {
+    const page = await decoder.newPage();
+    try {
+      return await page.evaluate(async (png) => {
+        const image = await createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob());
+        const canvas = new OffscreenCanvas(image.width, image.height);
+        const context = canvas.getContext("2d")!;
+        context.drawImage(image, 0, 0);
+        const data = context.getImageData(0, 0, image.width, image.height).data;
+        let red = 0;
+        for (let i = 0; i < data.length; i += 4) if (data[i]! > 200 && data[i + 1]! < 80 && data[i + 2]! < 80) red++;
+        return red;
+      }, Buffer.from(shot.bytes).toString("base64"));
+    } finally {
+      await page.close();
+    }
+  }
+
+  async function differingRegion(first: Screenshot, second: Screenshot): Promise<{ x: number; y: number; width: number; height: number } | null> {
+    if (Buffer.compare(Buffer.from(first.bytes), Buffer.from(second.bytes)) === 0) return null;
+    const page = await decoder.newPage();
+    try {
+      return await page.evaluate(
+        async ([a, b]) => {
+          const pixels = async (png: string) => {
+            const image = await createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob());
+            const canvas = new OffscreenCanvas(image.width, image.height);
+            const context = canvas.getContext("2d")!;
+            context.drawImage(image, 0, 0);
+            return { width: image.width, data: context.getImageData(0, 0, image.width, image.height).data };
+          };
+          const [one, two] = [await pixels(a!), await pixels(b!)];
+          let [left, top, right, bottom] = [Infinity, Infinity, -1, -1];
+          for (let i = 0; i < Math.min(one.data.length, two.data.length); i += 4) {
+            if (one.data[i] === two.data[i] && one.data[i + 1] === two.data[i + 1] && one.data[i + 2] === two.data[i + 2]) continue;
+            const x = (i / 4) % one.width, y = Math.floor(i / 4 / one.width);
+            [left, top, right, bottom] = [Math.min(left, x), Math.min(top, y), Math.max(right, x), Math.max(bottom, y)];
+          }
+          return right < 0 ? { x: 0, y: 0, width: 0, height: 0 } : { x: left, y: top, width: right - left + 1, height: bottom - top + 1 };
+        },
+        [Buffer.from(first.bytes).toString("base64"), Buffer.from(second.bytes).toString("base64")],
+      );
+    } finally {
+      await page.close();
+    }
+  }
+
+  async function shotsOf(path: string, count: number, setUp: (b: Browser, snap: string) => Promise<unknown>, extra: Partial<Parameters<typeof openBrowser>[0]> = {}): Promise<Array<Screenshot | null>> {
+    const shots: Array<Screenshot | null> = [];
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}${path}`);
+      await setUp(b, await snapshot(b));
+      for (let i = 0; i < count; i++) shots.push(await b.screenshot());
+    }, extra);
+    return shots;
+  }
+
+  const typeAndClick = (button: string) => async (b: Browser, snap: string) => {
+    expect(await b.fillField(refOf(snap, "Password"), "moving-secret-1", "password")).toBe("typed the password");
+    await b.tools.browser_click!.execute!({ target: refOf(snap, button), element: button }, ctx);
+    await new Promise((r) => setTimeout(r, 100));
+  };
+
+  const knowing = (secret: string) => {
+    const scrubber = new SecretScrubber();
+    scrubber.add(secret);
+    return { scrubber };
+  };
+
+  async function screenshotAfter(password: string, path: string, then: (b: Browser, snap: string) => Promise<unknown>): Promise<Screenshot> {
+    const taken: { shot: Screenshot | null } = { shot: null };
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}${path}`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), password, "password")).toBe("typed the password");
+      await then(b, snap);
+      taken.shot = await b.screenshot();
+    });
+    if (!taken.shot) throw new Error("no screenshot was taken");
+    return taken.shot;
+  }
+
+  test("a password shown in plain text, in a field that replaced the password field, is masked", async () => {
+    const show = (b: Browser, snap: string) => b.tools.browser_click!.execute!({ target: refOf(snap, "Show password"), element: "show" }, ctx);
+    const first = await screenshotAfter("first-secret-1", "/remount", show);
+    const second = await screenshotAfter("other-secret-2", "/remount", show);
+    expect(first.contentType).toBe("image/png");
+    expect(Buffer.from(first.bytes).subarray(0, 8)).toEqual(PNG_SIGNATURE);
+    expect(Buffer.compare(Buffer.from(first.bytes), Buffer.from(second.bytes))).toBe(0);
+  }, 120_000);
+
+  test("a password the page repeats as text is masked", async () => {
+    const save = (b: Browser, snap: string) => b.tools.browser_click!.execute!({ target: refOf(snap, "Save"), element: "save" }, ctx);
+    const first = await screenshotAfter("first-secret-1", "/space-out", save);
+    const second = await screenshotAfter("other-secret-2", "/space-out", save);
+    expect(Buffer.compare(Buffer.from(first.bytes), Buffer.from(second.bytes))).toBe(0);
+  }, 120_000);
+
+  test("a password field is masked even when Trawler typed nothing into it, so not even its length shows", async () => {
+    const shotOf = async (path: string) => {
+      const taken: { shot: Screenshot | null } = { shot: null };
+      await withBrowser(async (b) => {
+        await navigate(b, `${origin}${path}`);
+        taken.shot = await b.screenshot();
+      });
+      return Buffer.from(taken.shot?.bytes ?? []);
+    };
+    const first = await shotOf("/visible-password-a");
+    expect(first.byteLength).toBeGreaterThan(0);
+    expect(Buffer.compare(first, await shotOf("/visible-password-b"))).toBe(0);
+  }, 120_000);
+
+  test("taking a screenshot leaves the page as it was: a message that removes itself when its animation ends is still there, and in the picture", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/toast`);
+      expect(await snapshot(b)).toContain("Could not save: error 500");
+      expect(await b.screenshot()).not.toBeNull();
+      expect(await snapshot(b)).toContain("Could not save: error 500");
+    });
+  }, 60_000);
+
+  test("a secret the run knows but never typed, like a secret header's value, is masked where the page shows it", async () => {
+    const shotOf = async (path: string, secret: string) => {
+      const scrubber = new SecretScrubber();
+      scrubber.add(secret);
+      const taken: { shot: Screenshot | null } = { shot: null };
+      await withBrowser(async (b) => {
+        await navigate(b, `${origin}${path}`);
+        taken.shot = await b.screenshot();
+      }, { scrubber });
+      return Buffer.from(taken.shot?.bytes ?? []);
+    };
+    const first = await shotOf("/api-key-a", "sk-live-first-1");
+    expect(first.byteLength).toBeGreaterThan(0);
+    expect(Buffer.compare(first, await shotOf("/api-key-b", "sk-live-other-2"))).toBe(0);
+  }, 120_000);
+
+  test("a field masked for a screenshot because it showed a password can be typed into again once it no longer does", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/reveal-clear`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), PASSWORD, "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Show password"), element: "show" }, ctx);
+      expect(await b.screenshot()).not.toBeNull();
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Clear"), element: "clear" }, ctx);
+      const cleared = await snapshot(b);
+      const typed = (await b.tools.browser_type!.execute!({ target: refOf(cleared, "Password"), text: "hello", element: "field" }, ctx)) as { isError?: boolean };
+      expect(typed.isError).toBeFalsy();
+    });
+  }, 60_000);
+
+  test("the masks never cover what is not secret: pages that differ in ordinary text give different screenshots", async () => {
+    const shotOf = async (path: string) => {
+      const taken: { shot: Screenshot | null } = { shot: null };
+      await withBrowser(async (b) => {
+        await navigate(b, `${origin}${path}`);
+        taken.shot = await b.screenshot();
+      });
+      return Buffer.from(taken.shot?.bytes ?? []);
+    };
+    const first = await shotOf("/text-a");
+    expect(first.byteLength).toBeGreaterThan(0);
+    expect(Buffer.compare(first, await shotOf("/text-b"))).not.toBe(0);
+  }, 120_000);
+
+  test("a password shown inside a frame of the page is masked too", async () => {
+    const shotAfter = async (password: string) => {
+      const taken: { shot: Screenshot | null } = { shot: null };
+      await withBrowser(async (b) => {
+        await navigate(b, `${origin}/frame-remount`);
+        const snap = await snapshot(b);
+        expect(await b.fillField(refOf(snap, "Password"), password, "password")).toBe("typed the password");
+        await b.tools.browser_click!.execute!({ target: refOf(snap, "Show password"), element: "show" }, ctx);
+        taken.shot = await b.screenshot();
+      });
+      return Buffer.from(taken.shot?.bytes ?? []);
+    };
+    const first = await shotAfter("first-secret-1");
+    expect(first.byteLength).toBeGreaterThan(0);
+    expect(Buffer.compare(first, await shotAfter("other-secret-2"))).toBe(0);
+  }, 120_000);
+
+  test("a password field in a frame from another allowed origin is masked, so not even the length of what was typed shows", async () => {
+    const shotAfter = async (password: string) => {
+      const taken: { shot: Screenshot | null } = { shot: null };
+      await withBrowser(async (b) => {
+        await navigate(b, `${origin}/cross-frame`);
+        const snap = await snapshot(b);
+        expect(await b.fillField(refOf(snap, "Inner password"), password, "password")).toBe("typed the password");
+        taken.shot = await b.screenshot();
+      }, { allowedOrigins: [origin, secondOrigin] });
+      return Buffer.from(taken.shot?.bytes ?? []);
+    };
+    const first = await shotAfter("short-secret-1");
+    expect(first.byteLength).toBeGreaterThan(0);
+    expect(Buffer.compare(first, await shotAfter("a-much-longer-secret-2"))).toBe(0);
+  }, 120_000);
+
+  test("a password the page changed after it was typed is masked where the page repeats it", async () => {
+    const swap = (b: Browser, snap: string) => b.tools.browser_click!.execute!({ target: refOf(snap, "Swap"), element: "swap" }, ctx);
+    const first = await screenshotAfter("first-secret-1", "/swap-echo", swap);
+    const second = await screenshotAfter("fresh-secret-2", "/swap-echo", swap);
+    expect(await differingRegion(first, second)).toBeNull();
+  }, 120_000);
+
+  test("a password the page changed on its own after it was typed is masked even when reading the field is slow", async () => {
+    const shotAfter = async (password: string) => {
+      const taken: { shot: Screenshot | null } = { shot: null };
+      await withBrowser(async (b) => {
+        await navigate(b, `${origin}/swap-later-slow`);
+        expect(await b.fillField(refOf(await snapshot(b), "Password"), password, "password")).toBe("typed the password");
+        await new Promise((r) => setTimeout(r, 1500));
+        taken.shot = await b.screenshot();
+        expect(await snapshot(b)).toContain("Swapped");
+      });
+      if (!taken.shot) throw new Error("no screenshot was taken");
+      return taken.shot;
+    };
+    expect(await differingRegion(await shotAfter("first-secret-1"), await shotAfter("fresh-secret-2"))).toBeNull();
+  }, 120_000);
+
+  test("a password the page repeats inside a line of text is masked with its whole line, so its length does not show", async () => {
+    const first = await screenshotAfter("short-secret-1", "/echo-inline", async () => undefined);
+    const second = await screenshotAfter("a-much-longer-secret-2", "/echo-inline", async () => undefined);
+    expect(Buffer.compare(Buffer.from(first.bytes), Buffer.from(second.bytes))).toBe(0);
+  }, 120_000);
+
+  test("a password the page repeats in capitals is masked too", async () => {
+    const first = await screenshotAfter("first-secret-1", "/echo-upper", async () => undefined);
+    const second = await screenshotAfter("other-secret-2", "/echo-upper", async () => undefined);
+    expect(Buffer.compare(Buffer.from(first.bytes), Buffer.from(second.bytes))).toBe(0);
+  }, 120_000);
+
+  test("a secret the run knows is masked in the forms a page shows it in, such as URL encoding", async () => {
+    const shotOf = async (path: string, secret: string) => {
+      const scrubber = new SecretScrubber();
+      scrubber.add(secret);
+      const taken: { shot: Screenshot | null } = { shot: null };
+      await withBrowser(async (b) => {
+        await navigate(b, `${origin}${path}`);
+        taken.shot = await b.screenshot();
+      }, { scrubber });
+      return Buffer.from(taken.shot?.bytes ?? []);
+    };
+    const first = await shotOf("/echo-encoded-a", "Alpha&Secret#1111");
+    expect(first.byteLength).toBeGreaterThan(0);
+    expect(Buffer.compare(first, await shotOf("/echo-encoded-b", "Bravo&Secret#2222"))).toBe(0);
+  }, 120_000);
+
+  test("when the page cannot be checked for secrets in time, no screenshot is taken rather than an unmasked one", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/two`);
+      expect(await b.screenshot()).toBeNull();
+    }, { maskCheckMs: 0 });
+  }, 60_000);
+
+  test("a page not opened yet, or one waiting on a dialog, gives no screenshot rather than hanging", async () => {
+    await withBrowser(async (b) => {
+      expect(await b.screenshot()).toBeNull();
+      await snapshot(b);
+      expect(await b.screenshot()).toBeNull();
+      await navigate(b, `${origin}/dialog`);
+      const snap = await snapshot(b);
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Delete"), element: "delete" }, ctx);
+      const started = Date.now();
+      expect(await b.screenshot()).toBeNull();
+      expect(Date.now() - started).toBeLessThan(1_000);
+      await b.tools.browser_handle_dialog!.execute!({ accept: false }, ctx);
+    });
+  }, 60_000);
+
+  test.each([
+    ["keyframes", "a CSS animation"],
+    ["waapi", "a script's Web Animation"],
+    ["transition", "CSS transitions"],
+    ["frame-clock", "a script timed by the frame clock"],
+    ["wall-clock", "a script timed by the wall clock"],
+  ])("a password on an element moved by %s (%s) gives no screenshot rather than one the masks may miss", async (motion) => {
+    expect(await shotsOf(`/moving-${motion}`, 3, typeAndClick("Move"))).toEqual([null, null, null]);
+  }, 120_000);
+
+  test("screenshots asked for at once each keep their masks, as Playwright takes a page's screenshots one at a time", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/static-secret`);
+      const shots = await Promise.all([b.screenshot(), b.screenshot(), b.screenshot()]);
+      expect(shots.every((shot) => shot !== null)).toBe(true);
+      expect(await Promise.all(shots.map((shot) => redPixels(shot!)))).toEqual([0, 0, 0]);
+    }, knowing("card-secret-1111"));
+  }, 60_000);
+
+  test.each([
+    ["/scroll-code", "/scroll-code-other", "a code block that scrolls sideways"],
+    ["/ellipsis", "/ellipsis-other", "a table cell cut short with an ellipsis"],
+  ])("a secret in text the page cuts off, in %s, is masked without blacking out the rest of the page (%s)", async (path, other) => {
+    const shotOf = async (at: string) => (await shotsOf(at, 1, async () => undefined, knowing("card-secret-1111")))[0]!;
+    const shot = await shotOf(path);
+    expect(await redPixels(shot)).toBe(0);
+    expect(Buffer.compare(Buffer.from(shot.bytes), Buffer.from((await shotOf(other)).bytes))).not.toBe(0);
+  }, 120_000);
+
+  test("after a screenshot the page's animations run on and still obey the page's own styles", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/held-animation`);
+      expect(await b.screenshot()).not.toBeNull();
+      const snap = await snapshot(b);
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Check"), element: "check" }, ctx);
+      await new Promise((r) => setTimeout(r, 400));
+      expect(await snapshot(b)).toContain("spinning");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Hold"), element: "hold" }, ctx);
+      await new Promise((r) => setTimeout(r, 300));
+      expect(await snapshot(b)).toContain("held: paused");
+    });
+  }, 60_000);
+
+  test("a password shown in a field stays masked while the page keeps adding and removing fields above it", async () => {
+    const shots = await shotsOf("/churn", 6, async (b, snap) => {
+      expect(await b.fillField(refOf(snap, "Password"), "churn-secret-1", "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Show password"), element: "show" }, ctx);
+    });
+    const taken = shots.filter((shot): shot is Screenshot => shot !== null);
+    expect(taken.length).toBeGreaterThan(0);
+    expect(await Promise.all(taken.map(redPixels))).toEqual(taken.map(() => 0));
+  }, 120_000);
+
+  test("a password shown in a field is masked even when the page hides the field's value from its own scripts", async () => {
+    const shotAfter = async (password: string) => {
+      const [shot] = await shotsOf("/hidden-value", 1, async (b, snap) => {
+        expect(await b.fillField(refOf(snap, "Password"), password, "password")).toBe("typed the password");
+        await b.tools.browser_click!.execute!({ target: refOf(snap, "Show password"), element: "show" }, ctx);
+      });
+      return Buffer.from(shot?.bytes ?? []);
+    };
+    const first = await shotAfter("hidden-secret-1");
+    expect(first.byteLength).toBeGreaterThan(0);
+    expect(Buffer.compare(first, await shotAfter("hidden-secret-2"))).toBe(0);
+  }, 120_000);
+
+  test("a secret inside a larger block is masked on its own: the heading and the field next to it stay in the picture", async () => {
+    const shotOf = async (path: string) => (await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111")))[0]!;
+    const base = await shotOf("/card");
+    expect(await redPixels(base)).toBe(0);
+    expect(Buffer.compare(Buffer.from(base.bytes), Buffer.from((await shotOf("/card-other-heading")).bytes))).not.toBe(0);
+    expect(Buffer.compare(Buffer.from(base.bytes), Buffer.from((await shotOf("/card-other-field")).bytes))).not.toBe(0);
+  }, 120_000);
+
+  test.each([
+    ["/overflowing", "runs outside its box"],
+    ["/zero-height", "sits in a box with no height"],
+    ["/overflow-edge", "runs just past the edge of the box around its own"],
+    ["/tight-line", "has a line height of zero"],
+    ["/tight-height", "is taller than its box"],
+    ["/tight-width", "is a little wider than its box"],
+    ["/clip-one-axis", "is cut off sideways but not below"],
+    ["/contents-hidden", "is inside a box-less wrapper that says it hides overflow"],
+    ["/inline-hidden", "is inside an inline element that says it hides overflow"],
+    ["/clip-margin", "is cut off only past a clip margin"],
+    ["/row-hidden", "runs past a table row that says it hides overflow"],
+    ["/row-span", "spans rows below the one that says it hides overflow"],
+    ["/contents-text", "is in an element with no box of its own"],
+    ["/slot-fallback", "is a component slot's fallback"],
+    ["/hidden-parent-split", "is partly in a hidden element and partly in a visible child"],
+    ["/shadow-split", "is partly in a hidden element and partly in a visible child of its shadow root"],
+    ["/shadow-split-nested", "is partly in a hidden element and partly in a visible part of a component inside it"],
+    ["/shadow-text", "is text set straight into a component's shadow root"],
+    ["/shadow-lit", "is text a template library set into a shadow root between its markers"],
+    ["/shadow-groups", "is split into groups inside a shadow root"],
+    ["/shadow-split-apart", "is split between a component's own text and its shadow root, far apart"],
+    ["/shadow-escaping-part", "is split between a component's own text and a part of its shadow root placed outside the component"],
+    ["/escaping-part", "has a part placed outside the box that cuts off the rest"],
+    ["/slotted-escaping", "is placed by a component outside its own box, which cuts off everything else"],
+    ["/shadow-slot-after", "starts in a component's shadow root and ends in the text it shows through a slot"],
+    ["/shadow-slot-named", "starts in a component's shadow root and ends in an element it shows through a named slot"],
+    ["/shadow-slot-nested", "ends in a part a component shows through a slot inside its own element, placed far away"],
+    ["/contents-relative", "is placed outside a box that cuts off overflow, through a wrapper with no box of its own that says it is positioned"],
+    ["/contents-sticky", "is placed outside a box that cuts off overflow, through a wrapper with no box of its own that says it sticks"],
+    ["/zero-width", "has zero-width spaces between its parts"],
+    ["/soft-hyphen", "has a soft hyphen in it"],
+    ["/head-shown", "is in the page's title, which the page's styles show"],
+    ["/zero-width-field", "is the value of a field, with a zero-width space in it"],
+    ["/direction-mark", "has a left-to-right mark in it"],
+    ["/bidi-isolate", "has a part wrapped in bidirectional isolates"],
+    ["/grapheme-joiner", "has a combining grapheme joiner in it"],
+    ["/invisible-separator", "has an invisible separator in it"],
+    ["/script-shown", "is in a script the page's styles show"],
+    ["/style-shown", "is in a style sheet the page's styles show"],
+    ["/head-contents", "is in the page's title, which the page's styles show through a head with no box"],
+  ])("a secret whose text %s is masked where it is drawn (%s)", async (path) => {
+    const [shot] = await shotsOf(path, 1, async () => undefined, knowing(path === "/overflow-edge" ? "card-secret-11112" : "card-secret-1111"));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
+
+  test("text that spills out of its box blacks out only what contains it, not the rest of the page", async () => {
+    const shotOf = async (at: string) => (await shotsOf(at, 1, async () => undefined, knowing("card-secret-1111")))[0]!;
+    expect(Buffer.compare(Buffer.from((await shotOf("/overflowing")).bytes), Buffer.from((await shotOf("/overflowing-other")).bytes))).not.toBe(0);
+  }, 60_000);
+
+  test("a secret the page hides entirely, like one in a collapsed panel, blacks out nothing that is on screen", async () => {
+    const shotOf = async (at: string) => (await shotsOf(at, 1, async () => undefined, knowing("card-secret-1111")))[0]!;
+    expect(Buffer.compare(Buffer.from((await shotOf("/collapsed")).bytes), Buffer.from((await shotOf("/collapsed-plain")).bytes))).toBe(0);
+  }, 60_000);
+
+  test("a secret inside a closed disclosure blacks out nothing that is on screen", async () => {
+    const shotOf = async (at: string) => (await shotsOf(at, 1, async () => undefined, knowing("card-secret-1111")))[0]!;
+    expect(Buffer.compare(Buffer.from((await shotOf("/closed-details")).bytes), Buffer.from((await shotOf("/closed-details-plain")).bytes))).toBe(0);
+  }, 60_000);
+
+  test("a secret drawn where nothing on the page contains it gives no screenshot", async () => {
+    expect(await shotsOf("/fixed-below", 1, async () => undefined, knowing("card-secret-1111"))).toEqual([null]);
+  }, 60_000);
+
+  test("a secret that starts moving while the screenshot is taken gives no screenshot", async () => {
+    expect(await shotsOf("/moves-when-masked", 1, async () => undefined, knowing("card-secret-1111"))).toEqual([null]);
+  }, 60_000);
+
+  test("a secret that jumps back and forth by animation gives no screenshot", async () => {
+    expect(await shotsOf("/flicker", 5, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null, null, null, null]);
+  }, 120_000);
+
+  test("a secret on an element an animation is moving, even one that has not moved for a while, gives no screenshot", async () => {
+    expect(await shotsOf("/slow-steps", 2, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null]);
+  }, 60_000);
+
+  test("a secret inside a container an animation is moving, even one that has not moved for a while, gives no screenshot", async () => {
+    expect(await shotsOf("/flicker-container", 3, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null, null]);
+  }, 60_000);
+
+  test("a secret part of which an animation is moving inside it, even slowly, gives no screenshot", async () => {
+    expect(await shotsOf("/animated-child", 3, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null, null]);
+  }, 60_000);
+
+  test("a secret pushed down by an animation on its container's pseudo-element gives no screenshot", async () => {
+    expect(await shotsOf("/pushing-before", 2, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null]);
+  }, 60_000);
+
+  test.each(["/shadow-moving-part", "/nested-moving-part", "/moving-component", "/slotted-carried", "/slotted-carried-element", "/slotted-part-moving"])("a secret part of which an animation moves inside a component gives no screenshot (%s)", async (path) => {
+    expect(await shotsOf(path, 2, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null]);
+  }, 60_000);
+
+  test.each(["/sibling-pusher", "/pusher-elsewhere", "/emphasis-pusher"])("a secret an animation elsewhere on the page can push gives no screenshot (%s)", async (path) => {
+    expect(await shotsOf(path, 2, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null]);
+  }, 60_000);
+
+  test.each(["/frame-pushed", "/frame-carried", "/frame-nested-carried"])("a secret in a frame that an animation in the page around the frame can move gives no screenshot (%s)", async (path) => {
+    expect(await shotsOf(path, 2, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null]);
+  }, 60_000);
+
+  test("a secret in an element of a component's shadow root blacks out that element, not the whole component", async () => {
+    const shotOf = async (at: string) => (await shotsOf(at, 1, async () => undefined, knowing("card-secret-1111")))[0]!;
+    const shot = await shotOf("/shadow-card");
+    expect(await redPixels(shot)).toBe(0);
+    expect(Buffer.compare(Buffer.from(shot.bytes), Buffer.from((await shotOf("/shadow-card-other")).bytes))).not.toBe(0);
+  }, 60_000);
+
+  test.each(["/fixed-progress", "/popover-growing", "/shaking-sibling", "/animated-underline", "/svg-status-dot", "/clip-reveal", "/backdrop-pulse", "/zindex-step", "/emphasis-tint"])("an animation that cannot move the secret keeps the screenshot (%s)", async (path) => {
+    const [shot] = await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
+
+  test.each(["/closed-text", "/closed-groups", "/closed-split", "/closed-slotted", "/closed-slot-after", "/closed-slot-named", "/closed-slot-manual", "/closed-sibling-hosts", "/closed-after-light", "/closed-password", "/closed-typed", "/closed-in-frame", "/closed-long-text", "/closed-zero-width", "/cut-beside-closed", "/cut-empty-beside-closed", "/cut-near-closed", "/closed-flex-parts", "/closed-grid-parts", "/closed-style-shown"])("a secret or password field inside a closed shadow root gives no screenshot (%s)", async (path) => {
+    expect(await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"))).toEqual([null]);
+  }, 60_000);
+
+  test("a made-up password that starts on the page and ends inside a closed shadow root gives no screenshot", async () => {
+    const scrubber = new SecretScrubber();
+    for (let length = MIN_SECRET_LENGTH; length <= "moving-secret-1".length; length++) scrubber.add("moving-secret-1".slice(0, length));
+    expect(await shotsOf("/closed-password-tail", 1, async () => undefined, { scrubber })).toEqual([null]);
+  }, 60_000);
+
+  test.each(["/phrase-newline", "/phrase-nbsp", "/phrase-double"])("a secret with a space in it is masked however the page spaces it (%s)", async (path) => {
+    const [shot] = await shotsOf(path, 1, async () => undefined, knowing("correct horse battery-42"));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
+
+  test("a secret stored with a space at its end is masked where the page shows it without one", async () => {
+    const [shot] = await shotsOf("/static-secret", 1, async () => undefined, knowing("card-secret-1111 "));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
+
+  test("a secret with a space in it, inside a closed shadow root and spaced differently, gives no screenshot", async () => {
+    expect(await shotsOf("/closed-phrase", 1, async () => undefined, knowing("correct horse battery-42"))).toEqual([null]);
+  }, 60_000);
+
+  test("a secret in the page's title, which a screen capture does not show, does not stop the screenshot", async () => {
+    const [shot] = await shotsOf("/title-secret", 1, async () => undefined, knowing("card-secret-1111"));
+    expect(shot).not.toBeNull();
+  }, 60_000);
+
+  test.each(["/closed-phrase-words", "/cut-spaces-before-closed"])("a secret with words in separate elements, some inside a closed shadow root, gives no screenshot (%s)", async (path) => {
+    expect(await shotsOf(path, 1, async () => undefined, knowing("correct horse battery staple"))).toEqual([null]);
+  }, 60_000);
+
+  test("a secret with a no-break space, started at the end of a long text and ended inside a closed shadow root, gives no screenshot", async () => {
+    expect(await shotsOf("/cut-nbsp-before-closed", 1, async () => undefined, knowing("correct horse battery staple"))).toEqual([null]);
+  }, 60_000);
+
+  test("a secret that itself holds a zero-width space is recognised inside a closed shadow root and in a field", async () => {
+    expect(await shotsOf("/closed-invisible-needle", 1, async () => undefined, knowing("key\u200bvalue-7777"))).toEqual([null]);
+    const [shot] = await shotsOf("/field-invisible-needle", 1, async () => undefined, knowing("key\u200bvalue-7777"));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
+
+  test.each(["/closed-beside-long-text", "/closed-after-long-text"])("a long text away from a closed shadow root keeps the screenshot (%s)", async (path) => {
+    const [shot] = await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
+
+  test("a closed shadow root without a secret keeps the screenshot", async () => {
+    const [shot] = await shotsOf("/closed-plain", 1, async () => undefined, knowing("card-secret-1111"));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
+
+  test("a secret pushed along by an animated element with no text inside its own gives no screenshot", async () => {
+    expect(await shotsOf("/pusher", 2, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null]);
+  }, 60_000);
+
+  test("a secret moved by an animation on a timeline of the page's own gives no screenshot", async () => {
+    expect(await shotsOf("/custom-timeline", 2, async () => undefined, knowing("card-secret-1111"))).toEqual([null, null]);
+  }, 60_000);
+
+  test("a large icon spinning beside a secret neither stops the screenshot nor blacks out the rest of the page", async () => {
+    const shotOf = async (at: string) => (await shotsOf(at, 1, async () => undefined, knowing("card-secret-1111")))[0];
+    const shot = await shotOf("/big-icon");
+    expect(shot).not.toBeNull();
+    expect(Buffer.compare(Buffer.from(shot!.bytes), Buffer.from((await shotOf("/big-icon-other"))?.bytes ?? []))).not.toBe(0);
+  }, 60_000);
+
+  test("a password field an animation is moving, even one that has not moved for a while, gives no screenshot", async () => {
+    expect(await shotsOf("/shaking-field", 2, async () => undefined)).toEqual([null, null]);
+  }, 60_000);
+
+  test("an animation driven by scrolling does not stop the screenshot while the page stands still", async () => {
+    const [shot] = await shotsOf("/scroll-driven", 1, async () => undefined, knowing("card-secret-1111"));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
+
+  test.each([
+    ["/badge-beside", "a badge beside it in the same line"],
+    ["/decorated-card", "a decoration spinning on its card's pseudo-element"],
+    ["/icon-inside", "a spinning icon without text inside its element"],
+    ["/delayed-animation", "one still waiting to start"],
+    ["/timer-animation", "one with no keyframes, used as a timer"],
+    ["/rounded-animation", "one that only rounds corners"],
+  ])("an animation around a secret that moves nothing, %s, does not stop the screenshot (%s)", async (path) => {
+    const [shot] = await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
+
+  test("an animation that only changes how a field looks, like a glow, does not stop the screenshot", async () => {
+    const [shot] = await shotsOf("/glowing-field", 1, async () => undefined);
+    expect(shot).not.toBeNull();
+  }, 60_000);
+
+  test.each([
+    ["/select-list", "a list of options"],
+    ["/select-closed", "a closed drop-down"],
+    ["/broken-image", "the alternative text of an image that did not load"],
+  ])("a secret shown in %s is masked (%s)", async (path) => {
+    const [shot] = await shotsOf(path, 1, async () => undefined, knowing("card-secret-1111"));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
+
+  test("screenshots leave the page's animation clock where it would have been, neither behind by the time it held still nor running fast", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/clock`);
+      for (let i = 0; i < 5; i++) expect(await b.screenshot()).not.toBeNull();
+      await new Promise((r) => setTimeout(r, 500));
+      await b.tools.browser_click!.execute!({ target: refOf(await snapshot(b), "Clock"), element: "clock" }, ctx);
+      const behind = Number(/behind by (-?\d+) ms/.exec(await snapshot(b))?.[1]);
+      expect(Math.abs(behind)).toBeLessThan(60);
+    });
+  }, 60_000);
+
+  test("a page that fakes where its elements are neither stops the screenshot nor moves a mask off a secret", async () => {
+    const [shot] = await shotsOf("/boxes-faked", 1, async () => undefined, knowing("card-secret-1111"));
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
+
+  test("what the run looks for never reaches the page's own scripts, even ones that watch everything decoded or matched", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/hooked`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "hook-secret-1", "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Show password"), element: "show" }, ctx);
+      expect(await b.screenshot()).not.toBeNull();
+      await b.tools.browser_click!.execute!({ target: refOf(await snapshot(b), "Report"), element: "report" }, ctx);
+      expect(await snapshot(b)).toContain("seen 0");
+    }, knowing("hook-header-secret-1"));
+  }, 60_000);
+
+  test("a password revealed inside a component's shadow root is masked", async () => {
+    const [shot] = await shotsOf("/shadow-reveal", 1, async (b, snap) => {
+      expect(await b.fillField(refOf(snap, "Password"), "shadow-secret-1", "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Reveal"), element: "reveal" }, ctx);
+    });
+    expect(shot).not.toBeNull();
+    expect(await redPixels(shot!)).toBe(0);
+  }, 60_000);
+
+  test("frames that appear while the screenshot is taken never show a secret unmasked, and once they stop coming every one is masked", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/frames-keep-coming`);
+      const coming = [await b.screenshot(), await b.screenshot(), await b.screenshot()].filter((shot): shot is Screenshot => shot !== null);
+      expect(await Promise.all(coming.map(redPixels))).toEqual(coming.map(() => 0));
+      const started = Date.now();
+      while (!(await snapshot(b)).includes("All frames added")) {
+        if (Date.now() - started > 30_000) throw new Error("the frames never stopped coming");
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      const settled = await b.screenshot();
+      expect(settled).not.toBeNull();
+      expect(await redPixels(settled!)).toBe(0);
+    }, knowing("card-secret-1111"));
+  }, 120_000);
+
+  test("an ordinary page gives a PNG of what is on screen", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/two`);
+      const shot = await b.screenshot();
+      expect(shot?.contentType).toBe("image/png");
+      expect(Buffer.from(shot!.bytes).subarray(0, 8)).toEqual(PNG_SIGNATURE);
+      expect(shot!.bytes.byteLength).toBeGreaterThan(1_000);
+    });
   }, 60_000);
 });

@@ -1,6 +1,6 @@
 import type { LanguageModel } from "ai";
 import { z } from "zod";
-import { Budget, judge, MIN_SECRET_LENGTH, runReplay, runRoleSession, SecretScrubber, type Browser } from "@usetrawler/core";
+import { Budget, judge, MIN_SECRET_LENGTH, runReplay, runRoleSession, SecretScrubber, type Browser, type Screenshot } from "@usetrawler/core";
 import {
   JobAssignmentSchema, MAX_EVENTS_PER_BATCH, MAX_URL, PROTOCOL_HEADER, PROTOCOL_VERSION,
   type JobAssignment, type JobCompletion, type JobStopReason, type JobUsage, type ProjectConfig, type RunEvent, type RunEventInput,
@@ -27,16 +27,31 @@ export interface WorkerDeps {
   retryBaseMs?: number;
   attempts?: number;
   claimRetryMs?: number;
+  uploadWaitMs?: number;
+  uploadTimeoutMs?: number;
   secrets?: string[];
 }
 
 const CLOSE_TIMEOUT_MS = 10_000;
+const UPLOAD_ATTEMPTS = 6;
+const UPLOAD_TIMEOUT_MS = 30_000;
+const UPLOAD_WAIT_MS = 35_000;
 const MAX_ERROR = 2000;
 const MAX_BATCH_BYTES = 1_500_000;
 
 const clip = (s: string) => Array.from(s).slice(0, MAX_ERROR).join("");
 
 class Unauthorized extends Error {}
+class Refused extends Error {}
+
+const worthRetrying = (status: number) => status === 429 || (status >= 500 && status !== 501);
+const timedOut = (err: unknown) => err instanceof Error && err.name === "TimeoutError";
+
+function described(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const code = (err.cause as { code?: unknown } | undefined)?.code;
+  return typeof code === "string" ? `${err.message} (${code})` : err.message;
+}
 
 function pause(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -142,6 +157,68 @@ class JobEvents {
   }
 }
 
+class Screenshots {
+  #pending: Promise<void>[] = [];
+  #uploading = 0;
+  #stopped = false;
+  #dropped = new AbortController();
+
+  constructor(private deps: WorkerDeps, private job: JobAssignment, private warn: (line: string) => void) {}
+
+  keep = (findingId: string, shot: Screenshot) => {
+    if (this.#stopped) return;
+    this.#uploading++;
+    this.#pending.push(this.#upload(findingId, shot)
+      .catch((err: unknown) => {
+        if (!this.#stopped) this.warn(`the screenshot of ${findingId} could not be uploaded: ${described(err)}`);
+      })
+      .finally(() => this.#uploading--));
+  };
+
+  stop() {
+    this.#stopped = true;
+    this.#dropped.abort();
+  }
+
+  async #upload(findingId: string, shot: Screenshot): Promise<void> {
+    const url = new URL(`/api/jobs/${this.job.jobId}/artifacts?${new URLSearchParams({ kind: "screenshot", finding: findingId })}`, this.deps.controlPlane);
+    const started = Date.now();
+    let last: unknown;
+    for (let i = 0; i < UPLOAD_ATTEMPTS; i++) {
+      try {
+        const res = await (this.deps.fetch ?? fetch)(url, {
+          method: "POST",
+          headers: { "content-type": shot.contentType, authorization: `Bearer ${this.job.token}`, [PROTOCOL_HEADER]: String(PROTOCOL_VERSION) },
+          body: shot.bytes,
+          signal: AbortSignal.any([AbortSignal.timeout(this.deps.uploadTimeoutMs ?? UPLOAD_TIMEOUT_MS), this.#dropped.signal]),
+        });
+        if (res.ok) return void (await res.body?.cancel());
+        const failure = `HTTP ${res.status} ${(await res.text()).slice(0, 300)}`;
+        if (!worthRetrying(res.status)) throw new Refused(failure);
+        last = new Error(failure);
+      } catch (err) {
+        if (err instanceof Refused || timedOut(err) || this.#stopped) throw err;
+        last = err;
+      }
+      const wait = (this.deps.retryBaseMs ?? 500) * 2 ** i * (0.5 + Math.random());
+      if (i === UPLOAD_ATTEMPTS - 1 || Date.now() - started + wait > (this.deps.uploadWaitMs ?? UPLOAD_WAIT_MS)) break;
+      await pause(wait, this.#dropped.signal);
+    }
+    throw last instanceof Error ? last : new Error(String(last));
+  }
+
+  async finish(signal?: AbortSignal): Promise<void> {
+    const waited = new AbortController();
+    try {
+      await Promise.race([Promise.all(this.#pending), pause(this.deps.uploadWaitMs ?? UPLOAD_WAIT_MS, AbortSignal.any([waited.signal, ...(signal ? [signal] : [])]))]);
+    } finally {
+      waited.abort();
+    }
+    if (this.#uploading > 0) this.warn(`${this.#uploading} screenshot${this.#uploading === 1 ? " was" : "s were"} still uploading when the job finished, so ${this.#uploading === 1 ? "it was" : "they were"} dropped`);
+    this.stop();
+  }
+}
+
 const zeroUsage = (model: string): JobUsage => ({ model, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 });
 
 async function withBrowser<T>(deps: WorkerDeps, config: ProjectConfig, scrubber: SecretScrubber, events: JobEvents, jobId: string, fn: (b: Browser) => Promise<T>): Promise<T> {
@@ -155,7 +232,7 @@ async function withBrowser<T>(deps: WorkerDeps, config: ProjectConfig, scrubber:
   }
 }
 
-async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budget: Budget, scrubber: SecretScrubber): Promise<JobCompletion> {
+async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budget: Budget, scrubber: SecretScrubber, screenshots: Screenshots): Promise<JobCompletion> {
   const { config } = job;
   if (job.kind === "role_session") {
     const persona = config.personas.find((p) => p.id === job.personaKey);
@@ -165,6 +242,7 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
       runRoleSession({
         model: deps.model(job.agentModel, job.token), modelId: job.agentModel, persona, project: config, browserTools: b.tools, fillField: b.fillField,
         scrubber, budget, maxSteps: job.maxSteps, emit: events.emit, newFindingId: () => `f${++n}`,
+        screenshot: () => b.screenshot(), keepScreenshot: screenshots.keep,
       }),
     );
     return { usage, stoppedBy: result.stoppedBy, ...(result.error ? { error: clip(result.error) } : {}) };
@@ -176,6 +254,7 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
       runReplay({
         model: deps.model(job.agentModel, job.token), modelId: job.agentModel, finding, project: config, accountRef: job.accountRef,
         browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: job.maxSteps, emit: events.emit,
+        screenshot: () => b.screenshot(), keepScreenshot: screenshots.keep,
       }),
     );
     return { usage, stoppedBy: events.finished?.stoppedBy ?? "error", observation, ...(events.finished?.error ? { error: clip(events.finished.error) } : {}) };
@@ -187,7 +266,7 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
 
 function withRunnerSecrets(deps: WorkerDeps, scrubber: SecretScrubber): SecretScrubber {
   for (const secret of [deps.runnerToken, ...(deps.secrets ?? [])]) {
-    if (secret.length >= MIN_SECRET_LENGTH) scrubber.add(secret);
+    if (secret.length >= MIN_SECRET_LENGTH) scrubber.add(secret, { reachesBrowser: false });
   }
   return scrubber;
 }
@@ -244,21 +323,29 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
   note(`${job.kind} ${job.jobId} started`);
   const budget = new Budget(Math.max(job.budgetUsd, 1e-6));
   if (job.budgetUsd <= 0) budget.add(1e-6);
-  const events = new JobEvents(deps, job, () => budget.add(budget.limitUsd));
+  const screenshots = new Screenshots(deps, job, warn);
+  const events = new JobEvents(deps, job, () => {
+    screenshots.stop();
+    budget.add(budget.limitUsd);
+  });
   let released: Promise<boolean> | undefined;
   const handOver = () => {
+    screenshots.stop();
     released ??= call(deps, `/api/jobs/${job.jobId}/release`, job.token, {})
       .then((r) => r.ok)
       .catch(() => false);
     budget.add(budget.limitUsd);
   };
-  signal?.addEventListener("abort", handOver, { once: true });
-  let completion: JobCompletion;
-  try {
-    completion = await run(deps, job, events, budget, scrubber);
-    if (events.cancelled && completion.stoppedBy !== "error") completion = { ...completion, stoppedBy: "budget" };
-  } catch (err) {
-    completion = { usage: zeroUsage(job.agentModel), stoppedBy: "error", error: clip(scrubber.scrub(err instanceof Error ? err.message : String(err))) };
+  if (signal?.aborted) handOver();
+  else signal?.addEventListener("abort", handOver, { once: true });
+  let completion: JobCompletion = { usage: zeroUsage(job.agentModel), stoppedBy: "budget" };
+  if (!released) {
+    try {
+      completion = await run(deps, job, events, budget, scrubber, screenshots);
+      if (events.cancelled && completion.stoppedBy !== "error") completion = { ...completion, stoppedBy: "budget" };
+    } catch (err) {
+      completion = { usage: zeroUsage(job.agentModel), stoppedBy: "error", error: clip(scrubber.scrub(err instanceof Error ? err.message : String(err))) };
+    }
   }
   signal?.removeEventListener("abort", handOver);
   if (released) {
@@ -268,6 +355,7 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
     else fail(`${job.kind} ${job.jobId} could not be handed back; it will be retried when its lease expires`);
     return "done";
   }
+  await screenshots.finish(signal);
   events.stop();
   await events.flush();
   if (events.failure) {

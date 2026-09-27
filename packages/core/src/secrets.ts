@@ -33,6 +33,7 @@ function isPlainObject(v: object): boolean {
 
 export class SecretScrubber {
   #needles: string[] = [];
+  #browserNeedles: string[] = [];
 
   static forProject(project: {
     accounts: { password: string }[];
@@ -51,9 +52,15 @@ export class SecretScrubber {
     return scrubber;
   }
 
-  add(secret: string): void {
+  add(secret: string, { reachesBrowser = true }: { reachesBrowser?: boolean } = {}): void {
     if (secret.length < MIN_SECRET_LENGTH) throw new RangeError(`secrets must be at least ${MIN_SECRET_LENGTH} characters to be scrubbed reliably`);
-    this.#needles = [...new Set([...this.#needles, ...variants(secret)])].filter((n) => n.length > 0);
+    const found = variants(secret).filter((n) => n.length > 0);
+    this.#needles = [...new Set([...this.#needles, ...found])];
+    if (reachesBrowser) this.#browserNeedles = [...new Set([...this.#browserNeedles, ...found])];
+  }
+
+  browserNeedles(): string[] {
+    return [...this.#browserNeedles];
   }
 
   scrub<T>(value: T): T {

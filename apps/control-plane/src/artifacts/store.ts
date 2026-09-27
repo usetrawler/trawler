@@ -34,7 +34,7 @@ export function s3Store(storage: ArtifactStorage, timeouts: { connectionMs?: num
       await client.send(new PutObjectCommand({ Bucket: storage.bucket, Key: key, Body: bytes, ContentType: contentType }));
     },
     link(key) {
-      return getSignedUrl(client, new GetObjectCommand({ Bucket: storage.bucket, Key: key }), { expiresIn: LINK_SECONDS });
+      return getSignedUrl(client, new GetObjectCommand({ Bucket: storage.bucket, Key: key, ResponseCacheControl: "private, no-store" }), { expiresIn: LINK_SECONDS });
     },
     async remove(key) {
       await client.send(new DeleteObjectCommand({ Bucket: storage.bucket, Key: key })).catch((err: unknown) => {

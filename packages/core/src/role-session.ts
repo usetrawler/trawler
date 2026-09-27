@@ -1,4 +1,5 @@
 import type { LanguageModel, ToolSet } from "ai";
+import type { Screenshot } from "./browser.ts";
 import type { JobUsage, Persona, ProjectConfig, RoleResult, RunEventInput } from "@usetrawler/protocol";
 import { browserQueue, runAgentLoop } from "./agent-loop.ts";
 import type { Budget } from "./llm.ts";
@@ -20,12 +21,21 @@ export async function runRoleSession(opts: {
   maxSteps: number;
   emit: (e: RunEventInput) => void;
   newFindingId: () => string;
+  screenshot?: () => Promise<Screenshot | null>;
+  keepScreenshot?: (findingId: string, shot: Screenshot) => void;
 }): Promise<{ result: RoleResult; usage: JobUsage }> {
   if (!Number.isInteger(opts.maxSteps) || opts.maxSteps < 1) throw new RangeError(`maxSteps must be a positive integer, got ${opts.maxSteps}`);
   const jobId = `role:${opts.persona.id}`;
   const emit = (e: RunEventInput) => opts.emit(opts.scrubber.scrub(e));
   const state = newSessionState(opts.project.goals);
   const queue = browserQueue(opts.browserTools, (ok) => (state.page = ok ? "seen" : "stale"));
+  const { screenshot, keepScreenshot } = opts;
+  const capture = screenshot && keepScreenshot
+    ? async (findingId: string) => {
+        const shot = await queue.run(screenshot);
+        if (shot) keepScreenshot(findingId, shot);
+      }
+    : undefined;
   const tools = {
     ...queue.tools,
     ...sessionTools({
@@ -33,7 +43,7 @@ export async function runRoleSession(opts: {
       accounts: opts.project.accounts.filter((a) => a.ref === opts.persona.accountRef),
       emit, jobId,
       fillField: opts.fillField, inBrowser: queue.run,
-      scrubber: opts.scrubber, newId: opts.newFindingId,
+      scrubber: opts.scrubber, newId: opts.newFindingId, capture,
     }),
     ...(opts.persona.accountRef ? {} : ownPasswordTool({ state, fillField: opts.fillField, inBrowser: queue.run, scrubber: opts.scrubber })),
   };
