@@ -117,6 +117,14 @@ beforeAll(async () => {
         req.on("end", () => html(`<h1>Saved</h1><p>Your password is ${new URLSearchParams(body).get("password")}</p>`));
         return;
       }
+      case "/password-placeholder":
+        return html(`<input aria-label="Password" type="password" placeholder="Enter your password">`);
+      case "/password-colon-label":
+        return html(`<input aria-label="Password: at least 4 characters" type="password">`);
+      case "/signed-in-as":
+        return html(`<p>admin</p><input aria-label="Password" type="password">`);
+      case "/readonly-password":
+        return html(`<input aria-label="Password" type="password" readonly>`);
       case "/pin":
         return html(`<input aria-label="PIN" type="password" maxlength="6"><button onclick="document.getElementById('echo').textContent = 'Your PIN is ' + document.querySelector('input').value">Echo</button><p id="echo"></p>`);
       case "/signup": {
@@ -896,6 +904,78 @@ describe("password fields", () => {
     });
   }, 60_000);
 
+  test("a password short enough for a short field is typed into it, and stays unmasked like any text that short", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/pin`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "PIN"), "482193", "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Echo"), element: "Echo" }, ctx);
+      const shown = await snapshot(b);
+      expect(shown).toContain("Your PIN is 482193");
+      expect(shown).toMatch(/textbox \\"PIN\\"[^\\]*: •••/);
+      expect(await b.fillField(refOf(snap, "PIN"), "4821937", "password")).toBe("failed: the field takes at most 6 characters, fewer than the password has, so nothing was typed");
+    });
+  }, 60_000);
+
+  test("the model never reads a password too short to scrub from the field it was typed into", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, origin);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "pw12", "password")).toBe("typed the password");
+      const shown = await snapshot(b);
+      expect(shown).toMatch(/textbox \\"Password\\"[^\\]*: •••/);
+      expect(shown).not.toContain("pw12");
+    });
+  }, 60_000);
+
+  test.each([
+    ["a placeholder that differs from its name", "/password-placeholder", "Password", "pw12", "pw12"],
+    ["a name with a colon", "/password-colon-label", "Password: at least 4 characters", "pw12", "pw12"],
+    ["spaces the page view collapses", "/", "Password", " pw  1", "pw 1"],
+  ])("a password too short to scrub stays hidden in a field with %s", async (_, path, name, password, shown) => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}${path}`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, name), password, "password")).toBe("typed the password");
+      const after = await snapshot(b);
+      expect(after).toContain("•••");
+      expect(after).not.toContain(shown);
+    });
+  }, 60_000);
+
+  test("page text that happens to equal a password too short to scrub stays readable, only the field is hidden", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/signed-in-as`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "admin", "password")).toBe("typed the password");
+      const shown = await snapshot(b);
+      expect(shown).toMatch(/paragraph[^\\]*: admin/);
+      expect(shown).toMatch(/textbox \\"Password\\"[^\\]*: •••/);
+    });
+  }, 60_000);
+
+  test("a failed fill of a password too short to scrub does not repeat it", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/readonly-password`);
+      const snap = await snapshot(b);
+      const out = await b.fillField(refOf(snap, "Password"), "pw12", "password");
+      expect(out).toMatch(/^failed: /);
+      expect(out).not.toContain("pw12");
+    });
+  }, 60_000);
+
+  test("a field whose text contains a password too short to mask can still be typed into", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, origin);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "pw12", "password")).toBe("typed the password");
+      const first = (await b.tools.browser_type!.execute!({ target: refOf(snap, "Email"), text: "pw12@acme.test", element: "email" }, ctx)) as { isError?: boolean };
+      expect(first.isError).toBeFalsy();
+      const again = (await b.tools.browser_type!.execute!({ target: refOf(snap, "Email"), text: "kwame@acme.test", element: "email" }, ctx)) as { isError?: boolean };
+      expect(again.isError).toBeFalsy();
+    });
+  }, 60_000);
+
   test("a password a field shortens behind an alert is hidden once the alert is answered, and after the form is sent", async () => {
     await withBrowser(async (b) => {
       await navigate(b, `${origin}/alert-short`);
@@ -990,6 +1070,20 @@ describe("password fields", () => {
       await b.tools.browser_click!.execute!({ target: refOf(snap, "Reset"), element: "Reset" }, ctx);
       await navigate(b, `${origin}/placeholder`);
       expect(await snapshot(b)).toContain("Forgot password? Change your password below.");
+    });
+  }, 60_000);
+
+  test("a word the page puts into a field after a password too short to scrub never becomes a secret", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/reset-to-placeholder`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "pwd", "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Reset"), element: "Reset" }, ctx);
+      await navigate(b, `${origin}/placeholder`);
+      const shown = await snapshot(b);
+      expect(shown).toContain("Forgot password? Change your password below.");
+      const search = (await b.tools.browser_type!.execute!({ target: refOf(shown, "Search"), text: "password reset", element: "search" }, ctx)) as { isError?: boolean };
+      expect(search.isError).toBeFalsy();
     });
   }, 60_000);
 

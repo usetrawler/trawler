@@ -5,7 +5,7 @@ import { chromium, selectors, type ElementHandle, type Frame, type Locator, type
 import { jsonSchema, type Tool, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
 import { MAX_ARTIFACT_BYTES } from "@usetrawler/protocol";
-import { MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
+import { MASK, MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
 import type { FieldKind } from "./session-tools.ts";
 
 export const BROWSER_TOOLS = [
@@ -360,6 +360,36 @@ function textOf(result: unknown): string {
   return ((result as McpResult)?.content ?? []).map((c) => c.text ?? "").join("\n");
 }
 
+const SNAPSHOT_ENTRY = /^(\s*)- ('(?:[^'\n]|'')*'|[^'\n][^\n]*?)(?:: (.*)|(:))?$/;
+
+function withFieldValuesMasked<T>(value: T, values: Set<string>): T {
+  if (values.size === 0) return value;
+  const normal = (s: string) => s.replace(/\s+/g, " ").trim();
+  const wanted = new Set([...values].map(normal));
+  const unquoted = (s: string) => (/^'.*'$/.test(s) ? s.slice(1, -1).replace(/''/g, "'") : /^".*"$/.test(s) ? s.slice(1, -1).replace(/\\(.)/g, "$1") : s);
+  const holds = (shown: string) => wanted.has(normal(shown)) || wanted.has(normal(unquoted(shown)));
+  const maskFields = (text: string) => {
+    let field: number | null = null;
+    return text.split("\n").map((line) => {
+      const entry = SNAPSHOT_ENTRY.exec(line);
+      if (!entry) return line;
+      const [, indent = "", key = "", inline, children] = entry;
+      if (field !== null && indent.length <= field) field = null;
+      if (field !== null) return indent.length === field + 2 && key === "text" && inline !== undefined && holds(inline) ? `${indent}- text: ${MASK}` : line;
+      if (!/^textbox\b/.test(unquoted(key))) return line;
+      if (children) field = indent.length;
+      return inline !== undefined && holds(inline) ? `${indent}- ${key}: ${MASK}` : line;
+    }).join("\n");
+  };
+  const walk = (v: unknown): unknown => {
+    if (typeof v === "string") return maskFields(v);
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
+    return v;
+  };
+  return walk(value) as T;
+}
+
 function evaluatedValue(result: unknown): unknown {
   const match = /### Result\n([\s\S]*?)(?:\n###|$)/.exec(textOf(result));
   if (!match) return undefined;
@@ -491,13 +521,18 @@ export async function openBrowser(opts: {
     };
     const scrubWithFilledValues = async <T>(result: T): Promise<T> => {
       const live = new SecretScrubber();
+      const tooShortToScrub = new Set([...typedPasswords].filter((typed) => typed.length < MIN_SECRET_LENGTH));
       for (const h of await liveFilled()) {
         const value = await readValue(h);
-        if (value.length < MIN_SECRET_LENGTH || value === valuesBeforeTyping.get(h)) continue;
+        if (value === valuesBeforeTyping.get(h)) continue;
+        if (value.length < MIN_SECRET_LENGTH) {
+          if (value) tooShortToScrub.add(value);
+          continue;
+        }
         live.add(value);
-        if ([...typedPasswords].some((typed) => keptFrom(value, typed) || keptFrom(typed, value))) keepSecret(value);
+        if ([...typedPasswords].some((typed) => typed.length >= MIN_SECRET_LENGTH && (keptFrom(value, typed) || keptFrom(typed, value)))) keepSecret(value);
       }
-      return live.scrub(opts.scrubber.scrub(result));
+      return withFieldValuesMasked(live.scrub(opts.scrubber.scrub(result)), tooShortToScrub);
     };
     const focusCheck = async () => {
       const held = await liveFilled();
@@ -659,6 +694,10 @@ export async function openBrowser(opts: {
     return {
       tools,
       async fillField(ref, text, kind) {
+        const failure = (result: McpResult) => {
+          const detail = opts.scrubber.scrub(textOf(result));
+          return `failed: ${kind === "password" && text.length < MIN_SECRET_LENGTH ? detail.split("\nCall log:")[0]! : detail}`;
+        };
         if (kind === "password") {
           const mark = randomUUID();
           const raw = (await evaluate(
@@ -670,7 +709,7 @@ export async function openBrowser(opts: {
           if (typeof probe?.origin !== "string" || !isAllowed(probe.origin)) return "failed: the page is not an allowed origin, so the password was not typed";
           if (probe.type !== "password") return "failed: the target is not a password field, so the password was not typed";
           const limit = typeof probe.maxLength === "number" && probe.maxLength >= 0 ? probe.maxLength : undefined;
-          if (limit !== undefined && limit < MIN_SECRET_LENGTH) return `failed: the field takes at most ${limit} characters, too few to keep a password hidden, so nothing was typed`;
+          if (limit !== undefined && limit < text.length && limit < MIN_SECRET_LENGTH) return `failed: the field takes at most ${limit} characters, ${text.length < MIN_SECRET_LENGTH ? "fewer than the password has" : "too few to keep a password hidden"}, so nothing was typed`;
           if (limit !== undefined && limit < text.length) keepSecret(text.slice(0, limit));
           const field = await findMarked(mark);
           if (!field) return "failed: the password field could not be found again, so the password was not typed";
@@ -679,13 +718,13 @@ export async function openBrowser(opts: {
         }
         const out = (await type({ target: ref, element: kind === "password" ? "password field" : "username field", text }, internalCall)) as McpResult;
         if (kind === "password") {
-          typedSecrets.add(text);
+          if (text.length >= MIN_SECRET_LENGTH) typedSecrets.add(text);
           typedPasswords.add(text);
           const held = filled.at(-1);
           if (held) {
             lastValues.set(held, text);
             const kept = await within(held.evaluate((el: any) => String(el.value ?? "")).catch(() => null), FOCUS_CHECK_MS, text);
-            if (kept === null) return out?.isError ? `failed: ${opts.scrubber.scrub(textOf(out))}` : "failed: the page moved on before the field could be checked, so it is not known what the field kept";
+            if (kept === null) return out?.isError ? failure(out) : "failed: the page moved on before the field could be checked, so it is not known what the field kept";
             lastValues.set(held, kept);
             const shortened = kept !== text && kept.length > 0 && keptFrom(kept, text);
             if (shortened && kept.length >= MIN_SECRET_LENGTH) {
@@ -699,7 +738,7 @@ export async function openBrowser(opts: {
             }
           }
         }
-        if (out?.isError) return `failed: ${opts.scrubber.scrub(textOf(out))}`;
+        if (out?.isError) return failure(out);
         return kind === "password" ? "typed the password" : "typed the username";
       },
       async screenshot() {

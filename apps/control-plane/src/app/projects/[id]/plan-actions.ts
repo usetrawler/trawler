@@ -57,7 +57,7 @@ export async function addAccountAction(projectId: string, input: { username: str
   const parsed = AccountInput.safeParse(input);
   if (!parsed.success) {
     const field = parsed.error.issues[0]?.path[0];
-    return { ok: false, error: field === "password" ? "The password must be 8 to 1000 characters." : "Enter the username or email the account signs in with (up to 320 characters)." };
+    return { ok: false, error: field === "password" ? "Enter the password the account signs in with (up to 1000 characters)." : "Enter the username or email the account signs in with (up to 320 characters)." };
   }
   try {
     const ref = await withOrg(getDb(), orgId, (tx) => addAccount(tx, orgId, projectId, parsed.data, getKeyring()));

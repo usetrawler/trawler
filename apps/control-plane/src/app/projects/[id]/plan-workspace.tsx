@@ -49,7 +49,7 @@ export function Accounts({ projectId, accounts, anyoneWithout, onChange }: { pro
   return (
     <section className="flex flex-col gap-3">
       <Heading>Test accounts</Heading>
-      <p className="text-sm text-muted">Only for products with sign-in. Passwords are encrypted and never shown again; the agents type them without seeing them.</p>
+      <p className="text-sm text-muted">Only for products with sign-in. Passwords are encrypted and never shown again; the agents type them without seeing them. A password shorter than 8 characters cannot be masked if your product shows it on a page.</p>
       {anyoneWithout && <p className="text-sm text-muted">{WITHOUT_ACCOUNT}</p>}
       {accounts.length > 0 && (
         <ul className="flex flex-col gap-2">

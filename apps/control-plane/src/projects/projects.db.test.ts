@@ -145,7 +145,7 @@ test("test accounts are added encrypted, reach the runner, and removing one deta
   expect(JSON.stringify(editing)).not.toContain("buyer-password-9");
   expect(editing!.accounts).toEqual([{ ref, username: "buyer@shop.test", password_hint: last4("buyer-password-9") }]);
 
-  await expect(withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "x@shop.test", password: "short" }, keys))).rejects.toThrow();
+  await expect(withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "x@shop.test", password: "" }, keys))).rejects.toThrow();
   await expect(withOrg(t.db, "org-b", (tx) => addAccount(tx, "org-b", id, { username: "x@shop.test", password: "long-enough-1" }, keys))).rejects.toThrow(ProjectNotFound);
   await expect(withOrg(t.db, "org-b", (tx) => removeAccount(tx, "org-b", id, ref))).rejects.toThrow(ProjectNotFound);
 
@@ -155,6 +155,15 @@ test("test accounts are added encrypted, reach the runner, and removing one deta
   expect(after.accounts.map((a) => a.ref)).toEqual([second]);
   expect(after.personas[0]!.accountRef).toBeUndefined();
   expect(await withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "three@shop.test", password: "third-pass-1" }, keys))).not.toBe(ref);
+});
+
+test("a test account password shorter than 8 characters is stored encrypted and reaches the runner as it was typed", async () => {
+  const simple = ProjectConfigSchema.parse({ name: "Shop", targetUrl: "https://shop.test/", personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "Buy." }] });
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", simple, keys));
+  const ref = await withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "user", password: "pw12" }, keys));
+  expect((await withOrg(t.db, "org-a", (tx) => loadProjectConfig(tx, "org-a", id, keys))).accounts).toEqual([{ ref, username: "user", password: "pw12" }]);
+  const editing = await withOrg(t.db, "org-a", (tx) => projectForEditing(tx, "org-a", id));
+  expect(JSON.stringify(editing)).not.toContain("pw12");
 });
 
 test("saving a plan that points at a removed account says so, and the account limit has its own error", async () => {
