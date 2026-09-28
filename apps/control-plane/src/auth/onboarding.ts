@@ -8,8 +8,10 @@ export interface Invitation {
 
 export interface OnboardingStore {
   organizationsOf(userId: string): Promise<string[]>;
-  pendingInvitation(email: string): Promise<Invitation | null>;
+  hasOpenInvitation(email: string): Promise<boolean>;
+  openInvitation(id: string, email: string): Promise<Invitation | null>;
   acceptInvitation(invitation: Invitation, userId: string): Promise<boolean>;
+  declineInvitations(email: string): Promise<void>;
   createOrganization(name: string, slug: string, userId: string): Promise<string | null>;
 }
 
@@ -20,6 +22,8 @@ export interface NewUser {
   name: string;
 }
 
+export type WorkspaceChoice = { join: string } | "own";
+
 function slug(value: string): string {
   return value.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 30).replace(/-+$/, "");
 }
@@ -29,13 +33,29 @@ export function orgSlugFor(user: { email: string; name: string }): string {
   return `${base}-org`;
 }
 
-export async function onboard(store: OnboardingStore, user: NewUser): Promise<string> {
+const normalisedEmail = (user: NewUser) => user.email.trim().toLowerCase();
+
+export async function onboard(store: OnboardingStore, user: NewUser): Promise<string | null> {
   const [existing] = await store.organizationsOf(user.id);
   if (existing) return existing;
-  if (user.emailVerified) {
-    const invitation = await store.pendingInvitation(user.email.trim().toLowerCase());
-    if (invitation && (await store.acceptInvitation(invitation, user.id))) return invitation.organizationId;
+  if (user.emailVerified && (await store.hasOpenInvitation(normalisedEmail(user)))) return null;
+  return createOwnOrganization(store, user);
+}
+
+export async function chooseWorkspace(store: OnboardingStore, user: NewUser, choice: WorkspaceChoice): Promise<string | null> {
+  const [existing] = await store.organizationsOf(user.id);
+  if (existing) return existing;
+  if (choice === "own") {
+    const created = await createOwnOrganization(store, user);
+    if (user.emailVerified) await store.declineInvitations(normalisedEmail(user));
+    return created;
   }
+  if (!user.emailVerified) return null;
+  const invitation = await store.openInvitation(choice.join, normalisedEmail(user));
+  return invitation && (await store.acceptInvitation(invitation, user.id)) ? invitation.organizationId : null;
+}
+
+async function createOwnOrganization(store: OnboardingStore, user: NewUser): Promise<string> {
   const base = orgSlugFor(user);
   for (const candidate of [base, `${base}-${randomSuffix()}`, `${base}-${randomSuffix()}`, `${base}-${randomSuffix(12)}`]) {
     const created = await store.createOrganization(base, candidate, user.id);

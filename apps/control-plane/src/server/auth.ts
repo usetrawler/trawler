@@ -32,12 +32,26 @@ export interface Member {
   role: string;
 }
 
-export async function signedInMember(requestHeaders: Headers): Promise<Member | null> {
+export interface Newcomer {
+  userId: string;
+  sessionId: string;
+  name: string;
+  email: string;
+  emailVerified: boolean;
+}
+
+export async function signedInPerson(requestHeaders: Headers): Promise<{ member: Member } | { newcomer: Newcomer } | null> {
   const auth = getAuth();
   const found = await auth.api.getSession({ headers: requestHeaders });
   if (!found) return null;
   const workspace = await auth.workspaceOf(found.session);
-  return workspace ? { userId: found.user.id, name: found.user.name, email: found.user.email, ...workspace } : null;
+  if (workspace === "choosing") return { newcomer: { userId: found.user.id, sessionId: found.session.id, name: found.user.name, email: found.user.email, emailVerified: found.user.emailVerified } };
+  return workspace ? { member: { userId: found.user.id, name: found.user.name, email: found.user.email, ...workspace } } : null;
+}
+
+export async function signedInMember(requestHeaders: Headers): Promise<Member | null> {
+  const person = await signedInPerson(requestHeaders);
+  return person && "member" in person ? person.member : null;
 }
 
 export function canManageBilling(member: Member): boolean {

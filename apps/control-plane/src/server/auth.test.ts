@@ -2,9 +2,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { beforeEach, expect, test, vi } from "vitest";
 
-type Found = { user: { id: string; name: string; email: string }; session: { id: string; userId: string; activeOrganizationId: string | null } };
+type Found = { user: { id: string; name: string; email: string; emailVerified: boolean }; session: { id: string; userId: string; activeOrganizationId: string | null } };
 type Workspace = { orgId: string; orgName: string; role: string };
-const state = vi.hoisted(() => ({ found: null as Found | null, workspace: null as Workspace | null, checked: [] as unknown[], asked: [] as Headers[] }));
+const state = vi.hoisted(() => ({ found: null as Found | null, workspace: null as Workspace | "choosing" | null, checked: [] as unknown[], asked: [] as Headers[] }));
 
 vi.mock("./env.ts", () => ({ readEnv: () => ({ databaseUrl: "postgres://unused", authSecret: "x".repeat(32), baseURL: "http://localhost:3000" }) }));
 vi.mock("../auth/auth.ts", () => ({
@@ -15,8 +15,8 @@ vi.mock("../auth/auth.ts", () => ({
   }),
 }));
 
-const { canManageBilling, signedInMember } = await import("./auth.ts");
-const found: Found = { user: { id: "u1", name: "Ana Lopez", email: "ana@acme.test" }, session: { id: "s1", userId: "u1", activeOrganizationId: "org-1" } };
+const { canManageBilling, signedInMember, signedInPerson } = await import("./auth.ts");
+const found: Found = { user: { id: "u1", name: "Ana Lopez", email: "ana@acme.test", emailVerified: true }, session: { id: "s1", userId: "u1", activeOrganizationId: "org-1" } };
 
 beforeEach(() => {
   state.found = null;
@@ -50,6 +50,21 @@ test("a plain member stays a plain member, and does not manage the model key", a
 test("a signed-in person the membership check finds in no workspace is no member", async () => {
   state.found = found;
   expect(await signedInMember(new Headers())).toBeNull();
+});
+
+test("a signed-in person with no workspace yet is a newcomer choosing one, and no member", async () => {
+  state.found = { ...found, session: { ...found.session, activeOrganizationId: null } };
+  state.workspace = "choosing";
+  expect(await signedInPerson(new Headers())).toEqual({ newcomer: { userId: "u1", sessionId: "s1", name: "Ana Lopez", email: "ana@acme.test", emailVerified: true } });
+  expect(await signedInMember(new Headers())).toBeNull();
+});
+
+test("a member is a member to both checks, and a visitor is nobody", async () => {
+  state.found = found;
+  state.workspace = { orgId: "org-1", orgName: "Acme", role: "owner" };
+  expect(await signedInPerson(new Headers())).toEqual({ member: { userId: "u1", name: "Ana Lopez", email: "ana@acme.test", orgId: "org-1", orgName: "Acme", role: "owner" } });
+  state.found = null;
+  expect(await signedInPerson(new Headers())).toBeNull();
 });
 
 test("owners and admins manage the model key, by the role the membership check found", () => {

@@ -3,7 +3,7 @@ import { APIError } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { Kysely, PostgresDialect, sql, type Transaction } from "kysely";
 import pg from "pg";
-import { onboard, type OnboardingStore } from "./onboarding.ts";
+import { chooseWorkspace, onboard, type OnboardingStore, type WorkspaceChoice } from "./onboarding.ts";
 import { devSignIn, organizationPlugin } from "./plugins.ts";
 import { logError } from "../server/log.ts";
 
@@ -18,7 +18,7 @@ export interface AuthOptions {
 
 type AuthTables = {
   member: { id: string; organizationId: string; userId: string; role: string; createdAt: Date };
-  invitation: { id: string; organizationId: string; email: string; role: string | null; status: string; expiresAt: Date };
+  invitation: { id: string; organizationId: string; email: string; role: string | null; status: string; expiresAt: Date; createdAt: Date; inviterId: string };
   organization: { id: string; name: string; slug: string; createdAt: Date };
   user: { id: string; email: string; emailVerified: boolean; name: string };
   session: { id: string; userId: string; activeOrganizationId: string | null };
@@ -50,14 +50,16 @@ export function createAuth(options: AuthOptions) {
   const storeFor = (ex: Kysely<AuthTables> | Transaction<AuthTables>): OnboardingStore => ({
     organizationsOf: async (userId) =>
       (await ex.selectFrom("member").select("organizationId").where("userId", "=", userId).orderBy("createdAt").limit(1).execute()).map((m) => m.organizationId),
-    pendingInvitation: async (email) => {
+    hasOpenInvitation: async (email) =>
+      !!(await ex.selectFrom("invitation").select("id").where(sql<string>`lower(email)`, "=", email).where("status", "=", "pending").where("expiresAt", ">", new Date()).executeTakeFirst()),
+    openInvitation: async (id, email) => {
       const row = await ex
         .selectFrom("invitation")
         .select(["id", "organizationId", "role"])
+        .where("id", "=", id)
         .where(sql<string>`lower(email)`, "=", email)
         .where("status", "=", "pending")
         .where("expiresAt", ">", new Date())
-        .orderBy("expiresAt", "desc")
         .executeTakeFirst();
       return row ? { id: row.id, organizationId: row.organizationId, role: row.role ?? "member" } : null;
     },
@@ -84,6 +86,9 @@ export function createAuth(options: AuthOptions) {
         .execute();
       return true;
     },
+    declineInvitations: async (email) => {
+      await ex.updateTable("invitation").set({ status: "rejected" }).where(sql<string>`lower(email)`, "=", email).where("status", "=", "pending").execute();
+    },
     createOrganization: async (name, slug, userId) => {
       const org = await ex
         .insertInto("organization")
@@ -96,15 +101,39 @@ export function createAuth(options: AuthOptions) {
       return org.id;
     },
   });
+  const serialisedFor = <T>(userId: string, work: (store: OnboardingStore) => Promise<T>) =>
+    db.transaction().execute(async (tx) => {
+      await sql`select pg_advisory_xact_lock(hashtextextended(${`onboard:${userId}`}, 0))`.execute(tx);
+      return work(storeFor(tx));
+    });
   const onboardSerialised = async (user: AuthTables["user"]) => {
     const [existing] = await storeFor(db).organizationsOf(user.id);
     if (existing) return existing;
-    return db.transaction().execute(async (tx) => {
-      await sql`select pg_advisory_xact_lock(hashtextextended(${`onboard:${user.id}`}, 0))`.execute(tx);
-      return onboard(storeFor(tx), user);
-    });
+    return serialisedFor(user.id, (store) => onboard(store, user));
   };
-  const workspaceOf = async (session: { id: string; userId: string; activeOrganizationId?: string | null }): Promise<{ orgId: string; orgName: string; role: string } | null> => {
+  const chooseWorkspaceFor = async (session: { id: string; userId: string }, choice: WorkspaceChoice): Promise<string | null> => {
+    const user = await db.selectFrom("user").selectAll().where("id", "=", session.userId).executeTakeFirstOrThrow();
+    const chosen = await serialisedFor(user.id, (store) => chooseWorkspace(store, user, choice));
+    if (chosen) await db.updateTable("session").set({ activeOrganizationId: chosen }).where("id", "=", session.id).where("userId", "=", session.userId).execute();
+    return chosen;
+  };
+  const invitationsFor = async (user: { email: string; emailVerified: boolean }): Promise<Array<{ id: string; orgName: string; role: string; inviterName: string; inviterEmail: string; expiresAt: Date }>> =>
+    user.emailVerified
+      ? (
+          await db
+            .selectFrom("invitation")
+            .innerJoin("organization", "organization.id", "invitation.organizationId")
+            .innerJoin("user as inviter", "inviter.id", "invitation.inviterId")
+            .select(["invitation.id", "organization.name as orgName", "invitation.role", "inviter.name as inviterName", "inviter.email as inviterEmail", "invitation.expiresAt"])
+            .where(sql<string>`lower(invitation.email)`, "=", user.email.trim().toLowerCase())
+            .where("invitation.status", "=", "pending")
+            .where("invitation.expiresAt", ">", new Date())
+            .orderBy("invitation.createdAt")
+            .orderBy("invitation.id")
+            .execute()
+        ).map((row) => ({ ...row, role: row.role ?? "member" }))
+      : [];
+  const workspaceOf = async (session: { id: string; userId: string; activeOrganizationId?: string | null }): Promise<{ orgId: string; orgName: string; role: string } | "choosing" | null> => {
     const membership = session.activeOrganizationId
       ? await db
           .selectFrom("member")
@@ -115,6 +144,7 @@ export function createAuth(options: AuthOptions) {
           .executeTakeFirst()
       : undefined;
     if (membership) return membership;
+    if (!session.activeOrganizationId && !(await storeFor(db).organizationsOf(session.userId)).length) return "choosing";
     await db.deleteFrom("session").where("id", "=", session.id).execute();
     return null;
   };
@@ -188,7 +218,7 @@ export function createAuth(options: AuthOptions) {
       },
     },
   });
-  return Object.assign(auth, { workspaceOf, memberEmail, workspaceMembers, pendingInvitations });
+  return Object.assign(auth, { workspaceOf, chooseWorkspace: chooseWorkspaceFor, invitationsFor, memberEmail, workspaceMembers, pendingInvitations });
 }
 
 export type Auth = ReturnType<typeof createAuth>;

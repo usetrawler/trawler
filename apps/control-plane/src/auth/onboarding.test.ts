@@ -1,13 +1,15 @@
 import { describe, expect, test } from "vitest";
-import { onboard, orgSlugFor, type OnboardingStore } from "./onboarding.ts";
+import { chooseWorkspace, onboard, orgSlugFor, type OnboardingStore } from "./onboarding.ts";
 
 function store(over: Partial<OnboardingStore> = {}) {
   const calls: string[] = [];
   const taken = new Set(["kwame-org"]);
   const s: OnboardingStore = {
     organizationsOf: async () => [],
-    pendingInvitation: async () => null,
+    hasOpenInvitation: async () => false,
+    openInvitation: async () => null,
     acceptInvitation: async (inv, userId) => (calls.push(`accept ${inv.id} for ${userId}`), true),
+    declineInvitations: async (email) => { calls.push(`decline ${email}`); },
     createOrganization: async (name, slug, userId) => {
       if (taken.has(slug)) return null;
       calls.push(`create ${name} ${slug} for ${userId}`);
@@ -27,14 +29,16 @@ describe("onboard", () => {
     expect(calls).toEqual([]);
   });
 
-  test("a verified email with a pending invitation joins that organisation", async () => {
-    const { s, calls } = store({ pendingInvitation: async (email) => (email === "ana.silva@acme.test" ? { id: "inv1", organizationId: "org-x", role: "member" } : null) });
-    expect(await onboard(s, user)).toBe("org-x");
-    expect(calls).toEqual(["accept inv1 for u1"]);
+  test("a verified email with an open invitation joins nothing yet and waits for a choice", async () => {
+    const asked: string[] = [];
+    const { s, calls } = store({ hasOpenInvitation: async (email) => (asked.push(email), true) });
+    expect(await onboard(s, user)).toBeNull();
+    expect(asked).toEqual(["ana.silva@acme.test"]);
+    expect(calls).toEqual([]);
   });
 
-  test("an unverified email never joins by invitation", async () => {
-    const { s, calls } = store({ pendingInvitation: async () => ({ id: "inv1", organizationId: "org-x", role: "member" }) });
+  test("an unverified email never waits on an invitation and gets its own organisation", async () => {
+    const { s, calls } = store({ hasOpenInvitation: async () => true });
     expect(await onboard(s, { ...user, emailVerified: false })).toBe("org-ana-silva-org");
     expect(calls).toEqual(["create ana-silva-org ana-silva-org for u1"]);
   });
@@ -46,10 +50,54 @@ describe("onboard", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatch(/^create kwame-org kwame-org-[a-z0-9]{1,6} for u2$/);
   });
+});
 
-  test("an invitation someone else already claimed falls back to an own organisation", async () => {
-    const { s } = store({ pendingInvitation: async () => ({ id: "inv1", organizationId: "org-x", role: "member" }), acceptInvitation: async () => false });
-    expect(await onboard(s, user)).toBe("org-ana-silva-org");
+describe("chooseWorkspace", () => {
+  const invitation = { id: "inv1", organizationId: "org-x", role: "admin" };
+
+  test("joining accepts the chosen invitation, looked up by its id and the person's own address", async () => {
+    const asked: string[] = [];
+    const { s, calls } = store({ openInvitation: async (id, email) => (asked.push(`${id} ${email}`), id === "inv1" ? invitation : null) });
+    expect(await chooseWorkspace(s, user, { join: "inv1" })).toBe("org-x");
+    expect(asked).toEqual(["inv1 ana.silva@acme.test"]);
+    expect(calls).toEqual(["accept inv1 for u1"]);
+  });
+
+  test("an invitation that is not open for this address joins nothing and creates nothing", async () => {
+    const { s, calls } = store();
+    expect(await chooseWorkspace(s, user, { join: "inv-other" })).toBeNull();
+    expect(calls).toEqual([]);
+  });
+
+  test("an invitation someone else claimed first joins nothing", async () => {
+    const { s, calls } = store({ openInvitation: async () => invitation, acceptInvitation: async () => false });
+    expect(await chooseWorkspace(s, user, { join: "inv1" })).toBeNull();
+    expect(calls).toEqual([]);
+  });
+
+  test("an unverified address cannot join by invitation", async () => {
+    const { s, calls } = store({ openInvitation: async () => invitation });
+    expect(await chooseWorkspace(s, { ...user, emailVerified: false }, { join: "inv1" })).toBeNull();
+    expect(calls).toEqual([]);
+  });
+
+  test("starting one's own creates the organisation and declines the invitations to that address", async () => {
+    const { s, calls } = store();
+    expect(await chooseWorkspace(s, user, "own")).toBe("org-ana-silva-org");
+    expect(calls).toEqual(["create ana-silva-org ana-silva-org for u1", "decline ana.silva@acme.test"]);
+  });
+
+  test("an unverified address starting its own declines nobody's invitations", async () => {
+    const { s, calls } = store();
+    expect(await chooseWorkspace(s, { ...user, emailVerified: false }, "own")).toBe("org-ana-silva-org");
+    expect(calls).toEqual(["create ana-silva-org ana-silva-org for u1"]);
+  });
+
+  test("someone who already chose keeps that organisation, whatever the second choice", async () => {
+    const { s, calls } = store({ organizationsOf: async () => ["org-1"], openInvitation: async () => invitation });
+    expect(await chooseWorkspace(s, user, { join: "inv1" })).toBe("org-1");
+    expect(await chooseWorkspace(s, user, "own")).toBe("org-1");
+    expect(calls).toEqual([]);
   });
 });
 
