@@ -186,6 +186,16 @@ beforeAll(async () => {
         return html(`<input aria-label="Password" type="password"><button onclick="const p = document.querySelector('input'); p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value">Swap</button><p id="echo"></p>`);
       case "/swap-later-slow":
         return html(`<input aria-label="Password" type="password" oninput="clearTimeout(window.swap); window.swap = setTimeout(() => { const p = this; p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value; document.getElementById('state').textContent = 'Swapped'; const real = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); Object.defineProperty(p, 'value', { get() { const until = Date.now() + 900; while (Date.now() < until) {} return real.get.call(this); }, set(v) { real.set.call(this, v); } }); }, 300)"><p id="echo"></p><p id="state">Waiting</p>`);
+      case "/swap-later-throws":
+        return html(`<input aria-label="Password" type="password" oninput="clearTimeout(window.swap); window.swap = setTimeout(() => { const p = this; p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value; document.getElementById('state').textContent = 'Swapped'; const real = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); Object.defineProperty(p, 'value', { get() { throw new Error('no'); }, set(v) { real.set.call(this, v); } }); Object.defineProperty(HTMLInputElement.prototype, 'value', { get() { throw new Error('no'); }, set(v) { real.set.call(this, v); }, configurable: true }); }, 300)"><p id="echo"></p><p id="state">Waiting</p>`);
+      case "/swap-later-own-getter":
+        return html(`<input aria-label="Password" type="password" oninput="clearTimeout(window.swap); window.swap = setTimeout(() => { const p = this; p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value; document.getElementById('state').textContent = 'Swapped'; const real = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); Object.defineProperty(p, 'value', { get() { throw new Error('no'); }, set(v) { real.set.call(this, v); } }); }, 300)"><p id="echo"></p><p id="state">Waiting</p>`);
+      case "/swap-later-lies":
+        return html(`<input aria-label="Password" type="password" oninput="clearTimeout(window.swap); window.swap = setTimeout(() => { const p = this; const typed = p.value; p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value; document.getElementById('state').textContent = 'Swapped'; const real = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); Object.defineProperty(HTMLInputElement.prototype, 'value', { get() { return typed; }, set(v) { real.set.call(this, v); }, configurable: true }); }, 300)"><p id="echo"></p><p id="state">Waiting</p>`);
+      case "/swap-then-two-alerts":
+        return html(`<input aria-label="Password" type="password"><button onclick="const p = document.querySelector('input'); p.value = p.value.slice(0, -1) + 'X'; alert('first'); alert('Your password: ' + p.value)">Check</button>`);
+      case "/swap-then-alert":
+        return html(`<input aria-label="Password" type="password"><button onclick="const p = document.querySelector('input'); p.value = p.value.slice(0, -1) + 'X'; alert('Your password: ' + p.value)">Check</button>`);
       case "/reveal-clear":
         return html(`<input aria-label="Password" type="password"><button onclick="const o=document.querySelector('input');const n=document.createElement('input');n.type='text';n.setAttribute('aria-label','Password');n.value=o.value;o.replaceWith(n)">Show password</button><button onclick="document.querySelector('input').value=''">Clear</button>`);
       case "/moving-keyframes":
@@ -1520,6 +1530,80 @@ describe("screenshots", () => {
       return taken.shot;
     };
     expect(await differingRegion(await shotAfter("first-secret-1"), await shotAfter("fresh-secret-2"))).toBeNull();
+  }, 120_000);
+
+  test("a password the page changed on its own never reaches the page text when reading the field is slow", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/swap-later-slow`);
+      expect(await b.fillField(refOf(await snapshot(b), "Password"), "first-secret-1", "password")).toBe("typed the password");
+      await new Promise((r) => setTimeout(r, 1500));
+      const text = await snapshot(b);
+      expect(text).toContain("Swapped");
+      expect(text).not.toContain("first-secret-");
+    });
+  }, 120_000);
+
+  test("when a typed-into field cannot be read in time, the result is withheld rather than shown with a stale mask", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/swap-later-slow`);
+      expect(await b.fillField(refOf(await snapshot(b), "Password"), "first-secret-1", "password")).toBe("typed the password");
+      await new Promise((r) => setTimeout(r, 1500));
+      const text = await snapshot(b);
+      expect(text).toContain("could not be read, so its result is withheld");
+      expect(text).not.toContain("first-secret-");
+    }, { filledReadMs: 0 });
+  }, 120_000);
+
+  test("a field whose own value getter throws is still read, so the password the page changed is masked, not withheld", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/swap-later-own-getter`);
+      expect(await b.fillField(refOf(await snapshot(b), "Password"), "first-secret-1", "password")).toBe("typed the password");
+      await new Promise((r) => setTimeout(r, 1500));
+      const text = await snapshot(b);
+      expect(text).toContain("Swapped");
+      expect(text).not.toContain("withheld");
+      expect(text).not.toContain("first-secret-");
+    });
+  }, 120_000);
+
+  test.each(["/swap-later-throws", "/swap-later-lies"])("a page that replaces the value getter (%s) cannot hide the password it changed", async (path) => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}${path}`);
+      expect(await b.fillField(refOf(await snapshot(b), "Password"), "first-secret-1", "password")).toBe("typed the password");
+      await new Promise((r) => setTimeout(r, 1500));
+      const text = await snapshot(b);
+      expect(text).toContain("Swapped");
+      expect(text).not.toContain("withheld");
+      expect(text).not.toContain("first-secret-");
+    });
+  }, 120_000);
+
+  test("a dialog opened by answering another stays known, so its result still says to answer it", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/swap-then-two-alerts`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "first-secret-1", "password")).toBe("typed the password");
+      const results = [JSON.stringify(await b.tools.browser_click!.execute!({ target: refOf(snap, "Check"), element: "Check" }, ctx))];
+      results.push(JSON.stringify(await b.tools.browser_handle_dialog!.execute!({ accept: true }, ctx)));
+      results.push(JSON.stringify(await b.tools.browser_handle_dialog!.execute!({ accept: true }, ctx)));
+      expect(results.slice(0, 2).every((r) => r.includes("a dialog is open"))).toBe(true);
+      expect(results[2]).not.toContain("a dialog is open");
+      expect(results.join("")).not.toContain("first-secret-");
+    });
+  }, 120_000);
+
+  test("a dialog opened on a page with a typed password withholds the result, which says to answer the dialog", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/swap-then-alert`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "first-secret-1", "password")).toBe("typed the password");
+      const clicked = JSON.stringify(await b.tools.browser_click!.execute!({ target: refOf(snap, "Check"), element: "Check" }, ctx));
+      expect(clicked).toContain("a dialog is open");
+      expect(clicked).not.toContain("first-secret-");
+      const answered = JSON.stringify(await b.tools.browser_handle_dialog!.execute!({ accept: true }, ctx));
+      expect(answered).not.toContain("a dialog is open");
+      expect(answered).not.toContain("first-secret-");
+    });
   }, 120_000);
 
   test("a password the page repeats inside a line of text is masked with its whole line, so its length does not show", async () => {

@@ -38,6 +38,10 @@ const MAX_HELD_FIELDS = 20;
 const KEYS_SAFE_ON_SECRETS = new Set(["Enter", "Tab", "Shift+Tab", "Escape"]);
 const FOCUS_CHECK_MS = 2000;
 const HANDLE_READ_MS = 500;
+const FILLED_READ_MS = 5000;
+const FIELD_GONE = /Execution context was destroyed|Target page, context or browser has been closed|frame was detached|not attached to the DOM/i;
+const WITHHELD_UNREAD = "The action ran, but a field Trawler typed a password into could not be read, so its result is withheld to keep the password out of it. Do not repeat the action: call browser_snapshot to see the page, and navigate elsewhere if this keeps happening.";
+const WITHHELD_FOR_DIALOG = "The action ran, and a dialog is open on a page where Trawler typed a password, so its text is withheld to keep the password out of it. Answer the dialog with browser_handle_dialog, then call browser_snapshot.";
 const SCREENSHOT_MS = 5000;
 const MASK_COLOR = "#17191c";
 const MASK_CHECK_MS = 2500;
@@ -423,6 +427,7 @@ export async function openBrowser(opts: {
   headless?: boolean;
   survivesSignals?: boolean;
   maskCheckMs?: number;
+  filledReadMs?: number;
 }): Promise<Browser> {
   const allowed = new Set(opts.allowedOrigins.map((o) => new URL(o).origin));
   const isAllowed = (url: string) => {
@@ -496,25 +501,24 @@ export async function openBrowser(opts: {
     const typedPasswords = new Set<string>();
     const holdsSecret = (value: string) => [...typedSecrets].some((secret) => value.includes(secret));
     let dialogOpen = false;
+    let dialogsOpened = 0;
     context.on("page", (page) => {
-      page.on("dialog", () => (dialogOpen = true));
+      page.on("dialog", () => {
+        dialogOpen = true;
+        dialogsOpened++;
+      });
       page.on("framenavigated", (frame) => {
         if (frame === page.mainFrame()) dialogOpen = false;
       });
     });
     let filled: ElementHandle[] = [];
-    const lastValues = new WeakMap<ElementHandle, string>();
     const valuesBeforeTyping = new WeakMap<ElementHandle, string>();
     const liveFilled = async () => {
       const alive = await Promise.all(filled.map((h) => within(h.evaluate(() => true).catch(() => false), HANDLE_READ_MS, true)));
       filled = filled.filter((_, i) => alive[i]);
       return filled;
     };
-    const readValue = async (h: ElementHandle) => {
-      if (dialogOpen) return lastValues.get(h) ?? "";
-      const read = h.evaluate((el: any) => String(el.value ?? "")).then((value) => (lastValues.set(h, value), value));
-      return within(read.catch(() => lastValues.get(h) ?? ""), HANDLE_READ_MS, lastValues.get(h) ?? "");
-    };
+    const readValue = (h: ElementHandle): Promise<string | null> => h.inputValue({ timeout: Math.max(1, opts.filledReadMs ?? FILLED_READ_MS) }).catch((err: unknown) => (FIELD_GONE.test(String(err)) ? "" : null));
     const keepSecret = (value: string) => {
       typedSecrets.add(value);
       opts.scrubber.add(value);
@@ -522,8 +526,12 @@ export async function openBrowser(opts: {
     const scrubWithFilledValues = async <T>(result: T): Promise<T> => {
       const live = new SecretScrubber();
       const tooShortToScrub = new Set([...typedPasswords].filter((typed) => typed.length < MIN_SECRET_LENGTH));
-      for (const h of await liveFilled()) {
-        const value = await readValue(h);
+      const fields = await liveFilled();
+      if (dialogOpen && fields.length > 0) return refused(WITHHELD_FOR_DIALOG) as T;
+      const values = await within(Promise.all(fields.map(readValue)), opts.filledReadMs ?? FILLED_READ_MS, null);
+      if (values === null || values.includes(null)) return refused(WITHHELD_UNREAD) as T;
+      for (const [i, h] of fields.entries()) {
+        const value = values[i]!;
         if (value === valuesBeforeTyping.get(h)) continue;
         if (value.length < MIN_SECRET_LENGTH) {
           if (value) tooShortToScrub.add(value);
@@ -549,8 +557,9 @@ export async function openBrowser(opts: {
     const secretsOnPage = async () => {
       const filledValues = [];
       for (const h of await liveFilled()) {
-        const value = await h.evaluate((el: any) => String(el.value ?? "")).catch(() => null);
-        if (value !== null && value.length >= MIN_SECRET_LENGTH && value !== valuesBeforeTyping.get(h)) filledValues.push(value);
+        const value = await readValue(h);
+        if (value === null) throw new Error("a field Trawler typed a password into could not be read");
+        if (value.length >= MIN_SECRET_LENGTH && value !== valuesBeforeTyping.get(h)) filledValues.push(value);
       }
       const needles = [...new Set([...opts.scrubber.browserNeedles(), ...typedSecrets, ...filledValues].map((n) => n.replace(new RegExp(INVISIBLE, "gu"), "").trim()))].filter((n) => n.length >= MIN_SECRET_LENGTH).sort((a, b) => b.length - a.length);
       return needles.length > 0 ? new RegExp(needles.map((n) => escapedForRegExp(n).replace(/\s+/g, "\\s+")).join("|"), "i") : null;
@@ -678,10 +687,11 @@ export async function openBrowser(opts: {
             }
           }
           blockedNavigation = null;
+          const dialogsBefore = dialogsOpened;
           let result = (await execute(safeInput, options)) as McpResult;
           if (name === "browser_navigate" && result?.isError && INTERRUPTED.test(textOf(result))) result = (await execute(safeInput, options)) as McpResult;
           if (result?.isError && CLOSED.test(textOf(result))) throw new Error("the browser has closed");
-          if (name === "browser_handle_dialog" && !result?.isError) dialogOpen = false;
+          if (name === "browser_handle_dialog" && !result?.isError && dialogsOpened === dialogsBefore) dialogOpen = false;
           if (!result?.isError && !textOf(result).trim()) result.content = [{ type: "text", text: "Done. Call browser_snapshot to see the page." }];
           if (blockedNavigation) {
             result.content = [...(result.content ?? []), { type: "text", text: `### Blocked\n${blockedNavigation} is outside the allowed origins, so the browser did not open it. Go back or navigate to an allowed page.` }];
@@ -713,7 +723,7 @@ export async function openBrowser(opts: {
           if (limit !== undefined && limit < text.length) keepSecret(text.slice(0, limit));
           const field = await findMarked(mark);
           if (!field) return "failed: the password field could not be found again, so the password was not typed";
-          valuesBeforeTyping.set(field, await within(field.evaluate((el: any) => String(el.value ?? "")).catch(() => ""), HANDLE_READ_MS, ""));
+          valuesBeforeTyping.set(field, await within(field.inputValue({ timeout: HANDLE_READ_MS }).catch(() => ""), HANDLE_READ_MS, ""));
           filled = [...filled, field].slice(-MAX_HELD_FIELDS);
         }
         const out = (await type({ target: ref, element: kind === "password" ? "password field" : "username field", text }, internalCall)) as McpResult;
@@ -722,16 +732,14 @@ export async function openBrowser(opts: {
           typedPasswords.add(text);
           const held = filled.at(-1);
           if (held) {
-            lastValues.set(held, text);
-            const kept = await within(held.evaluate((el: any) => String(el.value ?? "")).catch(() => null), FOCUS_CHECK_MS, text);
+            const kept = await within(held.inputValue({ timeout: FOCUS_CHECK_MS }).catch(() => null), FOCUS_CHECK_MS, text);
             if (kept === null) return out?.isError ? failure(out) : "failed: the page moved on before the field could be checked, so it is not known what the field kept";
-            lastValues.set(held, kept);
             const shortened = kept !== text && kept.length > 0 && keptFrom(kept, text);
             if (shortened && kept.length >= MIN_SECRET_LENGTH) {
               keepSecret(kept);
             } else if (shortened) {
               await type({ target: ref, element: "password field", text: "" }, internalCall);
-              const left = await within(held.evaluate((el: any) => String(el.value ?? "")).catch(() => null), HANDLE_READ_MS, null);
+              const left = await within(held.inputValue({ timeout: HANDLE_READ_MS }).catch(() => null), HANDLE_READ_MS, null);
               return left === "" ? "failed: the field kept too little of the password to hide it, so it was cleared" : "failed: the field kept too little of the password to hide it, and it could not be cleared";
             } else if (!kept && !out?.isError) {
               return "failed: the field did not keep the password";
