@@ -1423,6 +1423,21 @@ describe("screenshots", () => {
     expect(Buffer.compare(first, await shotOf("/api-key-b", "sk-live-other-2"))).toBe(0);
   }, 120_000);
 
+  test("a page that shows only the token of an Authorization secret header has the token masked", async () => {
+    const shotOf = async (path: string, token: string) => {
+      const scrubber = SecretScrubber.forProject({ accounts: [], secretHeaders: { authorization: `Bearer ${token}` } });
+      const taken: { shot: Screenshot | null } = { shot: null };
+      await withBrowser(async (b) => {
+        await navigate(b, `${origin}${path}`);
+        taken.shot = await b.screenshot();
+      }, { scrubber });
+      return Buffer.from(taken.shot?.bytes ?? []);
+    };
+    const first = await shotOf("/api-key-a", "sk-live-first-1");
+    expect(first.byteLength).toBeGreaterThan(0);
+    expect(Buffer.compare(first, await shotOf("/api-key-b", "sk-live-other-2"))).toBe(0);
+  }, 120_000);
+
   test("a field masked for a screenshot because it showed a password can be typed into again once it no longer does", async () => {
     await withBrowser(async (b) => {
       await navigate(b, `${origin}/reveal-clear`);
