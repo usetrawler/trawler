@@ -15,8 +15,11 @@ function htmlEscaped(s: string, apostrophe: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, apostrophe);
 }
 
+const wellFormed = (s: string) => s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
+
 function forms(s: string): string[] {
-  const percent = [encodeURIComponent(s), encodeURI(s), new URLSearchParams({ x: s }).toString().slice(2)];
+  const whole = wellFormed(s);
+  const percent = [encodeURIComponent(whole), encodeURI(whole), new URLSearchParams({ x: whole }).toString().slice(2)];
   const lowerPercent = percent.map((p) => p.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase()));
   const html = ["&#39;", "&#x27;", "&apos;"].map((a) => htmlEscaped(s, a));
   return [s, jsonEscaped(s), jsonEscaped(jsonEscaped(s)), jsSingleQuoted(s), inspect(s).slice(1, -1), ...html, ...percent, ...lowerPercent];
@@ -27,7 +30,7 @@ export const asShown = (s: string) => s.replace(/\p{Default_Ignorable_Code_Point
 function variants(secret: string): string[] {
   const collapsed = secret.replace(/[\u200b\u00ad]/g, "").replace(/\s+/g, " ").trim();
   const extra = [...new Set([asShown(secret), collapsed])].filter((shown) => shown !== secret && shown.length >= MIN_SECRET_LENGTH);
-  return [secret, ...extra].flatMap((s) => [...forms(s), ...forms(s.normalize("NFC")), ...forms(s.normalize("NFD"))]);
+  return [...new Set([secret, wellFormed(secret), ...extra])].flatMap((s) => [...forms(s), ...forms(s.normalize("NFC")), ...forms(s.normalize("NFD"))]);
 }
 
 const AUTH_SCHEME = /^\s*([A-Za-z][!#$%&'*+.^_`|~0-9A-Za-z-]*)\s+(\S(?:.*\S)?)\s*$/s;
@@ -49,6 +52,44 @@ function userAndPassword(decoded: string): string[] {
   return [decoded, password.length >= MIN_SECRET_LENGTH ? password : decoded.slice(0, colon)];
 }
 
+const NATIVE_SEARCH_MAX = 250;
+
+export const longFormsOf = (secret: string) => [...new Set(variants(secret))].filter((n) => n.length > NATIVE_SEARCH_MAX).length;
+
+function borders(needle: string): number[] {
+  const border = new Array<number>(needle.length).fill(0);
+  for (let i = 1, k = 0; i < needle.length; i++) {
+    while (k > 0 && needle[i] !== needle[k]) k = border[k - 1]!;
+    if (needle[i] === needle[k]) k++;
+    border[i] = k;
+  }
+  return border;
+}
+
+function nativeMatches(text: string, needle: string, tail: string, ranges: Array<[number, number]>): void {
+  let found: [number, number] | undefined;
+  for (let at = text.indexOf(needle); at !== -1; ) {
+    let end = at + needle.length;
+    while (text.startsWith(tail, end)) end += tail.length;
+    if (found && at <= found[1]) found[1] = end;
+    else ranges.push((found = [at, end]));
+    at = text.indexOf(needle, end - needle.length + 1);
+  }
+}
+
+function kmpMatches(text: string, needle: string, border: number[], ranges: Array<[number, number]>): void {
+  let found: [number, number] | undefined;
+  for (let i = 0, k = 0; i < text.length; i++) {
+    while (k > 0 && text[i] !== needle[k]) k = border[k - 1]!;
+    if (text[i] === needle[k]) k++;
+    if (k < needle.length) continue;
+    const at = i + 1 - needle.length;
+    if (found && at <= found[1]) found[1] = i + 1;
+    else ranges.push((found = [at, i + 1]));
+    k = border[k - 1]!;
+  }
+}
+
 function isPlainObject(v: object): boolean {
   const proto = Object.getPrototypeOf(v);
   return proto === Object.prototype || proto === null;
@@ -56,6 +97,7 @@ function isPlainObject(v: object): boolean {
 
 export class SecretScrubber {
   #needles: string[] = [];
+  #borders = new Map<string, number[]>();
   #browserNeedles: string[] = [];
 
   static forProject(project: {
@@ -82,6 +124,7 @@ export class SecretScrubber {
     if (secret.length < MIN_SECRET_LENGTH) throw new RangeError(`secrets must be at least ${MIN_SECRET_LENGTH} characters to be scrubbed reliably`);
     const found = variants(secret).filter((n) => n.length > 0);
     this.#needles = [...new Set([...this.#needles, ...found])];
+    for (const needle of found) if (!this.#borders.has(needle)) this.#borders.set(needle, borders(needle));
     if (reachesBrowser) this.#browserNeedles = [...new Set([...this.#browserNeedles, ...found])];
   }
 
@@ -97,11 +140,9 @@ export class SecretScrubber {
     const text = input;
     const ranges: Array<[number, number]> = [];
     for (const needle of this.#needles) {
-      let found: [number, number] | undefined;
-      for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) {
-        if (found && at <= found[1]) found[1] = at + needle.length;
-        else ranges.push((found = [at, at + needle.length]));
-      }
+      const border = this.#borders.get(needle) ?? borders(needle);
+      if (needle.length > NATIVE_SEARCH_MAX) kmpMatches(text, needle, border, ranges);
+      else nativeMatches(text, needle, needle.slice(border[needle.length - 1]!), ranges);
     }
     if (ranges.length === 0) return text;
     ranges.sort((a, b) => a[0] - b[0]);
