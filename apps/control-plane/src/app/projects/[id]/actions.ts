@@ -19,6 +19,7 @@ import { logError, scrubberWith } from "../../../server/log.ts";
 
 export interface StartState {
   error?: string;
+  field?: "key" | "baseUrl";
   keyHint?: KeyHint;
 }
 
@@ -34,12 +35,12 @@ class KeyGone extends Error {}
 const MODEL_ID = /^[A-Za-z0-9._:\/@-]{1,200}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-async function endpointFrom(orgId: string, input: KeyInput): Promise<{ endpoint: Endpoint; fresh: boolean } | { error: string }> {
+async function endpointFrom(orgId: string, input: KeyInput): Promise<{ endpoint: Endpoint; fresh: boolean } | { error: string; field?: "key" | "baseUrl" }> {
   const openRouterUrl = readEnv().openRouterUrl;
   const key = (input.key ?? "").trim();
   if (!key) {
     const stored = await withOrg(getDb(), orgId, (tx) => modelKey(tx, orgId, getKeyring()));
-    if (!stored) return { error: "Paste an API key from your model provider to start." };
+    if (!stored) return { error: "Paste an API key from your model provider to start.", field: "key" };
     return { endpoint: endpointFor(stored.provider, stored.key, { openRouterUrl, customUrl: stored.baseUrl }), fresh: false };
   }
   const fresh = freshEndpoint(input, openRouterUrl);
@@ -98,14 +99,14 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   if (without) return { error: new NeedsAccount(without).message };
 
   const resolved = await endpointFrom(orgId, { key: String(form.get("apiKey") ?? ""), provider: String(form.get("provider") ?? ""), baseUrl: String(form.get("baseUrl") ?? "") });
-  if ("error" in resolved) return { error: resolved.error };
+  if ("error" in resolved) return { error: resolved.error, ...(resolved.field ? { field: resolved.field } : {}) };
   const { endpoint, fresh } = resolved;
   if (fresh && !canManageBilling(member)) return { error: "Only an owner or admin of this workspace can change its model key." };
   const label = PROVIDER_LABEL[endpoint.provider];
   const check = await checkModelCall(endpoint, modelId);
   if (!check.ok) {
     const detail = check.detail ? ` (${check.detail})` : "";
-    if (check.reason === "key") return { error: `${label} did not accept this key${detail}.` };
+    if (check.reason === "key") return { error: `${label} did not accept this key${detail}.`, field: "key" };
     if (check.reason === "model") return { error: `This key cannot use ${modelId}${detail}. Pick another model.` };
     return { error: `${label} could not be reached to check the key. Try again in a moment.` };
   }

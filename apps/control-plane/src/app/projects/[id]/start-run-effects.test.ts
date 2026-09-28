@@ -14,6 +14,7 @@ vi.mock("react", async (original) => ({
     return [initial, set];
   },
   useEffect: (effect: () => void | (() => void)) => { react.effects.push(effect); },
+  useRef: (initial: unknown) => ({ current: initial }),
 }));
 const actions = vi.hoisted(() => ({ startRunAction: vi.fn(), modelsForKeyAction: vi.fn() }));
 vi.mock("./actions.ts", () => actions);
@@ -59,6 +60,8 @@ test("the form goes to the server as it was sent, and a refusal is shown as it c
 test("a page left open across an update is told to reload, and keeps showing the key it showed", async () => {
   actions.startRunAction.mockRejectedValue(outdated());
   expect(await startTheRun({ keyHint, error: "The run could not start. Try again." }, form())).toEqual({ keyHint, error: "Trawler has been updated since this page opened. Reload the page to start the run." });
+  expect(await startTheRun({ keyHint, error: "OpenRouter did not accept this key.", field: "key" }, form())).toEqual({ keyHint, error: "Trawler has been updated since this page opened. Reload the page to start the run." });
+  expect(await startTheRun({ error: "OpenRouter did not accept this key.", field: "key" }, form())).toEqual({ error: "Trawler has been updated since this page opened. Reload the page to start the run." });
 });
 
 test("the redirect to the new run, and any other failure, go on to the framework as before", async () => {
