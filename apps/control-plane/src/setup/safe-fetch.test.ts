@@ -125,6 +125,7 @@ test("the guarded fetch used for custom model endpoints refuses private and plai
 describe("answers that cannot become a fetch Response", () => {
   const UPGRADE = "HTTP/1.1 101 Switching Protocols\r\nupgrade: websocket\r\nconnection: upgrade\r\n\r\n";
   const closed = new Map<string, Promise<boolean>>();
+  const sent = new Map<string, number>();
   let raw: ReturnType<typeof createTcpServer>;
   let rawBase = "";
   let overPlainTcp: { mockRestore(): void };
@@ -137,6 +138,18 @@ describe("answers that cannot become a fetch Response", () => {
       socket.on("error", () => {});
       if (path.startsWith("/upgrade/")) return socket.end(UPGRADE);
       if (path.startsWith("/upgrade-open/")) return socket.write(UPGRADE);
+      if (path.startsWith("/flood/")) {
+        const chunk = "x".repeat(64_000);
+        socket.write("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\n\r\n");
+        sent.set(path, 0);
+        const pump = setInterval(() => {
+          if (socket.destroyed) return;
+          socket.write(`${chunk.length.toString(16)}\r\n${chunk}\r\n`);
+          sent.set(path, sent.get(path)! + chunk.length);
+        }, 2);
+        return socket.on("close", () => clearInterval(pump));
+      }
+      if (path.startsWith("/declared/")) return socket.write("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 50000000\r\n\r\n{");
       if (path.startsWith("/endless/")) {
         socket.write(`HTTP/1.1 ${code} Odd\r\ntransfer-encoding: chunked\r\n\r\n`);
         const pump = setInterval(() => socket.write("5\r\nhello\r\n"), 20);
@@ -176,6 +189,30 @@ describe("answers that cannot become a fetch Response", () => {
       await expect(guarded(`https://llm.example.com${path}`)).rejects.toMatchObject({ reason: "status" });
       expect(await closesWithin(path, 2000)).toBe(true);
     }
+  });
+
+  test("an answer over the fetch's cap is refused as too large while it streams, and one that declares its size before a byte is read; the connection is closed", async () => {
+    const capped = guardedFetch({ maxResponseBytes: 200_000 });
+    await expect(capped("https://llm.example.com/flood/1")).rejects.toMatchObject({ reason: "too_long" });
+    expect(await closesWithin("/flood/1", 2000)).toBe(true);
+    expect(sent.get("/flood/1")).toBeLessThan(2_000_000);
+    await expect(capped("https://llm.example.com/declared/1")).rejects.toMatchObject({ reason: "too_long" });
+    expect(await closesWithin("/declared/1", 2000)).toBe(true);
+    const answered = await capped("https://llm.example.com/status/200");
+    expect(await answered.text()).toBe('{"data":[]}');
+  });
+
+  test("the chat calls to a custom endpoint are capped at 2 MB, while listing its models keeps the larger cap", async () => {
+    const { CHAT_ANSWER_BYTES, chatFetchFor, fetchFor } = await import("../llm/providers.ts");
+    expect(CHAT_ANSWER_BYTES).toBe(2_000_000);
+    const custom = { provider: "custom" as const, key: "k", baseUrl: "https://llm.example.com/v1" };
+    await expect(chatFetchFor(custom)("https://llm.example.com/flood/2")).rejects.toMatchObject({ reason: "too_long" });
+    expect(sent.get("/flood/2")).toBeGreaterThan(CHAT_ANSWER_BYTES - 64_000);
+    expect(sent.get("/flood/2")).toBeLessThan(CHAT_ANSWER_BYTES * 3);
+    await expect(fetchFor(custom)("https://llm.example.com/flood/3")).rejects.toMatchObject({ reason: "too_long" });
+    expect(sent.get("/flood/3")).toBeGreaterThan(16_000_000 - 64_000);
+    const openRouter = { provider: "openrouter" as const, key: "k", baseUrl: "https://openrouter.ai/api/v1" };
+    expect(chatFetchFor(openRouter, fetch)).toBe(fetch);
   });
 
   test("a page read for setup that answers 101 is refused instead of never settling", async () => {

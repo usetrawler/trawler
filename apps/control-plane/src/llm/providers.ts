@@ -27,12 +27,22 @@ export interface Endpoint {
   key: string;
 }
 
+export const CHAT_ANSWER_BYTES = 2_000_000;
+
 let customFetch: typeof fetch | undefined;
+let customChatFetch: typeof fetch | undefined;
+const allowLoopback = () => process.env.NODE_ENV !== "production" && process.env.TRAWLER_ALLOW_LOCAL_PROVIDERS === "1";
 
 export function fetchFor(endpoint: Endpoint, fallback: typeof fetch = fetch): typeof fetch {
   if (endpoint.provider !== "custom") return fallback;
-  customFetch ??= guardedFetch({ allowLoopback: process.env.NODE_ENV !== "production" && process.env.TRAWLER_ALLOW_LOCAL_PROVIDERS === "1" });
+  customFetch ??= guardedFetch({ allowLoopback: allowLoopback() });
   return customFetch;
+}
+
+export function chatFetchFor(endpoint: Endpoint, fallback: typeof fetch = fetch): typeof fetch {
+  if (endpoint.provider !== "custom") return fallback;
+  customChatFetch ??= guardedFetch({ allowLoopback: allowLoopback(), maxResponseBytes: CHAT_ANSWER_BYTES });
+  return customChatFetch;
 }
 
 export function endpointFor(provider: Provider, key: string, opts: { openRouterUrl: string; customUrl?: string | null }): Endpoint {
@@ -79,7 +89,7 @@ export type KeyCheck = { ok: true } | { ok: false; reason: "key" | "model" | "un
 
 export const LONGEST_EXPLANATION_READ = 4_000;
 
-export async function checkModelCall(endpoint: Endpoint, model: string, fetchImpl: typeof fetch = fetchFor(endpoint)): Promise<KeyCheck> {
+export async function checkModelCall(endpoint: Endpoint, model: string, fetchImpl: typeof fetch = chatFetchFor(endpoint)): Promise<KeyCheck> {
   try {
     const res = await fetchImpl(`${endpoint.baseUrl}/chat/completions`, {
       method: "POST",
