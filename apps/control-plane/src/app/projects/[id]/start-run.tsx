@@ -1,6 +1,6 @@
 "use client";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
-import { startTransition, useActionState, useEffect, useState } from "react";
+import { startTransition, useActionState, useEffect, useRef, useState } from "react";
 import type { KeyHint } from "../../../credentials/credentials.ts";
 import { field, KeyFields } from "../../../components/key-fields.tsx";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
@@ -83,6 +83,7 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
   const [ranged, setRanged] = useState<{ modelId: string; range: PriceRange | null } | null>(null);
   const [cap, setCap] = useState(DEFAULT_RUN.budgetUsd);
   const [authorised, setAuthorised] = useState(false);
+  const backToReplace = useRef(false);
 
   const typingKey = !keyHint || replacingKey;
   const detected = apiKey.trim() ? detectProvider(apiKey) : null;
@@ -145,13 +146,14 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
         <p className="text-sm">
           <span className="text-muted">Pays with your {PROVIDER_LABEL[keyHint!.provider]} key </span>
           <span className="font-mono">{keyHint!.hint}</span>
-          {canManageKey && <button type="button" onClick={() => setReplacingKey(true)} className="ml-3 text-muted underline underline-offset-4 hover:text-ink">Replace</button>}
+          {canManageKey && <button type="button" ref={(replace) => { if (replace && backToReplace.current) { backToReplace.current = false; replace.focus(); } }} onClick={() => setReplacingKey(true)} className="ml-3 text-muted underline underline-offset-4 hover:text-ink">Replace</button>}
         </p>
       ) : noKey ? null : (
         <KeyFields
           apiKey={apiKey} onKey={setApiKey} detected={detected} chosen={chosenProvider} onChoose={setChosenProvider}
-          provider={provider} baseUrl={baseUrl} onBaseUrl={setBaseUrl} required={!keyHint}
-          aside={keyHint && <button type="button" onClick={() => { setReplacingKey(false); setApiKey(""); }} className="h-12 px-3 text-sm text-muted hover:text-ink">Keep {keyHint.hint}</button>}
+          provider={provider} baseUrl={baseUrl} onBaseUrl={setBaseUrl} required={!keyHint} autoFocus={Boolean(keyHint)}
+          errorId={state.error && state.field === "key" ? "start-error" : undefined} baseUrlErrorId={state.error && state.field === "baseUrl" ? "start-error" : undefined}
+          aside={keyHint && <button type="button" onClick={() => { backToReplace.current = true; setReplacingKey(false); setApiKey(""); }} className="h-12 px-3 text-sm text-muted hover:text-ink">Keep {keyHint.hint}</button>}
         />
       )}
 
@@ -187,7 +189,7 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
           <span>I am authorised to test this product. It is not a production system with real people&apos;s data.</span>
         </label>
       )}
-      {state.error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{state.error}</p>}
+      {state.error && <p role="alert" id="start-error" className="border-l-2 border-bad pl-3 text-sm text-bad">{state.error}</p>}
       <div className="flex flex-wrap items-center justify-end gap-3">
         {(blocked ?? noKey) && <p id="start-blocked" className="text-sm text-muted">{blocked ?? noKey}</p>}
         <Submit blocked={blocked ?? noKey} pending={pending} />
