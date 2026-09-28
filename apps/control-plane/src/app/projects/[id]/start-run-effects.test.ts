@@ -14,6 +14,7 @@ vi.mock("react", async (original) => ({
     return [initial, set];
   },
   useEffect: (effect: () => void | (() => void)) => { react.effects.push(effect); },
+  useRef: (initial: unknown) => ({ current: initial }),
 }));
 const actions = vi.hoisted(() => ({ startRunAction: vi.fn(), modelsForKeyAction: vi.fn() }));
 vi.mock("./actions.ts", () => actions);
