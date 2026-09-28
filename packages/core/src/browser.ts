@@ -518,7 +518,7 @@ export async function openBrowser(opts: {
       filled = filled.filter((_, i) => alive[i]);
       return filled;
     };
-    const readValue = (h: ElementHandle): Promise<string | null> => h.inputValue({ timeout: opts.filledReadMs ?? FILLED_READ_MS }).catch((err: unknown) => (FIELD_GONE.test(String(err)) ? "" : null));
+    const readValue = (h: ElementHandle): Promise<string | null> => h.inputValue({ timeout: Math.max(1, opts.filledReadMs ?? FILLED_READ_MS) }).catch((err: unknown) => (FIELD_GONE.test(String(err)) ? "" : null));
     const keepSecret = (value: string) => {
       typedSecrets.add(value);
       opts.scrubber.add(value);
@@ -723,7 +723,7 @@ export async function openBrowser(opts: {
           if (limit !== undefined && limit < text.length) keepSecret(text.slice(0, limit));
           const field = await findMarked(mark);
           if (!field) return "failed: the password field could not be found again, so the password was not typed";
-          valuesBeforeTyping.set(field, await within(field.evaluate((el: any) => String(el.value ?? "")).catch(() => ""), HANDLE_READ_MS, ""));
+          valuesBeforeTyping.set(field, await within(field.inputValue({ timeout: HANDLE_READ_MS }).catch(() => ""), HANDLE_READ_MS, ""));
           filled = [...filled, field].slice(-MAX_HELD_FIELDS);
         }
         const out = (await type({ target: ref, element: kind === "password" ? "password field" : "username field", text }, internalCall)) as McpResult;
@@ -739,7 +739,7 @@ export async function openBrowser(opts: {
               keepSecret(kept);
             } else if (shortened) {
               await type({ target: ref, element: "password field", text: "" }, internalCall);
-              const left = await within(held.evaluate((el: any) => String(el.value ?? "")).catch(() => null), HANDLE_READ_MS, null);
+              const left = await within(held.inputValue({ timeout: HANDLE_READ_MS }).catch(() => null), HANDLE_READ_MS, null);
               return left === "" ? "failed: the field kept too little of the password to hide it, so it was cleared" : "failed: the field kept too little of the password to hide it, and it could not be cleared";
             } else if (!kept && !out?.isError) {
               return "failed: the field did not keep the password";

@@ -1585,8 +1585,8 @@ describe("screenshots", () => {
       expect(await b.fillField(refOf(snap, "Password"), "first-secret-1", "password")).toBe("typed the password");
       const results = [JSON.stringify(await b.tools.browser_click!.execute!({ target: refOf(snap, "Check"), element: "Check" }, ctx))];
       results.push(JSON.stringify(await b.tools.browser_handle_dialog!.execute!({ accept: true }, ctx)));
-      expect(results.every((r) => r.includes("a dialog is open"))).toBe(true);
       results.push(JSON.stringify(await b.tools.browser_handle_dialog!.execute!({ accept: true }, ctx)));
+      expect(results.slice(0, 2).every((r) => r.includes("a dialog is open"))).toBe(true);
       expect(results[2]).not.toContain("a dialog is open");
       expect(results.join("")).not.toContain("first-secret-");
     });
