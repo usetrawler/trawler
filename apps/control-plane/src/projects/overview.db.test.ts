@@ -7,7 +7,7 @@ import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { runView } from "../runs/report.ts";
 import { runSummary, startRun } from "../runs/runs.ts";
-import { projectHead, projectRunCount, runCounts, workspaceNav, workspaceProjects, workspaceRuns } from "./overview.ts";
+import { projectHead, projectRunCount, runCounts, runHead, workspaceNav, workspaceProjects, workspaceRuns } from "./overview.ts";
 import { createProject, replacePlan } from "./projects.ts";
 
 const t = await testDb();
@@ -214,6 +214,9 @@ test("another organisation's projects and runs never appear", async () => {
   expect(await withOrg(t.db, "org-b", (tx) => runCounts(tx, "org-b"))).toEqual({ all: 1, completed: 1, attention: 0 });
   expect(await withOrg(t.db, "org-b", (tx) => workspaceNav(tx, "org-b"))).toEqual({ projects: [{ id: foreign, name: "Acme", address: "app.globex.test" }], runs: 1 });
   expect(await withOrg(t.db, "org-b", (tx) => projectHead(tx, "org-b", acme))).toBeNull();
+  expect(await withOrg(t.db, "org-b", (tx) => runHead(tx, "org-b", latest.id))).toBeNull();
+  expect(await withOrg(t.db, "org-a", (tx) => runHead(tx, "org-a", latest.id))).toEqual({ number: latest.number, projectName: "Acme" });
+  expect(await withOrg(t.db, "org-b", (tx) => runHead(tx, "org-b", theirs.id))).toEqual({ number: theirs.number, projectName: "Acme" });
   expect(await withOrg(t.db, "org-b", (tx) => workspaceRuns(tx, "org-b", { projectId: acme }))).toEqual(nothing);
   expect(await withOrg(t.db, "org-b", (tx) => runCounts(tx, "org-b", acme))).toEqual(noCounts);
   expect(await withOrg(t.db, "org-b", (tx) => projectRunCount(tx, "org-b", acme))).toBe(0);
@@ -227,10 +230,12 @@ test("row-level security hides the workspace's data even from a query that names
   expect(await withOrg(t.db, "org-b", (tx) => workspaceNav(tx, "org-a"))).toEqual({ projects: [], runs: 0 });
   expect(await withOrg(t.db, "org-b", (tx) => projectHead(tx, "org-a", acme))).toBeNull();
   expect(await withOrg(t.db, "org-b", (tx) => projectRunCount(tx, "org-a", acme))).toBe(0);
+  expect(await withOrg(t.db, "org-b", (tx) => runHead(tx, "org-a", latest.id))).toBeNull();
 });
 
 test("each query keeps to the workspace it names even where row-level security would not stop it", async () => {
   expect(await asSystem(t.db, (tx) => projectHead(tx, "org-b", acme))).toBeNull();
+  expect(await asSystem(t.db, (tx) => runHead(tx, "org-b", latest.id))).toBeNull();
   expect((await asSystem(t.db, (tx) => workspaceProjects(tx, "org-b"))).map((p) => p.id)).toEqual([foreign]);
   expect((await asSystem(t.db, (tx) => workspaceRuns(tx, "org-b"))).runs.map((r) => r.id)).toEqual([theirs.id]);
   expect(await asSystem(t.db, (tx) => runCounts(tx, "org-b"))).toEqual({ all: 1, completed: 1, attention: 0 });

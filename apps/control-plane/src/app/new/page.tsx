@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AppShell } from "../../components/app-shell.tsx";
@@ -6,6 +7,7 @@ import { shellFor } from "../../server/shell.ts";
 import { SetupWizard } from "./setup-wizard.tsx";
 
 export const dynamic = "force-dynamic";
+export const metadata: Metadata = { title: "New project" };
 
 export default async function NewProjectPage() {
   const member = await signedInMember(await headers());

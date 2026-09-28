@@ -8,7 +8,7 @@ import { getAuth, signedInPerson } from "../../server/auth.ts";
 import { WorkspaceChoice } from "./choice.tsx";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Choose your workspace · Trawler" };
+export const metadata: Metadata = { title: "Choose your workspace" };
 
 export default async function WelcomePage() {
   const person = await signedInPerson(await headers());

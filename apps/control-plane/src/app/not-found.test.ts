@@ -19,7 +19,7 @@ test("a missing page says so in the mockup's words, with the way back into the a
 });
 
 test("on a full page load the tab names the page, before its JavaScript runs and after Next draws it", () => {
-  expect(metadata.title).toBe("Page not found · Trawler");
+  expect(metadata.title).toEqual({ absolute: "Page not found · Trawler" });
   expect(render()).toMatch(/^<title>Page not found · Trawler<\/title><div class="app-frame /);
 });
 

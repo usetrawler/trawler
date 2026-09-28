@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AppShell } from "../../components/app-shell.tsx";
@@ -13,6 +14,7 @@ import { ModelKey } from "./model-key.tsx";
 import { WorkspaceName } from "./workspace-name.tsx";
 
 export const dynamic = "force-dynamic";
+export const metadata: Metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   const member = await signedInMember(await headers());

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { signedInPerson, signInProviders } from "../../server/auth.ts";
@@ -6,6 +7,7 @@ import { DocsLink } from "../../components/docs-link.tsx";
 import { SignInButtons } from "./sign-in-buttons.tsx";
 
 export const dynamic = "force-dynamic";
+export const metadata: Metadata = { title: "Sign in" };
 
 export default async function SignInPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const { error } = await searchParams;

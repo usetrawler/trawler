@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
@@ -11,8 +12,14 @@ import { projectForEditing } from "../../../projects/projects.ts";
 import { canManageBilling, signedInMember } from "../../../server/auth.ts";
 import { getDb } from "../../../server/db.ts";
 import { shellFor } from "../../../server/shell.ts";
+import { projectPageTitle } from "../../../server/titles.ts";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return projectPageTitle(await headers(), id, "Plan");
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 

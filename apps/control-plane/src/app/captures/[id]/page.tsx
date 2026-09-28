@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { screenCapture } from "../../../artifacts/artifacts.ts";
@@ -7,8 +8,14 @@ import { runTitle } from "../../../runs/status.ts";
 import { signedInMember } from "../../../server/auth.ts";
 import { getDb } from "../../../server/db.ts";
 import { shellFor } from "../../../server/shell.ts";
+import { capturePageTitle } from "../../../server/titles.ts";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return capturePageTitle(await headers(), id);
+}
 
 export default async function CapturePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

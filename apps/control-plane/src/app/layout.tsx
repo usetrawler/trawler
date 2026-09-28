@@ -13,7 +13,7 @@ export const viewport: Viewport = { colorScheme: "light dark" };
 export function generateMetadata(): Metadata {
   const other = sentryMeta();
   return {
-    title: "Trawler",
+    title: { default: "Trawler", template: "%s · Trawler" },
     description: "Agents use your product in a real browser and report what they found, confirmed by a blind replay.",
     ...(other ? { other } : {}),
   };

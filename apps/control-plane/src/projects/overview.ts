@@ -100,6 +100,11 @@ export async function projectHead(tx: Tx, orgId: string, projectId: string) {
   return project ? { id: project.id, name: project.name, targetUrl: project.target_url } : null;
 }
 
+export async function runHead(tx: Tx, orgId: string, runId: string) {
+  const run = await tx.selectFrom("runs as r").innerJoin("projects as p", "p.id", "r.project_id").select(["r.number", "p.name"]).where("r.id", "=", runId).where("r.org_id", "=", orgId).executeTakeFirst();
+  return run ? { number: run.number, projectName: run.name } : null;
+}
+
 export async function workspaceRuns(tx: Tx, orgId: string, options: { projectId?: string; show?: RunFilter; before?: number; size?: number } = {}) {
   const size = options.size ?? RUNS_PER_PAGE;
   const show = options.show ?? "all";

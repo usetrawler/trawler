@@ -7,7 +7,7 @@ const label = "font-mono text-[10px] text-muted uppercase";
 
 const TITLE = "Page not found · Trawler";
 
-export const metadata: Metadata = { title: TITLE };
+export const metadata: Metadata = { title: { absolute: TITLE } };
 
 export default function NotFound() {
   return (
