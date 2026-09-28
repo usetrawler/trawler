@@ -38,6 +38,7 @@ const MAX_HELD_FIELDS = 20;
 const KEYS_SAFE_ON_SECRETS = new Set(["Enter", "Tab", "Shift+Tab", "Escape"]);
 const FOCUS_CHECK_MS = 2000;
 const HANDLE_READ_MS = 500;
+const FILLED_READ_MS = 5000;
 const SCREENSHOT_MS = 5000;
 const MASK_COLOR = "#17191c";
 const MASK_CHECK_MS = 2500;
@@ -510,10 +511,10 @@ export async function openBrowser(opts: {
       filled = filled.filter((_, i) => alive[i]);
       return filled;
     };
-    const readValue = async (h: ElementHandle) => {
+    const readValue = async (h: ElementHandle): Promise<string | null> => {
       if (dialogOpen) return lastValues.get(h) ?? "";
       const read = h.evaluate((el: any) => String(el.value ?? "")).then((value) => (lastValues.set(h, value), value));
-      return within(read.catch(() => lastValues.get(h) ?? ""), HANDLE_READ_MS, lastValues.get(h) ?? "");
+      return within(read.catch(() => lastValues.get(h) ?? ""), FILLED_READ_MS, null);
     };
     const keepSecret = (value: string) => {
       typedSecrets.add(value);
@@ -524,6 +525,7 @@ export async function openBrowser(opts: {
       const tooShortToScrub = new Set([...typedPasswords].filter((typed) => typed.length < MIN_SECRET_LENGTH));
       for (const h of await liveFilled()) {
         const value = await readValue(h);
+        if (value === null) return refused("A field Trawler typed a password into could not be read in time, so this result is withheld to keep the password out of it. Wait a moment and try again.") as T;
         if (value === valuesBeforeTyping.get(h)) continue;
         if (value.length < MIN_SECRET_LENGTH) {
           if (value) tooShortToScrub.add(value);
