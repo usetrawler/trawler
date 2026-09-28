@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { LanguageModel } from "ai";
 import { Budget, judge, runReplay, runRoleSession, SecretScrubber, type Browser } from "@usetrawler/core";
-import { MAX_STORY, MAX_URL, turnsOf, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
+import { MAX_URL, trimStory, turnsOf, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
 import type { RunSummary } from "./run-dir.ts";
 
 const CLOSE_TIMEOUT_MS = 10_000;
@@ -80,7 +80,8 @@ export async function localRun(opts: {
         model: opts.agentModel, modelId: opts.agentModelId, persona, project: opts.project,
         browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: opts.maxSteps, emit,
         newFindingId: () => `f${++findingNo}`,
-        goalIds: turn.goalIds, story: story.slice(-MAX_STORY), signUpSeed,
+        goalIds: turn.goalIds, story: trimStory(story), signUpSeed, jobId,
+        returning: turns.slice(0, i).some((t) => t.personaId === persona.id),
       }),
     ).catch((err): { result: RoleResult; usage: ReturnType<typeof noUsage> } => {
       const error = failure(scrubber, err);
@@ -93,7 +94,7 @@ export async function localRun(opts: {
     story.push(...told);
     const earlier = byPersona.get(persona.id);
     byPersona.set(persona.id, earlier
-      ? { ...result, goals: [...earlier.goals, ...result.goals], findings: [...earlier.findings, ...result.findings], ...(earlier.error && !result.error ? { error: earlier.error } : {}) }
+      ? { ...result, goals: [...earlier.goals, ...result.goals], findings: [...earlier.findings, ...result.findings] }
       : result);
     summary.jobs.push({ jobId, ...usage });
   }

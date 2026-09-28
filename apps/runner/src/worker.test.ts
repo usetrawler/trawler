@@ -87,7 +87,7 @@ const reportsDefect = () => scriptedModel([
 test("a finding's screenshot is uploaded with the job token, as the image it is, before the job completes", async () => {
   const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" }, { uploadDelayMs: 300 });
   await workOnce(deps(url, reportsDefect(), { openBrowser: shooting }));
-  expect(seen.uploads).toEqual([{ url: `/api/jobs/${baseJob.jobId}/artifacts?kind=screenshot&finding=f1`, auth: `Bearer ${token}`, type: "image/png", protocol: "1", bytes: Buffer.from(shot.bytes) }]);
+  expect(seen.uploads).toEqual([{ url: `/api/jobs/${baseJob.jobId}/artifacts?kind=screenshot&finding=f1`, auth: `Bearer ${token}`, type: "image/png", protocol: "2", bytes: Buffer.from(shot.bytes) }]);
   expect(seen.order.slice(0, seen.order.indexOf("complete"))).toContain("artifacts answered");
   expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "finish" })]);
 });
@@ -310,7 +310,7 @@ test("a replay handed back because the runner is stopping takes and uploads no s
 test("with nothing to do, a claim comes back idle", async () => {
   const { url, seen } = await fakeControlPlane(null);
   expect(await workOnce(deps(url, scriptedModel([])))).toBe("idle");
-  expect(seen.headers[0]).toBe("1");
+  expect(seen.headers[0]).toBe("2");
   expect(seen.auth[0]).toBe("Bearer runner-" + "r".repeat(40));
 });
 
@@ -327,6 +327,23 @@ test("a role session runs, streams numbered events with the job token and comple
   expect(types).toContain("goal_status");
   expect(seen.auth.filter((a) => a === `Bearer ${token}`).length).toBeGreaterThanOrEqual(2);
   expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "finish", usage: expect.objectContaining({ steps: 2 }) })]);
+});
+
+test("a turn of a team session plays its goals with the story so far, and numbers its findings by turn", async () => {
+  const story = [{ personaId: "lee", name: "Lee", text: "Accepted Ana's pitch." }];
+  const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana", goalIds: ["g"], turn: 2, returning: true, story, signUpSeed: "s".repeat(32) });
+  const model = scriptedModel([
+    toolCall("browser_snapshot", {}),
+    toolCall("submit_finding", { kind: "friction", goal: "g", title: "t", observed: "o", reproduction: ["a"], severity: "low" }),
+    toolCall("goal_status", { goal: "g", status: "reached", note: "" }),
+    toolCall("finish", { summary: "done" }),
+  ]);
+  expect(await workOnce(deps(url, model, { openBrowser: shooting }))).toBe("done");
+  const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
+  expect(prompt).toContain("Accepted Ana's pitch.");
+  expect(prompt).toContain("you started using earlier in this session");
+  const finding = seen.events.find((e) => e.type === "finding") as unknown as { finding: { id: string } };
+  expect(finding.finding.id).toBe("t2f1");
 });
 
 test("a failing events endpoint is retried and nothing is lost", async () => {

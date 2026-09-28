@@ -109,6 +109,11 @@ export function SignIn({ projectId, person, accounts, onPick, onAccounts }: {
 
 const AUTOSAVE_MS = 800;
 
+function afterLastOf(goals: Goal[], personaId: string, goal: Goal): Goal[] {
+  const at = goals.findLastIndex((g) => g.personaId === personaId) + 1 || goals.length;
+  return [...goals.slice(0, at), goal, ...goals.slice(at)];
+}
+
 function planProblem(personas: PlanPerson[], goals: Goal[]): string | null {
   for (const [i, p] of personas.entries()) {
     const who = p.name.trim() || `Person ${i + 1}`;
@@ -235,7 +240,7 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
                     </li>
                   ))}
                 </ol>
-                {own.length < MAX_GOALS_PER_PERSONA && <AddButton onClick={() => setGoals((list) => [...list, newGoal(p.id, list)])}>Add a goal</AddButton>}
+                {own.length < MAX_GOALS_PER_PERSONA && <AddButton onClick={() => setGoals((list) => afterLastOf(list, p.id, newGoal(p.id, list)))}>Add a goal</AddButton>}
                 <SignIn
                   projectId={projectId}
                   person={p}

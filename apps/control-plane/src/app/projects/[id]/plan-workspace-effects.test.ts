@@ -193,3 +193,15 @@ test("an account added on a card reaches the plan and becomes that person's, and
   await Promise.all(react.started);
   expect(panel.onChange).toHaveBeenLastCalledWith([], "account-1");
 });
+
+test("a goal added to a person goes right after that person's last goal, never to the end of someone else's turn", () => {
+  const kofi = { id: "kofi", name: "Kofi", brief: "b" };
+  const list = [{ id: "a", instruction: "A.", personaId: "ama" }, { id: "b", instruction: "B.", personaId: "kofi" }];
+  react.values = [{ personas: [ama, kofi], goals: list }, [ama, kofi], list, [], null];
+  const tree = PlanWorkspace({ projectId: "p1", projectName: "Acme", initialPersonas: [ama, kofi], initialGoals: list, initialAccounts: [], keyHint: null, canManageKey: true, authorisedBefore: true });
+  const [, , setGoals] = react.setters;
+  const addForAma = nodes(tree).filter((node) => typeof node.type === "function" && typeof node.props?.onClick === "function" && text(node) === "Add a goal")[0]!;
+  (addForAma.props!.onClick as () => void)();
+  const add = setGoals!.mock.calls.at(-1)![0] as (l: typeof list) => Array<{ personaId?: string }>;
+  expect(add(list).map((g) => g.personaId)).toEqual(["ama", "ama", "kofi"]);
+});

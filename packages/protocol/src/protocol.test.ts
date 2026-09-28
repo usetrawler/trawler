@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { FindingSchema, goalsFor, ProjectConfigSchema, RunEventSchema, turnsOf } from "./index.ts";
+import { FindingSchema, goalsFor, MAX_STORY_CHARS, ProjectConfigSchema, RunEventSchema, trimStory, turnsOf } from "./index.ts";
 
 const project = {
   name: "Acme",
@@ -167,4 +167,13 @@ describe("turnsOf", () => {
       { personaId: "priya", goalIds: ["shared"] }, { personaId: "marco", goalIds: ["shared", "own"] },
     ]);
   });
+});
+
+test("the story keeps the newest entries within its size, each cut short if long", () => {
+  const entries = Array.from({ length: 100 }, (_, i) => ({ personaId: "p", name: "P", text: `${i} ${"x".repeat(900)}` }));
+  const kept = trimStory(entries);
+  expect(kept.at(-1)!.text.startsWith("99 ")).toBe(true);
+  expect(kept.every((e) => e.text.length <= 500)).toBe(true);
+  expect(kept.reduce((n, e) => n + e.text.length, 0)).toBeLessThanOrEqual(MAX_STORY_CHARS);
+  expect(trimStory([{ personaId: "p", name: "P", text: "short" }])).toEqual([{ personaId: "p", name: "P", text: "short" }]);
 });

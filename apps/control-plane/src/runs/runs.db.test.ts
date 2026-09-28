@@ -744,6 +744,32 @@ describe("a team session", () => {
     summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
     expect(summary!.findings.map((f) => [f.key, f.personaKey]).sort()).toEqual([["priya:f1", "priya"], ["priya:t2f1", "priya"]]);
     expect(summary!.goals.map((g) => [g.personaKey, g.goal, g.status])).toEqual([["marco", "review", "reached"], ["priya", "decision", "failed"], ["priya", "submit", "reached"]]);
+    const done = await sql<{ seed: string | null }>`select sign_up_seed as seed from runs where id = ${run.id}`.execute(t.db);
+    expect(done.rows[0]!.seed).toBeNull();
+    await drain();
+  });
+
+  test("the sign-up seed is stored encrypted, not as the runner receives it", async () => {
+    await drain();
+    const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", team, keys));
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", id, keys, options));
+    const job = (await claimJob(t.db, keys))!;
+    const { rows } = await sql<{ seed: string }>`select sign_up_seed as seed from runs where id = ${run.id}`.execute(t.db);
+    expect(rows[0]!.seed).not.toContain(job.signUpSeed!);
+    expect(job.returning).toBe(false);
+    await drain();
+  });
+
+  test("a run started before turns existed plays one session per person as it did", async () => {
+    await drain();
+    const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", team, keys));
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", id, keys, options));
+    await sql`update runs set sign_up_seed = null where id = ${run.id}`.execute(t.db);
+    const job = (await claimJob(t.db, keys))!;
+    expect(job).toMatchObject({ kind: "role_session", personaKey: "priya" });
+    expect(job.goalIds).toBeUndefined();
+    expect(job.story).toBeUndefined();
+    expect(job.signUpSeed).toBeUndefined();
     await drain();
   });
 });

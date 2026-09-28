@@ -531,13 +531,22 @@ describe("a turn of a team session", () => {
 
   test("plays only this turn's goals, knows what happened so far, and gets back in rather than signing up again", async () => {
     const model = scriptedModel([reached("decision"), finish]);
-    const { result } = await run(model, { project: team, persona: team.personas[0]!, scrubber: SecretScrubber.forProject(team), goalIds: ["decision"], story, signUpSeed: "run-1" }).promise;
+    const { result } = await run(model, { project: team, persona: team.personas[0]!, scrubber: SecretScrubber.forProject(team), goalIds: ["decision"], story, signUpSeed: "run-1", returning: true }).promise;
     expect(result.goals.map((g) => g.goal)).toEqual(["decision"]);
     const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
     expect(prompt).toContain("Accepted EcoLoop.");
     expect(prompt).toContain("you started using earlier in this session");
     expect(prompt).toMatch(/sign in with that email address and type_own_password instead of signing up again/);
     expect(prompt).not.toContain("Submit a pitch.\\n");
+  });
+
+  test("a returning person is told so even when none of their own notes made it into the story", async () => {
+    const model = scriptedModel([reached("decision"), finish]);
+    await run(model, { project: team, persona: team.personas[0]!, scrubber: SecretScrubber.forProject(team), goalIds: ["decision"], story: [story[1]!], signUpSeed: "run-1", returning: true }).promise;
+    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toMatch(/instead of signing up again/);
+    const fresh = scriptedModel([reached("submit"), finish]);
+    await run(fresh, { project: team, persona: team.personas[0]!, scrubber: SecretScrubber.forProject(team), goalIds: ["submit"], story: [story[1]!], signUpSeed: "run-1" }).promise;
+    expect(JSON.stringify(fresh.doGenerateCalls[0]!.prompt)).not.toMatch(/instead of signing up again/);
   });
 
   test("the made-up email is the same in every turn of the run, and differs between runs", async () => {

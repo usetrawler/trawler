@@ -33,6 +33,8 @@ export function withoutSecrets(config: ProjectConfig) {
 
 export type ConfigSnapshot = ReturnType<typeof withoutSecrets>;
 
+export const signUpSeedContext = (orgId: string, runId: string) => [orgId, "run", runId, "sign_up_seed"];
+
 export class NeedsAccount extends Error {
   constructor(readonly person: string) {
     super(`${person} needs a test account to sign in.`);
@@ -56,12 +58,13 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
     .values({
       org_id: orgId, project_id: projectId, number: next, config_snapshot: JSON.stringify(withoutSecrets(config)),
       agent_model: options.agentModel, judge_model: options.judgeModel, budget_usd: options.budgetUsd.toFixed(4),
-      max_steps: options.maxSteps, replay_steps: options.replaySteps, created_by: options.createdBy, sign_up_seed: randomBytes(24).toString("base64url"),
+      max_steps: options.maxSteps, replay_steps: options.replaySteps, created_by: options.createdBy,
       provider: options.provider ?? "openrouter", provider_base_url: options.providerBaseUrl ?? null, token_cap: options.tokenCap ? String(options.tokenCap) : null,
       prompt_usd_per_mtok: options.price ? options.price.promptUsdPerMtok.toFixed(6) : null, completion_usd_per_mtok: options.price ? options.price.completionUsdPerMtok.toFixed(6) : null,
     })
     .returning(["id", "number"])
     .executeTakeFirstOrThrow();
+  await tx.updateTable("runs").set({ sign_up_seed: keys.encrypt(randomBytes(24).toString("base64url"), signUpSeedContext(orgId, run.id)) }).where("id", "=", run.id).execute();
   await tx.insertInto("jobs").values(turnsOf(config).map((turn, i) => ({ org_id: orgId, run_id: run.id, kind: "role_session", position: i, persona_key: turn.personaId }))).execute();
   return run;
 }

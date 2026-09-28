@@ -26,9 +26,11 @@ export async function runRoleSession(opts: {
   goalIds?: string[];
   story?: StoryEntry[];
   signUpSeed?: string;
+  returning?: boolean;
+  jobId?: string;
 }): Promise<{ result: RoleResult; usage: JobUsage }> {
   if (!Number.isInteger(opts.maxSteps) || opts.maxSteps < 1) throw new RangeError(`maxSteps must be a positive integer, got ${opts.maxSteps}`);
-  const jobId = `role:${opts.persona.id}`;
+  const jobId = opts.jobId ?? `role:${opts.persona.id}`;
   const emit = (e: RunEventInput) => opts.emit(opts.scrubber.scrub(e));
   const own = goalsFor(opts.project.goals, opts.persona.id);
   const goals = opts.goalIds ? own.filter((g) => opts.goalIds!.includes(g.id)) : own;
@@ -58,7 +60,7 @@ export async function runRoleSession(opts: {
     persona: opts.persona, targetUrl: opts.project.targetUrl, docsUrl: opts.project.docsUrl,
     goals, accountRef: opts.persona.accountRef,
     signUpEmail: opts.persona.accountRef ? undefined : madeUpEmail(opts.persona.id, seed),
-    story: opts.story,
+    story: opts.story, returning: opts.returning,
   });
   const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
 

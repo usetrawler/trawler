@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "kysely";
 import { z } from "zod";
-import { FindingSchema, JobUsageSchema, JobStopReasonSchema, MAX_STORY, ReplayObservationSchema, RunEventSchema, turnsOf, type Finding, type JobStopReason, type JobUsage, type ProjectConfig, type ReplayObservation, type RunEvent, type StoryEntry, type Turn } from "@usetrawler/protocol";
+import { FindingSchema, JobUsageSchema, JobStopReasonSchema, ReplayObservationSchema, trimStory, RunEventSchema, turnsOf, type Finding, type JobStopReason, type JobUsage, type ProjectConfig, type ReplayObservation, type RunEvent, type StoryEntry, type Turn } from "@usetrawler/protocol";
 import type { Database } from "../db/index.ts";
 import { asSystem, type Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -9,7 +9,7 @@ import { loadProjectConfig } from "../projects/projects.ts";
 import { logError } from "../server/log.ts";
 import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
-import { capSpent, type ConfigSnapshot } from "./runs.ts";
+import { capSpent, signUpSeedContext, type ConfigSnapshot } from "./runs.ts";
 
 const LEASE_MINUTES = 10;
 const ACTIVE = ["queued", "running"];
@@ -122,7 +122,7 @@ async function storyBefore(tx: Tx, runId: string, position: number, snapshot: Co
     if (e.type === "goal_status" && e.outcome.status !== "not_attempted") return [{ ...base, goal: goal.get(e.outcome.goal) ?? e.outcome.goal, status: e.outcome.status, text: e.outcome.note }];
     return [];
   });
-  return story.slice(-MAX_STORY);
+  return trimStory(story);
 }
 
 async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
@@ -150,8 +150,9 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
       const current = await loadProjectConfig(tx, picked.org_id, picked.project_id, keys);
       const finding = picked.finding_key ? await findingFor(tx, picked.run_id, picked.finding_key) : undefined;
       const config = configFor(snapshot, current);
-      const turn = picked.kind === "role_session" ? turnAt(snapshot, picked.position, picked.persona_key) : undefined;
+      const turn = picked.kind === "role_session" && picked.sign_up_seed ? turnAt(snapshot, picked.position, picked.persona_key) : undefined;
       const story = turn ? await storyBefore(tx, picked.run_id, picked.position, snapshot) : undefined;
+      const returning = turn ? turnsOf(snapshot).slice(0, picked.position).some((t) => t.personaId === picked.persona_key) : undefined;
       return {
         assignment: {
           jobId: picked.id,
@@ -160,7 +161,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
           kind: picked.kind as JobAssignment["kind"],
           config,
           personaKey: picked.persona_key ?? undefined,
-          ...(turn ? { goalIds: turn.goalIds, turn: picked.position, story, ...(picked.sign_up_seed ? { signUpSeed: picked.sign_up_seed } : {}) } : {}),
+          ...(turn ? { goalIds: turn.goalIds, turn: picked.position, returning, story, signUpSeed: keys.decrypt(picked.sign_up_seed!, signUpSeedContext(picked.org_id, picked.run_id)) } : {}),
           accountRef: finding ? config.personas.find((p) => p.id === finding.personaKey)?.accountRef : undefined,
           finding: finding?.finding,
           observation: finding?.replay,
@@ -217,13 +218,17 @@ export async function releaseJob(db: Database, job: { jobId: string; runId: stri
 }
 
 async function forgetPartialWork(tx: Tx, jobId: string) {
-  const job = await tx.selectFrom("jobs as j").innerJoin("runs as r", "r.id", "j.run_id").select(["j.run_id", "j.kind", "j.position", "j.persona_key", "j.finding_key", "r.config_snapshot"]).where("j.id", "=", jobId).executeTakeFirstOrThrow();
+  const job = await tx.selectFrom("jobs as j").innerJoin("runs as r", "r.id", "j.run_id").select(["j.run_id", "j.kind", "j.position", "j.persona_key", "j.finding_key", "r.config_snapshot", "r.sign_up_seed"]).where("j.id", "=", jobId).executeTakeFirstOrThrow();
   await tx.deleteFrom("run_events").where("job_id", "=", jobId).execute();
   await tx.updateTable("artifacts").set({ discarded_at: new Date() }).where("job_id", "=", jobId).where("discarded_at", "is", null).execute();
   if (job.kind === "role_session") {
     await tx.deleteFrom("findings").where("job_id", "=", jobId).execute();
-    const goalIds = turnsOf(job.config_snapshot as unknown as ConfigSnapshot)[job.position]?.goalIds ?? [];
-    if (goalIds.length) await tx.deleteFrom("goal_outcomes").where("run_id", "=", job.run_id).where("persona_key", "=", job.persona_key!).where("goal", "in", goalIds).execute();
+    const outcomes = tx.deleteFrom("goal_outcomes").where("run_id", "=", job.run_id).where("persona_key", "=", job.persona_key!);
+    if (!job.sign_up_seed) await outcomes.execute();
+    else {
+      const goalIds = turnsOf(job.config_snapshot as unknown as ConfigSnapshot)[job.position]?.goalIds ?? [];
+      if (goalIds.length) await outcomes.where("goal", "in", goalIds).execute();
+    }
   } else if (job.kind === "judge") {
     await tx.updateTable("findings").set({ verdict: null, updated_at: new Date() }).where("run_id", "=", job.run_id).where("key", "=", job.finding_key!).execute();
   }
@@ -397,6 +402,7 @@ async function planNext(tx: Tx, job: { run_id: string; org_id: string; kind: str
   if (job.kind === "role_session") {
     const rolesLeft = await tx.selectFrom("jobs").select("id").where("run_id", "=", job.run_id).where("kind", "=", "role_session").where("status", "in", ["queued", "leased"]).executeTakeFirst();
     if (!rolesLeft) {
+      await tx.updateTable("runs").set({ sign_up_seed: null }).where("id", "=", job.run_id).execute();
       const defects = await tx.selectFrom("findings").select("key").where("run_id", "=", job.run_id).where("kind", "=", "defect").orderBy("created_at").orderBy("key").execute();
       if (defects.length) {
         await tx.insertInto("jobs").values(defects.map((d, i) => ({ org_id: job.org_id, run_id: job.run_id, kind: "replay", position: next + i, finding_key: d.key }))).execute();

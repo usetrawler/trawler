@@ -74,7 +74,7 @@ export function runView(s: RunSummary) {
   const goalText = new Map(s.goalTexts.map((g) => [g.id, g.instruction]));
   const personas = s.personas.map((p) => {
     const turns = s.jobs.filter((j) => j.kind === "role_session" && j.persona_key === p.id);
-    const failed = turns.find((j) => j.status === "failed");
+    const failed = turns.at(-1)?.status === "failed" ? turns.at(-1) : undefined;
     const ended = turns.length > 0 && turns.every((j) => j.status === "succeeded" || j.status === "failed");
     const goals = s.goals.filter((g) => g.personaKey === p.id);
     const findings = s.findings.filter((f) => f.personaKey === p.id);

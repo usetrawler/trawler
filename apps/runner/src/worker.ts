@@ -243,7 +243,7 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
         model: deps.model(job.agentModel, job.token), modelId: job.agentModel, persona, project: config, browserTools: b.tools, fillField: b.fillField,
         scrubber, budget, maxSteps: job.maxSteps, emit: events.emit, newFindingId: () => (job.turn ? `t${job.turn}f${++n}` : `f${++n}`),
         screenshot: () => b.screenshot(), keepScreenshot: screenshots.keep,
-        goalIds: job.goalIds, story: job.story, signUpSeed: job.signUpSeed,
+        goalIds: job.goalIds, story: job.story, signUpSeed: job.signUpSeed, returning: job.returning,
       }),
     );
     return { usage, stoppedBy: result.stoppedBy, ...(result.error ? { error: clip(result.error) } : {}) };
