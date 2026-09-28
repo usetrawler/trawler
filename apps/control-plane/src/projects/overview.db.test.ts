@@ -94,7 +94,7 @@ test("the home page lists every project of the workspace, the most recently acti
   expect(projects[2]).toMatchObject({ id: acme, targetUrl: "https://app.acme.test/" });
   expect(projects[2]!.lastRun).toEqual({
     id: latest.id, number: latest.number, status: "succeeded", createdAt: expect.any(Date),
-    costUsd: 0.35, tokenCap: null, tokensUsed: 0, confirmed: 2, goalsReached: 4, goalsTotal: 6, projectId: acme, projectName: "Acme", projectSite: null,
+    costUsd: 0.35, tokenCap: null, tokensUsed: 0, confirmed: 2, unchecked: false, goalsReached: 4, goalsTotal: 6, projectId: acme, projectName: "Acme", projectSite: null,
   });
   expect(projects[1]!.lastRun).toMatchObject({ id: waiting.id, status: "queued", projectName: "Beta" });
 });
@@ -104,10 +104,10 @@ test("the workspace's runs are newest first across its projects, each with its p
   expect(history.runs.map((r) => r.id)).toEqual([waiting.id, live.id, latest.id, cancelled.id, capped.id, failed.id]);
   expect(history.runs[4]).toEqual({
     id: capped.id, number: capped.number, status: "stopped_budget", createdAt: expect.any(Date),
-    costUsd: 2, tokenCap: 100_000, tokensUsed: 120_000, confirmed: 1, goalsReached: 2, goalsTotal: 6, projectId: acme, projectName: "Acme", projectSite: null,
+    costUsd: 2, tokenCap: 100_000, tokensUsed: 120_000, confirmed: 1, unchecked: false, goalsReached: 2, goalsTotal: 6, projectId: acme, projectName: "Acme", projectSite: null,
   });
   expect(history.runs[3]).toMatchObject({ status: "cancelled", projectId: beta, projectName: "Beta" });
-  expect(history.runs[5]).toMatchObject({ status: "failed", confirmed: 0, goalsReached: 0, goalsTotal: 6, costUsd: 0.1 });
+  expect(history.runs[5]).toMatchObject({ status: "failed", confirmed: 0, unchecked: false, goalsReached: 0, goalsTotal: 6, costUsd: 0.1 });
   expect(Math.abs(history.runs[5]!.createdAt.getTime() - hoursAgo(72).getTime())).toBeLessThan(60_000);
   expect(history.olderThan).toBeNull();
 });
@@ -204,7 +204,7 @@ test("a run keeps the number of goals it was started with after the plan changes
 test("another organisation's projects and runs never appear", async () => {
   const theirProjects = await withOrg(t.db, "org-b", (tx) => workspaceProjects(tx, "org-b"));
   expect(theirProjects.map((p) => p.id)).toEqual([foreign]);
-  expect(theirProjects[0]!.lastRun).toMatchObject({ confirmed: 1, goalsReached: 6, projectName: "Acme", projectSite: null });
+  expect(theirProjects[0]!.lastRun).toMatchObject({ confirmed: 1, unchecked: false, goalsReached: 6, projectName: "Acme", projectSite: null });
   const ours = await withOrg(t.db, "org-a", (tx) => workspaceProjects(tx, "org-a"));
   expect(ours.map((p) => p.id)).not.toContain(foreign);
   const ourRuns = await withOrg(t.db, "org-a", (tx) => workspaceRuns(tx, "org-a"));
@@ -242,4 +242,29 @@ test("each query keeps to the workspace it names even where row-level security w
 test("the plan page counts the project's runs", async () => {
   expect(await withOrg(t.db, "org-a", (tx) => projectRunCount(tx, "org-a", acme))).toBe(3);
   expect(await withOrg(t.db, "org-a", (tx) => projectRunCount(tx, "org-a", empty))).toBe(0);
+});
+
+test("a run whose every defect's replay failed before any judge reads as not checked, in the history and as a project's last run, as on the run page", async () => {
+  const org = "org-d";
+  const unchecked = await project(org, "Unchecked", "https://unchecked.test/");
+  const run = await seedRun(org, unchecked, hoursAgo(1), { status: "succeeded", cost: 0.1 }, [{ kind: "defect", verdict: null }, { kind: "defect", verdict: null }, { kind: "friction", verdict: null }], 0, 0);
+  const replay = (key: string, status: string, position: number) => ({ org_id: org, run_id: run.id, kind: "replay", position, finding_key: key, status, error: "the provider refused the key" });
+  await asSystem(t.db, (tx) => tx.insertInto("jobs").values([replay("ana:f0", "failed", 100), replay("ana:f1", "failed", 101)]).execute());
+  const lineOf = async () => (await withOrg(t.db, org, (tx) => workspaceRuns(tx, org, { projectId: unchecked }))).runs[0]!;
+  expect(await lineOf()).toMatchObject({ id: run.id, confirmed: 0, unchecked: true });
+  expect((await withOrg(t.db, org, (tx) => workspaceProjects(tx, org))).find((p) => p.id === unchecked)!.lastRun).toMatchObject({ id: run.id, unchecked: true });
+  expect(runView((await withOrg(t.db, org, (tx) => runSummary(tx, org, run.id)))!).headline).toBe("None of the reported defects could be checked: every replay failed.");
+  await asSystem(t.db, (tx) => tx.insertInto("jobs").values({ org_id: org, run_id: run.id, kind: "judge", position: 102, finding_key: "ana:f1", status: "failed" }).execute());
+  expect(await lineOf()).toMatchObject({ unchecked: false });
+  expect(runView((await withOrg(t.db, org, (tx) => runSummary(tx, org, run.id)))!).headline).toBe("None of the reported defects was confirmed.");
+});
+
+test("a run with no defects, or a defect whose replay has not failed, is not marked unchecked", async () => {
+  const org = "org-d";
+  const plain = await project(org, "Plain", "https://plain.test/");
+  const none = await seedRun(org, plain, hoursAgo(3), { status: "succeeded", cost: 0.1 }, [], 0, 0);
+  const pending = await seedRun(org, plain, hoursAgo(2), { status: "succeeded", cost: 0.1 }, [{ kind: "defect", verdict: null }], 0, 0);
+  await asSystem(t.db, (tx) => tx.insertInto("jobs").values({ org_id: org, run_id: pending.id, kind: "replay", position: 100, finding_key: "ana:f0", status: "succeeded" }).execute());
+  const runs = (await withOrg(t.db, org, (tx) => workspaceRuns(tx, org, { projectId: plain }))).runs;
+  expect(runs.map((r) => [r.id, r.unchecked])).toEqual([[pending.id, false], [none.id, false]]);
 });

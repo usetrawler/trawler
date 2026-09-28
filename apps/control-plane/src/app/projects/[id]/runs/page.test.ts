@@ -46,7 +46,7 @@ const { default: ProjectRunsPage } = await import("./page.tsx");
 const open = (id: string, search: { show?: string | string[]; before?: string | string[] } = {}) => ProjectRunsPage({ params: Promise.resolve({ id }), searchParams: Promise.resolve(search) });
 const run: RunLine = {
   id: "r12", number: 12, status: "failed", createdAt: new Date("2026-09-25T12:32:00Z"), costUsd: 0.2, tokenCap: null, tokensUsed: 0,
-  confirmed: 0, goalsReached: 0, goalsTotal: 3, projectId: ID, projectName: "Acme", projectSite: null,
+  confirmed: 0, unchecked: false, goalsReached: 0, goalsTotal: 3, projectId: ID, projectName: "Acme", projectSite: null,
 };
 
 beforeEach(() => {

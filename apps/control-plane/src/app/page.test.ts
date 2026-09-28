@@ -27,7 +27,7 @@ const memberOf = (orgId: string): Member => ({ userId: "u1", name: "Ana Lopez", 
 const project: ProjectLine = { id: "p1", name: "Acme", targetUrl: "https://app.acme.test/", site: null, lastRun: null };
 const recent: RunLine = {
   id: "r7", number: 7, status: "failed", createdAt: new Date("2026-09-25T12:32:00Z"), costUsd: 0.4, tokenCap: null, tokensUsed: 0,
-  confirmed: 0, goalsReached: 1, goalsTotal: 6, projectId: "p1", projectName: "Acme", projectSite: null,
+  confirmed: 0, unchecked: false, goalsReached: 1, goalsTotal: 6, projectId: "p1", projectName: "Acme", projectSite: null,
 };
 
 beforeEach(() => {

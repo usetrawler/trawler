@@ -6,7 +6,7 @@ import { firstName, Overview, overviewSubtitle } from "./overview.tsx";
 
 const run = (over: Partial<RunLine> = {}): RunLine => ({
   id: "r9", number: 9, status: "succeeded", createdAt: new Date("2026-09-25T12:32:00Z"), costUsd: 0.4, tokenCap: null, tokensUsed: 0,
-  confirmed: 2, goalsReached: 4, goalsTotal: 6, projectId: "p1", projectName: "Acme", projectSite: null, ...over,
+  confirmed: 2, unchecked: false, goalsReached: 4, goalsTotal: 6, projectId: "p1", projectName: "Acme", projectSite: null, ...over,
 });
 const acme: ProjectLine = { id: "p1", name: "Acme Invoices", targetUrl: "https://app.acme.test/billing", site: null, lastRun: run() };
 const fresh: ProjectLine = { id: "p2", name: "Globex", targetUrl: "https://shop.globex.test/", site: null, lastRun: null };
@@ -39,6 +39,12 @@ describe("Overview", () => {
     expect(clean).not.toContain('bg-action"></span>');
     expect(clean).toMatch(/font-bold">0<\/p><p[^>]*>defects in the last run<\/p>/);
     expect(hero(render([{ ...acme, lastRun: run({ confirmed: 1 }) }]), "p1")).toContain(">defect in the last run</p>");
+  });
+
+  it("says the last run's defects were not checked when every replay failed, with no count", () => {
+    const card = hero(render([{ ...acme, lastRun: run({ confirmed: 0, unchecked: true }) }]), "p1");
+    expect(card).toMatch(/font-bold"><span aria-hidden="true">—<\/span><\/p><p[^>]*>not checked: every replay failed<\/p>/);
+    expect(card).not.toContain("defects in the last run");
   });
 
   it("leads a project without runs to its plan, and one with a live run to that run", () => {
@@ -85,6 +91,8 @@ describe("overviewSubtitle", () => {
     expect(overviewSubtitle([run({ confirmed: 3 })])).toBe("3 defects were confirmed by replay in the latest run.");
     expect(overviewSubtitle([run({ confirmed: 0 })])).toBe("No defect was confirmed in the latest run.");
     expect(overviewSubtitle([run({ confirmed: 0 }), run({ confirmed: 4 })])).toBe("No defect was confirmed in the latest run.");
+    expect(overviewSubtitle([run({ confirmed: 0, unchecked: true })])).toBe("None of the defects in the latest run could be checked: every replay failed.");
+    expect(overviewSubtitle([run({ status: "stopped_budget", confirmed: 0, unchecked: true })])).toBe("The latest run stopped at its cap; none of its defects could be checked: every replay failed.");
   });
 
   it("says when the latest run ended early, and what it confirmed before it stopped", () => {
