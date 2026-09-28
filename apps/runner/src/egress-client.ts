@@ -1,7 +1,7 @@
 import type { BlockedAttempt } from "./egress-proxy.ts";
 
 export interface EgressSession {
-  proxy: { server: string; username: string; password: string };
+  proxy: { server: string };
   drain: () => Promise<BlockedAttempt[]>;
   close: () => Promise<BlockedAttempt[]>;
 }
@@ -39,10 +39,10 @@ export function egressClient(server: string, token: string, fetchImpl: typeof fe
       }
     },
     async open(origins) {
-      const { id, password } = (await call("POST", "/sessions", { origins })) as { id: string; password: string };
+      const { id, port } = (await call("POST", "/sessions", { origins })) as { id: string; port: number };
       let closed: Promise<BlockedAttempt[]> | undefined;
       return {
-        proxy: { server, username: id, password },
+        proxy: { server: `http://127.0.0.1:${port}` },
         drain: async () => (closed ? [] : blockedOf(await call("GET", `/sessions/${id}/blocked`))),
         close: () => (closed ??= call("DELETE", `/sessions/${id}`).then(blockedOf)),
       };

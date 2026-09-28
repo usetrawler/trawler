@@ -33,7 +33,7 @@ export interface CliDeps {
   err: (line: string) => void;
   model: (modelId: string, apiKey: string, baseURL?: string) => LanguageModel;
   fetchText: (url: string) => Promise<string>;
-  openBrowser: (opts: Parameters<OpenBrowser>[0] & { project: ReturnType<typeof ProjectConfigSchema.parse>; outputDir: string; headless: boolean; survivesSignals?: boolean; proxy?: { server: string; username: string; password: string } }) => ReturnType<OpenBrowser>;
+  openBrowser: (opts: Parameters<OpenBrowser>[0] & { project: ReturnType<typeof ProjectConfigSchema.parse>; outputDir: string; headless: boolean; survivesSignals?: boolean; proxy?: { server: string } }) => ReturnType<OpenBrowser>;
   runsRoot: string;
   fetchImpl?: typeof fetch;
   startReporting?: typeof startReporting;

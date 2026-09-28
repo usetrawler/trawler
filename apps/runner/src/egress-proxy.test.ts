@@ -42,13 +42,12 @@ async function control(method: string, path: string, body?: unknown, token = TOK
 
 async function session(origins: string[]) {
   const { body } = await control("POST", "/sessions", { origins });
-  const auth = `Basic ${Buffer.from(`${body.id}:${body.password}`).toString("base64")}`;
-  return { id: body.id as string, auth, blocked: async () => (await control("GET", `/sessions/${body.id}/blocked`)).body.blocked };
+  return { id: body.id as string, port: body.port as number, blocked: async () => (await control("GET", `/sessions/${body.id}/blocked`)).body.blocked };
 }
 
-function exchange(first: string, then?: string): Promise<string> {
+function exchange(port: number, first: string, then?: string): Promise<string> {
   return new Promise((resolveText, reject) => {
-    const socket = net.connect(proxy.port, "127.0.0.1");
+    const socket = net.connect(port, "127.0.0.1");
     let text = "";
     let sent = false;
     socket.on("data", (chunk) => {
@@ -63,26 +62,22 @@ function exchange(first: string, then?: string): Promise<string> {
       }
     });
     socket.on("end", () => resolveText(text));
+    socket.on("close", () => resolveText(text));
     socket.on("error", reject);
     socket.setTimeout(3_000, () => socket.destroy(new Error(`no answer; got ${JSON.stringify(text)}`)));
     socket.write(first);
   });
 }
 
-const connect = (target: string, auth?: string, then?: string) =>
-  exchange(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n${auth ? `Proxy-Authorization: ${auth}\r\n` : ""}\r\n`, then);
+const connect = (port: number, target: string, then?: string) => exchange(port, `CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`, then);
 const status = (text: string) => text.split("\r\n")[0];
 const get = (host: string, path = "/x") => `GET ${path} HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`;
 const upgrade = (host: string) => `GET /ws HTTP/1.1\r\nHost: ${host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\nping`;
 
-test("an allowed origin is reached through a tunnel, and nothing passes without the session's password", async () => {
+test("an allowed origin is reached through the session's own port", async () => {
   const s = await session([`https://shop.test:${upstreamPort}`]);
   const target = `shop.test:${upstreamPort}`;
-  expect(status(await connect(target))).toBe("HTTP/1.1 407 Proxy Authentication Required");
-  expect(await connect(target)).toContain('Proxy-Authenticate: Basic realm="trawler"');
-  const wrong = `Basic ${Buffer.from(`${s.id}:not-the-password`).toString("base64")}`;
-  expect(status(await connect(target, wrong))).toBe("HTTP/1.1 407 Proxy Authentication Required");
-  const through = await connect(target, s.auth, get(target));
+  const through = await connect(s.port, target, get(target));
   expect(status(through)).toBe("HTTP/1.1 200 Connection Established");
   expect(through).toContain(`hello /x from ${target}`);
   expect(await s.blocked()).toEqual([]);
@@ -90,12 +85,12 @@ test("an allowed origin is reached through a tunnel, and nothing passes without 
 
 test("an allowed host that resolves to a private address, a private address among public ones, and the metadata address are refused and reported", async () => {
   const s = await session([`http://rebind.test:${upstreamPort}`, `http://mixed.test:${upstreamPort}`, "http://169.254.169.254"]);
-  expect(status(await connect(`rebind.test:${upstreamPort}`, s.auth, get("rebind.test")))).toBe("HTTP/1.1 403 Forbidden");
-  expect(status(await connect(`mixed.test:${upstreamPort}`, s.auth, get("mixed.test")))).toBe("HTTP/1.1 403 Forbidden");
-  expect(status(await connect("169.254.169.254:80", s.auth, get("169.254.169.254")))).toBe("HTTP/1.1 403 Forbidden");
+  expect(status(await connect(s.port, `rebind.test:${upstreamPort}`, get("rebind.test")))).toBe("HTTP/1.1 403 Forbidden");
+  expect(status(await connect(s.port, `mixed.test:${upstreamPort}`, get("mixed.test")))).toBe("HTTP/1.1 403 Forbidden");
+  expect(status(await connect(s.port, "169.254.169.254:80", get("169.254.169.254")))).toBe("HTTP/1.1 403 Forbidden");
   expect(await s.blocked()).toEqual([
-    { url: `https://rebind.test:${upstreamPort}`, reason: "private" },
-    { url: `https://mixed.test:${upstreamPort}`, reason: "private" },
+    { url: `http://rebind.test:${upstreamPort}`, reason: "private" },
+    { url: `http://mixed.test:${upstreamPort}`, reason: "private" },
     { url: "http://169.254.169.254", reason: "private" },
   ]);
   expect(await s.blocked()).toEqual([]);
@@ -104,7 +99,7 @@ test("an allowed host that resolves to a private address, a private address amon
 test("a host outside the session's origins is refused and reported once, raw addresses and other ports included", async () => {
   const s = await session([`https://shop.test:${upstreamPort}`]);
   for (const target of [`127.0.0.1:${upstreamPort}`, `127.0.0.1:${upstreamPort}`, "shop.test:1", "[::1]:443", "unknown.test:443"]) {
-    expect(status(await connect(target, s.auth, get(target)))).toBe("HTTP/1.1 403 Forbidden");
+    expect(status(await connect(s.port, target, get(target)))).toBe("HTTP/1.1 403 Forbidden");
   }
   expect(await s.blocked()).toEqual([
     { url: `https://127.0.0.1:${upstreamPort}`, reason: "origin" },
@@ -117,48 +112,47 @@ test("a host outside the session's origins is refused and reported once, raw add
 test("a malformed target is refused, and a host that does not resolve is a bad gateway, not a report", async () => {
   HOSTS["gone.test"] = [];
   const s = await session(["https://gone.test", "https://nowhere.test"]);
-  expect(status(await connect("gone.test", s.auth))).toBe("HTTP/1.1 400 Bad Request");
-  expect(status(await connect("gone.test:99999", s.auth))).toBe("HTTP/1.1 400 Bad Request");
-  expect(status(await connect("gone.test:443", s.auth))).toBe("HTTP/1.1 502 Bad Gateway");
-  expect(status(await connect("nowhere.test:443", s.auth))).toBe("HTTP/1.1 502 Bad Gateway");
+  expect(status(await connect(s.port, "gone.test"))).toBe("HTTP/1.1 400 Bad Request");
+  expect(status(await connect(s.port, "gone.test:99999"))).toBe("HTTP/1.1 400 Bad Request");
+  expect(status(await connect(s.port, "gone.test:443"))).toBe("HTTP/1.1 502 Bad Gateway");
+  expect(status(await connect(s.port, "nowhere.test:443"))).toBe("HTTP/1.1 502 Bad Gateway");
   expect(await s.blocked()).toEqual([]);
 });
 
-test("a plain http request goes only to an allowed origin, without the proxy credentials", async () => {
+test("a plain http request goes only to an allowed origin, without proxy headers", async () => {
   const s = await session([`http://shop.test:${upstreamPort}`, `http://rebind.test:${upstreamPort}`]);
-  const ask = (host: string, auth?: string) => exchange(`GET http://${host}/y HTTP/1.1\r\nHost: ${host}\r\n${auth ? `Proxy-Authorization: ${auth}\r\n` : ""}Connection: close\r\n\r\n`);
-  expect(status(await ask(`shop.test:${upstreamPort}`))).toBe("HTTP/1.1 407 Proxy Authentication Required");
-  const answer = await ask(`shop.test:${upstreamPort}`, s.auth);
+  const ask = (host: string) => exchange(s.port, `GET http://${host}/y HTTP/1.1\r\nHost: ${host}\r\nProxy-Authorization: Basic eDp5\r\nConnection: close\r\n\r\n`);
+  const answer = await ask(`shop.test:${upstreamPort}`);
   expect(status(answer)).toBe("HTTP/1.1 200 OK");
   expect(answer).toContain(`hello /y from shop.test:${upstreamPort}`);
   expect(answer).not.toContain("with proxy credentials");
-  expect(status(await ask(`rebind.test:${upstreamPort}`, s.auth))).toBe("HTTP/1.1 403 Forbidden");
-  expect(status(await ask("elsewhere.test", s.auth))).toBe("HTTP/1.1 403 Forbidden");
+  expect(status(await ask(`rebind.test:${upstreamPort}`))).toBe("HTTP/1.1 403 Forbidden");
+  expect(status(await ask("elsewhere.test"))).toBe("HTTP/1.1 403 Forbidden");
   expect(await s.blocked()).toEqual([{ url: `http://rebind.test:${upstreamPort}`, reason: "private" }, { url: "http://elsewhere.test", reason: "origin" }]);
 });
 
 test("a WebSocket reaches an allowed origin, through a tunnel or as a proxied upgrade, and one to a private address is refused", async () => {
   const s = await session([`http://shop.test:${upstreamPort}`, `http://rebind.test:${upstreamPort}`]);
-  const tunnelled = await connect(`shop.test:${upstreamPort}`, s.auth, upgrade(`shop.test:${upstreamPort}`));
+  const tunnelled = await connect(s.port, `shop.test:${upstreamPort}`, upgrade(`shop.test:${upstreamPort}`));
   expect(tunnelled).toContain("HTTP/1.1 101 Switching Protocols");
   expect(tunnelled).toContain("ping");
-  const proxied = await exchange(upgrade(`shop.test:${upstreamPort}`).replace("GET /ws", `GET http://shop.test:${upstreamPort}/ws`).replace("\r\n\r\n", `\r\nProxy-Authorization: ${s.auth}\r\n\r\n`));
+  const proxied = await exchange(s.port, upgrade(`shop.test:${upstreamPort}`).replace("GET /ws", `GET http://shop.test:${upstreamPort}/ws`));
   expect(status(proxied)).toBe("HTTP/1.1 101 Switching Protocols");
   expect(proxied).toContain("ping");
-  expect(status(await connect(`rebind.test:${upstreamPort}`, s.auth, upgrade("rebind.test")))).toBe("HTTP/1.1 403 Forbidden");
-  expect(await s.blocked()).toEqual([{ url: `https://rebind.test:${upstreamPort}`, reason: "private" }]);
+  expect(status(await connect(s.port, `rebind.test:${upstreamPort}`, upgrade("rebind.test")))).toBe("HTTP/1.1 403 Forbidden");
+  expect(await s.blocked()).toEqual([{ url: `http://rebind.test:${upstreamPort}`, reason: "private" }]);
 });
 
-test("the control API needs its token and valid origins, and a closed session lets nothing through", async () => {
+test("the control API needs its token and valid origins, and a closed session's port stops listening", async () => {
   expect((await control("GET", "/health", undefined, "wrong-token".padEnd(40, "x"))).status).toBe(401);
   expect((await control("GET", "/health")).status).toBe(200);
   expect((await control("POST", "/sessions", { origins: [] })).status).toBe(400);
   expect((await control("POST", "/sessions", { origins: ["file:///etc/passwd"] })).status).toBe(400);
-  expect((await control("POST", "/sessions", { origins: ["https://a.test"], extra: 1 })).status).toBe(201);
+  expect(await connect(proxy.port, `shop.test:${upstreamPort}`, get("shop.test"))).not.toContain("hello");
   const s = await session([`https://shop.test:${upstreamPort}`]);
-  await connect("elsewhere.test:443", s.auth);
+  await connect(s.port, "elsewhere.test:443");
   expect(await control("DELETE", `/sessions/${s.id}`)).toEqual({ status: 200, body: { blocked: [{ url: "https://elsewhere.test", reason: "origin" }] } });
-  expect(status(await connect(`shop.test:${upstreamPort}`, s.auth))).toBe("HTTP/1.1 407 Proxy Authentication Required");
+  await expect(connect(s.port, `shop.test:${upstreamPort}`)).rejects.toThrow(/ECONNREFUSED/);
   expect((await control("GET", `/sessions/${s.id}/blocked`)).status).toBe(404);
 });
 

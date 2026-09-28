@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import http from "node:http";
 import net, { type BlockList } from "node:net";
@@ -13,7 +13,7 @@ export interface BlockedAttempt {
 }
 
 interface Session {
-  password: Buffer;
+  server: http.Server;
   origins: Set<string>;
   blocked: BlockedAttempt[];
   reported: Set<string>;
@@ -26,7 +26,7 @@ const MAX_ORIGINS = 50;
 const MAX_BLOCKED = 100;
 const MAX_CONTROL_BODY = 64 * 1024;
 const CONNECT_TIMEOUT_MS = 15_000;
-const HOP_HEADERS = new Set(["proxy-authorization", "proxy-connection", "proxy-authenticate"]);
+const HOP_HEADERS = new Set(["proxy-authorization", "proxy-connection"]);
 
 const systemResolve: Resolve = (hostname) => lookup(hostname, { all: true, verbatim: true });
 
@@ -38,8 +38,6 @@ function reply(socket: Duplex, status: string, extra = "") {
   socket.end(`HTTP/1.1 ${status}\r\n${extra}Content-Length: 0\r\nConnection: close\r\n\r\n`);
 }
 
-const AUTH_REQUIRED = 'Proxy-Authenticate: Basic realm="trawler"\r\n';
-
 export async function startEgressProxy(opts: { token: string; port?: number; resolve?: Resolve; blocked?: BlockList; now?: () => number }): Promise<{ port: number; close: () => Promise<void> }> {
   const token = Buffer.from(opts.token);
   if (token.length < 32) throw new RangeError("the egress control token must be at least 32 characters");
@@ -48,18 +46,18 @@ export async function startEgressProxy(opts: { token: string; port?: number; res
   const now = opts.now ?? Date.now;
   const sessions = new Map<string, Session>();
   const tunnels = new Set<Duplex>();
+  const sockets = new WeakMap<http.Server, Set<net.Socket>>();
+  const tracked = (server: http.Server) => {
+    const open = new Set<net.Socket>();
+    sockets.set(server, open);
+    server.on("connection", (socket: net.Socket) => {
+      open.add(socket);
+      socket.on("close", () => open.delete(socket));
+    });
+    return server;
+  };
 
   const sameSecret = (given: Buffer, expected: Buffer) => given.length === expected.length && timingSafeEqual(given, expected);
-
-  function session(req: http.IncomingMessage): Session | null {
-    const [scheme, encoded] = (req.headers["proxy-authorization"] ?? "").split(" ");
-    if (scheme?.toLowerCase() !== "basic" || !encoded) return null;
-    const decoded = Buffer.from(encoded, "base64").toString("utf8");
-    const colon = decoded.indexOf(":");
-    const found = colon > 0 ? sessions.get(decoded.slice(0, colon)) : undefined;
-    if (!found || found.expires < now() || !sameSecret(Buffer.from(decoded.slice(colon + 1)), found.password)) return null;
-    return found;
-  }
 
   function refuse(s: Session, url: string, reason: BlockedAttempt["reason"]) {
     if (s.reported.has(url) || s.blocked.length >= MAX_BLOCKED) return;
@@ -67,8 +65,8 @@ export async function startEgressProxy(opts: { token: string; port?: number; res
     s.blocked.push({ url, reason });
   }
 
-  const allowed = (s: Session, host: string, port: string) =>
-    ["http", "https"].some((scheme) => s.origins.has(new URL(`${scheme}://${bracketed(host)}:${port}`).origin));
+  const candidates = (host: string, port: string) => ["http", "https"].map((scheme) => new URL(`${scheme}://${bracketed(host)}:${port}`).origin);
+  const allowed = (s: Session, host: string, port: string) => candidates(host, port).some((origin) => s.origins.has(origin));
 
   async function destination(host: string): Promise<{ address: string; family: number } | "private" | "unresolved"> {
     const literal = net.isIP(host);
@@ -127,15 +125,14 @@ export async function startEgressProxy(opts: { token: string; port?: number; res
     return dial(target, Number(port)).catch(() => ({ status: "502 Bad Gateway" }));
   }
 
-  async function onConnect(req: http.IncomingMessage, client: Duplex, head: Buffer) {
+  async function onConnect(s: Session, req: http.IncomingMessage, client: Duplex, head: Buffer) {
     client.on("error", () => client.destroy());
-    const s = session(req);
-    if (!s) return reply(client, "407 Proxy Authentication Required", AUTH_REQUIRED);
     const match = /^(\[[0-9a-fA-F:.]+\]|[^:\[\]/]+):(\d{1,5})$/.exec(req.url ?? "");
     if (!match || Number(match[2]) < 1 || Number(match[2]) > 65535) return reply(client, "400 Bad Request");
     const host = unbracketed(match[1]!.toLowerCase());
     const port = match[2]!;
-    const shown = new URL(`${port === "80" ? "http" : "https"}://${bracketed(host)}:${port}`).origin;
+    const [http80, https] = candidates(host, port);
+    const shown = [http80!, https!].find((origin) => s.origins.has(origin)) ?? (port === "80" ? http80! : https!);
     const upstream = await open(s, host, port, shown);
     if (!(upstream instanceof net.Socket)) return reply(client, upstream.status);
     if (client.destroyed) return upstream.destroy();
@@ -159,10 +156,8 @@ export async function startEgressProxy(opts: { token: string; port?: number; res
     return kept;
   }
 
-  async function onUpgrade(req: http.IncomingMessage, client: Duplex, head: Buffer) {
+  async function onUpgrade(s: Session, req: http.IncomingMessage, client: Duplex, head: Buffer) {
     client.on("error", () => client.destroy());
-    const s = session(req);
-    if (!s) return reply(client, "407 Proxy Authentication Required", AUTH_REQUIRED);
     const url = absolute(req);
     if (!url) return reply(client, "400 Bad Request");
     const upstream = await open(s, unbracketed(url.hostname), url.port || "80", url.origin);
@@ -176,12 +171,7 @@ export async function startEgressProxy(opts: { token: string; port?: number; res
     splice(client, upstream);
   }
 
-  async function onProxyRequest(req: http.IncomingMessage, res: http.ServerResponse) {
-    const s = session(req);
-    if (!s) {
-      res.writeHead(407, { "proxy-authenticate": 'Basic realm="trawler"', "content-length": 0 });
-      return res.end();
-    }
+  async function onProxyRequest(s: Session, req: http.IncomingMessage, res: http.ServerResponse) {
     const url = absolute(req);
     if (!url) {
       res.writeHead(400, { "content-length": 0 });
@@ -247,49 +237,70 @@ export async function startEgressProxy(opts: { token: string; port?: number; res
     const path = (req.url ?? "").split("?")[0]!;
     if (req.method === "GET" && path === "/health") return answer(res, 200, { sessions: sessions.size });
     if (req.method === "POST" && path === "/sessions") {
-      for (const [id, s] of sessions) if (s.expires < now()) sessions.delete(id);
+      for (const [id, s] of sessions) if (s.expires < now()) await end(id);
       if (sessions.size >= MAX_SESSIONS) return answer(res, 429, { error: "too many sessions" });
       const allowedOrigins = origins(await body(req).catch(() => null));
       if (!allowedOrigins) return answer(res, 400, { error: "origins: one to 50 http(s) addresses" });
       const id = randomUUID();
-      const password = randomBytes(24).toString("base64url");
-      sessions.set(id, { password: Buffer.from(password), origins: allowedOrigins, blocked: [], reported: new Set(), expires: now() + SESSION_MS });
-      return answer(res, 201, { id, password });
+      const port = await openSession(id, allowedOrigins);
+      return answer(res, 201, { id, port });
     }
     const match = /^\/sessions\/([0-9a-f-]{36})(\/blocked)?$/.exec(path);
     const s = match ? sessions.get(match[1]!) : undefined;
     if (!match || !s) return answer(res, 404, { error: "no such session" });
     if (req.method === "GET" && match[2]) return answer(res, 200, { blocked: s.blocked.splice(0) });
     if (req.method === "DELETE" && !match[2]) {
-      sessions.delete(match[1]!);
+      await end(match[1]!);
       return answer(res, 200, { blocked: s.blocked });
     }
     return answer(res, 405, { error: "method not allowed" });
   }
 
-  const server = http.createServer((req, res) => {
-    const handle = (req.url ?? "").startsWith("/") ? onControl(req, res) : onProxyRequest(req, res);
-    handle.catch(() => {
-      if (!res.headersSent) answer(res, 500, { error: "failed" });
-      else res.destroy();
-    });
-  });
-  server.requestTimeout = 0;
-  server.on("connect", (req, socket, head) => void onConnect(req, socket, head).catch(() => socket.destroy()));
-  server.on("upgrade", (req, socket, head) => void onUpgrade(req, socket, head).catch(() => socket.destroy()));
+  const failed = (res: http.ServerResponse) => () => {
+    if (!res.headersSent) answer(res, 500, { error: "failed" });
+    else res.destroy();
+  };
 
-  await new Promise<void>((resolveListen, reject) => {
-    server.once("error", reject);
-    server.listen(opts.port ?? 0, "127.0.0.1", () => resolveListen());
-  });
-  const { port } = server.address() as net.AddressInfo;
+  async function openSession(id: string, allowedOrigins: Set<string>): Promise<number> {
+    const proxyServer = tracked(http.createServer());
+    const s: Session = { server: proxyServer, origins: allowedOrigins, blocked: [], reported: new Set(), expires: now() + SESSION_MS };
+    proxyServer.requestTimeout = 0;
+    proxyServer.on("request", (req, res) => void onProxyRequest(s, req, res).catch(failed(res)));
+    proxyServer.on("connect", (req, socket, head) => void onConnect(s, req, socket, head).catch(() => socket.destroy()));
+    proxyServer.on("upgrade", (req, socket, head) => void onUpgrade(s, req, socket, head).catch(() => socket.destroy()));
+    await listen(proxyServer, 0);
+    sessions.set(id, s);
+    return (proxyServer.address() as net.AddressInfo).port;
+  }
+
+  async function end(id: string) {
+    const s = sessions.get(id);
+    if (!s) return;
+    sessions.delete(id);
+    await shut(s.server);
+  }
+
+  const listen = (server: http.Server, port: number) =>
+    new Promise<void>((resolveListen, reject) => {
+      server.once("error", reject);
+      server.listen(port, "127.0.0.1", () => resolveListen());
+    });
+
+  const shut = (server: http.Server) =>
+    new Promise<void>((resolveClose) => {
+      server.close(() => resolveClose());
+      server.closeAllConnections();
+      for (const socket of sockets.get(server) ?? []) socket.destroy();
+    });
+
+  const control = tracked(http.createServer((req, res) => void onControl(req, res).catch(failed(res))));
+  await listen(control, opts.port ?? 0);
   return {
-    port,
-    close: () =>
-      new Promise<void>((resolveClose) => {
-        for (const t of tunnels) t.destroy();
-        server.closeAllConnections();
-        server.close(() => resolveClose());
-      }),
+    port: (control.address() as net.AddressInfo).port,
+    close: async () => {
+      for (const t of tunnels) t.destroy();
+      await Promise.all([...sessions.keys()].map(end));
+      await shut(control);
+    },
   };
 }

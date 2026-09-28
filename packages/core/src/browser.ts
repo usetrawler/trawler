@@ -428,7 +428,7 @@ export async function openBrowser(opts: {
   outputDir: string;
   scrubber: SecretScrubber;
   onBlocked: (url: string) => void;
-  proxy?: { server: string; username: string; password: string };
+  proxy?: { server: string };
   headless?: boolean;
   survivesSignals?: boolean;
   maskCheckMs?: number;
