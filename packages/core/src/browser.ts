@@ -39,6 +39,9 @@ const KEYS_SAFE_ON_SECRETS = new Set(["Enter", "Tab", "Shift+Tab", "Escape"]);
 const FOCUS_CHECK_MS = 2000;
 const HANDLE_READ_MS = 500;
 const FILLED_READ_MS = 5000;
+const FIELD_GONE = /Execution context was destroyed|Target page, context or browser has been closed|frame was detached|not attached to the DOM/i;
+const WITHHELD_UNREAD = "The action ran, but a field Trawler typed a password into could not be read, so its result is withheld to keep the password out of it. Do not repeat the action: call browser_snapshot to see the page, and navigate elsewhere if this keeps happening.";
+const WITHHELD_FOR_DIALOG = "The action ran, and a dialog is open on a page where Trawler typed a password, so its text is withheld to keep the password out of it. Answer the dialog with browser_handle_dialog, then call browser_snapshot.";
 const SCREENSHOT_MS = 5000;
 const MASK_COLOR = "#17191c";
 const MASK_CHECK_MS = 2500;
@@ -504,18 +507,20 @@ export async function openBrowser(opts: {
       });
     });
     let filled: ElementHandle[] = [];
-    const lastValues = new WeakMap<ElementHandle, string>();
     const valuesBeforeTyping = new WeakMap<ElementHandle, string>();
     const liveFilled = async () => {
       const alive = await Promise.all(filled.map((h) => within(h.evaluate(() => true).catch(() => false), HANDLE_READ_MS, true)));
       filled = filled.filter((_, i) => alive[i]);
       return filled;
     };
-    const readValue = async (h: ElementHandle): Promise<string | null> => {
-      if (dialogOpen) return lastValues.get(h) ?? "";
-      const read = h.evaluate((el: any) => String(el.value ?? "")).then((value) => (lastValues.set(h, value), value));
-      return within(read.catch(() => lastValues.get(h) ?? ""), FILLED_READ_MS, null);
-    };
+    const readValue = (h: ElementHandle): Promise<string | null> =>
+      h
+        .evaluate((el: any) => {
+          const proto = [HTMLInputElement.prototype, HTMLTextAreaElement.prototype].find((p) => p.isPrototypeOf(el));
+          const get = proto && Object.getOwnPropertyDescriptor(proto, "value")?.get;
+          return String((get ? get.call(el) : el.value) ?? "");
+        })
+        .catch((err: unknown) => (FIELD_GONE.test(String(err)) ? "" : null));
     const keepSecret = (value: string) => {
       typedSecrets.add(value);
       opts.scrubber.add(value);
@@ -523,9 +528,12 @@ export async function openBrowser(opts: {
     const scrubWithFilledValues = async <T>(result: T): Promise<T> => {
       const live = new SecretScrubber();
       const tooShortToScrub = new Set([...typedPasswords].filter((typed) => typed.length < MIN_SECRET_LENGTH));
-      for (const h of await liveFilled()) {
-        const value = await readValue(h);
-        if (value === null) return refused("A field Trawler typed a password into could not be read in time, so this result is withheld to keep the password out of it. Wait a moment and try again.") as T;
+      const fields = await liveFilled();
+      if (dialogOpen && fields.length > 0) return refused(WITHHELD_FOR_DIALOG) as T;
+      const values = await within(Promise.all(fields.map(readValue)), FILLED_READ_MS, null);
+      if (values === null || values.includes(null)) return refused(WITHHELD_UNREAD) as T;
+      for (const [i, h] of fields.entries()) {
+        const value = values[i]!;
         if (value === valuesBeforeTyping.get(h)) continue;
         if (value.length < MIN_SECRET_LENGTH) {
           if (value) tooShortToScrub.add(value);
@@ -724,10 +732,8 @@ export async function openBrowser(opts: {
           typedPasswords.add(text);
           const held = filled.at(-1);
           if (held) {
-            lastValues.set(held, text);
             const kept = await within(held.evaluate((el: any) => String(el.value ?? "")).catch(() => null), FOCUS_CHECK_MS, text);
             if (kept === null) return out?.isError ? failure(out) : "failed: the page moved on before the field could be checked, so it is not known what the field kept";
-            lastValues.set(held, kept);
             const shortened = kept !== text && kept.length > 0 && keptFrom(kept, text);
             if (shortened && kept.length >= MIN_SECRET_LENGTH) {
               keepSecret(kept);
