@@ -20,6 +20,7 @@ import { createProject } from "../projects/projects.ts";
 import { runView } from "../runs/report.ts";
 import { runSummary, startRun } from "../runs/runs.ts";
 import { scrubberWith } from "../server/log.ts";
+import { FetchRefused } from "../setup/safe-fetch.ts";
 import { handleArtifactUpload, handleClaim, handleComplete, handleEvents, handleRelease, type RunnerApiDeps } from "./handlers.ts";
 
 vi.mock("../server/log.ts", async (importOriginal) => {
@@ -320,6 +321,41 @@ test("a run on a direct provider goes to that provider without OpenRouter extras
   const summary = await withOrg(t.db, "org-o", (tx) => runSummary(tx, "org-o", run.id));
   expect(summary).toMatchObject({ status: "stopped_budget", costUsd: 0, tokensUsed: 2100, tokenCap: 2000, provider: "openai" });
   expect((await call()).status).toBe(402);
+});
+
+test("a timed-out call is answered 504 after one attempt whichever fetch timed out, even while its answer is read, a refused address is not tried again, and a dropped connection still is", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-t', 'T', 't', now())`.execute(t.db);
+  await withOrg(t.db, "org-t", (tx) => setModelKey(tx, "org-t", { provider: "openrouter", key: ORG_KEY }, "u", keys));
+  const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "ti", name: "Ti", brief: "b" }], goals: [{ id: "g", instruction: "x" }] });
+  const project = await withOrg(t.db, "org-t", (tx) => createProject(tx, "org-t", config, keys));
+  const run = await withOrg(t.db, "org-t", (tx) => startRun(tx, "org-t", project, keys, { budgetUsd: 5, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 10, replaySteps: 10, createdBy: "u", price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } }));
+  const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "3" } }), deps)).json();
+  expect(job.runId).toBe(run.id);
+  const attempts = async (rejection: () => unknown) => {
+    let tried = 0;
+    const failing: typeof fetch = async () => {
+      tried++;
+      throw rejection();
+    };
+    const res = await handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${job.token}`, "content-type": "application/json" }, body: JSON.stringify({ model: "m/agent", messages: [{ role: "user", content: "hi" }] }) }), { db: t.db, keys, openRouterUrl: openRouterBase, fetch: failing, retryBaseMs: 1 });
+    return { status: res.status, message: ((await res.json()) as { error: { message: string } }).error.message, tried };
+  };
+  const guardedTimeout = () => Object.assign(new Error("The operation was aborted"), { name: "AbortError", code: "ABORT_ERR", cause: new DOMException("The operation was aborted due to timeout", "TimeoutError") });
+
+  expect(await attempts(guardedTimeout)).toEqual({ status: 504, message: "the provider did not answer in time", tried: 1 });
+  expect(await attempts(() => new DOMException("The operation was aborted due to timeout", "TimeoutError"))).toEqual({ status: 504, message: "the provider did not answer in time", tried: 1 });
+  expect(await attempts(() => new FetchRefused("private", "the address is not allowed"))).toEqual({ status: 502, message: "the provider could not be reached", tried: 1 });
+  expect(await attempts(() => new FetchRefused("status", "HTTP 700"))).toEqual({ status: 502, message: "the provider could not be reached", tried: 1 });
+  expect(await attempts(() => Object.assign(new Error("The operation was aborted"), { name: "AbortError" }))).toEqual({ status: 502, message: "the provider could not be reached", tried: 3 });
+  expect(await attempts(() => new TypeError("fetch failed"))).toEqual({ status: 502, message: "the provider could not be reached", tried: 3 });
+
+  const cutOff = async (reason: unknown) => {
+    const body = new ReadableStream({ start: (controller) => controller.error(reason) });
+    const res = await handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${job.token}`, "content-type": "application/json" }, body: JSON.stringify({ model: "m/agent", messages: [{ role: "user", content: "hi" }] }) }), { db: t.db, keys, openRouterUrl: openRouterBase, fetch: async () => new Response(body, { status: 200 }), retryBaseMs: 1 });
+    return { status: res.status, message: ((await res.json()) as { error: { message: string } }).error.message };
+  };
+  expect(await cutOff(new DOMException("The operation was aborted due to timeout", "TimeoutError"))).toEqual({ status: 504, message: "the provider did not answer in time" });
+  expect(await cutOff(new TypeError("terminated"))).toEqual({ status: 502, message: "the provider could not be reached" });
 });
 
 test("a session interrupted by a runner shutdown goes back to the queue with its partial work forgotten, and the next runner finishes the run", async () => {
