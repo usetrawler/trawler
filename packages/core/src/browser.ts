@@ -1,7 +1,7 @@
 import { createMCPClient } from "@ai-sdk/mcp";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createConnection } from "@playwright/mcp";
-import { chromium, selectors, type ElementHandle, type Frame, type Locator, type Page, type Route } from "playwright";
+import { chromium, selectors, type Dialog, type ElementHandle, type Frame, type Locator, type Page, type Route } from "playwright";
 import { jsonSchema, type Tool, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
 import { MAX_ARTIFACT_BYTES } from "@usetrawler/protocol";
@@ -38,6 +38,7 @@ const MAX_HELD_FIELDS = 20;
 const KEYS_SAFE_ON_SECRETS = new Set(["Enter", "Tab", "Shift+Tab", "Escape"]);
 const FOCUS_CHECK_MS = 2000;
 const HANDLE_READ_MS = 500;
+const CLOSE_STEP_MS = 2000;
 const FILLED_READ_MS = 5000;
 const FIELD_GONE = /Execution context was destroyed|Target page, context or browser has been closed|frame was detached|not attached to the DOM/i;
 const WITHHELD_UNREAD = "The action ran, but a field Trawler typed a password into could not be read, so its result is withheld to keep the password out of it. Do not repeat the action: call browser_snapshot to see the page, and navigate elsewhere if this keeps happening.";
@@ -320,7 +321,7 @@ function keptFrom(value: string, typed: string): boolean {
 }
 
 function within<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return Promise.race([work, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))]);
+  return Promise.race([work, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms).unref())]);
 }
 
 async function focusIsOnSecretIn(frame: Frame, filled: ElementHandle[], holdsSecret: (value: string) => boolean, depth = 0): Promise<boolean> {
@@ -507,10 +508,12 @@ export async function openBrowser(opts: {
     const holdsSecret = (value: string) => [...typedSecrets].some((secret) => value.includes(secret));
     let dialogOpen = false;
     let dialogsOpened = 0;
+    const dialogs = new Set<Dialog>();
     context.on("page", (page) => {
-      page.on("dialog", () => {
+      page.on("dialog", (dialog) => {
         dialogOpen = true;
         dialogsOpened++;
+        dialogs.add(dialog);
       });
       page.on("framenavigated", (frame) => {
         if (frame === page.mainFrame()) dialogOpen = false;
@@ -776,9 +779,11 @@ export async function openBrowser(opts: {
         return shot;
       },
       async close() {
+        const bounded = (step: Promise<unknown>) => within(step.catch(() => undefined), CLOSE_STEP_MS, undefined);
         try {
-          await context.unrouteAll({ behavior: "ignoreErrors" }).catch(() => undefined);
-          await mcp.close();
+          await bounded(Promise.allSettled([...dialogs].map((dialog) => dialog.dismiss())));
+          await bounded(context.unrouteAll({ behavior: "ignoreErrors" }));
+          await bounded(mcp.close());
         } finally {
           await chrome.close();
         }

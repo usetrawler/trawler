@@ -512,6 +512,8 @@ beforeAll(async () => {
         return html(`<div id="host"></div><script>document.getElementById("host").attachShadow({ mode: "open" }).innerHTML = '<input aria-label="Shadow password" type="password">';</script>`);
       case "/cross-frame":
         return html(`<iframe src="${secondOrigin}/"></iframe>`);
+      case "/dialog-chain":
+        return html(`<button onclick="if (!confirm('Sure?')) alert('Cancelled')">Delete</button>`);
       case "/dialog":
         return html(`<button onclick="document.getElementById('r').textContent = confirm('Sure?') ? 'yes' : 'no'">Delete</button><p id="r">none</p>`);
       case "/upload":
@@ -1261,6 +1263,37 @@ describe("robustness", () => {
       await navigate(b, origin);
       await b.close();
       await expect(b.tools.browser_snapshot!.execute!({}, ctx)).rejects.toThrow(/browser has closed|closed client/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  test("closing with a dialog still open is quick, and leaves no Chromium running", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "trw-"));
+    const b = await openBrowser({ allowedOrigins: [origin], outputDir: dir, scrubber: new SecretScrubber(), onBlocked: () => {} });
+    try {
+      await navigate(b, `${origin}/dialog`);
+      const clicked = JSON.stringify(await b.tools.browser_click!.execute!({ target: refOf(await snapshot(b), "Delete"), element: "Delete" }, ctx));
+      expect(clicked).toContain("Modal state");
+      const started = performance.now();
+      await b.close();
+      expect(performance.now() - started).toBeLessThan(1500);
+      expect(() => execFileSync("pgrep", ["-P", String(process.pid), "-f", "chrom"])).toThrow(expect.objectContaining({ status: 1 }));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  test("closing still ends Chromium when dismissing one dialog opens another", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "trw-"));
+    const b = await openBrowser({ allowedOrigins: [origin], outputDir: dir, scrubber: new SecretScrubber(), onBlocked: () => {} });
+    try {
+      await navigate(b, `${origin}/dialog-chain`);
+      await b.tools.browser_click!.execute!({ target: refOf(await snapshot(b), "Delete"), element: "Delete" }, ctx);
+      const started = performance.now();
+      await b.close();
+      expect(performance.now() - started).toBeLessThan(8000);
+      expect(() => execFileSync("pgrep", ["-P", String(process.pid), "-f", "chrom"])).toThrow(expect.objectContaining({ status: 1 }));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
