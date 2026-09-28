@@ -1,6 +1,6 @@
 import { Worker } from "node:worker_threads";
 import { describe, expect, test } from "vitest";
-import { SecretScrubber } from "./secrets.ts";
+import { MASK, SecretScrubber } from "./secrets.ts";
 
 function scrubbed(secret: string, text: string): string {
   const s = new SecretScrubber();
@@ -178,6 +178,27 @@ test("a secret is also masked as a page view shows it: spaces collapsed, invisib
   s.add("ad\u200c  min-secret");
   expect(s.scrub("paragraph: ad min-secret, then pw 12345, then a b c d")).toBe("paragraph: •••, then •••, then a b c d");
   expect(s.scrub("pass\u2764\ufe0f word and ad\u200c min-secret")).toBe("••• and •••");
+});
+
+test("masking stays fast for a long secret that repeats in a long text, and still covers every overlapping match", () => {
+  const cases: Array<[string, string]> = [["a".repeat(4000), "a".repeat(2_000_000)], ["ab".repeat(2000), "ab".repeat(1_000_000)], ["a".repeat(100_000), "a".repeat(400_000)]];
+  for (const [secret, text] of cases) {
+    const s = new SecretScrubber();
+    s.add(secret);
+    const started = performance.now();
+    expect(s.scrub(`x${text}y`)).toBe(`x${MASK}y`);
+    expect(performance.now() - started).toBeLessThan(1000);
+  }
+  const s = new SecretScrubber();
+  s.add("abcabcab");
+  expect(s.scrub("-abcabcabcabcab- abcabcab abcabca")).toBe(`-${MASK}- ${MASK} abcabca`);
+});
+
+test("a secret with a lone surrogate is taken, and masked as written", () => {
+  const s = new SecretScrubber();
+  expect(() => s.add("pass\uD800word-12")).not.toThrow();
+  expect(s.scrub("got pass\uD800word-12 back")).toBe(`got ${MASK} back`);
+  expect(s.scrub("got pass\uFFFDword-12 as a page shows it")).toBe(`got ${MASK} as a page shows it`);
 });
 
 describe("SecretScrubber.forProject", () => {

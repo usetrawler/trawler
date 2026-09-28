@@ -92,6 +92,9 @@ describe("ProjectConfig", () => {
   });
   test("secret headers must be long enough to scrub, plain headers need not", () => {
     expect(() => ProjectConfigSchema.parse({ ...project, secretHeaders: { "x-key": "k7Qz9aP" } })).toThrow();
+    const headers = (n: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`x-secret-${i}`, `secret-value-${i}`]));
+    expect(Object.keys(ProjectConfigSchema.parse({ ...project, secretHeaders: headers(20) }).secretHeaders)).toHaveLength(20);
+    expect(() => ProjectConfigSchema.parse({ ...project, secretHeaders: headers(21) })).toThrow(/at most 20 secret headers/);
     expect(ProjectConfigSchema.parse({ ...project, extraHeaders: { "x-env": "stg" } }).extraHeaders).toEqual({ "x-env": "stg" });
   });
   test("rejects an empty accountRef", () => {

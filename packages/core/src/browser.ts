@@ -41,6 +41,8 @@ const HANDLE_READ_MS = 500;
 const FILLED_READ_MS = 5000;
 const FIELD_GONE = /Execution context was destroyed|Target page, context or browser has been closed|frame was detached|not attached to the DOM/i;
 const WITHHELD_UNREAD = "The action ran, but a field Trawler typed a password into could not be read, so its result is withheld to keep the password out of it. Do not repeat the action: call browser_snapshot to see the page, and navigate elsewhere if this keeps happening.";
+const MAX_HELD_VALUE = 1000;
+const WITHHELD_TOO_LONG = "The action ran, but a field Trawler typed a password into now holds a value too long to check, so its result is withheld to keep the password out of it. Do not repeat the action: navigate elsewhere.";
 const WITHHELD_FOR_DIALOG = "The action ran, and a dialog is open on a page where Trawler typed a password, so its text is withheld to keep the password out of it. Answer the dialog with browser_handle_dialog, then call browser_snapshot.";
 const SCREENSHOT_MS = 5000;
 const MASK_COLOR = "#17191c";
@@ -530,6 +532,7 @@ export async function openBrowser(opts: {
       if (dialogOpen && fields.length > 0) return refused(WITHHELD_FOR_DIALOG) as T;
       const values = await within(Promise.all(fields.map(readValue)), opts.filledReadMs ?? FILLED_READ_MS, null);
       if (values === null || values.includes(null)) return refused(WITHHELD_UNREAD) as T;
+      if (values.some((value) => value!.length > MAX_HELD_VALUE)) return refused(WITHHELD_TOO_LONG) as T;
       for (const [i, h] of fields.entries()) {
         const value = values[i]!;
         if (value === valuesBeforeTyping.get(h)) continue;
@@ -557,6 +560,7 @@ export async function openBrowser(opts: {
       for (const h of await liveFilled()) {
         const value = await readValue(h);
         if (value === null) throw new Error("a field Trawler typed a password into could not be read");
+        if (value.length > MAX_HELD_VALUE) throw new Error("a field Trawler typed a password into holds a value too long to check");
         if (value.length >= MIN_SECRET_LENGTH && value !== valuesBeforeTyping.get(h)) filledValues.push(value);
       }
       const needles = [...new Set([...opts.scrubber.browserNeedles(), ...typedSecrets, ...filledValues].map((n) => n.replace(new RegExp(INVISIBLE, "gu"), "").trim()))].filter((n) => n.length >= MIN_SECRET_LENGTH).sort((a, b) => b.length - a.length);

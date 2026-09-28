@@ -44,6 +44,7 @@ export const MAX_PERSONAS = 12;
 export const MAX_GOALS_PER_PERSONA = 20;
 export const MAX_GOALS = MAX_PERSONAS * MAX_GOALS_PER_PERSONA;
 export const MAX_ACCOUNTS = 20;
+export const MAX_SECRET_HEADERS = 20;
 
 const HEADER_NAME = z.string().regex(/^[A-Za-z0-9-]{1,100}$/, "header names are letters, digits and dashes");
 const HEADER_VALUE = z.string().max(4000).regex(/^[\t\x20-\x7e\x80-\xff]*$/, "header values are plain Latin-1 text without line breaks");
@@ -72,7 +73,7 @@ export const ProjectConfigSchema = z
     accounts: z.array(TargetAccountSchema).max(MAX_ACCOUNTS).default([]),
     httpCredentials: z.strictObject({ username: z.string().min(1).max(320).regex(/^[\x20-\x39\x3b-\x7e\x80-\xff]+$/, "basic auth usernames are plain Latin-1 text without colons"), password: z.string().min(1).max(1000) }).optional(),
     extraHeaders: z.record(HEADER_NAME, HEADER_VALUE).default({}),
-    secretHeaders: z.record(HEADER_NAME, HEADER_VALUE.min(MIN_SECRET_HEADER_LENGTH)).default({}),
+    secretHeaders: z.record(HEADER_NAME, HEADER_VALUE.min(MIN_SECRET_HEADER_LENGTH)).refine((headers) => Object.keys(headers).length <= MAX_SECRET_HEADERS, `at most ${MAX_SECRET_HEADERS} secret headers`).default({}),
   })
   .superRefine((p, ctx) => {
     for (const id of duplicates(p.goals.map((g) => g.id))) ctx.addIssue({ code: "custom", path: ["goals"], message: `duplicate goal id ${id}` });
