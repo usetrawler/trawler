@@ -50,7 +50,9 @@ export interface PriceRange {
 }
 
 const MAX_RANGES = 500;
-const ranges = new Map<string, { at: number; range: PriceRange | null }>();
+const RETRY_AFTER_MS = 60 * 1000;
+const ranges = new Map<string, { at: number; range: PriceRange | null; ttl: number }>();
+const asking = new Map<string, Promise<PriceRange | null>>();
 
 export function parseEndpointPrices(body: unknown): PriceRange | null {
   const endpoints = (body as { data?: { endpoints?: unknown } })?.data?.endpoints;
@@ -69,18 +71,23 @@ export function parseEndpointPrices(body: unknown): PriceRange | null {
 
 export async function openRouterPriceRange(openRouterUrl: string, model: string, fetchImpl: typeof fetch = fetch, now = Date.now()): Promise<PriceRange | null> {
   const cached = ranges.get(model);
-  if (cached && now - cached.at < TTL_MS) return cached.range;
+  if (cached && now - cached.at < cached.ttl) return cached.range;
+  const pending = asking.get(model);
+  if (pending) return pending;
   const segments = model.split("/");
   if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) return null;
   const path = segments.map(encodeURIComponent).join("/");
-  const answer = await fetchImpl(`${openRouterUrl}/models/${path}/endpoints`, { signal: AbortSignal.timeout(10_000) })
+  const asked = fetchImpl(`${openRouterUrl}/models/${path}/endpoints`, { signal: AbortSignal.timeout(10_000) })
     .then(async (res) => (res.ok ? { range: parseEndpointPrices(await res.json()) } : res.status === 404 ? { range: null } : undefined))
-    .catch(() => undefined);
-  if (!answer) return null;
-  const { range } = answer;
-  if (ranges.size >= MAX_RANGES) ranges.delete(ranges.keys().next().value!);
-  ranges.set(model, { at: now, range });
-  return range;
+    .catch(() => undefined)
+    .then((answer) => {
+      if (ranges.size >= MAX_RANGES) ranges.delete(ranges.keys().next().value!);
+      ranges.set(model, answer ? { at: now, range: answer.range, ttl: TTL_MS } : { at: now, range: null, ttl: RETRY_AFTER_MS });
+      return answer?.range ?? null;
+    })
+    .finally(() => asking.delete(model));
+  asking.set(model, asked);
+  return asked;
 }
 
 export async function priceFor(provider: Provider, model: string, openRouterUrl: string, fetchImpl?: typeof fetch): Promise<Price | null> {
@@ -92,4 +99,5 @@ export async function priceFor(provider: Provider, model: string, openRouterUrl:
 export function resetPriceCache() {
   cache = undefined;
   ranges.clear();
+  asking.clear();
 }

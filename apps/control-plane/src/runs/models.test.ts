@@ -30,3 +30,11 @@ test("with one price the estimate grows with turns, goals and price", () => {
   expect(estimateUsd(price, [4]).high).toBeGreaterThan(one.high);
   expect(estimateUsd({ promptUsdPerMtok: 3, completionUsdPerMtok: 15 }, [2]).high).toBeGreaterThan(one.high);
 });
+
+test("the low end never passes the high end, however many goals a turn has", () => {
+  const price = { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 };
+  for (const goals of [1, 10, 11, 20]) {
+    const { low, high } = estimateUsd(price, [goals]);
+    expect(low).toBeLessThanOrEqual(high);
+  }
+});

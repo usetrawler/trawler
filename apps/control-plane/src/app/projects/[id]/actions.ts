@@ -74,7 +74,7 @@ export async function modelsForKeyAction(input: KeyInput): Promise<ModelList> {
 }
 
 export async function priceRangeAction(modelId: string): Promise<PriceRange | null> {
-  if (!MODEL_ID.test(modelId)) return null;
+  if (typeof modelId !== "string" || !MODEL_ID.test(modelId)) return null;
   if (!(await signedInMember(await headers()))) return null;
   return openRouterPriceRange(readEnv().openRouterUrl, modelId);
 }

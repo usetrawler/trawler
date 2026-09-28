@@ -29,10 +29,7 @@ export const modelsForKey = (input: KeyInput): Promise<ModelList> =>
   });
 
 export const priceRangeFor = (modelId: string): Promise<PriceRange | null> =>
-  priceRangeAction(modelId).catch((err) => {
-    if (!unstable_isUnrecognizedActionError(err)) throw err;
-    return null;
-  });
+  priceRangeAction(modelId).catch(() => null);
 
 const priceText = (low: Price, high: Price) => {
   const span = (a: number, b: number) => (a === b ? perMillion(a) : `${perMillion(a)}–${perMillion(b)}`);
@@ -83,7 +80,7 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
   const [list, setList] = useState<ModelList | null>(null);
   const [loading, setLoading] = useState(false);
   const [modelId, setModelId] = useState("");
-  const [range, setRange] = useState<PriceRange | null>(null);
+  const [ranged, setRanged] = useState<{ modelId: string; range: PriceRange | null } | null>(null);
   const [cap, setCap] = useState(DEFAULT_RUN.budgetUsd);
   const [authorised, setAuthorised] = useState(false);
 
@@ -115,13 +112,13 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
 
   const price = list?.ok ? list.models.find((m) => m.id === modelId)?.price ?? null : null;
   const routed = list?.ok && list.provider === "openrouter" && price !== null;
+  const range = routed && ranged?.modelId === modelId ? ranged.range : null;
   useEffect(() => {
-    setRange(null);
     if (!routed) return;
     let cancelled = false;
     const timer = setTimeout(async () => {
       const found = await priceRangeFor(modelId);
-      if (!cancelled) setRange(found);
+      if (!cancelled) setRanged({ modelId, range: found });
     }, 400);
     return () => {
       cancelled = true;

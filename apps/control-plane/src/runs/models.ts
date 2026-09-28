@@ -9,7 +9,7 @@ export const turnSteps = (goals: number, ceiling: number = DEFAULT_RUN.maxSteps)
 const usd = (p: Price, tokens: { input: number; output: number }) => (tokens.input * p.promptUsdPerMtok + tokens.output * p.completionUsdPerMtok) / 1_000_000;
 
 export function estimateUsd(price: Price, goalsPerTurn: number[], highPrice: Price = price): { low: number; high: number; perDefect: number } {
-  const typical = goalsPerTurn.reduce((n, goals) => n + STEPS.typicalPerGoal * Math.max(1, goals), 0);
+  const typical = goalsPerTurn.reduce((n, goals) => n + Math.min(turnSteps(goals), STEPS.typicalPerGoal * Math.max(1, goals)), 0);
   const most = goalsPerTurn.reduce((n, goals) => n + turnSteps(goals), 0);
   const perDefect = usd(highPrice, TOKEN_PROFILE.step) * STEPS.typicalReplay + usd(highPrice, TOKEN_PROFILE.judge);
   return { low: usd(price, TOKEN_PROFILE.step) * typical, high: usd(highPrice, TOKEN_PROFILE.step) * most, perDefect };
