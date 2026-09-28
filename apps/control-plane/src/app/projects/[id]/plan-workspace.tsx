@@ -114,6 +114,37 @@ function afterLastOf(goals: Goal[], personaId: string, goal: Goal): Goal[] {
   return [...goals.slice(0, at), goal, ...goals.slice(at)];
 }
 
+function OrderOfPlay({ personas, goals, onMove }: { personas: PlanPerson[]; goals: Goal[]; onMove: (from: number, to: number) => void }) {
+  const name = new Map(personas.map((p, i) => [p.id, p.name.trim() || `Person ${i + 1}`]));
+  const turns = turnsOf({ personas, goals }).length;
+  return (
+    <section className="flex flex-col gap-3" aria-labelledby="order-of-play">
+      <div className="flex flex-col gap-1">
+        <h2 id="order-of-play" className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Order of play</h2>
+        <p className="text-sm text-muted">People take turns in this order, one at a time, and each turn knows what happened before it. Put a step that needs someone else&apos;s work after it: submit, then review, then see the decision.{turns > personas.length ? ` ${turns} turns.` : ""}</p>
+      </div>
+      <ol className="flex flex-col border-t border-line">
+        {goals.map((g, i) => {
+          const who = name.get(g.personaId ?? "") ?? "Everyone";
+          const newTurn = i === 0 || goals[i - 1]!.personaId !== g.personaId;
+          const step = `step ${i + 1}, ${who}`;
+          return (
+            <li key={g.id} className={`grid grid-cols-[auto_7rem_minmax(0,1fr)_auto] items-start gap-3 py-2 ${newTurn ? "border-t border-line" : ""}`}>
+              <span className="pt-0.5 font-mono text-xs text-muted">{String(i + 1).padStart(2, "0")}</span>
+              <span className={`truncate text-sm font-bold ${newTurn ? "" : "text-muted"}`}>{newTurn ? who : ""}</span>
+              <span className="text-sm break-words">{g.instruction || <em className="text-muted">No text yet</em>}</span>
+              <span className="flex gap-1">
+                <button type="button" aria-label={`Move ${step} up`} disabled={i === 0} onClick={() => onMove(i, i - 1)} className="h-7 w-7 border border-line text-sm text-muted hover:border-ink hover:text-ink disabled:opacity-30">↑</button>
+                <button type="button" aria-label={`Move ${step} down`} disabled={i === goals.length - 1} onClick={() => onMove(i, i + 1)} className="h-7 w-7 border border-line text-sm text-muted hover:border-ink hover:text-ink disabled:opacity-30">↓</button>
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
 function planProblem(personas: PlanPerson[], goals: Goal[]): string | null {
   for (const [i, p] of personas.entries()) {
     const who = p.name.trim() || `Person ${i + 1}`;
@@ -161,6 +192,13 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
   }, [dirty]);
 
   const updatePersona = (i: number, patch: Partial<PlanPerson>) => setPersonas((list) => list.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+  const moveGoal = (from: number, to: number) => setGoals((list) => {
+    if (to < 0 || to >= list.length) return list;
+    const next = [...list];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved!);
+    return next;
+  });
   const updateGoal = (id: string, instruction: string) => setGoals((list) => list.map((g) => (g.id === id ? { ...g, instruction } : g)));
   const newGoal = (personaId: string, taken: Goal[]): Goal => ({ id: nextKey("goal", new Set(taken.map((g) => g.id))), instruction: "", personaId });
   const addPerson = () => {
@@ -254,6 +292,8 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
         </ul>
         {personas.length < MAX_PERSONAS && <AddButton onClick={addPerson}>Add a person</AddButton>}
       </section>
+
+      {personas.length > 1 && <OrderOfPlay personas={personas} goals={goals} onMove={moveGoal} />}
 
 
 
