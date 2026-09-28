@@ -5,7 +5,7 @@ import { chromium, selectors, type ElementHandle, type Frame, type Locator, type
 import { jsonSchema, type Tool, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
 import { MAX_ARTIFACT_BYTES } from "@usetrawler/protocol";
-import { asShown, MASK, MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
+import { asShown, longFormsOf, MASK, MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
 import type { FieldKind } from "./session-tools.ts";
 
 export const BROWSER_TOOLS = [
@@ -43,6 +43,7 @@ const FIELD_GONE = /Execution context was destroyed|Target page, context or brow
 const WITHHELD_UNREAD = "The action ran, but a field Trawler typed a password into could not be read, so its result is withheld to keep the password out of it. Do not repeat the action: call browser_snapshot to see the page, and navigate elsewhere if this keeps happening.";
 const MAX_HELD_VALUE = 1000;
 const MAX_KEPT_FROM_PAGE = 20;
+const MAX_LONG_FORMS_FROM_PAGE = 100;
 const WITHHELD_TOO_LONG = "The action ran, but a field Trawler typed a password into now holds a value too long to check, or keeps changing it, so its result is withheld to keep the password out of it. Do not repeat the action: navigate elsewhere.";
 const WITHHELD_FOR_DIALOG = "The action ran, and a dialog is open on a page where Trawler typed a password, so its text is withheld to keep the password out of it. Answer the dialog with browser_handle_dialog, then call browser_snapshot.";
 const SCREENSHOT_MS = 5000;
@@ -527,8 +528,10 @@ export async function openBrowser(opts: {
       opts.scrubber.add(value);
     };
     const keptFromPage = new Set<string>();
+    let longFormsKept = 0;
     const scrubWithFilledValues = async <T>(result: T): Promise<T> => {
       const live = new SecretScrubber();
+      let longFormsLive = 0;
       const heldInFields = new Set(typedPasswords);
       const fields = await liveFilled();
       if (dialogOpen && fields.length > 0) return refused(WITHHELD_FOR_DIALOG) as T;
@@ -540,10 +543,16 @@ export async function openBrowser(opts: {
         if (value.length > MAX_HELD_VALUE) return refused(WITHHELD_TOO_LONG) as T;
         if (value) heldInFields.add(value);
         if (value.length < MIN_SECRET_LENGTH) continue;
+        const longForms = typedPasswords.has(value) ? 0 : longFormsOf(value);
+        longFormsLive += longForms;
+        if (longFormsKept + longFormsLive > MAX_LONG_FORMS_FROM_PAGE) return refused(WITHHELD_TOO_LONG) as T;
         live.add(value);
         if (keptFromPage.has(value) || ![...typedPasswords].some((typed) => typed.length >= MIN_SECRET_LENGTH && (keptFrom(value, typed) || keptFrom(typed, value)))) continue;
-        if (keptFromPage.size >= MAX_KEPT_FROM_PAGE) return refused(WITHHELD_TOO_LONG) as T;
-        keptFromPage.add(value);
+        if (!typedPasswords.has(value)) {
+          if (keptFromPage.size >= MAX_KEPT_FROM_PAGE) return refused(WITHHELD_TOO_LONG) as T;
+          keptFromPage.add(value);
+          longFormsKept += longForms;
+        }
         keepSecret(value);
       }
       return withFieldValuesMasked(live.scrub(opts.scrubber.scrub(result)), heldInFields);

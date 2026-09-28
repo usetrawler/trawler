@@ -194,6 +194,10 @@ beforeAll(async () => {
         return html(`<input aria-label="Password" type="password"><button onclick="const p = document.querySelector('input'); p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value">Swap</button><p id="echo"></p>`);
       case "/password-keeps-changing":
         return html(`<input aria-label="Password" type="password"><button onclick="const p = document.querySelector('input'); p.value = p.value + 'x'">Change</button>`);
+      case "/password-fancy":
+        return html(`<input aria-label="Password" type="password"><button onclick="const p = document.querySelector('input'); window.n = (window.n || 0) + 1; p.value = p.value.slice(0, 14) + ' ' + window.n + '  &quot;\\x27&amp;\\\\é\\u200b<'.repeat(60)">Change</button>`);
+      case "/password-long-before":
+        return html(`<input aria-label="Password" type="password" value="${"x".repeat(1500)}" oninput="clearTimeout(window.back); window.back = setTimeout(() => { this.value = '${"x".repeat(1500)}'; document.getElementById('state').textContent = 'Back'; }, 300)"><p id="state">Waiting</p>`);
       case "/password-grows":
         return html(`<input aria-label="Password" type="password" oninput="clearTimeout(window.grow); window.grow = setTimeout(() => { this.value = this.value + 'x'.repeat(2000); document.getElementById('state').textContent = 'Grown'; }, 300)"><p id="state">Waiting</p>`);
       case "/password-lone-surrogate":
@@ -1709,6 +1713,33 @@ describe("screenshots", () => {
       expect(results.slice(0, 20).some((r) => r.includes("too long to check"))).toBe(false);
       expect(results[20]).toContain("too long to check, or keeps changing it");
       expect(results.join("")).not.toContain("first-secret-");
+    });
+  }, 120_000);
+
+  test("a page cannot pile up long secret forms: a second long, escape-heavy value withholds the result, and masking stays quick", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/password-fancy`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "first-secret-1", "password")).toBe("typed the password");
+      const first = JSON.stringify(await b.tools.browser_click!.execute!({ target: refOf(snap, "Change"), element: "Change" }, ctx));
+      const started = performance.now();
+      const second = JSON.stringify(await b.tools.browser_click!.execute!({ target: refOf(snap, "Change"), element: "Change" }, ctx));
+      expect(performance.now() - started).toBeLessThan(10_000);
+      expect(first).not.toContain("too long to check");
+      expect(second).toContain("too long to check, or keeps changing it");
+      expect(first + second).not.toContain("first-secret-");
+    });
+  }, 120_000);
+
+  test("a password field that goes back to its own long value from before typing is not treated as too long", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/password-long-before`);
+      expect(await b.fillField(refOf(await snapshot(b), "Password"), "first-secret-1", "password")).toBe("typed the password");
+      await new Promise((r) => setTimeout(r, 1500));
+      const text = await snapshot(b);
+      expect(text).toContain("Back");
+      expect(text).not.toContain("withheld");
+      expect(await b.screenshot()).not.toBeNull();
     });
   }, 120_000);
 

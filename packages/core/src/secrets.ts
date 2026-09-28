@@ -54,6 +54,8 @@ function userAndPassword(decoded: string): string[] {
 
 const NATIVE_SEARCH_MAX = 250;
 
+export const longFormsOf = (secret: string) => [...new Set(variants(secret))].filter((n) => n.length > NATIVE_SEARCH_MAX).length;
+
 function borders(needle: string): number[] {
   const border = new Array<number>(needle.length).fill(0);
   for (let i = 1, k = 0; i < needle.length; i++) {
