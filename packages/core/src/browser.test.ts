@@ -991,6 +991,8 @@ describe("password fields", () => {
     ["a soft hyphen", "/", "Password", "ad\u00admin-secret", "admin-secret"],
     ["the page changing it", "/password-shouted", "Password", " ad  min-secret", "AD MIN-SECRET"],
     ["the project's own secret inside it", "/", "Password", "hunter22-secret  2024", "2024"],
+    ["an invisible character, too short to scrub", "/", "Password", "pw\u200b12", "pw12"],
+    ["the page changing it, too short to scrub", "/password-shouted", "Password", "pw12ab", "PW12AB"],
   ])("a password with %s is hidden in its own field", async (_, path, name, password, shown) => {
     await withBrowser(async (b) => {
       await navigate(b, `${origin}${path}`);
@@ -1001,15 +1003,15 @@ describe("password fields", () => {
     });
   }, 60_000);
 
-  test("a password field the page turns into a search box keeps the password hidden", async () => {
+  test.each([" ad  min-secret", "pw  12"])("a password field the page turns into a search box keeps %j hidden", async (password) => {
     await withBrowser(async (b) => {
       await navigate(b, `${origin}/password-shown-as-search`);
       const snap = await snapshot(b);
-      expect(await b.fillField(refOf(snap, "Password"), " ad  min-secret", "password")).toBe("typed the password");
+      expect(await b.fillField(refOf(snap, "Password"), password, "password")).toBe("typed the password");
       await b.tools.browser_click!.execute!({ target: refOf(snap, "Show password"), element: "Show password" }, ctx);
       const after = await snapshot(b);
       expect(after).toMatch(/searchbox \\"Password\\"[^\\]*: •••/);
-      expect(after).not.toContain("ad min-secret");
+      expect(after).not.toContain(password.replace(/\s+/g, " ").trim());
     });
   }, 60_000);
 

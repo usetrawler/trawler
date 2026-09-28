@@ -538,7 +538,7 @@ export async function openBrowser(opts: {
         live.add(value);
         if ([...typedPasswords].some((typed) => typed.length >= MIN_SECRET_LENGTH && (keptFrom(value, typed) || keptFrom(typed, value)))) keepSecret(value);
       }
-      return live.scrub(opts.scrubber.scrub(withFieldValuesMasked(result, heldInFields)));
+      return withFieldValuesMasked(live.scrub(opts.scrubber.scrub(result)), heldInFields);
     };
     const focusCheck = async () => {
       const held = await liveFilled();
