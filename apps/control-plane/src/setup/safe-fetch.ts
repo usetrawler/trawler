@@ -1,7 +1,10 @@
 import { lookup } from "node:dns";
 import http from "node:http";
 import https from "node:https";
-import { BlockList, isIP, type LookupFunction } from "node:net";
+import { isIP, type BlockList, type LookupFunction } from "node:net";
+import { blockedAddresses, isBlockedAddress } from "@usetrawler/core/network";
+
+export { blockedAddresses };
 
 const MAX_BYTES = 2_000_000;
 const MAX_REDIRECTS = 5;
@@ -15,44 +18,15 @@ export class FetchRefused extends Error {
   }
 }
 
-function ipv4Compatible(): Array<[string, number]> {
-  return Array.from({ length: 31 }, (_, i) => [`::${(1n << BigInt(i + 1)).toString(16).replace(/(?=(\w{4})+$)/g, ":").replace(/^:/, "")}`, 127 - i] as [string, number]);
-}
-
-export function blockedAddresses(options: { allowLoopback?: boolean } = {}): BlockList {
-  const list = new BlockList();
-  const v4: Array<[string, number]> = [
-    ["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.0.0.0", 24],
-    ["192.0.2.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["198.51.100.0", 24], ["203.0.113.0", 24], ["224.0.0.0", 4], ["240.0.0.0", 4],
-  ];
-  const v6: Array<[string, number]> = [
-    ["::", 128], ...ipv4Compatible(), ["fc00::", 7], ["fe80::", 10], ["fec0::", 10], ["ff00::", 8], ["64:ff9b::", 96], ["64:ff9b:1::", 48],
-    ["100::", 64], ["2001::", 32], ["2001:db8::", 32], ["2002::", 16], ["::ffff:0:0:0", 96],
-  ];
-  if (!options.allowLoopback) {
-    v4.push(["127.0.0.0", 8]);
-    v6.push(["::1", 128]);
-  }
-  for (const [net, prefix] of v4) {
-    list.addSubnet(net, prefix, "ipv4");
-    list.addSubnet(`::ffff:${net}`, 96 + prefix, "ipv6");
-  }
-  for (const [net, prefix] of v6) list.addSubnet(net, prefix, "ipv6");
-  return list;
-}
-
 const DEFAULT_BLOCKED = blockedAddresses();
 
-function isBlocked(address: string, family: number, blocked: BlockList): boolean {
-  return blocked.check(address, family === 6 ? "ipv6" : "ipv4");
-}
 
 function guardedLookup(blocked: BlockList): LookupFunction {
   return (hostname, options, callback) => {
     lookup(hostname, { ...options, all: true }, (err, addresses) => {
       if (err) return callback(err, "", 4);
       const list = addresses as Array<{ address: string; family: number }>;
-      const bad = list.find((a) => isBlocked(a.address, a.family, blocked));
+      const bad = list.find((a) => isBlockedAddress(a.address, a.family, blocked));
       if (bad || list.length === 0) return callback(Object.assign(new Error("the address is not allowed"), { code: "EBLOCKED" }), "", 4);
       if ((options as { all?: boolean }).all) return (callback as unknown as (e: null, a: typeof list) => void)(null, list);
       return callback(null, list[0]!.address, list[0]!.family);
@@ -83,7 +57,7 @@ function refuseUpgrades(req: http.ClientRequest, reject: (err: FetchRefused) => 
 function getOnce(url: URL, blocked: BlockList, timeoutMs: number): Promise<{ status: number; location?: string; body: string }> {
   const host = url.hostname.replace(/^\[|\]$/g, "");
   const literal = isIP(host);
-  if (literal && isBlocked(host, literal, blocked)) return Promise.reject(new FetchRefused("private", "the address is not allowed"));
+  if (literal && isBlockedAddress(host, literal, blocked)) return Promise.reject(new FetchRefused("private", "the address is not allowed"));
   const client = url.protocol === "https:" ? https : http;
   const agent = url.protocol === "https:" ? new https.Agent({ keepAlive: false }) : new http.Agent({ keepAlive: false });
   return new Promise((resolve, reject) => {
@@ -147,7 +121,7 @@ export function guardedFetch(options: { allowLoopback?: boolean } = {}): typeof 
     if (url.protocol !== "https:") throw new FetchRefused("address", "only https endpoints can be used");
     const host = url.hostname.replace(/^\[|\]$/g, "");
     const literal = isIP(host);
-    if (literal && isBlocked(host, literal, blocked)) throw new FetchRefused("private", "the address is not allowed");
+    if (literal && isBlockedAddress(host, literal, blocked)) throw new FetchRefused("private", "the address is not allowed");
     const headers = Object.fromEntries(new Headers(init.headers).entries());
     const body = typeof init.body === "string" ? init.body : undefined;
     return new Promise<Response>((resolve, reject) => {
