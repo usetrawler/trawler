@@ -137,6 +137,8 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
   const egressToken = deps.env.TRAWLER_EGRESS_TOKEN?.trim();
   if (egressServer && !egressToken) throw new UsageError("TRAWLER_EGRESS_PROXY is set without TRAWLER_EGRESS_TOKEN");
   const egress = egressServer ? egressClient(egressServer, egressToken!) : undefined;
+  const stop = new AbortController();
+  let egressDown = false;
   const log = workerLog(deps.env, { out: deps.out, err: deps.err });
   const reporting = await (deps.startReporting ?? startReporting)(deps.env, [runnerToken]);
   const workerDeps: WorkerDeps = {
@@ -145,7 +147,14 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
     model: (modelId, jobToken) => deps.model(modelId, jobToken, new URL("/api/llm/v1", controlPlane).toString()),
     openBrowser: async (project, { onBlocked, scrubber }) => {
       const outputDir = mkdtempSync(join(tmpdir(), "trawler-work-"));
-      const session = egress ? await egress.open(project.allowedOrigins).catch((err) => (rmSync(outputDir, { recursive: true, force: true }), Promise.reject(err))) : undefined;
+      const session = egress
+        ? await egress.open(project.allowedOrigins).catch((err) => {
+            rmSync(outputDir, { recursive: true, force: true });
+            egressDown = true;
+            stop.abort();
+            throw new Error(`the egress proxy could not open a session, so the browser was not started: ${err instanceof Error ? err.message : String(err)}`);
+          })
+        : undefined;
       const reported = new Set<string>();
       const report = (blocked: BlockedAttempt[]) => {
         for (const { url } of blocked) {
@@ -178,14 +187,14 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
   if (values.once) {
     await workOnce(workerDeps);
     await reporting.close();
-    return 0;
+    return egressDown ? 1 : 0;
   }
-  const stop = new AbortController();
   for (const signal of ["SIGTERM", "SIGINT"] as const) process.once(signal, () => stop.abort());
   log(`working for ${new URL(controlPlane).origin}${egress ? `, browsing through the egress proxy at ${egressServer}` : ""}`);
   await workLoop(workerDeps, stop.signal);
   await reporting.close();
-  return 0;
+  if (egressDown) deps.err("stopped: the egress proxy is not answering, so no browser can be started safely");
+  return egressDown ? 1 : 0;
 }
 
 async function run(args: string[], deps: CliDeps, apiKey: () => string): Promise<number> {

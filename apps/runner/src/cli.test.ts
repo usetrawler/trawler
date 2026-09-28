@@ -348,3 +348,41 @@ test("work refuses an egress proxy without its control token", async () => {
   expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(2);
   expect(err.join("\n")).toMatch(/TRAWLER_EGRESS_TOKEN/);
 });
+
+test("a work runner whose egress proxy has gone hands its job back, stops taking jobs and exits with an error instead of browsing without it", async () => {
+  const egressToken = "egress-token-".padEnd(40, "x");
+  const proxy = await startEgressProxy({ token: egressToken });
+  const job = {
+    kind: "role_session", personaKey: "ana", jobId: "11111111-1111-4111-8111-111111111111", runId: "22222222-2222-4222-8222-222222222222", token: "job-token-" + "x".repeat(40),
+    config: { name: "Acme", targetUrl: "https://a.test/", description: "", allowedOrigins: ["https://a.test"], personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "x" }], accounts: [], extraHeaders: {}, secretHeaders: {} },
+    maxSteps: 10, budgetUsd: 1, agentModel: "m/agent", judgeModel: "m/judge",
+  };
+  let claims = 0;
+  const handedBack: string[] = [];
+  const controlPlane = (async (url: string | URL, init?: RequestInit) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/api/runner/claim") {
+      claims++;
+      if (claims === 1) await proxy.close();
+      return claims <= 3 ? Response.json(job) : new Response(null, { status: 204 });
+    }
+    if (path.endsWith("/release")) handedBack.push(path);
+    if (path.endsWith("/complete")) throw new Error(`completed instead of handed back: ${String(init?.body)}`);
+    return Response.json({ cancel: false });
+  }) as typeof fetch;
+  let browsers = 0;
+  const { d, err } = deps({
+    env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_EGRESS_PROXY: `http://127.0.0.1:${proxy.port}`, TRAWLER_EGRESS_TOKEN: egressToken },
+    fetchImpl: controlPlane,
+    openBrowser: async () => {
+      browsers++;
+      return { tools: {}, fillField: async () => "typed", screenshot: async () => null, close: async () => {} };
+    },
+    startReporting: async () => ({ report: () => {}, maskWith: () => {}, close: async () => {} }),
+  });
+  expect(await runCli(["work", "--control-plane", "http://localhost:9"], d)).toBe(1);
+  expect(claims).toBe(1);
+  expect(browsers).toBe(0);
+  expect(handedBack).toEqual([`/api/jobs/${job.jobId}/release`]);
+  expect(err.join("\n")).toContain("stopped: the egress proxy is not answering");
+});
