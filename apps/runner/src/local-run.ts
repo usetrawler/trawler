@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { LanguageModel } from "ai";
-import { Budget, judge, runReplay, runRoleSession, SecretScrubber, type Browser } from "@usetrawler/core";
-import { MAX_URL, trimStory, turnsOf, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
+import { Budget, checkAccount, judge, runReplay, runRoleSession, SecretScrubber, type Browser } from "@usetrawler/core";
+import { ACCOUNT_CHECK_STEPS, MAX_URL, trimStory, turnsOf, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
 import type { RunSummary } from "./run-dir.ts";
 
 const CLOSE_TIMEOUT_MS = 10_000;
@@ -48,7 +48,7 @@ export async function localRun(opts: {
   };
   const failure = (scrubber: SecretScrubber, err: unknown) => scrubber.scrub(err instanceof Error ? err.message : String(err));
   const noUsage = (model: string) => ({ model, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 });
-  const recordFailure = (jobId: string, kind: "role_session" | "replay", error: string) => {
+  const recordFailure = (jobId: string, kind: "account_check" | "role_session" | "replay", error: string) => {
     try {
       opts.emit({ type: "job_started", jobId, kind });
       opts.emit({ type: "job_finished", jobId, usage: noUsage(opts.agentModelId), stoppedBy: "error", error });
@@ -56,6 +56,28 @@ export async function localRun(opts: {
       return;
     }
   };
+
+  for (const ref of new Set(opts.project.personas.flatMap((p) => (p.accountRef ? [p.accountRef] : [])))) {
+    if (budget.exceeded) break;
+    const jobId = `account:${ref}`;
+    const scrubber = scrubberFor();
+    const checked = await withBrowser(jobId, scrubber, (b) =>
+      checkAccount({ model: opts.agentModel, modelId: opts.agentModelId, project: opts.project, accountRef: ref, browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: Math.min(ACCOUNT_CHECK_STEPS, opts.replaySteps), emit: opts.emit }),
+    ).catch((err) => {
+      recordFailure(jobId, "account_check", failure(scrubber, err));
+      summary.jobs.push({ jobId, ...noUsage(opts.agentModelId) });
+      return null;
+    });
+    if (!checked) continue;
+    summary.jobs.push({ jobId, ...checked.usage });
+    if (checked.signIn.outcome === "refused") {
+      const username = opts.project.accounts.find((a) => a.ref === ref)?.username ?? ref;
+      summary.refusedAccount = `The product refused the username and password of ${username}: ${checked.signIn.observed}`;
+      summary.totalCostUsd = budget.spent;
+      summary.finishedAt = new Date().toISOString();
+      return summary;
+    }
+  }
 
   const turns = turnsOf(opts.project);
   const teamed = turns.length > opts.project.personas.length;

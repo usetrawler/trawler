@@ -3,12 +3,12 @@ import { JobStopReasonSchema, JobUsageSchema, RunEventSchema } from "./event.ts"
 import { FindingSchema, ReplayObservationSchema } from "./finding.ts";
 import { ProjectConfigSchema } from "./project.ts";
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 export const PROTOCOL_HEADER = "x-trawler-protocol";
 export const MAX_EVENTS_PER_BATCH = 200;
 export const JOB_STOPPED = "job_stopped";
 
-export const JobKindSchema = z.enum(["role_session", "replay", "judge"]);
+export const JobKindSchema = z.enum(["account_check", "role_session", "replay", "judge"]);
 export type JobKind = z.infer<typeof JobKindSchema>;
 
 export const MAX_STORY = 60;
@@ -63,10 +63,19 @@ export type EventBatch = z.infer<typeof EventBatchSchema>;
 
 export const EventsAcceptedSchema = z.object({ cancel: z.boolean() });
 
+export const ACCOUNT_CHECK_STEPS = 12;
+
+export const SignInCheckSchema = z.object({
+  outcome: z.enum(["signed_in", "refused", "unclear"]),
+  observed: z.string().max(1000),
+});
+export type SignInCheck = z.infer<typeof SignInCheckSchema>;
+
 export const JobCompletionSchema = z.object({
   usage: JobUsageSchema,
   stoppedBy: JobStopReasonSchema,
   error: z.string().max(2000).optional(),
   observation: ReplayObservationSchema.optional(),
+  signIn: SignInCheckSchema.optional(),
 });
 export type JobCompletion = z.infer<typeof JobCompletionSchema>;

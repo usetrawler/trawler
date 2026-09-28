@@ -241,3 +241,16 @@ test("in a team session a person between turns waits for their next one, and is 
   expect(done.personas.map((p) => p.state)).toEqual(["reached", "reached"]);
   expect(done.goalsTotal).toBe(3);
 });
+
+test("the headline says the accounts are being checked, and why a refused account stopped the run", () => {
+  expect(runView(summary({ jobs: [job("account_check", "leased"), job("role_session", "queued", { persona_key: "ana" })] })).headline).toBe("Checking that the test accounts can sign in.");
+  const refused = runView(summary({
+    status: "cancelled", cancelReason: "account_refused",
+    jobs: [
+      job("account_check", "failed", { error: "The product refused the username and password of ana@acme.test: Username and password do not match" }),
+      job("account_check", "failed", { error: "the browser failed 3 times in a row" }),
+      job("role_session", "cancelled", { persona_key: "ana" }),
+    ],
+  }));
+  expect(refused.headline).toBe("The product refused the username and password of ana@acme.test: Username and password do not match. Check that account on the plan and run again.");
+});

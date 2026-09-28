@@ -1,6 +1,6 @@
 import type { LanguageModel } from "ai";
 import { z } from "zod";
-import { Budget, judge, MIN_SECRET_LENGTH, runReplay, runRoleSession, SecretScrubber, type Browser, type Screenshot } from "@usetrawler/core";
+import { type Browser, Budget, checkAccount, judge, MIN_SECRET_LENGTH, runReplay, runRoleSession, type Screenshot, SecretScrubber } from "@usetrawler/core";
 import {
   JobAssignmentSchema, MAX_EVENTS_PER_BATCH, MAX_URL, PROTOCOL_HEADER, PROTOCOL_VERSION,
   type JobAssignment, type JobCompletion, type JobStopReason, type JobUsage, type ProjectConfig, type RunEvent, type RunEventInput,
@@ -234,6 +234,17 @@ async function withBrowser<T>(deps: WorkerDeps, config: ProjectConfig, scrubber:
 
 async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budget: Budget, scrubber: SecretScrubber, screenshots: Screenshots): Promise<JobCompletion> {
   const { config } = job;
+  if (job.kind === "account_check") {
+    if (!job.accountRef) throw new Error("the account check names no account");
+    const accountRef = job.accountRef;
+    const { signIn, usage, stoppedBy, error } = await withBrowser(deps, config, scrubber, events, job.jobId, (b) =>
+      checkAccount({
+        model: deps.model(job.agentModel, job.token), modelId: job.agentModel, project: config, accountRef,
+        browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: job.maxSteps, emit: events.emit,
+      }),
+    );
+    return { usage, stoppedBy, signIn, ...(error ? { error: clip(error) } : {}) };
+  }
   if (job.kind === "role_session") {
     const persona = config.personas.find((p) => p.id === job.personaKey);
     if (!persona) throw new Error(`persona ${job.personaKey} is not in the project`);

@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "kysely";
 import { z } from "zod";
-import { FindingSchema, JobUsageSchema, JobStopReasonSchema, ReplayObservationSchema, trimStory, RunEventSchema, turnsOf, type Finding, type JobStopReason, type JobUsage, type ProjectConfig, type ReplayObservation, type RunEvent, type StoryEntry, type Turn } from "@usetrawler/protocol";
+import { FindingSchema, JobUsageSchema, JobStopReasonSchema, ReplayObservationSchema, RunEventSchema, SignInCheckSchema, ACCOUNT_CHECK_STEPS, trimStory, turnsOf, type Finding, type JobStopReason, type JobUsage, type ProjectConfig, type ReplayObservation, type RunEvent, type SignInCheck, type StoryEntry, type Turn } from "@usetrawler/protocol";
 import type { Database } from "../db/index.ts";
 import { asSystem, type Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -9,7 +9,7 @@ import { loadProjectConfig } from "../projects/projects.ts";
 import { logError } from "../server/log.ts";
 import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
-import { capSpent, signUpSeedContext, type ConfigSnapshot } from "./runs.ts";
+import { ACCOUNT_REFUSED, capSpent, signUpSeedContext, type ConfigSnapshot } from "./runs.ts";
 
 const LEASE_MINUTES = 10;
 const ACTIVE = ["queued", "running"];
@@ -24,7 +24,7 @@ export interface JobAssignment {
   jobId: string;
   runId: string;
   token: string;
-  kind: "role_session" | "replay" | "judge";
+  kind: "account_check" | "role_session" | "replay" | "judge";
   config: ProjectConfig;
   personaKey?: string;
   goalIds?: string[];
@@ -46,6 +46,7 @@ export interface JobResult {
   stoppedBy: JobStopReason;
   error?: string;
   observation?: ReplayObservation;
+  signIn?: SignInCheck;
 }
 
 export class ForeignEvents extends Error {
@@ -131,7 +132,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
     const picked = await tx
       .selectFrom("jobs as j")
       .innerJoin("runs as r", "r.id", "j.run_id")
-      .select(["j.id", "j.org_id", "j.run_id", "j.kind", "j.position", "j.persona_key", "j.finding_key", "r.project_id", "r.config_snapshot", "r.max_steps", "r.replay_steps", "r.budget_usd", "r.cost_usd", "r.agent_model", "r.judge_model", "r.sign_up_seed"])
+      .select(["j.id", "j.org_id", "j.run_id", "j.kind", "j.position", "j.persona_key", "j.finding_key", "j.account_ref", "r.project_id", "r.config_snapshot", "r.max_steps", "r.replay_steps", "r.budget_usd", "r.cost_usd", "r.agent_model", "r.judge_model", "r.sign_up_seed"])
       .where("j.status", "=", "queued")
       .where((eb) => eb.or([eb("r.status", "in", ACTIVE), eb("j.requested_by", "is not", null)]))
       .where((eb) => eb.not(eb.exists(eb.selectFrom("jobs as busy").select("busy.id").whereRef("busy.run_id", "=", "j.run_id").where("busy.status", "=", "leased"))))
@@ -163,10 +164,10 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
           config,
           personaKey: picked.persona_key ?? undefined,
           ...(turn ? { goalIds: turn.goalIds, turn: picked.position, returning, story, signUpSeed: keys.decrypt(picked.sign_up_seed!, signUpSeedContext(picked.org_id, picked.run_id)) } : {}),
-          accountRef: finding ? config.personas.find((p) => p.id === finding.personaKey)?.accountRef : undefined,
+          accountRef: picked.account_ref ?? (finding ? config.personas.find((p) => p.id === finding.personaKey)?.accountRef : undefined),
           finding: finding?.finding,
           observation: finding?.replay,
-          maxSteps: picked.kind === "role_session" ? picked.max_steps : picked.replay_steps,
+          maxSteps: picked.kind === "role_session" ? picked.max_steps : picked.kind === "account_check" ? Math.min(ACCOUNT_CHECK_STEPS, picked.replay_steps) : picked.replay_steps,
           budgetUsd: Math.max(0, Number(picked.budget_usd) - Number(picked.cost_usd)),
           agentModel: picked.agent_model,
           judgeModel: picked.judge_model,
@@ -377,19 +378,31 @@ export async function recordLlmUsage(db: Database, call: LlmCall, usage: { model
 
 const noReport = (o?: ReplayObservation) => !o || (!o.completed && o.blockedAt === null);
 
-const JobResultSchema = z.object({ usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().max(2000).optional(), observation: ReplayObservationSchema.optional() });
+const JobResultSchema = z.object({ usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().max(2000).optional(), observation: ReplayObservationSchema.optional(), signIn: SignInCheckSchema.optional() });
+
+async function refusal(tx: Tx, runId: string, accountRef: string, observed: string): Promise<string> {
+  const run = await tx.selectFrom("runs").select("config_snapshot").where("id", "=", runId).executeTakeFirstOrThrow();
+  const username = (run.config_snapshot as unknown as ConfigSnapshot).accounts.find((a) => a.ref === accountRef)?.username ?? accountRef;
+  return `${ACCOUNT_REFUSED} ${username}: ${observed}`.slice(0, 2000);
+}
 
 export async function completeJob(db: Database, token: string, input: JobResult, expectedJobId?: string): Promise<void> {
   const result = storable(JobResultSchema.parse(input));
   await asSystem(db, async (tx) => {
     const job = await jobForToken(tx, token, { allowExpired: true, expectedJobId });
     if (job.status !== "leased") return;
-    const failed = result.stoppedBy === "error";
+    const refused = job.kind === "account_check" && result.signIn?.outcome === "refused" ? await refusal(tx, job.run_id, job.account_ref!, result.signIn.observed) : null;
+    const failed = result.stoppedBy === "error" || refused !== null;
     await tx
       .updateTable("jobs")
-      .set({ status: failed ? "failed" : "succeeded", usage: JSON.stringify(result.usage), stopped_by: result.stoppedBy, error: result.error ?? null, finished_at: new Date(), lease_until: null })
+      .set({ status: failed ? "failed" : "succeeded", usage: JSON.stringify(result.usage), stopped_by: result.stoppedBy, error: refused ?? result.error ?? null, finished_at: new Date(), lease_until: null })
       .where("id", "=", job.id)
       .execute();
+    if (refused) {
+      await tx.updateTable("runs").set({ status: "cancelled", cancel_reason: "account_refused", finished_at: new Date(), sign_up_seed: null }).where("id", "=", job.run_id).where("status", "in", ACTIVE).execute();
+      await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date() }).where("run_id", "=", job.run_id).where("status", "=", "queued").execute();
+      return;
+    }
     if (job.kind === "replay" && result.observation) {
       await tx.updateTable("findings").set({ replay: JSON.stringify(ReplayObservationSchema.parse(result.observation)), updated_at: new Date() }).where("run_id", "=", job.run_id).where("key", "=", job.finding_key!).execute();
     }

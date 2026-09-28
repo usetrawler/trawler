@@ -16,7 +16,7 @@ export type JobStopReason = z.infer<typeof JobStopReasonSchema>;
 const base = { seq: z.number().int().positive().max(2_147_483_647), at: z.iso.datetime(), jobId: z.string().min(1) };
 
 export const RunEventSchema = z.discriminatedUnion("type", [
-  z.object({ ...base, type: z.literal("job_started"), kind: z.enum(["role_session", "replay", "judge", "setup"]) }),
+  z.object({ ...base, type: z.literal("job_started"), kind: z.enum(["account_check", "role_session", "replay", "judge", "setup"]) }),
   z.object({ ...base, type: z.literal("step"), step: z.number().int().positive(), tool: z.string().max(100).nullable(), costUsd: z.number().nonnegative().max(1000) }),
   z.object({ ...base, type: z.literal("note"), text: z.string().max(MAX_NOTE) }),
   z.object({ ...base, type: z.literal("finding"), finding: FindingSchema }),

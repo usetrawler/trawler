@@ -41,7 +41,7 @@ export function personLine(p: Person): string {
     return missed.note || `Did not reach: ${missed.goal}`;
   }
   if (p.state === "failed") return p.error ? `Could not finish: ${p.error}` : "Could not finish.";
-  if (p.state === "cancelled") return "Stopped before the end.";
+  if (p.state === "cancelled") return p.hadTurn ? "Stopped before the end." : "Stopped before their turn.";
   if (p.state === "waiting") return p.hadTurn ? `Reached ${p.goals.filter((g) => g.status === "reached").length} of ${p.goals.length} so far; waiting for their next turn.` : "Waiting for their turn.";
   if (p.state === "exploring") {
     const next = p.goals.find((g) => !g.status);

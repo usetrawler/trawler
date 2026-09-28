@@ -6,5 +6,6 @@ export { BROWSER_TOOLS, openBrowser, type Browser, type Screenshot } from "./bro
 export { runRoleSession } from "./role-session.ts";
 export { judgePrompt, replayPrompt, rolePrompt, sessionStatus, setupPrompt } from "./prompts.ts";
 export { judge, runReplay } from "./replay.ts";
+export { checkAccount } from "./account-check.ts";
 export { browserQueue, runAgentLoop } from "./agent-loop.ts";
 export { pageText, proposeProject, SetupModelFailed } from "./setup.ts";
