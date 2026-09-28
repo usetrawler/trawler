@@ -81,7 +81,7 @@ export async function cancelRun(tx: Tx, orgId: string, runId: string, reason: Ca
   const run = await tx.selectFrom("runs").select("status").where("id", "=", runId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
   if (!run) throw new RunNotFound();
   if (run.status !== "queued" && run.status !== "running") return false;
-  await tx.updateTable("runs").set({ status: "cancelled", cancel_reason: reason, finished_at: new Date() }).where("id", "=", runId).execute();
+  await tx.updateTable("runs").set({ status: "cancelled", cancel_reason: reason, finished_at: new Date(), sign_up_seed: null }).where("id", "=", runId).execute();
   await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date() }).where("run_id", "=", runId).where("status", "=", "queued").execute();
   return true;
 }

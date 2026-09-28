@@ -285,7 +285,7 @@ async function stopIfOverBudget(tx: Tx, runId: string): Promise<boolean> {
   const run = await lockedRun(tx, runId);
   if (!ACTIVE.includes(run.status)) return true;
   if (!capSpent(run)) return false;
-  await tx.updateTable("runs").set({ status: "stopped_budget", finished_at: new Date() }).where("id", "=", runId).execute();
+  await tx.updateTable("runs").set({ status: "stopped_budget", finished_at: new Date(), sign_up_seed: null }).where("id", "=", runId).execute();
   await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date() }).where("run_id", "=", runId).where("status", "=", "queued").execute();
   return true;
 }
