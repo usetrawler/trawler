@@ -169,18 +169,26 @@ export function createAuth(options: AuthOptions) {
       .orderBy("member.createdAt")
       .orderBy("member.id")
       .execute();
-  const pendingInvitations = async (orgId: string): Promise<Array<{ id: string; email: string; role: string; expiresAt: Date }>> =>
+  const pendingInvitations = async (orgId: string): Promise<Array<{ id: string; email: string; role: string; expiresAt: Date; addressHasWorkspace: boolean }>> =>
     (
       await db
         .selectFrom("invitation")
-        .select(["id", "email", "role", "expiresAt"])
+        .select((eb) => [
+          "invitation.id",
+          "invitation.email",
+          "invitation.role",
+          "invitation.expiresAt",
+          eb
+            .exists(eb.selectFrom("user").innerJoin("member", "member.userId", "user.id").select("member.id").where("user.email", "=", sql<string>`lower(invitation.email)`))
+            .as("addressHasWorkspace"),
+        ])
         .where("organizationId", "=", orgId)
         .where("status", "=", "pending")
         .where("expiresAt", ">", new Date())
         .orderBy("expiresAt")
         .orderBy("id")
         .execute()
-    ).map((row) => ({ ...row, role: row.role ?? "member" }));
+    ).map((row) => ({ ...row, role: row.role ?? "member", addressHasWorkspace: !!row.addressHasWorkspace }));
   const workspaceOfEmail = async (email: string): Promise<string | null> =>
     (
       await db

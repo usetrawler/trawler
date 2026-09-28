@@ -48,7 +48,7 @@ const draw = (results: Array<[unknown, boolean]>, flow: Record<string, unknown> 
   react.results = [...results];
   react.flow = { sent: null, confirming: null, focus: null, ...flow };
   react.refs = [{ current: heading }, { current: buttons }, sentFrom];
-  return nodes(Members({ members: [lee], invitations: [{ id: "inv-1", email: "max@acme.test", role: "member", expiresAt: "2026-10-03T10:00:00.000Z" }], canManage: true, signInAt: "app.usetrawler.test" }));
+  return nodes(Members({ members: [lee], invitations: [{ id: "inv-1", email: "max@acme.test", role: "member", expiresAt: "2026-10-03T10:00:00.000Z", addressHasWorkspace: false }], canManage: true, signInAt: "app.usetrawler.test" }));
 };
 const idle = (): Array<[unknown, boolean]> => CHANGES.map(() => [{}, false]);
 const answering = (change: (typeof CHANGES)[number], result: unknown) => {

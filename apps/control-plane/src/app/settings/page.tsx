@@ -33,7 +33,7 @@ export default async function SettingsPage() {
         <WorkspaceName name={member.orgName} canManage={canManage} />
         <Members
           members={members.map((m) => ({ id: m.id, name: m.name, email: m.email, role: m.role, joinedAt: m.joinedAt.toISOString(), you: m.userId === member.userId }))}
-          invitations={invitations.map((i) => ({ id: i.id, email: i.email, role: i.role, expiresAt: i.expiresAt.toISOString() }))}
+          invitations={invitations.map((i) => ({ id: i.id, email: i.email, role: i.role, expiresAt: i.expiresAt.toISOString(), addressHasWorkspace: i.addressHasWorkspace }))}
           canManage={canManage}
           signInAt={new URL(readEnv().baseURL).host}
         />

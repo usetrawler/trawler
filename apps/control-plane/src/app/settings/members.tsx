@@ -22,6 +22,7 @@ export interface InvitationRow {
   email: string;
   role: string;
   expiresAt: string;
+  addressHasWorkspace: boolean;
 }
 
 export type Change = "change" | "remove" | "revoke" | "invite";
@@ -207,6 +208,7 @@ export function Members({ members, invitations, canManage, signInAt }: { members
             {invitations.map((i) => (
               <li key={i.id} className="flex flex-wrap items-center justify-between gap-3 text-sm">
                 <span className="min-w-0 wrap-anywhere">{i.email} <span className={tag}>{roleLabel(i.role)}</span></span>
+                {canManage && i.addressHasWorkspace && <span className="order-last basis-full text-xs text-muted">This address has since signed in and belongs to a workspace, so it can no longer use this invitation.</span>}
                 <span className="ml-auto flex items-center gap-3">
                   <span className="text-xs text-muted">Expires <LocalTime iso={i.expiresAt} /></span>
                   {canManage && (
