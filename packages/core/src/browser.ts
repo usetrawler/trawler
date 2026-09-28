@@ -427,6 +427,7 @@ export async function openBrowser(opts: {
   headless?: boolean;
   survivesSignals?: boolean;
   maskCheckMs?: number;
+  filledReadMs?: number;
 }): Promise<Browser> {
   const allowed = new Set(opts.allowedOrigins.map((o) => new URL(o).origin));
   const isAllowed = (url: string) => {
@@ -500,8 +501,12 @@ export async function openBrowser(opts: {
     const typedPasswords = new Set<string>();
     const holdsSecret = (value: string) => [...typedSecrets].some((secret) => value.includes(secret));
     let dialogOpen = false;
+    let dialogsOpened = 0;
     context.on("page", (page) => {
-      page.on("dialog", () => (dialogOpen = true));
+      page.on("dialog", () => {
+        dialogOpen = true;
+        dialogsOpened++;
+      });
       page.on("framenavigated", (frame) => {
         if (frame === page.mainFrame()) dialogOpen = false;
       });
@@ -513,14 +518,7 @@ export async function openBrowser(opts: {
       filled = filled.filter((_, i) => alive[i]);
       return filled;
     };
-    const readValue = (h: ElementHandle): Promise<string | null> =>
-      h
-        .evaluate((el: any) => {
-          const proto = [HTMLInputElement.prototype, HTMLTextAreaElement.prototype].find((p) => p.isPrototypeOf(el));
-          const get = proto && Object.getOwnPropertyDescriptor(proto, "value")?.get;
-          return String((get ? get.call(el) : el.value) ?? "");
-        })
-        .catch((err: unknown) => (FIELD_GONE.test(String(err)) ? "" : null));
+    const readValue = (h: ElementHandle): Promise<string | null> => h.inputValue({ timeout: opts.filledReadMs ?? FILLED_READ_MS }).catch((err: unknown) => (FIELD_GONE.test(String(err)) ? "" : null));
     const keepSecret = (value: string) => {
       typedSecrets.add(value);
       opts.scrubber.add(value);
@@ -530,7 +528,7 @@ export async function openBrowser(opts: {
       const tooShortToScrub = new Set([...typedPasswords].filter((typed) => typed.length < MIN_SECRET_LENGTH));
       const fields = await liveFilled();
       if (dialogOpen && fields.length > 0) return refused(WITHHELD_FOR_DIALOG) as T;
-      const values = await within(Promise.all(fields.map(readValue)), FILLED_READ_MS, null);
+      const values = await within(Promise.all(fields.map(readValue)), opts.filledReadMs ?? FILLED_READ_MS, null);
       if (values === null || values.includes(null)) return refused(WITHHELD_UNREAD) as T;
       for (const [i, h] of fields.entries()) {
         const value = values[i]!;
@@ -559,8 +557,9 @@ export async function openBrowser(opts: {
     const secretsOnPage = async () => {
       const filledValues = [];
       for (const h of await liveFilled()) {
-        const value = await h.evaluate((el: any) => String(el.value ?? "")).catch(() => null);
-        if (value !== null && value.length >= MIN_SECRET_LENGTH && value !== valuesBeforeTyping.get(h)) filledValues.push(value);
+        const value = await readValue(h);
+        if (value === null) throw new Error("a field Trawler typed a password into could not be read");
+        if (value.length >= MIN_SECRET_LENGTH && value !== valuesBeforeTyping.get(h)) filledValues.push(value);
       }
       const needles = [...new Set([...opts.scrubber.browserNeedles(), ...typedSecrets, ...filledValues].map((n) => n.replace(new RegExp(INVISIBLE, "gu"), "").trim()))].filter((n) => n.length >= MIN_SECRET_LENGTH).sort((a, b) => b.length - a.length);
       return needles.length > 0 ? new RegExp(needles.map((n) => escapedForRegExp(n).replace(/\s+/g, "\\s+")).join("|"), "i") : null;
@@ -688,10 +687,11 @@ export async function openBrowser(opts: {
             }
           }
           blockedNavigation = null;
+          const dialogsBefore = dialogsOpened;
           let result = (await execute(safeInput, options)) as McpResult;
           if (name === "browser_navigate" && result?.isError && INTERRUPTED.test(textOf(result))) result = (await execute(safeInput, options)) as McpResult;
           if (result?.isError && CLOSED.test(textOf(result))) throw new Error("the browser has closed");
-          if (name === "browser_handle_dialog" && !result?.isError) dialogOpen = false;
+          if (name === "browser_handle_dialog" && !result?.isError && dialogsOpened === dialogsBefore) dialogOpen = false;
           if (!result?.isError && !textOf(result).trim()) result.content = [{ type: "text", text: "Done. Call browser_snapshot to see the page." }];
           if (blockedNavigation) {
             result.content = [...(result.content ?? []), { type: "text", text: `### Blocked\n${blockedNavigation} is outside the allowed origins, so the browser did not open it. Go back or navigate to an allowed page.` }];
@@ -732,7 +732,7 @@ export async function openBrowser(opts: {
           typedPasswords.add(text);
           const held = filled.at(-1);
           if (held) {
-            const kept = await within(held.evaluate((el: any) => String(el.value ?? "")).catch(() => null), FOCUS_CHECK_MS, text);
+            const kept = await within(held.inputValue({ timeout: FOCUS_CHECK_MS }).catch(() => null), FOCUS_CHECK_MS, text);
             if (kept === null) return out?.isError ? failure(out) : "failed: the page moved on before the field could be checked, so it is not known what the field kept";
             const shortened = kept !== text && kept.length > 0 && keptFrom(kept, text);
             if (shortened && kept.length >= MIN_SECRET_LENGTH) {
