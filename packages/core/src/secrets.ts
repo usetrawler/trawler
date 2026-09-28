@@ -22,8 +22,12 @@ function forms(s: string): string[] {
   return [s, jsonEscaped(s), jsonEscaped(jsonEscaped(s)), jsSingleQuoted(s), inspect(s).slice(1, -1), ...html, ...percent, ...lowerPercent];
 }
 
+export const asShown = (s: string) => s.replace(/\p{Default_Ignorable_Code_Point}/gu, "").replace(/\s+/g, " ").trim();
+
 function variants(secret: string): string[] {
-  return [...forms(secret), ...forms(secret.normalize("NFC")), ...forms(secret.normalize("NFD"))];
+  const shown = asShown(secret);
+  const extra = shown !== secret && shown.length >= MIN_SECRET_LENGTH ? [shown] : [];
+  return [secret, ...extra].flatMap((s) => [...forms(s), ...forms(s.normalize("NFC")), ...forms(s.normalize("NFD"))]);
 }
 
 const AUTH_SCHEME = /^\s*([A-Za-z][!#$%&'*+.^_`|~0-9A-Za-z-]*)\s+(\S(?:.*\S)?)\s*$/s;

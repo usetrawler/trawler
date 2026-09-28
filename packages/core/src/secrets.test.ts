@@ -169,6 +169,14 @@ describe("SecretScrubber masking", () => {
   });
 });
 
+test("a secret is also masked as a page view shows it: spaces collapsed, invisible characters dropped, when that is 8 characters or more", () => {
+  const s = new SecretScrubber();
+  s.add(" ad  min-secret");
+  s.add("pw\u200b  12345");
+  s.add("a  b   c   d");
+  expect(s.scrub("paragraph: ad min-secret, then pw 12345, then a b c d")).toBe("paragraph: •••, then •••, then a b c d");
+});
+
 describe("SecretScrubber.forProject", () => {
   test("registers every password, basic auth in raw and base64 form, and secret headers only", () => {
     const s = SecretScrubber.forProject({
