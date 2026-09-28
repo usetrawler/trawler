@@ -845,3 +845,31 @@ describe("account check", () => {
     await drain();
   });
 });
+
+describe("steps per turn", () => {
+  test("each turn may take steps for its own goals, up to the run's ceiling, and a run from before turns keeps its flat limit", async () => {
+    await drain();
+    const planned = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", ProjectConfigSchema.parse({
+      name: "Steps", targetUrl: "https://app.acme.test/",
+      personas: [{ id: "ana", name: "Ana", brief: "b" }, { id: "lee", name: "Lee", brief: "b" }],
+      goals: [
+        { id: "g1", instruction: "One.", personaId: "ana" }, { id: "g2", instruction: "Two.", personaId: "ana" }, { id: "g3", instruction: "Three.", personaId: "ana" },
+        { id: "g4", instruction: "Four.", personaId: "lee" },
+        { id: "g5", instruction: "Five.", personaId: "ana" }, { id: "g6", instruction: "Six.", personaId: "ana" }, { id: "g7", instruction: "Seven.", personaId: "ana" },
+        { id: "g8", instruction: "Eight.", personaId: "ana" }, { id: "g9", instruction: "Nine.", personaId: "ana" }, { id: "g10", instruction: "Ten.", personaId: "ana" },
+      ],
+    }), keys));
+    await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", planned, keys, { ...options, maxSteps: 120 }));
+    const steps: number[] = [];
+    for (let job = await claimPastChecks(); job; job = await claimPastChecks()) {
+      steps.push(job.maxSteps);
+      await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "finish" });
+    }
+    expect(steps).toEqual([70, 30, 120]);
+
+    const legacy = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", planned, keys, { ...options, maxSteps: 60 }));
+    await sql`update runs set sign_up_seed = null where id = ${legacy.id}`.execute(t.db);
+    expect((await claimPastChecks())!.maxSteps).toBe(60);
+    await drain();
+  });
+});

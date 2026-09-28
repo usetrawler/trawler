@@ -6,8 +6,9 @@ import { field, KeyFields } from "../../../components/key-fields.tsx";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { detectProvider, PROVIDER_LABEL, type Provider } from "../../../llm/provider-kinds.ts";
 import type { KeyInput } from "../../../llm/key-input.ts";
-import { DEFAULT_RUN, estimateUsd } from "../../../runs/models.ts";
-import { modelsForKeyAction, startRunAction, type ModelList, type StartState } from "./actions.ts";
+import type { Price, PriceRange } from "../../../llm/prices.ts";
+import { DEFAULT_RUN, estimateUsd, STEPS } from "../../../runs/models.ts";
+import { modelsForKeyAction, priceRangeAction, startRunAction, type ModelList, type StartState } from "./actions.ts";
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
 const perMillion = (n: number) => `$${n >= 0.1 || n === 0 ? n.toFixed(2) : n.toFixed(3)}`;
@@ -27,6 +28,40 @@ export const modelsForKey = (input: KeyInput): Promise<ModelList> =>
     return { ok: false, error: updatedSinceOpened("Reload the page to list the models.") };
   });
 
+export const priceRangeFor = (modelId: string): Promise<PriceRange | null> =>
+  priceRangeAction(modelId).catch((err) => {
+    if (!unstable_isUnrecognizedActionError(err)) throw err;
+    return null;
+  });
+
+const priceText = (low: Price, high: Price) => {
+  const span = (a: number, b: number) => (a === b ? perMillion(a) : `${perMillion(a)}–${perMillion(b)}`);
+  const text = `${span(low.promptUsdPerMtok, high.promptUsdPerMtok)} in / ${span(low.completionUsdPerMtok, high.completionUsdPerMtok)} out per million tokens`;
+  return low.promptUsdPerMtok === high.promptUsdPerMtok && low.completionUsdPerMtok === high.completionUsdPerMtok ? text : `${text}, depending on the provider OpenRouter routes each call to`;
+};
+
+export function Estimate({ price, range, goalsPerTurn, personas, modelChosen }: { price: Price | null; range: PriceRange | null; goalsPerTurn: number[]; personas: number; modelChosen: boolean }) {
+  const estimate = price ? estimateUsd(range?.low ?? price, goalsPerTurn, range?.high ?? price) : null;
+  const turns = goalsPerTurn.length;
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-sm text-muted">Estimated run</p>
+      {estimate ? (
+        <>
+          <p className="text-2xl font-bold">{usd(estimate.low)}–{usd(estimate.high)}</p>
+          <p className="text-sm text-muted">{personas} {personas === 1 ? "person" : "people"}{turns > personas ? ` taking ${turns} turns` : ""}, plus about {usd(estimate.perDefect)} for each defect that gets replayed.</p>
+        </>
+      ) : (
+        <>
+          <p className="text-2xl font-bold">Unknown</p>
+          <p className="text-sm text-muted">{modelChosen ? `Without a price Trawler cannot count dollars, so the run stops after ${(DEFAULT_RUN.tokenCap / 1_000_000).toFixed(0)} million tokens instead. Watch your provider's billing.` : "Choose a model to see an estimate."}</p>
+        </>
+      )}
+      <p className="text-sm text-muted">A turn gets {STEPS.perGoal} steps for each of its goals and {STEPS.base} more, {DEFAULT_RUN.maxSteps} at most.</p>
+    </div>
+  );
+}
+
 function Submit({ blocked, pending }: { blocked?: string; pending: boolean }) {
   return (
     <button type="submit" disabled={pending || Boolean(blocked)} aria-describedby={blocked ? "start-blocked" : undefined} className="flex h-12 items-center justify-between gap-6 bg-action px-5 font-mono text-sm tracking-[0.12em] text-[#17191c] uppercase transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50">
@@ -36,8 +71,8 @@ function Submit({ blocked, pending }: { blocked?: string; pending: boolean }) {
   );
 }
 
-export function StartRun({ projectId, projectName, personas, turns = personas, keyHint: savedHint, canManageKey, authorisedBefore, blocked, onStarting }: {
-  projectId: string; projectName: string; personas: number; turns?: number; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; blocked?: string; onStarting?: (starting: boolean) => void;
+export function StartRun({ projectId, projectName, personas, goalsPerTurn = Array.from({ length: personas }, () => 1), keyHint: savedHint, canManageKey, authorisedBefore, blocked, onStarting }: {
+  projectId: string; projectName: string; personas: number; goalsPerTurn?: number[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; blocked?: string; onStarting?: (starting: boolean) => void;
 }) {
   const [state, action, pending] = useActionState<StartState, FormData>(startTheRun, {});
   const keyHint = state.keyHint ?? savedHint;
@@ -48,6 +83,7 @@ export function StartRun({ projectId, projectName, personas, turns = personas, k
   const [list, setList] = useState<ModelList | null>(null);
   const [loading, setLoading] = useState(false);
   const [modelId, setModelId] = useState("");
+  const [range, setRange] = useState<PriceRange | null>(null);
   const [cap, setCap] = useState(DEFAULT_RUN.budgetUsd);
   const [authorised, setAuthorised] = useState(false);
 
@@ -78,7 +114,21 @@ export function StartRun({ projectId, projectName, personas, turns = personas, k
   useEffect(() => onStarting?.(pending), [pending, onStarting]);
 
   const price = list?.ok ? list.models.find((m) => m.id === modelId)?.price ?? null : null;
-  const estimate = price ? estimateUsd(price, turns) : null;
+  const routed = list?.ok && list.provider === "openrouter" && price !== null;
+  useEffect(() => {
+    setRange(null);
+    if (!routed) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      const found = await priceRangeFor(modelId);
+      if (!cancelled) setRange(found);
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [routed, modelId]);
+  const estimate = price ? estimateUsd(range?.low ?? price, goalsPerTurn, range?.high ?? price) : null;
   const label = provider && provider !== "custom" ? PROVIDER_LABEL[provider] : null;
 
   return (
@@ -116,26 +166,13 @@ export function StartRun({ projectId, projectName, personas, turns = personas, k
           {list && !list.ok && <span className="text-sm text-warn">{list.error}</span>}
           {modelId && list?.ok && (
             <span className="text-sm text-muted">
-              {price ? `${perMillion(price.promptUsdPerMtok)} in / ${perMillion(price.completionUsdPerMtok)} out per million tokens` : "Price unknown for this model."}
+              {price ? priceText(range?.low ?? price, range?.high ?? price) : "Price unknown for this model."}
             </span>
           )}
         </label>
       )}
 
-      <div className="flex flex-col gap-1">
-        <p className="text-sm text-muted">Estimated run</p>
-        {estimate ? (
-          <>
-            <p className="text-2xl font-bold">{usd(estimate.low)}–{usd(estimate.high)}</p>
-            <p className="text-sm text-muted">{personas} {personas === 1 ? "person" : "people"}{turns > personas ? ` taking ${turns} turns` : ""}, plus about {usd(estimate.perDefect)} for each defect that gets replayed.</p>
-          </>
-        ) : (
-          <>
-            <p className="text-2xl font-bold">Unknown</p>
-            <p className="text-sm text-muted">{modelId ? `Without a price Trawler cannot count dollars, so the run stops after ${(DEFAULT_RUN.tokenCap / 1_000_000).toFixed(0)} million tokens instead. Watch your provider's billing.` : "Choose a model to see an estimate."}</p>
-          </>
-        )}
-      </div>
+      <Estimate price={price} range={range} goalsPerTurn={goalsPerTurn} personas={personas} modelChosen={Boolean(modelId)} />
       {estimate || !modelId ? (
         <label className="flex flex-col gap-2">
           <span className="text-sm text-muted">Hard cap (USD). The run stops before going over it; findings so far are kept.</span>

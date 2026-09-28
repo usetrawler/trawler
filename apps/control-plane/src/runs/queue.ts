@@ -9,6 +9,7 @@ import { loadProjectConfig } from "../projects/projects.ts";
 import { logError } from "../server/log.ts";
 import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
+import { turnSteps } from "./models.ts";
 import { ACCOUNT_REFUSED, capSpent, signUpSeedContext, type ConfigSnapshot } from "./runs.ts";
 
 const LEASE_MINUTES = 10;
@@ -167,7 +168,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
           accountRef: picked.account_ref ?? (finding ? config.personas.find((p) => p.id === finding.personaKey)?.accountRef : undefined),
           finding: finding?.finding,
           observation: finding?.replay,
-          maxSteps: picked.kind === "role_session" ? picked.max_steps : picked.kind === "account_check" ? Math.min(ACCOUNT_CHECK_STEPS, picked.replay_steps) : picked.replay_steps,
+          maxSteps: picked.kind === "role_session" ? (turn ? turnSteps(turn.goalIds.length, picked.max_steps) : picked.max_steps) : picked.kind === "account_check" ? Math.min(ACCOUNT_CHECK_STEPS, picked.replay_steps) : picked.replay_steps,
           budgetUsd: Math.max(0, Number(picked.budget_usd) - Number(picked.cost_usd)),
           agentModel: picked.agent_model,
           judgeModel: picked.judge_model,

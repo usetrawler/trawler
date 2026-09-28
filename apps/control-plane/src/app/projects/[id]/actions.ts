@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { keyStillStored, modelKey, modelKeyHint, setModelKey, type KeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
-import { openRouterPrices, priceFor, type Price } from "../../../llm/prices.ts";
+import { openRouterPriceRange, openRouterPrices, priceFor, type Price, type PriceRange } from "../../../llm/prices.ts";
 import { projectExists, ProjectNotFound } from "../../../projects/projects.ts";
 import { freshEndpoint, withinListingLimit, type KeyInput } from "../../../llm/key-input.ts";
 import { checkModelCall, endpointFor, listModels, PREFERRED_MODELS, PROVIDER_LABEL, priceKey, type Endpoint, type Provider } from "../../../llm/providers.ts";
@@ -71,6 +71,12 @@ export async function modelsForKeyAction(input: KeyInput): Promise<ModelList> {
   });
   const suggested = PREFERRED_MODELS[endpoint.provider].find((id) => ids.includes(id)) ?? ids[0] ?? "";
   return { ok: true, provider: endpoint.provider, models, suggested };
+}
+
+export async function priceRangeAction(modelId: string): Promise<PriceRange | null> {
+  if (!MODEL_ID.test(modelId)) return null;
+  if (!(await signedInMember(await headers()))) return null;
+  return openRouterPriceRange(readEnv().openRouterUrl, modelId);
 }
 
 export async function startRunAction(_previous: StartState, form: FormData): Promise<StartState> {

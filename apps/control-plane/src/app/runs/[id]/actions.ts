@@ -71,7 +71,7 @@ export async function runAgainAction(_previous: RunAgainState, form: FormData): 
   const found = await withOrg(getDb(), orgId, async (tx) => ({
     previous: await tx
       .selectFrom("runs")
-      .select(["project_id", "status", "agent_model", "judge_model", "budget_usd", "max_steps", "replay_steps", "provider", "provider_base_url", "prompt_usd_per_mtok", "completion_usd_per_mtok"])
+      .select(["project_id", "status", "agent_model", "judge_model", "budget_usd", "provider", "provider_base_url", "prompt_usd_per_mtok", "completion_usd_per_mtok"])
       .where("id", "=", runId)
       .where("org_id", "=", orgId)
       .executeTakeFirst(),
@@ -106,7 +106,7 @@ export async function runAgainAction(_previous: RunAgainState, form: FormData): 
       if (!(await keyStillStored(tx, orgId, endpoint.provider, providerBaseUrl))) throw new KeyGone();
       return startRun(tx, orgId, previous.project_id, keys, {
         budgetUsd: Number(previous.budget_usd), agentModel: previous.agent_model, judgeModel: previous.judge_model,
-        maxSteps: previous.max_steps, replaySteps: previous.replay_steps, createdBy: member.userId,
+        maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: member.userId,
         provider: endpoint.provider, providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap,
       });
     });

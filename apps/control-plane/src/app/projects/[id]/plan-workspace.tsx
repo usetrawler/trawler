@@ -311,7 +311,7 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
 
       {personas.length > 1 && <OrderOfPlay personas={personas} goals={goals} onMove={moveGoal} />}
 
-      <StartRun projectId={projectId} projectName={projectName} personas={saved.personas.length} turns={turnsOf(saved).length} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} onStarting={setStarting} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : undefined)} />
+      <StartRun projectId={projectId} projectName={projectName} personas={saved.personas.length} goalsPerTurn={turnsOf(saved).map((t) => t.goalIds.length)} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} onStarting={setStarting} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : undefined)} />
     </div>
   );
 }
