@@ -1275,7 +1275,7 @@ describe("robustness", () => {
       expect(clicked).toContain("Modal state");
       const started = performance.now();
       await b.close();
-      expect(performance.now() - started).toBeLessThan(3000);
+      expect(performance.now() - started).toBeLessThan(1500);
       expect(() => execFileSync("pgrep", ["-P", String(process.pid), "-f", "chrom"])).toThrow();
     } finally {
       rmSync(dir, { recursive: true, force: true });
