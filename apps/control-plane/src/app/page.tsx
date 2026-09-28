@@ -10,7 +10,7 @@ import { shellFor } from "../server/shell.ts";
 import { firstName, Overview } from "./overview.tsx";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Overview" };
+export const metadata: Metadata = { title: { absolute: "Overview · Trawler" } };
 
 export default async function Home() {
   const member = await signedInMember(await headers());
