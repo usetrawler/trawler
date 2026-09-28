@@ -22,7 +22,7 @@ const members = [
   { id: "m-3", name: "", email: "bo@acme.test", role: "admin", joinedAt: "2026-09-22T10:00:00.000Z", you: false },
   { id: "m-4", name: "Cy", email: "cy@acme.test", role: "owner", joinedAt: "2026-09-23T10:00:00.000Z", you: false },
 ];
-const invitations = [{ id: "inv-1", email: "max@acme.test", role: "admin", expiresAt: "2026-10-03T10:00:00.000Z" }];
+const invitations = [{ id: "inv-1", email: "max@acme.test", role: "admin", expiresAt: "2026-10-03T10:00:00.000Z", addressHasWorkspace: false }];
 const IDLE: [unknown, boolean] = [{}, false];
 const BEFORE = {};
 const render = (canManage = true, people = members) => renderToStaticMarkup(createElement(Members, { members: people, invitations, canManage, signInAt: "app.usetrawler.test" }));
@@ -178,4 +178,13 @@ test("a member reads who is in the workspace and who is invited, with nothing to
 test("the invited status and role labels read as the page words them", () => {
   expect(invitedStatus("max@acme.test", "app.usetrawler.com")).toBe("Invited max@acme.test. Ask them to sign in at app.usetrawler.com with this address; no email is sent.");
   expect([roleLabel("owner"), roleLabel("admin"), roleLabel("member"), roleLabel("admin,member")]).toEqual(["Owner", "Admin", "Member", "Admin, Member"]);
+});
+
+test("an invitation whose address has since got a workspace says it can no longer be used, and can still be revoked", () => {
+  const taken = { id: "inv-2", email: "gone@acme.test", role: "member", expiresAt: "2026-10-03T10:00:00.000Z", addressHasWorkspace: true };
+  const html = renderToStaticMarkup(createElement(Members, { members, invitations: [...invitations, taken], canManage: true, signInAt: "app.usetrawler.test" }));
+  expect(text(rowOf(html, "gone@acme.test"))).toContain("This address has since signed in and belongs to a workspace, so it can no longer use this invitation.");
+  expect(rowOf(html, "gone@acme.test")).toContain('value="inv-2"');
+  expect(text(rowOf(html, "max@acme.test"))).toContain("max@acme.test");
+  expect(text(rowOf(html, "max@acme.test"))).not.toContain("can no longer use");
 });

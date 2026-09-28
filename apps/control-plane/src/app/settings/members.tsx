@@ -22,6 +22,7 @@ export interface InvitationRow {
   email: string;
   role: string;
   expiresAt: string;
+  addressHasWorkspace: boolean;
 }
 
 export type Change = "change" | "remove" | "revoke" | "invite";
@@ -216,6 +217,7 @@ export function Members({ members, invitations, canManage, signInAt }: { members
                     </form>
                   )}
                 </span>
+                {i.addressHasWorkspace && <span className="basis-full text-xs text-muted">This address has since signed in and belongs to a workspace, so it can no longer use this invitation.</span>}
               </li>
             ))}
           </ul>
