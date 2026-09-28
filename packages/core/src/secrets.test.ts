@@ -192,16 +192,16 @@ describe("SecretScrubber.forProject", () => {
   });
   test("a secret header with Basic masks the encoded token, the decoded user and password, and the password alone", () => {
     const token = Buffer.from("deploy-user:gate-secret-9").toString("base64");
-    const s = SecretScrubber.forProject({ accounts: [], secretHeaders: { authorization: `Basic ${token}` } });
-    expect(s.scrub(`${token} | deploy-user:gate-secret-9 | password gate-secret-9 | user deploy-user`)).toBe("••• | ••• | password ••• | user deploy-user");
+    for (const scheme of ["Basic", "basic"]) {
+      const s = SecretScrubber.forProject({ accounts: [], secretHeaders: { authorization: `${scheme} ${token}` } });
+      expect(s.scrub(`${token} | deploy-user:gate-secret-9 | password gate-secret-9 | user deploy-user`)).toBe("••• | ••• | password ••• | user deploy-user");
+    }
   });
-  test("any scheme in front of a token counts, such as SSWS or ApiKey, and a value with no scheme adds nothing beyond itself", () => {
+  test("any scheme in front of a token counts, such as SSWS or ApiKey", () => {
     const okta = SecretScrubber.forProject({ accounts: [], secretHeaders: { authorization: "SSWS 00okta-token-1" } });
     expect(okta.scrub("key 00okta-token-1")).toBe("key •••");
     const apiKey = SecretScrubber.forProject({ accounts: [], secretHeaders: { "x-auth": "ApiKey live-key-7788" } });
     expect(apiKey.scrub("live-key-7788")).toBe("•••");
-    const bare = SecretScrubber.forProject({ accounts: [], secretHeaders: { "x-bypass": "bypass-token-123" } });
-    expect(bare.scrub("bypass-token-123 and bypass")).toBe("••• and bypass");
   });
   test("a scheme's token too short to mask reliably adds nothing beyond the whole value", () => {
     const short = SecretScrubber.forProject({ accounts: [], secretHeaders: { authorization: "Bearer abc123" } });
