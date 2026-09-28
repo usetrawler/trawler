@@ -362,6 +362,20 @@ describe("proposePeople", () => {
     expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toMatch(/playOrder/);
   });
 
+  test("an answer without an order of play, or one that skips a person's first goal or spells ids loosely, still plays each person's goals in their own order", async () => {
+    const people2 = { personas: [
+      { id: "Founder Priya", name: "Priya", brief: "You submit pitches.", signsIn: false, goals: [{ id: "sign up", instruction: "Get in." }, { id: "submit", instruction: "Submit a pitch." }, { id: "decision", instruction: "See the decision." }] },
+      { id: "reviewer", name: "Marco", brief: "You review.", signsIn: true, goals: [{ id: "review", instruction: "Accept Priya's pitch." }] },
+    ] };
+    const order = async (playOrder?: unknown) => {
+      const answer = playOrder === undefined ? people2 : { ...people2, playOrder };
+      const plan = await proposePeople({ model: scriptedModel([text(JSON.stringify(answer))]), modelId: "mock", budget: new Budget(1), product, name: "Acme", description: "d", features: ["f"] });
+      return plan.project.goals.map((g) => g.id);
+    };
+    expect(await order()).toEqual(["sign-up", "submit", "decision", "review"]);
+    expect(await order([{ person: "founder-priya", goal: "submit" }, { person: "reviewer", goal: "review" }, { person: "founder-priya", goal: "decision" }])).toEqual(["sign-up", "submit", "review", "decision"]);
+  });
+
   test("when nobody can sign up, every person signs in to an existing account, whatever the model marked", async () => {
     const model = scriptedModel([text(JSON.stringify(people))]);
     const plan = await proposePeople({ model, modelId: "mock", budget: new Budget(1), product, name: "Acme", description: "d", features: ["Submit a pitch"], signUp: "closed" });

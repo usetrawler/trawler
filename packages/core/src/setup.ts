@@ -142,8 +142,8 @@ function uniqueIds<T extends { id: string }>(items: T[], fallback: string): T[] 
 const GoalProposal = z.object({ id: z.string(), instruction: z.string() });
 const PersonProposal = z.object({ id: z.string(), name: z.string(), brief: z.string(), signsIn: z.boolean(), goals: z.array(GoalProposal) });
 const PlayOrder = z.array(z.object({ person: z.string(), goal: z.string() }));
-const ProposalSchema = z.object({ name: z.string(), description: z.string(), personas: z.array(PersonProposal), playOrder: PlayOrder });
-const PeopleSchema = z.object({ personas: z.array(PersonProposal), playOrder: PlayOrder });
+const ProposalSchema = z.object({ name: z.string(), description: z.string(), personas: z.array(PersonProposal), playOrder: PlayOrder.optional() });
+const PeopleSchema = z.object({ personas: z.array(PersonProposal), playOrder: PlayOrder.optional() });
 export const SIGN_UP = ["open", "closed", "unclear"] as const;
 export type SignUp = (typeof SIGN_UP)[number];
 const SummarySchema = z.object({ name: z.string(), description: z.string(), signUp: z.enum(SIGN_UP), features: z.array(z.object({ title: z.string(), summary: z.string() })) });
@@ -241,23 +241,27 @@ export interface ProposedPlan {
   signsIn: string[];
 }
 
-function inPlayOrder<G extends { from: string }>(goals: G[], playOrder: z.infer<typeof PlayOrder>): G[] {
+function inPlayOrder<G extends { from: string; personaId: string }>(goals: G[], playOrder: z.infer<typeof PlayOrder>): G[] {
   const left = [...goals];
   const ordered: G[] = [];
   for (const step of playOrder) {
-    const i = left.findIndex((g) => g.from === `${step.person}\0${step.goal}`);
-    if (i >= 0) ordered.push(...left.splice(i, 1));
+    const i = left.findIndex((g) => g.from === `${slug(step.person)}\0${slug(step.goal)}`);
+    if (i < 0) continue;
+    const personaId = left[i]!.personaId;
+    const earlier = left.slice(0, i + 1).filter((g) => g.personaId === personaId);
+    for (const g of earlier) left.splice(left.indexOf(g), 1);
+    ordered.push(...earlier);
   }
   return [...ordered, ...left];
 }
 
 function planFrom(product: ProductPage, head: { name: string; description: string }, proposed: z.infer<typeof PersonProposal>[], playOrder: z.infer<typeof PlayOrder> = []): ProposedPlan {
   const people = uniqueIds(
-    proposed.filter((p) => p.name.trim() && p.brief.trim() && p.goals.some((g) => g.instruction.trim())).slice(0, MAX_PERSONAS).map((p) => ({ ...p, from: p.id })),
+    proposed.filter((p) => p.name.trim() && p.brief.trim() && p.goals.some((g) => g.instruction.trim())).slice(0, MAX_PERSONAS).map((p) => ({ ...p, from: slug(p.id) })),
     "persona",
   );
   const personas = people.map((p) => ({ id: p.id, name: clip(p.name, 100), brief: clip(p.brief, 800) }));
-  const owned = people.flatMap((p) => p.goals.filter((g) => g.instruction.trim()).slice(0, MAX_GOALS_PER_PERSONA).map((g) => ({ ...g, personaId: p.id, from: `${p.from}\0${g.id}` })));
+  const owned = people.flatMap((p) => p.goals.filter((g) => g.instruction.trim()).slice(0, MAX_GOALS_PER_PERSONA).map((g) => ({ ...g, personaId: p.id, from: `${p.from}\0${slug(g.id)}` })));
   const goals = uniqueIds(inPlayOrder(owned, playOrder), "goal").map((g) => ({ id: g.id, instruction: clip(g.instruction, 300), personaId: g.personaId }));
   if (personas.length === 0) throw new SetupModelFailed("the setup model proposed no personas with goals");
   const project = ProjectConfigSchema.parse({
@@ -288,7 +292,7 @@ export async function proposePeople(opts: {
   if (features.length === 0) throw new RangeError("choose at least one feature");
   const signUp = opts.signUp ?? "unclear";
   const { answer, usage } = await ask(opts, PeopleSchema, setupPrompt({ ...opts.product, context: { description, features, signUp } }));
-  const plan = planFrom(opts.product, { name: opts.name, description }, answer.personas, answer.playOrder);
+  const plan = planFrom(opts.product, { name: opts.name, description }, answer.personas, answer.playOrder ?? []);
   return { ...plan, signsIn: signUp === "closed" ? plan.project.personas.map((p) => p.id) : plan.signsIn, usage };
 }
 
@@ -305,5 +309,5 @@ export async function proposeProject(opts: {
   if (opts.budget.exceeded) throw spent();
   const product = await readProduct(opts);
   const { answer, usage } = await ask(opts, ProposalSchema, setupPrompt({ ...product, focus }));
-  return { project: planFrom(product, { name: answer.name, description: clip(answer.description, 600) }, answer.personas, answer.playOrder).project, usage };
+  return { project: planFrom(product, { name: answer.name, description: clip(answer.description, 600) }, answer.personas, answer.playOrder ?? []).project, usage };
 }
