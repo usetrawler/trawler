@@ -8,6 +8,7 @@ import type { Price } from "../llm/prices.ts";
 import { chatHeaders, endpointFor, fetchFor, LONGEST_EXPLANATION_READ, type Endpoint } from "../llm/providers.ts";
 import { InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage, type LlmCall } from "../runs/queue.ts";
 import { logError, scrubberWith } from "../server/log.ts";
+import { FetchRefused } from "../setup/safe-fetch.ts";
 
 export interface ProxyDeps {
   db: Database;
@@ -30,6 +31,8 @@ const jobStopped = (message: string) => failure(402, message, JOB_STOPPED);
 
 class UpstreamTimeout extends Error {}
 
+const timedOut = (err: unknown) => err instanceof Error && (err.name === "TimeoutError" || (err.name === "AbortError" && err.cause instanceof Error && err.cause.name === "TimeoutError"));
+
 async function forward(deps: ProxyDeps, endpoint: Endpoint, payload: unknown, signal: AbortSignal): Promise<Response> {
   const attempts = deps.attempts ?? 3;
   let last: Response | Error = new Error("no attempt made");
@@ -46,7 +49,8 @@ async function forward(deps: ProxyDeps, endpoint: Endpoint, payload: unknown, si
       last = res;
     } catch (err) {
       if (signal.aborted) throw err;
-      if (err instanceof Error && err.name === "TimeoutError") throw new UpstreamTimeout();
+      if (timedOut(err)) throw new UpstreamTimeout();
+      if (err instanceof FetchRefused) throw err;
       last = err instanceof Error ? err : new Error(String(err));
     }
     if (i < attempts - 1) await new Promise((r) => setTimeout(r, (deps.retryBaseMs ?? 1000) * 2 ** i * (0.5 + Math.random())));
