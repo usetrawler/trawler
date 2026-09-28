@@ -194,3 +194,37 @@ test("leaves no timers behind once the run is over", async () => {
   });
   expect(timers()).toBeLessThanOrEqual(before);
 });
+
+test("people take turns in the plan's order, each told what happened before, and each person's results are kept together", async () => {
+  const team = ProjectConfigSchema.parse({
+    name: "Pitches", targetUrl: "https://a.test",
+    personas: [{ id: "priya", name: "Priya", brief: "b" }, { id: "marco", name: "Marco", brief: "b", accountRef: "acct" }],
+    goals: [
+      { id: "submit", instruction: "Submit a pitch.", personaId: "priya" },
+      { id: "review", instruction: "Accept Priya's pitch.", personaId: "marco" },
+      { id: "decision", instruction: "See the decision.", personaId: "priya" },
+    ],
+    accounts: [{ ref: "acct", username: "a@a.test", password: "hunter22-secret" }],
+  });
+  const agent = scriptedModel([
+    toolCall("note", { text: "Submitted EcoLoop." }), toolCall("goal_status", { goal: "submit", status: "reached", note: "" }), toolCall("finish", { summary: "ok" }),
+    toolCall("goal_status", { goal: "review", status: "reached", note: "Accepted EcoLoop." }), toolCall("finish", { summary: "ok" }),
+    toolCall("goal_status", { goal: "decision", status: "reached", note: "" }), toolCall("finish", { summary: "ok" }),
+  ]);
+  const browsers = fakeBrowsers();
+  const summary = await localRun({
+    project: team, agentModel: agent, agentModelId: "m", judgeModel: scriptedModel([]), judgeModelId: "m",
+    budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: () => {}, openBrowser: browsers.open,
+  });
+  expect(browsers.opened).toHaveLength(3);
+  expect(summary.jobs.map((j) => j.jobId)).toEqual(["role:priya#1", "role:marco#2", "role:priya#3"]);
+  expect(summary.roles.map((r) => [r.persona, r.goals.map((g) => `${g.goal}:${g.status}`)])).toEqual([
+    ["priya", ["submit:reached", "decision:reached"]],
+    ["marco", ["review:reached"]],
+  ]);
+  const prompts = agent.doGenerateCalls.map((c) => JSON.stringify(c.prompt));
+  expect(prompts[3]).toContain("Submitted EcoLoop.");
+  expect(prompts[5]).toContain("Accepted EcoLoop.");
+  expect(prompts[5]).toMatch(/priya\.[0-9a-f]{8}@example\.com/);
+  expect(/priya\.[0-9a-f]{8}@example\.com/.exec(prompts[5]!)![0]).toBe(/priya\.[0-9a-f]{8}@example\.com/.exec(prompts[0]!)![0]);
+});
