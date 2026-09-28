@@ -321,7 +321,7 @@ function keptFrom(value: string, typed: string): boolean {
 }
 
 function within<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return Promise.race([work, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))]);
+  return Promise.race([work, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms).unref())]);
 }
 
 async function focusIsOnSecretIn(frame: Frame, filled: ElementHandle[], holdsSecret: (value: string) => boolean, depth = 0): Promise<boolean> {
@@ -781,7 +781,7 @@ export async function openBrowser(opts: {
       async close() {
         const bounded = (step: Promise<unknown>) => within(step.catch(() => undefined), CLOSE_STEP_MS, undefined);
         try {
-          await bounded(Promise.all([...dialogs].map((dialog) => dialog.dismiss())));
+          await bounded(Promise.allSettled([...dialogs].map((dialog) => dialog.dismiss())));
           await bounded(context.unrouteAll({ behavior: "ignoreErrors" }));
           await bounded(mcp.close());
         } finally {
