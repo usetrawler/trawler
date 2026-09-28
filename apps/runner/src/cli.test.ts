@@ -8,6 +8,8 @@ import { z } from "zod";
 import { scriptedModel, text, toolCall } from "../../../packages/core/src/testing.ts";
 import { fetchPage, runCli, type CliDeps } from "./cli.ts";
 import type { LogFields } from "./worker.ts";
+import { startEgressProxy } from "./egress-proxy.ts";
+import net from "node:net";
 
 function deps(over: Partial<CliDeps> = {}) {
   const out: string[] = [];
@@ -290,4 +292,59 @@ test("work starts reporting with the runner token, reports a failed job with its
   expect(closed).toBe(true);
   expect(JSON.parse(out[0]!)).toMatchObject({ level: "info", msg: expect.stringContaining("started"), job_id: job.jobId, run_id: job.runId });
   expect(JSON.parse(err.at(-1)!)).toMatchObject({ level: "error", msg: expect.stringContaining("no chromium"), job_id: job.jobId });
+});
+
+test("in work mode with an egress proxy, each browser gets its own proxy session, and what the proxy refused becomes blocked requests", async () => {
+  const egressToken = "egress-token-".padEnd(40, "x");
+  const proxy = await startEgressProxy({ token: egressToken });
+  const job = {
+    kind: "role_session", personaKey: "ana", jobId: "11111111-1111-4111-8111-111111111111", runId: "22222222-2222-4222-8222-222222222222", token: "job-token-" + "x".repeat(40),
+    config: { name: "Acme", targetUrl: "https://a.test/", description: "", allowedOrigins: ["https://a.test"], personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "x" }], accounts: [], extraHeaders: {}, secretHeaders: {} },
+    maxSteps: 10, budgetUsd: 1, agentModel: "m/agent", judgeModel: "m/judge",
+  };
+  const events: Array<{ type: string; url?: string }> = [];
+  const controlPlane = (async (url: string | URL, init?: RequestInit) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/api/runner/claim") return Response.json(job);
+    if (path.endsWith("/events")) {
+      events.push(...(JSON.parse(String(init?.body)).events as typeof events));
+      return Response.json({ cancel: false });
+    }
+    return Response.json({ ok: true });
+  }) as typeof fetch;
+  const proxies: unknown[] = [];
+  const tryPrivate = (server: string) =>
+    new Promise<void>((resolveTry) => {
+      const { port } = new URL(server);
+      const socket = net.connect(Number(port), "127.0.0.1", () => socket.write("CONNECT 169.254.169.254:443 HTTP/1.1\r\nHost: 169.254.169.254:443\r\n\r\n"));
+      socket.on("data", () => socket.destroy());
+      socket.on("close", () => resolveTry());
+    });
+  const { d } = deps({
+    env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_EGRESS_PROXY: `http://127.0.0.1:${proxy.port}`, TRAWLER_EGRESS_TOKEN: egressToken },
+    fetchImpl: controlPlane,
+    model: () => scriptedModel([toolCall("goal_status", { goal: "g", status: "failed", note: "blocked" }), toolCall("finish", { summary: "done" })]),
+    openBrowser: async ({ proxy: given }) => {
+      proxies.push(given);
+      await tryPrivate(given!.server);
+      return { tools: {}, fillField: async () => "typed", screenshot: async () => null, close: async () => {} };
+    },
+    startReporting: async () => ({ report: () => {}, maskWith: () => {}, close: async () => {} }),
+  });
+  try {
+    expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(0);
+    expect(proxies).toEqual([{ server: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/) }]);
+    expect((proxies[0] as { server: string }).server).not.toBe(`http://127.0.0.1:${proxy.port}`);
+    expect(events.filter((e) => e.type === "blocked_request").map((e) => e.url)).toEqual(["https://169.254.169.254"]);
+    const health = await fetch(`http://127.0.0.1:${proxy.port}/health`, { headers: { authorization: `Bearer ${egressToken}` } });
+    expect(await health.json()).toEqual({ sessions: 0 });
+  } finally {
+    await proxy.close();
+  }
+});
+
+test("work refuses an egress proxy without its control token", async () => {
+  const { d, err } = deps({ env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_EGRESS_PROXY: "http://127.0.0.1:9" } });
+  expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(2);
+  expect(err.join("\n")).toMatch(/TRAWLER_EGRESS_TOKEN/);
 });

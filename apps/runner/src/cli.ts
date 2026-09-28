@@ -136,7 +136,7 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
   const egressServer = deps.env.TRAWLER_EGRESS_PROXY?.trim();
   const egressToken = deps.env.TRAWLER_EGRESS_TOKEN?.trim();
   if (egressServer && !egressToken) throw new UsageError("TRAWLER_EGRESS_PROXY is set without TRAWLER_EGRESS_TOKEN");
-  const egress = egressServer ? egressClient(egressServer, egressToken!, deps.fetchImpl) : undefined;
+  const egress = egressServer ? egressClient(egressServer, egressToken!) : undefined;
   const log = workerLog(deps.env, { out: deps.out, err: deps.err });
   const reporting = await (deps.startReporting ?? startReporting)(deps.env, [runnerToken]);
   const workerDeps: WorkerDeps = {
