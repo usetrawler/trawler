@@ -251,7 +251,10 @@ function Stages({ stages }: { stages: View["stages"] }) {
       {stages.map((s, i) => (
         <li key={s.label} className={`grid grid-cols-[auto_1fr] gap-x-2.5 gap-y-[3px] border-line p-[15px] not-last:border-r max-md:nth-2:border-r-0 max-md:nth-[-n+2]:border-b ${s.state === "done" ? "text-ok" : s.state === "active" ? "bg-[color-mix(in_srgb,var(--action)_9%,transparent)] text-ink shadow-[inset_0_-3px_var(--action)]" : "text-muted"}`}>
           <span className="row-span-2 font-mono text-[10px]">{String(i + 1).padStart(2, "0")}</span>
-          <strong>{s.label}</strong>
+          <strong className="flex items-center gap-2">
+            {s.label}
+            {s.state === "active" && <span aria-hidden className="size-2 rounded-full bg-action motion-safe:animate-pulse" />}
+          </strong>
           <small className={`text-[11px] ${s.state === "skipped" ? "italic" : ""}`}>{STAGE_LABEL[s.state]}</small>
         </li>
       ))}
@@ -267,12 +270,18 @@ function LivePeople({ view }: { view: View }) {
         const reached = p.goals.filter((g) => g.status === "reached").length;
         return (
           <li key={p.id} className="relative grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 border-b border-line px-1 py-[18px] max-md:grid-cols-[auto_minmax(0,1fr)]">
-            <span aria-hidden className="grid size-[42px] place-items-center rounded-full border border-line bg-soft font-mono text-[10px]">{initials(p.name)}</span>
+            <span aria-hidden className="relative grid size-[42px] place-items-center rounded-full border border-line bg-soft font-mono text-[10px]">
+              {p.state === "exploring" && <span className="absolute -inset-1 rounded-full border-2 border-action border-t-transparent motion-safe:animate-spin [animation-duration:1.6s]" />}
+              {initials(p.name)}
+            </span>
             <span className="min-w-0">
               <strong className="block break-words">{p.name}</strong>
               <span className="mt-[3px] block text-xs break-words text-muted">{personLine(p)}{p.state === "exploring" && <span className="sr-only"> {reached} of {plural(p.goals.length, "goal", "goals")} reached.</span>}</span>
             </span>
-            <span className={`${label} ${tone} max-md:col-start-2`}>{state}</span>
+            <span className={`${label} ${tone} flex items-center gap-2 max-md:col-start-2`}>
+              {p.state === "exploring" && <span aria-hidden className="size-1.5 rounded-full bg-current motion-safe:animate-ping" />}
+              {state}
+            </span>
             <span aria-hidden className="absolute right-0 -bottom-px left-0 h-0.5 bg-soft"><span className="block h-full bg-ok" style={{ width: `${p.goals.length ? (reached / p.goals.length) * 100 : 0}%` }} /></span>
           </li>
         );

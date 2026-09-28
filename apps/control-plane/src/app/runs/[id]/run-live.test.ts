@@ -185,3 +185,11 @@ test("a confirmed defect's card shows both screenshots after its steps, and a ca
   expect(loaded).toContain("Load fails");
   expect(loaded).not.toContain("<figure");
 });
+
+test("while a run is live the active stage and the person exploring visibly move, only for those who allow motion, and nothing moves once it ends", () => {
+  const html = render(live);
+  const moving = html.match(/class="[^"]*animate-(spin|ping|pulse)[^"]*"/g) ?? [];
+  expect(moving).toHaveLength(3);
+  expect(moving.every((c) => /motion-safe:animate-/.test(c))).toBe(true);
+  expect(render({ ...live, status: "succeeded", finishedAt: new Date("2026-09-25T20:00:00Z") })).not.toMatch(/animate-(spin|ping|pulse)/);
+});
