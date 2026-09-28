@@ -15,7 +15,7 @@ const render = (options: { current?: ShellPage; parent?: boolean; shell?: Shell 
 const link = (html: string, label: string) => html.match(new RegExp(`<a [^>]*>(?:(?!</a>).)*${label}(?:(?!</a>).)*</a>`))?.[0] ?? "";
 const nav = (html: string) => html.match(/<nav aria-label="Workspace".*?<\/nav>/)?.[0] ?? "";
 const header = (html: string) => html.match(/<header.*<\/header>/)?.[0] ?? "";
-const account = (html: string) => html.match(/<\/nav><section aria-label="Account" class="[^"]*">.*?<\/section>/)?.[0] ?? "";
+const account = (html: string) => html.match(/<\/nav>(?:<script[^>]*>[\s\S]*?<\/script>)?<section aria-label="Account" class="[^"]*">.*?<\/section>/)?.[0] ?? "";
 const marked = (html: string) => nav(html).match(/<a [^>]*aria-current="[^"]*"[^>]*>(?:(?!<\/a>).)*<\/a>/g) ?? [];
 
 describe("AppShell", () => {
@@ -24,7 +24,7 @@ describe("AppShell", () => {
     expect(link(html, "trawler")).toContain('href="/"');
     const items = [...nav(html).matchAll(/<a href="([^"]*)"[^>]*>(?:(?!<\/a>).)*?<span class="min-w-0" title="[^"]*"><span class="block truncate">([^<]*)/g)].map((m) => [m[1], m[2]]);
     expect(items).toEqual([["/", "Overview"], ["/runs", "All runs"], ["/projects/p1", "Acme Invoices"], ["/projects/p2", "Globex Store"], ["/new", "New project"], ["/settings", "Settings"]]);
-    expect(html).not.toContain("aria-current");
+    expect(nav(html)).not.toContain("aria-current");
   });
 
   it("counts the workspace's runs next to All runs", () => {
@@ -68,7 +68,7 @@ describe("AppShell", () => {
 
   it("shows who is signed in at the bottom of the panel, by name and email, with Sign out", () => {
     const block = account(render());
-    expect(block).toMatch(/^<\/nav><section aria-label="Account" class="[^"]*\bhidden\b[^"]*\bmd:block\b/);
+    expect(block).toMatch(/^<\/nav><script type="text\/javascript">[\s\S]*?<\/script><section aria-label="Account" class="[^"]*\bhidden\b[^"]*\bmd:block\b/);
     expect(block).toMatch(/>BO<\/span>.*>Ben Ortiz<\/p><p [^>]*>ben@acme\.test<\/p>.*>Sign out<\/button><\/section>$/);
   });
 
