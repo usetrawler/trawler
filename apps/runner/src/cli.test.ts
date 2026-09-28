@@ -118,6 +118,20 @@ test("a run in which every role failed exits 1 but still writes the report", asy
   expect(readdirSync(join(run.d.runsRoot, runDir!))).toContain("report.md");
 });
 
+test("a run whose test account the product refuses exits 1 and says which account to check", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cfg-"));
+  writeFileSync(join(dir, "p.yaml"), YAML.stringify({
+    name: "A", targetUrl: "https://a.test", personas: [{ id: "p", name: "P", brief: "b", accountRef: "acct" }], goals: [{ id: "g", instruction: "x" }],
+    accounts: [{ ref: "acct", username: "p@a.test", password: "correct-horse-battery" }],
+  }));
+  const run = deps({ model: () => scriptedModel([
+    toolCall("sign_in", { account: "acct", usernameField: "e1", passwordField: "e2" }),
+    toolCall("report_sign_in", { outcome: "refused", observed: "Username and password do not match" }),
+  ]) });
+  expect(await runCli(["run", "--config", join(dir, "p.yaml")], run.d)).toBe(1);
+  expect(run.err.join("\n")).toContain("The product refused the username and password of p@a.test: Username and password do not match. Check that account in the project file and run again.");
+});
+
 test("run passes --judge-model, --headed and the budget through", async () => {
   const dir = mkdtempSync(join(tmpdir(), "cfg-"));
   writeFileSync(join(dir, "p.yaml"), YAML.stringify({ name: "A", targetUrl: "https://a.test", personas: [{ id: "p", name: "P", brief: "b" }], goals: [{ id: "g", instruction: "x" }] }));

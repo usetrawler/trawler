@@ -206,7 +206,7 @@ async function run(args: string[], deps: CliDeps, apiKey: () => string): Promise
   runDir.writeReport(renderReport(summary));
   deps.out(`${runDir.path("report.md")} — $${summary.totalCostUsd.toFixed(2)}`);
   if (summary.refusedAccount) {
-    deps.err(`${summary.refusedAccount} Check that account in the project file and run again.`);
+    deps.err(`${/[.!?]$/.test(summary.refusedAccount) ? summary.refusedAccount : `${summary.refusedAccount}.`} Check that account in the project file and run again.`);
     return 1;
   }
   const nothingWorked = summary.roles.length > 0 && summary.roles.every((r) => r.stoppedBy === "error");
