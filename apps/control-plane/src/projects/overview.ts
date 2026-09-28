@@ -12,6 +12,7 @@ export interface RunLine {
   tokenCap: number | null;
   tokensUsed: number;
   confirmed: number;
+  unchecked: boolean;
   goalsReached: number;
   goalsTotal: number;
   projectId: string;
@@ -58,6 +59,7 @@ function runLines(tx: Tx, orgId: string) {
       eb.selectFrom("findings as f").select((f) => f.fn.countAll<string>().as("n")).whereRef("f.run_id", "=", "r.id").where("f.kind", "=", "defect").where("f.verdict", "=", "confirmed")
         .where((f) => f.not(f.exists(f.selectFrom("jobs as j").select("j.id").whereRef("j.run_id", "=", "f.run_id").whereRef("j.finding_key", "=", "f.key").where("j.kind", "=", "judge").where("j.requested_by", "is not", null).where("j.status", "in", ["queued", "leased"]))))
         .as("confirmed"),
+      sql<boolean>`EXISTS (SELECT 1 FROM findings f WHERE f.run_id = r.id AND f.kind = 'defect') AND NOT EXISTS (SELECT 1 FROM findings f WHERE f.run_id = r.id AND f.kind = 'defect' AND NOT (EXISTS (SELECT 1 FROM jobs j WHERE j.run_id = r.id AND j.finding_key = f.key AND j.kind = 'replay' AND j.status = 'failed') AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.run_id = r.id AND j.finding_key = f.key AND j.kind = 'judge')))`.as("unchecked"),
       eb.selectFrom("goal_outcomes as g").select((g) => g.fn.countAll<string>().as("n")).whereRef("g.run_id", "=", "r.id").where("g.status", "=", "reached").as("goals_reached"),
       sql<number>`(SELECT count(*) FROM jsonb_array_elements(r.config_snapshot -> 'personas') p JOIN jsonb_array_elements(r.config_snapshot -> 'goals') g ON g ->> 'personaId' IS NULL OR g ->> 'personaId' = p ->> 'id')`.as("goals_total"),
     ]);
@@ -69,7 +71,7 @@ function toLine(r: RunRow): RunLine {
   return {
     id: r.id, number: r.number, status: r.status, createdAt: r.created_at,
     costUsd: Number(r.cost_usd), tokenCap: r.token_cap === null ? null : Number(r.token_cap), tokensUsed: Number(r.tokens_used),
-    confirmed: Number(r.confirmed ?? 0), goalsReached: Number(r.goals_reached ?? 0), goalsTotal: Number(r.goals_total ?? 0),
+    confirmed: Number(r.confirmed ?? 0), unchecked: !!r.unchecked, goalsReached: Number(r.goals_reached ?? 0), goalsTotal: Number(r.goals_total ?? 0),
     projectId: r.project_id, projectName: r.project_name, projectSite: r.name_shared ? siteOf(r.project_url) : null,
   };
 }

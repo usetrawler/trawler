@@ -6,7 +6,7 @@ import { RunTable } from "./run-table.tsx";
 
 const line = (over: Partial<RunLine> = {}): RunLine => ({
   id: "r1", number: 17, status: "succeeded", createdAt: new Date("2026-09-25T12:32:00Z"), costUsd: 3.08, tokenCap: null, tokensUsed: 0,
-  confirmed: 3, goalsReached: 2, goalsTotal: 3, projectId: "p1", projectName: "Acme Invoices", projectSite: null, ...over,
+  confirmed: 3, unchecked: false, goalsReached: 2, goalsTotal: 3, projectId: "p1", projectName: "Acme Invoices", projectSite: null, ...over,
 });
 const render = (runs: RunLine[], project = true) => renderToStaticMarkup(createElement(RunTable, { runs, project }));
 const rows = (html: string) => html.match(/<li[^>]*>.*?<\/li>/g) ?? [];
@@ -56,4 +56,10 @@ test("inside one project the date leads each row instead of the project's name",
 test("the rows keep the order they are given in, newest first from the query", () => {
   const html = render([line({ id: "new", number: 18 }), line({ id: "old", number: 17 })]);
   expect(rows(html).map((row) => row.match(/href="\/runs\/([^"]*)"/)?.[1])).toEqual(["new", "old"]);
+});
+
+test("a run whose every replay failed shows no count of confirmed defects, but that they were not checked", () => {
+  const [row] = rows(render([line({ confirmed: 0, unchecked: true })]));
+  expect(row).toMatch(/>—<\/strong><small[^>]*>not checked<span class="sr-only">: every replay failed<\/span><\/small>/);
+  expect(row).not.toContain(">confirmed<");
 });

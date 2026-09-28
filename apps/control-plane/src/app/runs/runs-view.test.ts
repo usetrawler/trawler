@@ -6,7 +6,7 @@ import { parseRunsQuery, RunsView } from "./runs-view.tsx";
 
 const run: RunLine = {
   id: "r1", number: 12, status: "failed", createdAt: new Date("2026-09-25T12:32:00Z"), costUsd: 0.2, tokenCap: null, tokensUsed: 0,
-  confirmed: 0, goalsReached: 0, goalsTotal: 3, projectId: "p1", projectName: "Acme", projectSite: null,
+  confirmed: 0, unchecked: false, goalsReached: 0, goalsTotal: 3, projectId: "p1", projectName: "Acme", projectSite: null,
 };
 
 const render = (over: { show?: RunFilter; runs?: RunLine[]; olderThan?: number | null; paged?: boolean; scope?: "workspace" | "project" } = {}) => renderToStaticMarkup(createElement(RunsView, {
