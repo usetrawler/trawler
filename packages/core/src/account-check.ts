@@ -9,7 +9,7 @@ import { newSessionState, sessionTools, type FillField } from "./session-tools.t
 
 const NUDGE = "Every turn must call a tool; plain text does nothing. Sign in with the account, then call report_sign_in.";
 const NO_REPORT: SignInCheck = { outcome: "unclear", observed: "the check wrote no report" };
-const MAX_OBSERVED = 500;
+const MAX_OBSERVED = 1000;
 
 export async function checkAccount(opts: {
   model: LanguageModel;

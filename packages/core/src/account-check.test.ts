@@ -80,9 +80,10 @@ test("a sign-in whose fields could not be typed cannot be reported as refused", 
 test("the observed text is cut short enough to always pass the protocol", async () => {
   const model = scriptedModel([
     toolCall("sign_in", { account: "ana", usernameField: "e1", passwordField: "e2" }),
-    toolCall("report_sign_in", { outcome: "refused", observed: "😀".repeat(900) }),
+    toolCall("report_sign_in", { outcome: "refused", observed: "😀".repeat(1200) }),
   ]);
   const { signIn } = await check(model).promise;
+  expect(signIn.outcome).toBe("refused");
   expect(SignInCheckSchema.safeParse(signIn).success).toBe(true);
 });
 
