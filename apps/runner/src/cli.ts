@@ -18,6 +18,7 @@ const SETUP_BUDGET_USD = 0.25;
 const FETCH_TIMEOUT_MS = 20_000;
 const MAX_PAGE_BYTES = 2_000_000;
 const EGRESS_POLL_MS = 1_000;
+const EGRESS_DOWN = "stopped: the egress proxy is not answering, so no browser can be started safely";
 
 const USAGE = `Usage:
   trawler-runner setup <url> [--docs <url>] [--focus <text>] [--model <id>] [--out project.yaml] [--force]
@@ -136,6 +137,7 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
   const egressServer = deps.env.TRAWLER_EGRESS_PROXY?.trim();
   const egressToken = deps.env.TRAWLER_EGRESS_TOKEN?.trim();
   if (egressServer && !egressToken) throw new UsageError("TRAWLER_EGRESS_PROXY is set without TRAWLER_EGRESS_TOKEN");
+  if (!egressServer && deps.env.TRAWLER_REQUIRE_EGRESS === "1") throw new UsageError("this runner must browse through the egress proxy, and TRAWLER_EGRESS_PROXY is not set; start it with apps/runner/start.sh");
   const egress = egressServer ? egressClient(egressServer, egressToken!) : undefined;
   const stop = new AbortController();
   let egressDown = false;
@@ -185,15 +187,16 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
   };
   if (egress) await egress.ready();
   if (values.once) {
-    await workOnce(workerDeps);
+    await workOnce(workerDeps, stop.signal);
     await reporting.close();
+    if (egressDown) deps.err(EGRESS_DOWN);
     return egressDown ? 1 : 0;
   }
   for (const signal of ["SIGTERM", "SIGINT"] as const) process.once(signal, () => stop.abort());
   log(`working for ${new URL(controlPlane).origin}${egress ? `, browsing through the egress proxy at ${egressServer}` : ""}`);
   await workLoop(workerDeps, stop.signal);
   await reporting.close();
-  if (egressDown) deps.err("stopped: the egress proxy is not answering, so no browser can be started safely");
+  if (egressDown) deps.err(EGRESS_DOWN);
   return egressDown ? 1 : 0;
 }
 

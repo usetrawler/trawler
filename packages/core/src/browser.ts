@@ -449,7 +449,7 @@ export async function openBrowser(opts: {
   let blockedNavigation: string | null = null;
 
   await registerEngines();
-  const chrome = await chromium.launch({ headless: opts.headless ?? true, proxy: opts.proxy, handleSIGTERM: !opts.survivesSignals, handleSIGINT: !opts.survivesSignals, handleSIGHUP: !opts.survivesSignals });
+  const chrome = await chromium.launch({ headless: opts.headless ?? true, proxy: opts.proxy, args: opts.proxy ? ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"] : [], handleSIGTERM: !opts.survivesSignals, handleSIGINT: !opts.survivesSignals, handleSIGHUP: !opts.survivesSignals });
   let disconnected = false;
   chrome.on("disconnected", () => (disconnected = true));
   try {

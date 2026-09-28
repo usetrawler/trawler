@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import dgram from "node:dgram";
 import { mkdtempSync, rmSync } from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -35,6 +36,14 @@ fetch("http://private.test:${privatePort}/secret").then((r) => r.text()).then(
 beforeAll(async () => {
   shop = http.createServer((req, res) => {
     if (req.url === "/secret") return res.end("leaked");
+    if (req.url?.startsWith("/rtc?")) {
+      res.setHeader("content-type", "text/html");
+      return res.end(`<title>RTC</title><p id="rtc">rtc: waiting</p><script>
+const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:127.0.0.1:${new URL(req.url, "http://x").searchParams.get("port")}" }] });
+pc.createDataChannel("x");
+pc.createOffer().then((o) => pc.setLocalDescription(o)).then(() => (document.getElementById("rtc").textContent = "rtc: offered"));
+</script>`);
+    }
     res.setHeader("content-type", "text/html");
     res.end(page(shopPort));
   });
@@ -89,4 +98,32 @@ test("Chromium reaches an allowed origin and its WebSocket only through the prox
     { url: `http://private.test:${shopPort}`, reason: "private" },
     { url: `http://127.0.0.1:${directPort}`, reason: "private" },
   ]);
+}, 60_000);
+
+test("a page's WebRTC cannot send UDP around the proxy", async () => {
+  const udp = dgram.createSocket("udp4");
+  let packets = 0;
+  udp.on("message", () => packets++);
+  await new Promise<void>((r) => udp.bind(0, "127.0.0.1", r));
+  const egress = egressClient(`http://127.0.0.1:${proxy.port}`, TOKEN);
+  const origins = [`http://shop.test:${shopPort}`];
+  const session = await egress.open(origins);
+  const dir = mkdtempSync(join(tmpdir(), "trw-egress-"));
+  const browser = await openBrowser({ allowedOrigins: origins, outputDir: dir, scrubber: new SecretScrubber(), onBlocked: () => undefined, proxy: session.proxy });
+  try {
+    await browser.tools.browser_navigate!.execute!({ url: `http://shop.test:${shopPort}/rtc?port=${udp.address().port}` }, ctx);
+    let seen = "";
+    for (let i = 0; i < 20 && !seen.includes("rtc: offered"); i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      seen = JSON.stringify(await browser.tools.browser_snapshot!.execute!({}, ctx));
+    }
+    expect(seen).toContain("rtc: offered");
+    await new Promise((r) => setTimeout(r, 2_000));
+    expect(packets).toBe(0);
+  } finally {
+    await browser.close();
+    await session.close();
+    rmSync(dir, { recursive: true, force: true });
+    udp.close();
+  }
 }, 60_000);

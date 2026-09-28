@@ -20,7 +20,7 @@ let proxy: Awaited<ReturnType<typeof startEgressProxy>>;
 const accept = (key: string) => createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
 
 beforeAll(async () => {
-  upstream = http.createServer((req, res) => res.end(`hello ${req.url} from ${req.headers.host}${req.headers["proxy-authorization"] ? " with proxy credentials" : ""}`));
+  upstream = http.createServer((req, res) => req.url === "/odd" ? void res.socket!.end("HTTP/1.1 099 Odd\r\ncontent-length: 0\r\n\r\n") : res.end(`hello ${req.url} from ${req.headers.host}${req.headers["proxy-authorization"] ? " with proxy credentials" : ""}`));
   upstream.on("upgrade", (req, socket, head) => {
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept(String(req.headers["sec-websocket-key"]))}\r\n\r\n`);
     if (head.length) socket.write(head);
@@ -154,6 +154,21 @@ test("the control API needs its token and valid origins, and a closed session's 
   expect(await control("DELETE", `/sessions/${s.id}`)).toEqual({ status: 200, body: { blocked: [{ url: "https://elsewhere.test", reason: "origin" }] } });
   await expect(connect(s.port, `shop.test:${upstreamPort}`)).rejects.toThrow(/ECONNREFUSED/);
   expect((await control("GET", `/sessions/${s.id}/blocked`)).status).toBe(404);
+});
+
+test("a target that is not in its canonical form is refused before it is resolved", async () => {
+  const s = await session([`https://shop.test:${upstreamPort}`, `https://127.0.0.1:${upstreamPort}`]);
+  for (const target of [`shop.test?:${upstreamPort}`, `2130706433:${upstreamPort}`, `0x7f.1:${upstreamPort}`, `shop.test.:${upstreamPort}`.replace(".:", "%2e:")]) {
+    expect(status(await connect(s.port, target))).toBe("HTTP/1.1 400 Bad Request");
+  }
+  expect(status(await connect(s.port, `SHOP.test:${upstreamPort}`, get("shop.test")))).toBe("HTTP/1.1 200 Connection Established");
+});
+
+test("an answer the proxy cannot pass on is a bad gateway, and the proxy keeps working", async () => {
+  const s = await session([`http://shop.test:${upstreamPort}`]);
+  const ask = (path: string) => exchange(s.port, `GET http://shop.test:${upstreamPort}${path} HTTP/1.1\r\nHost: shop.test:${upstreamPort}\r\nConnection: close\r\n\r\n`);
+  expect(status(await ask("/odd"))).toBe("HTTP/1.1 502 Bad Gateway");
+  expect(await ask("/after")).toContain("hello /after");
 });
 
 test("the proxy will not start with a short control token", async () => {

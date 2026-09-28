@@ -349,7 +349,7 @@ test("work refuses an egress proxy without its control token", async () => {
   expect(err.join("\n")).toMatch(/TRAWLER_EGRESS_TOKEN/);
 });
 
-test("a work runner whose egress proxy has gone hands its job back, stops taking jobs and exits with an error instead of browsing without it", async () => {
+test.each([[[]], [["--once"]]])("a work runner whose egress proxy has gone hands its job back, stops taking jobs and exits with an error instead of browsing without it (%j)", async (extra: string[]) => {
   const egressToken = "egress-token-".padEnd(40, "x");
   const proxy = await startEgressProxy({ token: egressToken });
   const job = {
@@ -380,9 +380,15 @@ test("a work runner whose egress proxy has gone hands its job back, stops taking
     },
     startReporting: async () => ({ report: () => {}, maskWith: () => {}, close: async () => {} }),
   });
-  expect(await runCli(["work", "--control-plane", "http://localhost:9"], d)).toBe(1);
+  expect(await runCli(["work", "--control-plane", "http://localhost:9", ...extra], d)).toBe(1);
   expect(claims).toBe(1);
   expect(browsers).toBe(0);
   expect(handedBack).toEqual([`/api/jobs/${job.jobId}/release`]);
   expect(err.join("\n")).toContain("stopped: the egress proxy is not answering");
+});
+
+test("a runner that must browse through the egress proxy refuses to work without one", async () => {
+  const { d, err } = deps({ env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_REQUIRE_EGRESS: "1" } });
+  expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(2);
+  expect(err.join("\n")).toMatch(/must browse through the egress proxy/);
 });

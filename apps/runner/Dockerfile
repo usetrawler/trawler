@@ -1,7 +1,7 @@
 FROM node:24-slim
 WORKDIR /app
 RUN useradd --system --no-create-home --shell /usr/sbin/nologin egress
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright NODE_ENV=production
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright NODE_ENV=production TRAWLER_REQUIRE_EGRESS=1
 COPY package.json package-lock.json tsconfig.base.json tsconfig.json ./
 COPY packages/core/package.json packages/core/
 COPY packages/protocol/package.json packages/protocol/

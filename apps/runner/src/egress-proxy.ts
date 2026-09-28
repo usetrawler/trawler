@@ -127,9 +127,12 @@ export async function startEgressProxy(opts: { token: string; port?: number; res
 
   async function onConnect(s: Session, req: http.IncomingMessage, client: Duplex, head: Buffer) {
     client.on("error", () => client.destroy());
-    const match = /^(\[[0-9a-fA-F:.]+\]|[^:\[\]/]+):(\d{1,5})$/.exec(req.url ?? "");
+    const match = /^(\[[0-9a-fA-F:.]+\]|[A-Za-z0-9.-]+):(\d{1,5})$/.exec(req.url ?? "");
     if (!match || Number(match[2]) < 1 || Number(match[2]) > 65535) return reply(client, "400 Bad Request");
-    const host = unbracketed(match[1]!.toLowerCase());
+    const given = match[1]!.toLowerCase();
+    const canonical = URL.canParse(`http://${given}`) ? new URL(`http://${given}`).hostname : null;
+    if (canonical !== given) return reply(client, "400 Bad Request");
+    const host = unbracketed(given);
     const port = match[2]!;
     const [http80, https] = candidates(host, port);
     const shown = [http80!, https!].find((origin) => s.origins.has(origin)) ?? (port === "80" ? http80! : https!);
@@ -190,7 +193,14 @@ export async function startEgressProxy(opts: { token: string; port?: number; res
       setHost: false,
     });
     forward.on("response", (answer) => {
-      res.writeHead(answer.statusCode ?? 502, answer.rawHeaders);
+      try {
+        res.writeHead(answer.statusCode ?? 502, answer.rawHeaders);
+      } catch {
+        answer.destroy();
+        forward.destroy();
+        if (!res.headersSent) res.writeHead(502, { "content-length": 0 });
+        return res.end();
+      }
       answer.pipe(res);
     });
     forward.on("error", () => {
