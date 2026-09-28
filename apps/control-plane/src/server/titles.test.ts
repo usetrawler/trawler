@@ -1,9 +1,12 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
+const NOT_FOUND = { digest: "NEXT_HTTP_ERROR_FALLBACK;404" };
+
 type Member = { userId: string; email: string; orgId: string; orgName: string; role: string };
 const state = vi.hoisted(() => ({ member: null as Member | null, tenants: [] as string[], projects: {} as Record<string, string>, runs: {} as Record<string, { number: number; projectName: string }>, captures: {} as Record<string, { runNumber: number; projectId: string }> }));
 
 vi.mock("./auth.ts", () => ({ signedInMember: async (headers: Headers) => (headers.get("cookie") === "session=ana" ? state.member : null) }));
+vi.mock("next/navigation", () => ({ notFound: () => { throw Object.assign(new Error("NEXT_HTTP_ERROR_FALLBACK;404"), NOT_FOUND); } }));
 vi.mock("./db.ts", () => ({ getDb: () => ({}) }));
 vi.mock("../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
 vi.mock("../projects/overview.ts", () => ({
@@ -33,20 +36,20 @@ test("a project's pages, a run and a screen capture are named after what they sh
   expect(state.tenants.every((org) => org === "org-a")).toBe(true);
 });
 
-test("a project, run or capture the workspace cannot see leaves the title to the not-found page, naming nothing", async () => {
+test("a project, run or capture the workspace cannot see switches the metadata to the not-found page's, naming nothing", async () => {
   state.member = { ...state.member!, orgId: "org-b" };
-  expect(await projectPageTitle(request(), PROJECT, "Plan")).toEqual({});
-  expect(await runPageTitle(request(), ID)).toEqual({});
-  expect(await capturePageTitle(request(), ID)).toEqual({});
+  await expect(projectPageTitle(request(), PROJECT, "Plan")).rejects.toMatchObject(NOT_FOUND);
+  await expect(runPageTitle(request(), ID)).rejects.toMatchObject(NOT_FOUND);
+  await expect(capturePageTitle(request(), ID)).rejects.toMatchObject(NOT_FOUND);
   expect(state.tenants.every((org) => org === "org-b")).toBe(true);
 });
 
-test("signed out, or with an id that is not a uuid, nothing is read", async () => {
+test("an id that is not a uuid is not found without a query, and a signed-out request reads nothing, since the page sends it to sign in", async () => {
+  await expect(projectPageTitle(request(), "plan", "Plan")).rejects.toMatchObject(NOT_FOUND);
+  await expect(runPageTitle(request(), "0017")).rejects.toMatchObject(NOT_FOUND);
   expect(await projectPageTitle(new Headers(), PROJECT, "Plan")).toEqual({});
   expect(await runPageTitle(new Headers(), ID)).toEqual({});
   expect(await capturePageTitle(new Headers(), ID)).toEqual({});
-  expect(await projectPageTitle(request(), "plan", "Plan")).toEqual({});
-  expect(await runPageTitle(request(), "0017")).toEqual({});
   expect(state.tenants).toEqual([]);
 });
 

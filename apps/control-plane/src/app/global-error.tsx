@@ -15,6 +15,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        <title>{updated ? "Page updated · Trawler" : "Something went wrong · Trawler"}</title>
         <ThemeScript />
       </head>
       <body className="min-h-dvh bg-paper font-sans text-ink antialiased">
