@@ -1266,6 +1266,22 @@ describe("robustness", () => {
     }
   }, 60_000);
 
+  test("closing with a dialog still open is quick, and leaves no Chromium running", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "trw-"));
+    const b = await openBrowser({ allowedOrigins: [origin], outputDir: dir, scrubber: new SecretScrubber(), onBlocked: () => {} });
+    try {
+      await navigate(b, `${origin}/dialog`);
+      const clicked = JSON.stringify(await b.tools.browser_click!.execute!({ target: refOf(await snapshot(b), "Delete"), element: "Delete" }, ctx));
+      expect(clicked).toContain("Modal state");
+      const started = performance.now();
+      await b.close();
+      expect(performance.now() - started).toBeLessThan(3000);
+      expect(() => execFileSync("pgrep", ["-P", String(process.pid), "-f", "chrom"])).toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   test("a crashed browser makes every tool throw", async () => {
     await withBrowser(async (b) => {
       await navigate(b, origin);
