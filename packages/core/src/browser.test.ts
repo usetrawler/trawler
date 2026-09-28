@@ -121,6 +121,14 @@ beforeAll(async () => {
         return html(`<input aria-label="Password" type="password" placeholder="Enter your password">`);
       case "/password-colon-label":
         return html(`<input aria-label="Password: at least 4 characters" type="password">`);
+      case "/signed-in-as-long":
+        return html(`<p>ad min-secret</p><input aria-label="Password" type="password">`);
+      case "/password-shouted":
+        return html(`<input aria-label="Password" type="password" oninput="this.value = this.value.toUpperCase()">`);
+      case "/password-shown-as-search":
+        return html(`<input aria-label="Password" type="password"><button onclick="document.querySelector('input').type = 'search'">Show password</button>`);
+      case "/password-copied":
+        return html(`<input aria-label="Your password" type="text" value=" ad  min-secret">`);
       case "/signed-in-as":
         return html(`<p>admin</p><input aria-label="Password" type="password">`);
       case "/readonly-password":
@@ -950,6 +958,71 @@ describe("password fields", () => {
       const after = await snapshot(b);
       expect(after).toContain("•••");
       expect(after).not.toContain(shown);
+    });
+  }, 60_000);
+
+  test.each([
+    ["/password-placeholder", "Password"],
+    ["/", "Password"],
+  ])("a long password with leading and doubled spaces stays hidden in its own field on %s", async (path, name) => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}${path}`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, name), " ad  min-secret", "password")).toBe("typed the password");
+      const after = await snapshot(b);
+      expect(after).toMatch(/textbox \\"Password\\"[^\\]*(: •••|\\n\s*- \/placeholder: [^\\]*\\n\s*- text: •••)/);
+      expect(after).not.toContain("ad min-secret");
+    });
+  }, 60_000);
+
+  test("page text that shows a long password with its spaces collapsed is masked like the password itself", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/signed-in-as-long`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), " ad  min-secret", "password")).toBe("typed the password");
+      const shown = await snapshot(b);
+      expect(shown).toMatch(/paragraph[^\\]*: •••/);
+      expect(shown).not.toContain("ad min-secret");
+    });
+  }, 60_000);
+
+  test.each([
+    ["an invisible character", "/", "Password", "ad\u200bmin-secret", "admin-secret"],
+    ["a soft hyphen", "/", "Password", "ad\u00admin-secret", "admin-secret"],
+    ["the page changing it", "/password-shouted", "Password", " ad  min-secret", "AD MIN-SECRET"],
+    ["the project's own secret inside it", "/", "Password", "hunter22-secret  2024", "2024"],
+    ["an invisible character, too short to scrub", "/", "Password", "pw\u200b12", "pw12"],
+    ["the page changing it, too short to scrub", "/password-shouted", "Password", "pw12ab", "PW12AB"],
+  ])("a password with %s is hidden in its own field", async (_, path, name, password, shown) => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}${path}`);
+      expect(await b.fillField(refOf(await snapshot(b), name), password, "password")).toBe("typed the password");
+      const after = await snapshot(b);
+      expect(after).toMatch(/textbox \\"Password\\"[^\\]*: •••/);
+      expect(after).not.toContain(shown);
+    });
+  }, 60_000);
+
+  test.each([" ad  min-secret", "pw  12"])("a password field the page turns into a search box keeps %j hidden", async (password) => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/password-shown-as-search`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), password, "password")).toBe("typed the password");
+      await b.tools.browser_click!.execute!({ target: refOf(snap, "Show password"), element: "Show password" }, ctx);
+      const after = await snapshot(b);
+      expect(after).toMatch(/searchbox \\"Password\\"[^\\]*: •••/);
+      expect(after).not.toContain(password.replace(/\s+/g, " ").trim());
+    });
+  }, 60_000);
+
+  test("a typed password shown in another field on a later page is hidden there too", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/`);
+      expect(await b.fillField(refOf(await snapshot(b), "Password"), " ad  min-secret", "password")).toBe("typed the password");
+      await navigate(b, `${origin}/password-copied`);
+      const after = await snapshot(b);
+      expect(after).toMatch(/textbox \\"Your password\\"[^\\]*: •••/);
+      expect(after).not.toContain("ad min-secret");
     });
   }, 60_000);
 

@@ -5,7 +5,7 @@ import { chromium, selectors, type ElementHandle, type Frame, type Locator, type
 import { jsonSchema, type Tool, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
 import { MAX_ARTIFACT_BYTES } from "@usetrawler/protocol";
-import { MASK, MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
+import { asShown, MASK, MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
 import type { FieldKind } from "./session-tools.ts";
 
 export const BROWSER_TOOLS = [
@@ -368,7 +368,7 @@ const SNAPSHOT_ENTRY = /^(\s*)- ('(?:[^'\n]|'')*'|[^'\n][^\n]*?)(?:: (.*)|(:))?$
 
 function withFieldValuesMasked<T>(value: T, values: Set<string>): T {
   if (values.size === 0) return value;
-  const normal = (s: string) => s.replace(/\s+/g, " ").trim();
+  const normal = asShown;
   const wanted = new Set([...values].map(normal));
   const unquoted = (s: string) => (/^'.*'$/.test(s) ? s.slice(1, -1).replace(/''/g, "'") : /^".*"$/.test(s) ? s.slice(1, -1).replace(/\\(.)/g, "$1") : s);
   const holds = (shown: string) => wanted.has(normal(shown)) || wanted.has(normal(unquoted(shown)));
@@ -380,7 +380,7 @@ function withFieldValuesMasked<T>(value: T, values: Set<string>): T {
       const [, indent = "", key = "", inline, children] = entry;
       if (field !== null && indent.length <= field) field = null;
       if (field !== null) return indent.length === field + 2 && key === "text" && inline !== undefined && holds(inline) ? `${indent}- text: ${MASK}` : line;
-      if (!/^textbox\b/.test(unquoted(key))) return line;
+      if (!/^(textbox|searchbox|combobox|spinbutton)\b/.test(unquoted(key))) return line;
       if (children) field = indent.length;
       return inline !== undefined && holds(inline) ? `${indent}- ${key}: ${MASK}` : line;
     }).join("\n");
@@ -525,7 +525,7 @@ export async function openBrowser(opts: {
     };
     const scrubWithFilledValues = async <T>(result: T): Promise<T> => {
       const live = new SecretScrubber();
-      const tooShortToScrub = new Set([...typedPasswords].filter((typed) => typed.length < MIN_SECRET_LENGTH));
+      const heldInFields = new Set(typedPasswords);
       const fields = await liveFilled();
       if (dialogOpen && fields.length > 0) return refused(WITHHELD_FOR_DIALOG) as T;
       const values = await within(Promise.all(fields.map(readValue)), opts.filledReadMs ?? FILLED_READ_MS, null);
@@ -533,14 +533,12 @@ export async function openBrowser(opts: {
       for (const [i, h] of fields.entries()) {
         const value = values[i]!;
         if (value === valuesBeforeTyping.get(h)) continue;
-        if (value.length < MIN_SECRET_LENGTH) {
-          if (value) tooShortToScrub.add(value);
-          continue;
-        }
+        if (value) heldInFields.add(value);
+        if (value.length < MIN_SECRET_LENGTH) continue;
         live.add(value);
         if ([...typedPasswords].some((typed) => typed.length >= MIN_SECRET_LENGTH && (keptFrom(value, typed) || keptFrom(typed, value)))) keepSecret(value);
       }
-      return withFieldValuesMasked(live.scrub(opts.scrubber.scrub(result)), tooShortToScrub);
+      return withFieldValuesMasked(live.scrub(opts.scrubber.scrub(result)), heldInFields);
     };
     const focusCheck = async () => {
       const held = await liveFilled();
