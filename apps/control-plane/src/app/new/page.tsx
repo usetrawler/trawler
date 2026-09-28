@@ -16,7 +16,7 @@ export default async function NewProjectPage() {
       <SetupWizard
         intro={
           <div className="flex flex-col gap-4">
-            <p className="font-mono text-xs tracking-[0.2em] text-action uppercase">New project</p>
+            <p className="font-mono text-xs tracking-[0.2em] text-action-ink uppercase">New project</p>
             <h1 className="text-4xl leading-[0.95] font-bold tracking-tight md:text-6xl">What should Trawler use?</h1>
             <p className="max-w-xl text-lg text-muted">Paste a real product that runs in a browser: production, staging or a preview. We read the public page, tell you what we think the product does, and propose people to try the features you choose.</p>
           </div>

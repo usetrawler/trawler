@@ -23,7 +23,7 @@ export default function NotFound() {
       <main className="relative m-auto grid w-[min(1220px,calc(100%-48px))] grid-cols-[minmax(0,1fr)_360px] items-center gap-20 max-[821px]:grid-cols-1 max-[821px]:gap-[55px] max-[821px]:py-[60px] max-[521px]:w-[calc(100%-36px)]">
         <div aria-hidden className="pointer-events-none absolute top-1/2 -right-[2vw] z-0 -translate-y-[54%] text-[clamp(260px,35vw,540px)] leading-[0.75] font-[850] tracking-[-0.1em] text-[color-mix(in_srgb,var(--ink)_4%,transparent)] select-none forced-colors:hidden max-[821px]:relative max-[821px]:top-auto max-[821px]:right-auto max-[821px]:h-[0.7em] max-[821px]:translate-y-0 max-[821px]:text-[clamp(120px,38vw,190px)] max-[821px]:text-[color-mix(in_srgb,var(--action)_14%,transparent)]">404</div>
         <section className="relative z-10 min-w-0">
-          <p className="flex items-center gap-2.5 font-mono text-[11px] tracking-[0.12em] text-action uppercase">
+          <p className="flex items-center gap-2.5 font-mono text-[11px] tracking-[0.12em] text-action-ink uppercase">
             <i aria-hidden className="h-2 w-2 rounded-full bg-action shadow-[0_0_0_7px_color-mix(in_srgb,var(--action)_13%,transparent)]" />
             Page not found
           </p>
@@ -45,11 +45,11 @@ export default function NotFound() {
             <i className="h-[11px] w-[11px] flex-none rounded-full border-2 border-ink" />
             <b className="h-0.5 flex-1 border-t-2 border-transparent bg-origin-border bg-[linear-gradient(90deg,var(--action)_0_45%,transparent_45%_55%,var(--line)_55%)]" />
             <i className="h-[11px] w-[11px] flex-none rounded-full border-2 border-ink" />
-            <strong className="grid h-9 w-9 place-items-center rounded-full border-2 border-action text-2xl leading-none text-action">×</strong>
+            <strong className="grid h-9 w-9 place-items-center rounded-full border-2 border-action text-2xl leading-none text-action-ink">×</strong>
           </div>
           <p className="flex items-end justify-between border-t border-line pt-[17px]">
             <span className={label}>Result</span>
-            <b className="font-mono text-[11px] font-normal text-action uppercase">Not found</b>
+            <b className="font-mono text-[11px] font-normal text-action-ink uppercase">Not found</b>
           </p>
           <small className="mt-[18px] block text-[11px] text-muted">Checked twice by Trawler.</small>
         </section>

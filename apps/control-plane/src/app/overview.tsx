@@ -82,7 +82,7 @@ export function Overview({ firstName, projects, recent }: { firstName: string; p
         <section aria-labelledby="recent-runs" className="mt-[34px]">
           <div className="flex items-end justify-between gap-4 pb-3">
             <div>
-              <h2 id="recent-runs" className="font-mono text-[10px] text-action uppercase">Recent runs</h2>
+              <h2 id="recent-runs" className="font-mono text-[10px] text-action-ink uppercase">Recent runs</h2>
               <p className="mt-[3px] text-[11px] text-muted">Newest first</p>
             </div>
             <a href="/runs" className="-my-2 py-2 text-muted hover:text-ink">View all<span aria-hidden> →</span></a>

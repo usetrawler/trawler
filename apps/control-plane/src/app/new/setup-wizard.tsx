@@ -71,7 +71,7 @@ export function Progress({ step, host }: { step: Step; host: string }) {
     <div role="status" className="flex flex-col gap-6">
       <Working />
       <div className="flex flex-col gap-3">
-        <p className="font-mono text-xs tracking-[0.2em] text-action uppercase">Building your test plan</p>
+        <p className="font-mono text-xs tracking-[0.2em] text-action-ink uppercase">Building your test plan</p>
         <h2 className="text-3xl leading-tight font-bold tracking-tight break-words md:text-5xl">Understanding {host}</h2>
         <p className="max-w-xl text-muted">Trawler reads the product&apos;s page, works out what it does, and then chooses people with different roles and goals. This usually takes 1–2 minutes; keep this page open.</p>
       </div>
@@ -186,7 +186,7 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-3">
-        <p className="font-mono text-xs tracking-[0.2em] text-action uppercase">Trawler understood the product</p>
+        <p className="font-mono text-xs tracking-[0.2em] text-action-ink uppercase">Trawler understood the product</p>
         <h2 className="text-4xl leading-[0.95] font-bold tracking-tight md:text-6xl">Confirm the context.</h2>
         <p className="max-w-xl text-lg text-muted">We use this only to choose the people and their goals. Edit it if we misunderstood anything.</p>
       </div>
@@ -224,7 +224,7 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
                   <strong>{f.title}</strong>
                   {f.summary && <span className="text-sm text-muted">{f.summary}</span>}
                 </span>
-                <span aria-hidden className={f.chosen ? "text-action" : "text-muted"}>{f.chosen ? "✓" : "+"}</span>
+                <span aria-hidden className={f.chosen ? "text-action-ink" : "text-muted"}>{f.chosen ? "✓" : "+"}</span>
               </button>
             </li>
           ))}

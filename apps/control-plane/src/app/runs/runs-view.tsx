@@ -30,8 +30,8 @@ export function RunsView({ head, basePath, show, counts, runs, olderThan, paged,
       {runs.length === 0 ? <p className="py-6 text-muted">{paged ? "There are no older runs here." : (scope === "project" ? EMPTY_PROJECT : EMPTY)[show]}</p> : <RunTable runs={runs} project={scope === "workspace"} />}
       {(paged || olderThan !== null) && (
         <nav aria-label="Run history pages" className="mt-5 flex flex-wrap justify-between gap-3">
-          {paged ? <a href={href(show)} className="underline underline-offset-4 hover:text-action">Newest runs</a> : <span />}
-          {olderThan !== null && <a href={href(show, olderThan)} className="underline underline-offset-4 hover:text-action">Older runs</a>}
+          {paged ? <a href={href(show)} className="underline underline-offset-4 hover:text-action-ink">Newest runs</a> : <span />}
+          {olderThan !== null && <a href={href(show, olderThan)} className="underline underline-offset-4 hover:text-action-ink">Older runs</a>}
         </nav>
       )}
     </div>
