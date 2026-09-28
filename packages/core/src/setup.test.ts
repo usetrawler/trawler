@@ -61,6 +61,7 @@ const proposal = {
     { id: "", name: "Mo", brief: "You run a small studio.", signsIn: false, goals: [{ id: "invite", instruction: "Bring a colleague in." }] },
     { id: "fifth", name: "Extra", brief: "You should be dropped.", signsIn: false, goals: [{ id: "extra", instruction: "Dropped with the person." }] },
   ],
+  playOrder: [],
 };
 
 const PLAN_TOKENS = 600;
@@ -142,6 +143,7 @@ describe("proposeProject", () => {
         { id: "c", name: "N".repeat(500), brief: "B".repeat(5000), signsIn: false, goals: [{ id: "c", instruction: "Look around." }] },
         { id: "d", name: "Dee", brief: "You have nothing to do.", signsIn: false, goals: [{ id: "d", instruction: "  " }] },
       ],
+      playOrder: [],
     };
     const { project, usage } = await propose(scriptedModel([text(JSON.stringify(long))], 0.002)).promise;
     expect(project.name).toBe("app.acme.test");
@@ -333,7 +335,7 @@ describe("proposePeople", () => {
   const people = { personas: [
     { id: "founder", name: "Ana", brief: "You submit pitches.", signsIn: false, goals: [{ id: "submit", instruction: "Submit a pitch." }] },
     { id: "reviewer", name: "Dana", brief: "You review pitches.", signsIn: true, goals: [{ id: "approve", instruction: "Approve a pitch." }] },
-  ] };
+  ], playOrder: [] };
 
   test("proposes people for the chosen features, keeps the confirmed description and marks who signs in", async () => {
     const model = scriptedModel([text(JSON.stringify(people))]);
@@ -345,6 +347,19 @@ describe("proposePeople", () => {
     expect(prompt).toContain("Review pitches");
     expect(prompt).toContain("Pitches, reviewed.");
     expect(prompt).toMatch(/exercise these features and nothing else/);
+  });
+
+  test("goals come in the order of play the model gives, across people, and anything it left out follows", async () => {
+    const team = { personas: [
+      { id: "founder", name: "Priya", brief: "You submit pitches.", signsIn: false, goals: [{ id: "submit", instruction: "Submit a pitch." }, { id: "decision", instruction: "See the decision on the pitch you submitted." }, { id: "edit", instruction: "Edit your profile." }] },
+      { id: "reviewer", name: "Marco", brief: "You review pitches.", signsIn: true, goals: [{ id: "review", instruction: "Accept the pitch Priya submitted." }] },
+    ], playOrder: [
+      { person: "founder", goal: "submit" }, { person: "reviewer", goal: "review" }, { person: "founder", goal: "decision" }, { person: "ghost", goal: "boo" },
+    ] };
+    const model = scriptedModel([text(JSON.stringify(team))]);
+    const plan = await proposePeople({ model, modelId: "mock", budget: new Budget(1), product, name: "Acme", description: "d", features: ["Submit a pitch"] });
+    expect(plan.project.goals.map((g) => [g.personaId, g.id])).toEqual([["founder", "submit"], ["reviewer", "review"], ["founder", "decision"], ["founder", "edit"]]);
+    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toMatch(/playOrder/);
   });
 
   test("when nobody can sign up, every person signs in to an existing account, whatever the model marked", async () => {
