@@ -1,6 +1,7 @@
+import { randomBytes } from "node:crypto";
 import type { LanguageModel } from "ai";
 import { Budget, judge, runReplay, runRoleSession, SecretScrubber, type Browser } from "@usetrawler/core";
-import { goalsFor, MAX_URL, type ProjectConfig, type RoleResult, type RunEventInput } from "@usetrawler/protocol";
+import { MAX_STORY, MAX_URL, turnsOf, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
 import type { RunSummary } from "./run-dir.ts";
 
 const CLOSE_TIMEOUT_MS = 10_000;
@@ -56,27 +57,47 @@ export async function localRun(opts: {
     }
   };
 
-  for (const persona of opts.project.personas) {
+  const turns = turnsOf(opts.project);
+  const teamed = turns.length > opts.project.personas.length;
+  const signUpSeed = randomBytes(24).toString("base64url");
+  const story: StoryEntry[] = [];
+  const byPersona = new Map<string, RoleResult>();
+  for (const [i, turn] of turns.entries()) {
     if (budget.exceeded) break;
-    const jobId = `role:${persona.id}`;
+    const persona = opts.project.personas.find((p) => p.id === turn.personaId)!;
+    const jobId = teamed ? `role:${persona.id}#${i + 1}` : `role:${persona.id}`;
     const scrubber = scrubberFor();
+    const told: StoryEntry[] = [];
+    const emit = (e: RunEventInput) => {
+      if (e.type === "note") told.push({ personaId: persona.id, name: persona.name, text: e.text });
+      if (e.type === "goal_status" && e.outcome.status !== "not_attempted") {
+        told.push({ personaId: persona.id, name: persona.name, goal: opts.project.goals.find((g) => g.id === e.outcome.goal)?.instruction ?? e.outcome.goal, status: e.outcome.status, text: e.outcome.note });
+      }
+      opts.emit(e);
+    };
     const { result, usage } = await withBrowser(jobId, scrubber, (b) =>
       runRoleSession({
         model: opts.agentModel, modelId: opts.agentModelId, persona, project: opts.project,
-        browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: opts.maxSteps, emit: opts.emit,
+        browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: opts.maxSteps, emit,
         newFindingId: () => `f${++findingNo}`,
+        goalIds: turn.goalIds, story: story.slice(-MAX_STORY), signUpSeed,
       }),
     ).catch((err): { result: RoleResult; usage: ReturnType<typeof noUsage> } => {
       const error = failure(scrubber, err);
       recordFailure(jobId, "role_session", error);
       return {
-        result: { persona: persona.id, goals: goalsFor(opts.project.goals, persona.id).map((g) => ({ goal: g.id, status: "not_attempted", note: "" })), findings: [], stoppedBy: "error", error },
+        result: { persona: persona.id, goals: turn.goalIds.map((goal) => ({ goal, status: "not_attempted", note: "" })), findings: [], stoppedBy: "error", error },
         usage: noUsage(opts.agentModelId),
       };
     });
-    summary.roles.push(result);
+    story.push(...told);
+    const earlier = byPersona.get(persona.id);
+    byPersona.set(persona.id, earlier
+      ? { ...result, goals: [...earlier.goals, ...result.goals], findings: [...earlier.findings, ...result.findings], ...(earlier.error && !result.error ? { error: earlier.error } : {}) }
+      : result);
     summary.jobs.push({ jobId, ...usage });
   }
+  summary.roles.push(...byPersona.values());
 
   for (const role of summary.roles) {
     const accountRef = opts.project.personas.find((p) => p.id === role.persona)?.accountRef;

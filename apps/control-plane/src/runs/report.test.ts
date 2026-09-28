@@ -227,3 +227,17 @@ test("a defect that was replayed but never judged is not said to be unreplayed",
   const live = runView(summary({ jobs: [job("replay", "succeeded"), judged("queued")], findings: [finding("ana:f1", "ana", replayed)] }));
   expect(live.report.notJudged.map((f) => f.reason)).toEqual(["Waiting for the judge."]);
 });
+
+test("in a team session a person between turns waits for their next one, and is counted over all their turns", () => {
+  const team = summary({
+    goalTexts: [{ id: "submit", instruction: "Submit.", personaId: "ana" }, { id: "review", instruction: "Review.", personaId: "lee" }, { id: "decision", instruction: "See the decision.", personaId: "ana" }],
+    jobs: [job("role_session", "succeeded", { persona_key: "ana" }), job("role_session", "leased", { persona_key: "lee" }), job("role_session", "queued", { persona_key: "ana" })],
+    goals: [{ personaKey: "ana", goal: "submit", status: "reached", note: "" }],
+  });
+  const view = runView(team);
+  expect(view.personas.map((p) => [p.id, p.state, p.hadTurn])).toEqual([["ana", "waiting", true], ["lee", "exploring", false]]);
+  expect(view.stages[0]!.detail).toBe("2 people taking 3 turns");
+  const done = runView({ ...team, status: "succeeded", jobs: team.jobs.map((j) => ({ ...j, status: "succeeded" })), goals: [...team.goals, { personaKey: "ana", goal: "decision", status: "reached", note: "" }, { personaKey: "lee", goal: "review", status: "reached", note: "" }] });
+  expect(done.personas.map((p) => p.state)).toEqual(["reached", "reached"]);
+  expect(done.goalsTotal).toBe(3);
+});

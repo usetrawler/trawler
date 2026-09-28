@@ -1,5 +1,6 @@
+import { randomBytes } from "node:crypto";
 import { sql } from "kysely";
-import type { ProjectConfig, RunEvent, Verdict } from "@usetrawler/protocol";
+import { turnsOf, type ProjectConfig, type RunEvent, type Verdict } from "@usetrawler/protocol";
 import { modelKey } from "../credentials/credentials.ts";
 import type { Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -55,13 +56,13 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
     .values({
       org_id: orgId, project_id: projectId, number: next, config_snapshot: JSON.stringify(withoutSecrets(config)),
       agent_model: options.agentModel, judge_model: options.judgeModel, budget_usd: options.budgetUsd.toFixed(4),
-      max_steps: options.maxSteps, replay_steps: options.replaySteps, created_by: options.createdBy,
+      max_steps: options.maxSteps, replay_steps: options.replaySteps, created_by: options.createdBy, sign_up_seed: randomBytes(24).toString("base64url"),
       provider: options.provider ?? "openrouter", provider_base_url: options.providerBaseUrl ?? null, token_cap: options.tokenCap ? String(options.tokenCap) : null,
       prompt_usd_per_mtok: options.price ? options.price.promptUsdPerMtok.toFixed(6) : null, completion_usd_per_mtok: options.price ? options.price.completionUsdPerMtok.toFixed(6) : null,
     })
     .returning(["id", "number"])
     .executeTakeFirstOrThrow();
-  await tx.insertInto("jobs").values(config.personas.map((p, i) => ({ org_id: orgId, run_id: run.id, kind: "role_session", position: i, persona_key: p.id }))).execute();
+  await tx.insertInto("jobs").values(turnsOf(config).map((turn, i) => ({ org_id: orgId, run_id: run.id, kind: "role_session", position: i, persona_key: turn.personaId }))).execute();
   return run;
 }
 

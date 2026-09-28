@@ -2,6 +2,11 @@ import { goalsFor } from "@usetrawler/protocol";
 import type { CancelReason, RunSummary } from "./runs.ts";
 
 export type StageState = "waiting" | "active" | "done" | "skipped";
+function useDetail(people: number, turns: number): string {
+  if (turns <= people) return `${people} ${people === 1 ? "session" : "sessions"}`;
+  return `${people} people taking ${turns} turns`;
+}
+
 export type PersonaState = "waiting" | "exploring" | "reached" | "missed" | "finished" | "failed" | "cancelled";
 export type JudgeAgainState = "judge_again" | "judging" | "after_run" | "cap_spent";
 
@@ -60,7 +65,7 @@ export function runView(s: RunSummary) {
   const replay = stage(byKind("replay"), live);
   const judge = rejudging ? "active" : stage(byKind("judge"), live);
   const stages = [
-    { label: "Use", detail: `${s.personas.length} ${s.personas.length === 1 ? "session" : "sessions"}`, state: use },
+    { label: "Use", detail: useDetail(s.personas.length, byKind("role_session").length), state: use },
     { label: "Replay", detail: "a fresh agent follows each defect's steps", state: replay },
     { label: "Judge", detail: "compares the replay with the report", state: judge },
     { label: "Report", detail: "", state: (live ? "waiting" : "done") as StageState },
@@ -68,18 +73,21 @@ export function runView(s: RunSummary) {
 
   const goalText = new Map(s.goalTexts.map((g) => [g.id, g.instruction]));
   const personas = s.personas.map((p) => {
-    const job = s.jobs.find((j) => j.kind === "role_session" && j.persona_key === p.id);
+    const turns = s.jobs.filter((j) => j.kind === "role_session" && j.persona_key === p.id);
+    const failed = turns.find((j) => j.status === "failed");
+    const ended = turns.length > 0 && turns.every((j) => j.status === "succeeded" || j.status === "failed");
     const goals = s.goals.filter((g) => g.personaKey === p.id);
     const findings = s.findings.filter((f) => f.personaKey === p.id);
     const own = goalsFor(s.goalTexts, p.id);
     const reached = goals.filter((g) => g.status === "reached").length;
     let state: PersonaState = "waiting";
-    if (job?.status === "failed") state = "failed";
-    else if (job?.status === "succeeded") state = goals.some((g) => g.status === "failed") ? "missed" : reached === own.length ? "reached" : "finished";
-    else if (!live || job?.status === "cancelled") state = "cancelled";
-    else if (job?.status === "leased") state = "exploring";
+    if (live && turns.some((j) => j.status === "leased")) state = "exploring";
+    else if (ended && failed) state = "failed";
+    else if (ended) state = goals.some((g) => g.status === "failed") ? "missed" : reached === own.length ? "reached" : "finished";
+    else if (!live || turns.some((j) => j.status === "cancelled")) state = "cancelled";
     return {
-      id: p.id, name: p.name, state, error: job?.error ?? null,
+      id: p.id, name: p.name, state, error: failed?.error ?? null,
+      hadTurn: turns.some((j) => j.status === "succeeded" || j.status === "failed"),
       goals: own.map((g) => {
         const outcome = goals.find((o) => o.goal === g.id);
         return { id: g.id, goal: g.instruction, status: outcome?.status ?? null, note: outcome?.note ?? "" };

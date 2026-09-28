@@ -30,6 +30,7 @@ export const JobAssignmentSchema = z.object({
   config: ProjectConfigSchema,
   personaKey: z.string().optional(),
   goalIds: z.array(z.string()).optional(),
+  turn: z.number().int().nonnegative().optional(),
   story: z.array(StoryEntrySchema).max(MAX_STORY).optional(),
   signUpSeed: z.string().max(200).optional(),
   accountRef: z.string().optional(),

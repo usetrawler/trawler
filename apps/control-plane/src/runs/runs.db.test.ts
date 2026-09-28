@@ -683,3 +683,67 @@ test("a run does not start while a person who has to sign in has no account, and
   await withOrg(t.db, "org-a", (tx) => replacePlan(tx, "org-a", id, { personas: plan.personas.map((p) => ({ ...p, accountRef: "ana" })), goals: plan.goals }));
   await expect(withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", id, keys, options))).resolves.toMatchObject({ id: expect.any(String) });
 });
+
+describe("a team session", () => {
+  const team = ProjectConfigSchema.parse({
+    name: "Pitches", targetUrl: "https://pitches.test/",
+    personas: [{ id: "priya", name: "Priya", brief: "b" }, { id: "marco", name: "Marco", brief: "b", accountRef: "admin" }],
+    goals: [
+      { id: "submit", instruction: "Submit a pitch.", personaId: "priya" },
+      { id: "review", instruction: "Accept the pitch Priya submitted.", personaId: "marco" },
+      { id: "decision", instruction: "See the decision on your pitch.", personaId: "priya" },
+    ],
+    accounts: [{ ref: "admin", username: "admin@pitches.test", password: "admin-pass-1" }],
+  });
+
+  test("people take turns in the plan's order, each turn gets its goals and what happened before, and results stay with each person", async () => {
+    await drain();
+    const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", team, keys));
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", id, keys, options));
+
+    const first = (await claimJob(t.db, keys))!;
+    expect(first).toMatchObject({ kind: "role_session", personaKey: "priya", goalIds: ["submit"], turn: 0, story: [] });
+    expect(first.signUpSeed).toMatch(/^[\w-]{20,}$/);
+    seq = 0;
+    await ingestEvents(t.db, first.token, [
+      ev({ type: "note", jobId: first.jobId, text: "Submitted pitch EcoLoop." }),
+      ev({ type: "finding", jobId: first.jobId, finding: { ...defect, id: "f1", goal: "submit" } }),
+      ev({ type: "goal_status", jobId: first.jobId, outcome: { goal: "submit", status: "reached", note: "EcoLoop is in review." } }),
+    ]);
+    await completeJob(t.db, first.token, { usage: usage(0), stoppedBy: "finish" });
+
+    const second = (await claimJob(t.db, keys))!;
+    expect(second).toMatchObject({ personaKey: "marco", goalIds: ["review"], turn: 1, signUpSeed: first.signUpSeed });
+    expect(second.story).toEqual([
+      { personaId: "priya", name: "Priya", text: "Submitted pitch EcoLoop." },
+      { personaId: "priya", name: "Priya", goal: "Submit a pitch.", status: "reached", text: "EcoLoop is in review." },
+    ]);
+    seq = 0;
+    await ingestEvents(t.db, second.token, [ev({ type: "goal_status", jobId: second.jobId, outcome: { goal: "review", status: "reached", note: "Accepted EcoLoop." } })]);
+    await completeJob(t.db, second.token, { usage: usage(0), stoppedBy: "finish" });
+
+    const third = (await claimJob(t.db, keys))!;
+    expect(third).toMatchObject({ personaKey: "priya", goalIds: ["decision"], turn: 2 });
+    expect(third.story!.map((e) => e.text)).toEqual(["Submitted pitch EcoLoop.", "EcoLoop is in review.", "Accepted EcoLoop."]);
+    seq = 0;
+    await ingestEvents(t.db, third.token, [
+      ev({ type: "finding", jobId: third.jobId, finding: { ...defect, id: "t2f1", goal: "decision", title: "No decision shown" } }),
+      ev({ type: "goal_status", jobId: third.jobId, outcome: { goal: "decision", status: "failed", note: "Nothing shown." } }),
+    ]);
+    await releaseJob(t.db, { jobId: third.jobId, runId: run.id, token: third.token });
+    const again = (await claimJob(t.db, keys))!;
+    expect(again).toMatchObject({ personaKey: "priya", goalIds: ["decision"], turn: 2 });
+    let summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
+    expect(summary!.goals.map((g) => [g.personaKey, g.goal])).toEqual([["marco", "review"], ["priya", "submit"]]);
+    seq = 0;
+    await ingestEvents(t.db, again.token, [
+      ev({ type: "finding", jobId: again.jobId, finding: { ...defect, id: "t2f1", goal: "decision", title: "No decision shown" } }),
+      ev({ type: "goal_status", jobId: again.jobId, outcome: { goal: "decision", status: "failed", note: "Nothing shown." } }),
+    ]);
+    await completeJob(t.db, again.token, { usage: usage(0), stoppedBy: "finish" });
+    summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
+    expect(summary!.findings.map((f) => [f.key, f.personaKey]).sort()).toEqual([["priya:f1", "priya"], ["priya:t2f1", "priya"]]);
+    expect(summary!.goals.map((g) => [g.personaKey, g.goal, g.status])).toEqual([["marco", "review", "reached"], ["priya", "decision", "failed"], ["priya", "submit", "reached"]]);
+    await drain();
+  });
+});
