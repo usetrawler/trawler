@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { Shell } from "../server/shell.ts";
 import { BrandMark } from "./brand-mark.tsx";
+import { RevealCurrentEntry } from "./current-entry.tsx";
 import { DocsLink } from "./docs-link.tsx";
 import { initials } from "./initials.ts";
 import { SignOutButton } from "./sign-out-button.tsx";
@@ -88,6 +89,7 @@ export function AppShell({ shell, current, parent = false, wide = false, childre
               <NavItem href="/settings" icon="⚙" label="Settings" active={marked("settings")} parent={parent} />
             </ul>
           </nav>
+          <RevealCurrentEntry current={typeof current === "object" ? current.project : (current ?? "")} />
           <Account user={user} />
         </div>
         <main id="main" className="min-w-0 px-[18px] py-9 md:px-[clamp(30px,5vw,78px)] md:py-[54px]">
