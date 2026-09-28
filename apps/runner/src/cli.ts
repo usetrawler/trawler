@@ -9,12 +9,16 @@ import { ProjectConfigSchema, type RunEventInput } from "@usetrawler/protocol";
 import { localRun, type OpenBrowser } from "./local-run.ts";
 import { RunDir, renderReport } from "./run-dir.ts";
 import { workLoop, workOnce, type WorkerDeps } from "./worker.ts";
+import { egressClient } from "./egress-client.ts";
+import type { BlockedAttempt } from "./egress-proxy.ts";
 import { startReporting, workerLog } from "./report.ts";
 
 export const DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
 const SETUP_BUDGET_USD = 0.25;
 const FETCH_TIMEOUT_MS = 20_000;
 const MAX_PAGE_BYTES = 2_000_000;
+const EGRESS_POLL_MS = 1_000;
+const EGRESS_DOWN = "stopped: the egress proxy is not answering, so no browser can be started safely";
 
 const USAGE = `Usage:
   trawler-runner setup <url> [--docs <url>] [--focus <text>] [--model <id>] [--out project.yaml] [--force]
@@ -30,7 +34,7 @@ export interface CliDeps {
   err: (line: string) => void;
   model: (modelId: string, apiKey: string, baseURL?: string) => LanguageModel;
   fetchText: (url: string) => Promise<string>;
-  openBrowser: (opts: Parameters<OpenBrowser>[0] & { project: ReturnType<typeof ProjectConfigSchema.parse>; outputDir: string; headless: boolean; survivesSignals?: boolean }) => ReturnType<OpenBrowser>;
+  openBrowser: (opts: Parameters<OpenBrowser>[0] & { project: ReturnType<typeof ProjectConfigSchema.parse>; outputDir: string; headless: boolean; survivesSignals?: boolean; proxy?: { server: string } }) => ReturnType<OpenBrowser>;
   runsRoot: string;
   fetchImpl?: typeof fetch;
   startReporting?: typeof startReporting;
@@ -61,10 +65,10 @@ export const defaultDeps: CliDeps = {
   err: (line) => console.error(line),
   model: (modelId, apiKey, baseURL) => createModel({ modelId, apiKey, baseURL }),
   fetchText: fetchPage,
-  openBrowser: ({ project, outputDir, headless, onBlocked, scrubber, survivesSignals }) =>
+  openBrowser: ({ project, outputDir, headless, onBlocked, scrubber, survivesSignals, proxy }) =>
     openBrowser({
       allowedOrigins: project.allowedOrigins, httpCredentials: project.httpCredentials, extraHeaders: project.extraHeaders,
-      secretHeaders: project.secretHeaders, outputDir, scrubber, onBlocked, headless, survivesSignals,
+      secretHeaders: project.secretHeaders, outputDir, scrubber, onBlocked, headless, survivesSignals, proxy,
     }),
   runsRoot: "runs",
 };
@@ -130,6 +134,13 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
   if (protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(hostname)) throw new UsageError("work sends the runner token, so --control-plane must use https unless it is on this machine");
   const runnerToken = deps.env.TRAWLER_RUNNER_TOKEN?.trim();
   if (!runnerToken) throw new UsageError("TRAWLER_RUNNER_TOKEN is not set");
+  const egressServer = deps.env.TRAWLER_EGRESS_PROXY?.trim();
+  const egressToken = deps.env.TRAWLER_EGRESS_TOKEN?.trim();
+  if (egressServer && !egressToken) throw new UsageError("TRAWLER_EGRESS_PROXY is set without TRAWLER_EGRESS_TOKEN");
+  if (!egressServer && deps.env.TRAWLER_REQUIRE_EGRESS === "1") throw new UsageError("this runner must browse through the egress proxy, and TRAWLER_EGRESS_PROXY is not set; start it with apps/runner/start.sh");
+  const egress = egressServer ? egressClient(egressServer, egressToken!) : undefined;
+  const stop = new AbortController();
+  let egressDown = false;
   const log = workerLog(deps.env, { out: deps.out, err: deps.err });
   const reporting = await (deps.startReporting ?? startReporting)(deps.env, [runnerToken]);
   const workerDeps: WorkerDeps = {
@@ -138,12 +149,33 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
     model: (modelId, jobToken) => deps.model(modelId, jobToken, new URL("/api/llm/v1", controlPlane).toString()),
     openBrowser: async (project, { onBlocked, scrubber }) => {
       const outputDir = mkdtempSync(join(tmpdir(), "trawler-work-"));
-      const removeOutput = () => rmSync(outputDir, { recursive: true, force: true });
+      const session = egress
+        ? await egress.open(project.allowedOrigins).catch((err) => {
+            rmSync(outputDir, { recursive: true, force: true });
+            egressDown = true;
+            stop.abort();
+            throw new Error(`the egress proxy could not open a session, so the browser was not started: ${err instanceof Error ? err.message : String(err)}`);
+          })
+        : undefined;
+      const reported = new Set<string>();
+      const report = (blocked: BlockedAttempt[]) => {
+        for (const { url } of blocked) {
+          if (reported.has(url)) continue;
+          reported.add(url);
+          onBlocked(url);
+        }
+      };
+      const polling = session ? setInterval(() => void session.drain().then(report, () => undefined), EGRESS_POLL_MS) : undefined;
+      const finish = async () => {
+        clearInterval(polling);
+        rmSync(outputDir, { recursive: true, force: true });
+        if (session) report(await session.close().catch(() => []));
+      };
       try {
-        const browser = await deps.openBrowser({ project, outputDir, headless: true, onBlocked, scrubber, survivesSignals: true });
-        return { tools: browser.tools, fillField: (ref, text, kind) => browser.fillField(ref, text, kind), screenshot: () => browser.screenshot(), close: () => browser.close().finally(removeOutput) };
+        const browser = await deps.openBrowser({ project, outputDir, headless: true, onBlocked, scrubber, survivesSignals: true, proxy: session?.proxy });
+        return { tools: browser.tools, fillField: (ref, text, kind) => browser.fillField(ref, text, kind), screenshot: () => browser.screenshot(), close: () => browser.close().finally(finish) };
       } catch (err) {
-        removeOutput();
+        await finish();
         throw err;
       }
     },
@@ -153,17 +185,19 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
     fetch: deps.fetchImpl,
     secrets: [runnerToken],
   };
+  if (egress) await egress.ready();
   if (values.once) {
-    await workOnce(workerDeps);
+    await workOnce(workerDeps, stop.signal);
     await reporting.close();
-    return 0;
+    if (egressDown) deps.err(EGRESS_DOWN);
+    return egressDown ? 1 : 0;
   }
-  const stop = new AbortController();
   for (const signal of ["SIGTERM", "SIGINT"] as const) process.once(signal, () => stop.abort());
-  log(`working for ${new URL(controlPlane).origin}`);
+  log(`working for ${new URL(controlPlane).origin}${egress ? `, browsing through the egress proxy at ${egressServer}` : ""}`);
   await workLoop(workerDeps, stop.signal);
   await reporting.close();
-  return 0;
+  if (egressDown) deps.err(EGRESS_DOWN);
+  return egressDown ? 1 : 0;
 }
 
 async function run(args: string[], deps: CliDeps, apiKey: () => string): Promise<number> {
