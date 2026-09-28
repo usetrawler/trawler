@@ -109,17 +109,18 @@ test("starting one's own workspace creates it and declines every invitation to t
 test("a request that read the session before the choice committed keeps the chosen workspace, and every waiting session of the person gets it", async () => {
   const owner = await signIn("tabs-owner@acme.test");
   const org = owner.session.activeOrganizationId as string;
-  await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-tabs', ${org}, 'tabs-guest@acme.test', 'member', 'pending', now() + interval '1 day', ${owner.user.id})`.execute(t.db);
+  await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-tabs', ${org}, 'tabs-guest@acme.test', 'member', 'pending', now() + interval '1 day', ${owner.user.id}), ('inv-tabs-waiting', ${org}, 'tabs-waiting@acme.test', 'member', 'pending', now() + interval '1 day', ${owner.user.id})`.execute(t.db);
   const guest = await invitee("tabs-guest@acme.test");
   const phone = (await (await auth.$context).internalAdapter.createSession(guest.user.id, false)) as { id: string; activeOrganizationId?: string | null };
   const readBeforeJoin = { id: guest.session.id, userId: guest.user.id, activeOrganizationId: null };
+  const elsewhere = await invitee("tabs-waiting@acme.test");
   expect(await guest.join("inv-tabs")).toBe(org);
   expect(await auth.workspaceOf(readBeforeJoin)).toMatchObject({ orgId: org, role: "member" });
   expect(await activeIn(guest.session.id)).toBe(org);
   expect(await activeIn(phone.id)).toBe(org);
   expect(await auth.workspaceOf({ id: phone.id, userId: guest.user.id, activeOrganizationId: null })).toMatchObject({ orgId: org });
-  const elsewhere = await signIn("tabs-other@acme.test");
-  expect(await activeIn(sessionOf(elsewhere.session).id)).toBe(elsewhere.session.activeOrganizationId);
+  expect(await activeIn(elsewhere.session.id)).toBeNull();
+  expect(await auth.workspaceOf({ id: elsewhere.session.id, userId: elsewhere.user.id, activeOrganizationId: null })).toBe("choosing");
 });
 
 test("an invitation shows whether the inviter's address is verified", async () => {
