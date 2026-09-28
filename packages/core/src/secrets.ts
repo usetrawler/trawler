@@ -26,6 +26,25 @@ function variants(secret: string): string[] {
   return [...forms(secret), ...forms(secret.normalize("NFC")), ...forms(secret.normalize("NFD"))];
 }
 
+const AUTH_SCHEME = /^\s*([A-Za-z][!#$%&'*+.^_`|~0-9A-Za-z-]*)\s+(\S(?:.*\S)?)\s*$/s;
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+
+function credentialParts(headerValue: string): string[] {
+  const [, scheme, credential] = AUTH_SCHEME.exec(headerValue) ?? [];
+  if (!scheme || !credential) return [];
+  if (scheme.toLowerCase() !== "basic" || !BASE64.test(credential)) return [credential];
+  const bytes = Buffer.from(credential, "base64");
+  const utf8 = bytes.toString("utf8");
+  return [credential, ...[utf8, ...(utf8.includes("\uFFFD") ? [bytes.toString("latin1")] : [])].flatMap(userAndPassword)];
+}
+
+function userAndPassword(decoded: string): string[] {
+  const colon = decoded.indexOf(":");
+  if (colon === -1) return [decoded];
+  const password = decoded.slice(colon + 1);
+  return [decoded, password.length >= MIN_SECRET_LENGTH ? password : decoded.slice(0, colon)];
+}
+
 function isPlainObject(v: object): boolean {
   const proto = Object.getPrototypeOf(v);
   return proto === Object.prototype || proto === null;
@@ -48,7 +67,10 @@ export class SecretScrubber {
       if (password.length >= MIN_SECRET_LENGTH) scrubber.add(password);
       if (basic.length >= MIN_SECRET_LENGTH) scrubber.add(basic);
     }
-    for (const value of Object.values(project.secretHeaders)) scrubber.add(value);
+    for (const value of Object.values(project.secretHeaders)) {
+      scrubber.add(value);
+      for (const part of credentialParts(value)) if (part.length >= MIN_SECRET_LENGTH) scrubber.add(part);
+    }
     return scrubber;
   }
 
