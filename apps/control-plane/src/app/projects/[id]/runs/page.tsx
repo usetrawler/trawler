@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { AppShell } from "../../../../components/app-shell.tsx";
@@ -7,9 +8,15 @@ import { projectHead, runCounts, workspaceRuns } from "../../../../projects/over
 import { signedInMember } from "../../../../server/auth.ts";
 import { getDb } from "../../../../server/db.ts";
 import { shellFor } from "../../../../server/shell.ts";
+import { projectPageTitle } from "../../../../server/titles.ts";
 import { parseRunsQuery, RunsView } from "../../../runs/runs-view.tsx";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return projectPageTitle(await headers(), id, "Runs");
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 

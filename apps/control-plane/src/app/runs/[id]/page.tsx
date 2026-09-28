@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { AppShell } from "../../../components/app-shell.tsx";
@@ -5,9 +6,15 @@ import { runView } from "../../../runs/report.ts";
 import { runTitle } from "../../../runs/status.ts";
 import { runFor } from "../../../server/runs.ts";
 import { shellFor } from "../../../server/shell.ts";
+import { runPageTitle } from "../../../server/titles.ts";
 import { RunLive } from "./run-live.tsx";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return runPageTitle(await headers(), id);
+}
 
 export default async function RunPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

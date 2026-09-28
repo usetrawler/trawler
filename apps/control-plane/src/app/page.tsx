@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AppShell } from "../components/app-shell.tsx";
@@ -9,6 +10,7 @@ import { shellFor } from "../server/shell.ts";
 import { firstName, Overview } from "./overview.tsx";
 
 export const dynamic = "force-dynamic";
+export const metadata: Metadata = { title: "Overview" };
 
 export default async function Home() {
   const member = await signedInMember(await headers());
