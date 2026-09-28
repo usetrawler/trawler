@@ -526,7 +526,7 @@ export async function openBrowser(opts: {
       typedSecrets.add(value);
       opts.scrubber.add(value);
     };
-    let keptFromPage = 0;
+    const keptFromPage = new Set<string>();
     const scrubWithFilledValues = async <T>(result: T): Promise<T> => {
       const live = new SecretScrubber();
       const heldInFields = new Set(typedPasswords);
@@ -541,9 +541,9 @@ export async function openBrowser(opts: {
         if (value) heldInFields.add(value);
         if (value.length < MIN_SECRET_LENGTH) continue;
         live.add(value);
-        if (typedSecrets.has(value) || ![...typedPasswords].some((typed) => typed.length >= MIN_SECRET_LENGTH && (keptFrom(value, typed) || keptFrom(typed, value)))) continue;
-        if (keptFromPage >= MAX_KEPT_FROM_PAGE) return refused(WITHHELD_TOO_LONG) as T;
-        keptFromPage++;
+        if (keptFromPage.has(value) || ![...typedPasswords].some((typed) => typed.length >= MIN_SECRET_LENGTH && (keptFrom(value, typed) || keptFrom(typed, value)))) continue;
+        if (keptFromPage.size >= MAX_KEPT_FROM_PAGE) return refused(WITHHELD_TOO_LONG) as T;
+        keptFromPage.add(value);
         keepSecret(value);
       }
       return withFieldValuesMasked(live.scrub(opts.scrubber.scrub(result)), heldInFields);
