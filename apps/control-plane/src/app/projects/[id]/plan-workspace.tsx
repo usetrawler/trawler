@@ -1,6 +1,6 @@
 "use client";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { MAX_GOALS_PER_PERSONA, MAX_PERSONAS, type Goal, type Persona } from "@usetrawler/protocol";
 import type { KeyHint } from "../../../credentials/credentials.ts";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
@@ -109,7 +109,7 @@ export function SignIn({ projectId, person, accounts, onPick, onAccounts }: {
 
 const AUTOSAVE_MS = 800;
 
-export function planProblem(personas: PlanPerson[], goals: Goal[]): string | null {
+function planProblem(personas: PlanPerson[], goals: Goal[]): string | null {
   for (const [i, p] of personas.entries()) {
     const who = p.name.trim() || `Person ${i + 1}`;
     if (!p.name.trim()) return `${who} needs a name.`;
@@ -129,16 +129,24 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
   const [personas, setPersonas] = useState(initialPersonas);
   const [goals, setGoals] = useState(initialGoals);
   const [accounts, setAccounts] = useState(initialAccounts);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; retry: boolean } | null>(null);
+  const [starting, setStarting] = useState(false);
   const [saving, startSaving] = useTransition();
+  const status = useRef<HTMLParagraphElement>(null);
   const dirty = JSON.stringify({ personas, goals }) !== JSON.stringify(saved);
   const problem = dirty ? planProblem(personas, goals) : null;
 
   useEffect(() => {
-    if (!dirty || problem || saving || error) return;
+    if (!dirty || problem || saving || error || starting) return;
     const timer = setTimeout(() => save({ personas, goals }), AUTOSAVE_MS);
     return () => clearTimeout(timer);
   });
+
+  const unsaved = useRef<{ personas: PlanPerson[]; goals: Goal[] } | null>(null);
+  unsaved.current = dirty && !problem && !saving ? { personas, goals } : null;
+  useEffect(() => () => {
+    if (unsaved.current) void savePlanAction(projectId, unsaved.current).catch(() => undefined);
+  }, [projectId]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -168,7 +176,13 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
   };
   const withoutAccount = saved.personas.find((p) => (p.signsIn || p.accountRef) && !accounts.some((a) => a.ref === p.accountRef));
   const save = (plan: { personas: PlanPerson[]; goals: Goal[] }) => startSaving(async () => {
-    const res = await savePlanAction(projectId, plan).catch(outdated("Reload the page to keep editing; your last change was not saved."));
+    let res: Awaited<ReturnType<typeof savePlanAction>>;
+    try {
+      res = await savePlanAction(projectId, plan);
+    } catch (err) {
+      if (unstable_isUnrecognizedActionError(err)) return setError({ message: updatedSinceOpened("Reload the page to keep editing; your last change was not saved."), retry: false });
+      return setError({ message: "Trawler could not be reached, so your last change is not saved yet.", retry: true });
+    }
     if (!res.ok) {
       if ("accounts" in res) {
         const left = new Set(res.accounts.map((a) => a.ref));
@@ -178,7 +192,7 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
         setSaved((s) => ({ ...s, personas: detach(s.personas) }));
         return;
       }
-      return setError(res.error);
+      return setError({ message: res.error, retry: true });
     }
     setError(null);
     setSaved(plan);
@@ -189,14 +203,15 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
       <section className="flex flex-col gap-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <Heading>These people will try it</Heading>
-          <p aria-live="polite" className={`text-xs ${error || problem ? "text-bad" : "text-muted"}`}>
+          <p ref={status} tabIndex={-1} aria-live="polite" className={`text-xs outline-none ${error ? "text-bad" : "text-muted"}`}>
             {error ? (
               <>
-                {error}{" "}
-                <button type="button" onClick={() => { setError(null); }} className="underline underline-offset-4 hover:text-ink">Try again</button>
+                {error.message}
+                {error.retry && <>{" "}<button type="button" onClick={() => { setError(null); status.current?.focus(); }} className="underline underline-offset-4 hover:text-ink">Try again</button></>}
               </>
-            ) : problem ?? (dirty || saving ? "Saving…" : "All changes saved")}
+            ) : problem ? "" : dirty || saving ? "Saving…" : "All changes saved"}
           </p>
+          {!error && problem && <p className="text-xs text-bad">{problem}</p>}
         </div>
         <p className="text-sm text-muted">Each person has their own goals, so give an administrator what only an administrator can do.</p>
         <ul className="grid gap-3 sm:grid-cols-2">
@@ -237,7 +252,7 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
 
 
 
-      <StartRun projectId={projectId} projectName={projectName} personas={saved.personas.length} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} blocked={error ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : undefined)} />
+      <StartRun projectId={projectId} projectName={projectName} personas={saved.personas.length} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} onStarting={setStarting} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : undefined)} />
     </div>
   );
 }
