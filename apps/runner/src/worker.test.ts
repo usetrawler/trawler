@@ -384,6 +384,26 @@ test("a judge that gives no verdict completes as an error and reports no verdict
   expect(judged.seen.completions).toEqual([expect.objectContaining({ stoppedBy: "error", error: "the model gave no verdict (2 tries)" })]);
 });
 
+test("an account check signs in once and completes with what the product said, never with the password", async () => {
+  const accounts = [{ ref: "ana", username: "ana@a.test", password: "correct-horse-battery" }];
+  const { url, seen } = await fakeControlPlane({ ...baseJob, config: { ...config, accounts }, kind: "account_check", accountRef: "ana", maxSteps: 12 });
+  const filled: string[] = [];
+  await workOnce(deps(url, scriptedModel([
+    toolCall("sign_in", { account: "ana", usernameField: "e1", passwordField: "e2" }),
+    toolCall("report_sign_in", { outcome: "refused", observed: "Wrong password for correct-horse-battery" }),
+  ]), { openBrowser: async () => ({ ...(await browser()), fillField: async (_ref: string, value: string) => (filled.push(value), "typed") }) }));
+  expect(filled).toEqual(["ana@a.test", "correct-horse-battery"]);
+  expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "report", signIn: { outcome: "refused", observed: expect.stringMatching(/^Wrong password for (?!correct-horse-battery)/) } })]);
+  expect(seen.events[0]).toMatchObject({ type: "job_started", kind: "account_check" });
+  expect(JSON.stringify(seen)).not.toContain("correct-horse-battery");
+});
+
+test("an account check that names no account completes as an error", async () => {
+  const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "account_check" });
+  await workOnce(deps(url, scriptedModel([])));
+  expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "error", error: "the account check names no account" })]);
+});
+
 test("a browser that will not start completes the job as an error", async () => {
   const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" });
   await workOnce(deps(url, scriptedModel([]), { openBrowser: async () => { throw new Error("no chromium"); } }));
