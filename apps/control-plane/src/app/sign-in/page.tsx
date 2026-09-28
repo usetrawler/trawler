@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { getAuth, signInProviders } from "../../server/auth.ts";
+import { signedInPerson, signInProviders } from "../../server/auth.ts";
 import { BrandMark } from "../../components/brand-mark.tsx";
 import { DocsLink } from "../../components/docs-link.tsx";
 import { SignInButtons } from "./sign-in-buttons.tsx";
@@ -9,8 +9,8 @@ export const dynamic = "force-dynamic";
 
 export default async function SignInPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const { error } = await searchParams;
-  const session = await getAuth().api.getSession({ headers: await headers() });
-  if (session) redirect("/");
+  const person = await signedInPerson(await headers());
+  if (person) redirect("member" in person ? "/" : "/welcome");
   return (
     <main className="mx-auto grid min-h-dvh max-w-5xl items-center gap-12 px-4 py-16 md:grid-cols-2">
       <section className="flex flex-col gap-5">

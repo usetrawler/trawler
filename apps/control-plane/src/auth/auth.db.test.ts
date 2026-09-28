@@ -35,13 +35,120 @@ test("the next sign-in keeps the same organisation", async () => {
   expect(again.activeOrganizationId).toBe(session.activeOrganizationId);
 });
 
-test("a verified invitee joins the inviting organisation instead of getting a new one", async () => {
+async function invitee(email: string, emailVerified = true) {
+  const person = await signIn(email, emailVerified, email.split("@")[0]!);
+  const session = person.session as { id: string; token: string; activeOrganizationId?: string | null };
+  const join = (invitationId: string) => auth.chooseWorkspace({ id: session.id, userId: person.user.id }, { join: invitationId });
+  const startOwn = () => auth.chooseWorkspace({ id: session.id, userId: person.user.id }, "own");
+  return { ...person, session, join, startOwn };
+}
+const membershipsOf = async (userId: string) => (await sql<{ org: string; role: string }>`select "organizationId" as org, role from member where "userId" = ${userId}`.execute(t.db)).rows;
+const statusOf = async (id: string) => (await sql<{ status: string }>`select status from invitation where id = ${id}`.execute(t.db)).rows[0]?.status;
+const activeIn = async (sessionId: string) => (await sql<{ active: string | null }>`select "activeOrganizationId" as active from session where id = ${sessionId}`.execute(t.db)).rows[0]?.active;
+
+test("a verified invitee is asked first: the session starts with no workspace, and nothing is joined or created", async () => {
   const owner = await signIn("owner@acme.test");
   await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv1', ${owner.session.activeOrganizationId}, 'New.Person@acme.test', 'member', 'pending', now() + interval '1 day', ${owner.user.id})`.execute(t.db);
-  const invitee = await signIn("new.person@acme.test");
-  expect(invitee.session.activeOrganizationId).toBe(owner.session.activeOrganizationId);
-  const { rows } = await sql<{ status: string }>`select status from invitation where id = 'inv1'`.execute(t.db);
-  expect(rows[0]!.status).toBe("accepted");
+  const person = await invitee("new.person@acme.test");
+  expect(person.session.activeOrganizationId ?? null).toBeNull();
+  expect(await membershipsOf(person.user.id)).toEqual([]);
+  expect(await statusOf("inv1")).toBe("pending");
+  expect(await auth.workspaceOf({ ...person.session, userId: person.user.id, activeOrganizationId: null })).toBe("choosing");
+  expect(await activeIn(person.session.id)).toBeNull();
+  const again = (await (await auth.$context).internalAdapter.createSession(person.user.id, false)) as { activeOrganizationId?: string | null };
+  expect(again.activeOrganizationId ?? null).toBeNull();
+  expect(await membershipsOf(person.user.id)).toEqual([]);
+});
+
+test("joining the invitation makes the person a member with the invited role, in the session they chose from", async () => {
+  const owner = await signIn("join-owner@acme.test", true, "Jo Owner");
+  const org = owner.session.activeOrganizationId as string;
+  await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-join', ${org}, 'join-guest@acme.test', 'admin', 'pending', now() + interval '1 day', ${owner.user.id})`.execute(t.db);
+  const person = await invitee("join-guest@acme.test");
+  expect((await auth.invitationsFor(person.user)).map((i) => [i.id, i.orgName, i.role, i.inviterName, i.inviterEmail])).toEqual([["inv-join", "join-owner-org", "admin", "Jo Owner", "join-owner@acme.test"]]);
+  expect(await person.join("inv-join")).toBe(org);
+  expect(await membershipsOf(person.user.id)).toEqual([{ org, role: "admin" }]);
+  expect(await statusOf("inv-join")).toBe("accepted");
+  expect(await activeIn(person.session.id)).toBe(org);
+  expect(await auth.workspaceOf({ id: person.session.id, userId: person.user.id, activeOrganizationId: org })).toMatchObject({ orgId: org, role: "admin" });
+});
+
+test("two workspaces invite the same address: the person sees both, joins the one they pick, and the other is withdrawn", async () => {
+  const team = await signIn("pick-team@acme.test", true, "Team Lead");
+  const stranger = await signIn("pick-stranger@evil.test", true, "Stranger");
+  const teamOrg = team.session.activeOrganizationId as string;
+  const strangerOrg = stranger.session.activeOrganizationId as string;
+  await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId", "createdAt") values ('inv-team', ${teamOrg}, 'pick-hire@acme.test', 'member', 'pending', now() + interval '1 day', ${team.user.id}, now() - interval '1 hour')`.execute(t.db);
+  await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-stranger', ${strangerOrg}, 'Pick-Hire@acme.test', 'admin', 'pending', now() + interval '6 days', ${stranger.user.id})`.execute(t.db);
+  const hire = await invitee("pick-hire@acme.test");
+  expect(hire.session.activeOrganizationId ?? null).toBeNull();
+  expect(await membershipsOf(hire.user.id)).toEqual([]);
+  expect((await auth.invitationsFor(hire.user)).map((i) => [i.id, i.inviterEmail])).toEqual([["inv-team", "pick-team@acme.test"], ["inv-stranger", "pick-stranger@evil.test"]]);
+  expect(await hire.join("inv-team")).toBe(teamOrg);
+  expect(await membershipsOf(hire.user.id)).toEqual([{ org: teamOrg, role: "member" }]);
+  expect([await statusOf("inv-team"), await statusOf("inv-stranger")]).toEqual(["accepted", "canceled"]);
+  expect(await hire.join("inv-stranger")).toBe(teamOrg);
+  expect(await membershipsOf(hire.user.id)).toEqual([{ org: teamOrg, role: "member" }]);
+});
+
+test("starting one's own workspace creates it and declines every invitation to the address", async () => {
+  const a = await signIn("own-a@acme.test");
+  const b = await signIn("own-b@acme.test");
+  await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-own-a', ${a.session.activeOrganizationId}, 'own-guest@acme.test', 'admin', 'pending', now() + interval '1 day', ${a.user.id}), ('inv-own-b', ${b.session.activeOrganizationId}, 'OWN-guest@acme.test', 'member', 'pending', now() + interval '1 day', ${b.user.id})`.execute(t.db);
+  const guest = await invitee("own-guest@acme.test");
+  const own = await guest.startOwn();
+  expect(own).toBeTruthy();
+  expect(own).not.toBe(a.session.activeOrganizationId);
+  expect(own).not.toBe(b.session.activeOrganizationId);
+  expect(await membershipsOf(guest.user.id)).toEqual([{ org: own, role: "owner" }]);
+  expect([await statusOf("inv-own-a"), await statusOf("inv-own-b")]).toEqual(["rejected", "rejected"]);
+  expect(await activeIn(guest.session.id)).toBe(own);
+  expect(await auth.invitationsFor(guest.user)).toEqual([]);
+});
+
+test("a request that read the session before the choice committed keeps the chosen workspace, and every waiting session of the person gets it", async () => {
+  const owner = await signIn("tabs-owner@acme.test");
+  const org = owner.session.activeOrganizationId as string;
+  await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-tabs', ${org}, 'tabs-guest@acme.test', 'member', 'pending', now() + interval '1 day', ${owner.user.id}), ('inv-tabs-waiting', ${org}, 'tabs-waiting@acme.test', 'member', 'pending', now() + interval '1 day', ${owner.user.id})`.execute(t.db);
+  const guest = await invitee("tabs-guest@acme.test");
+  const phone = (await (await auth.$context).internalAdapter.createSession(guest.user.id, false)) as { id: string; activeOrganizationId?: string | null };
+  const readBeforeJoin = { id: guest.session.id, userId: guest.user.id, activeOrganizationId: null };
+  const elsewhere = await invitee("tabs-waiting@acme.test");
+  expect(await guest.join("inv-tabs")).toBe(org);
+  expect(await auth.workspaceOf(readBeforeJoin)).toMatchObject({ orgId: org, role: "member" });
+  expect(await activeIn(guest.session.id)).toBe(org);
+  expect(await activeIn(phone.id)).toBe(org);
+  expect(await auth.workspaceOf({ id: phone.id, userId: guest.user.id, activeOrganizationId: null })).toMatchObject({ orgId: org });
+  expect(await activeIn(elsewhere.session.id)).toBeNull();
+  expect(await auth.workspaceOf({ id: elsewhere.session.id, userId: elsewhere.user.id, activeOrganizationId: null })).toBe("choosing");
+});
+
+test("an invitation shows whether the inviter's address is verified", async () => {
+  const shady = await signIn("it-support@corp.test", false, "IT Support");
+  await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-shady', ${shady.session.activeOrganizationId}, 'shady-guest@corp.test', 'admin', 'pending', now() + interval '1 day', ${shady.user.id})`.execute(t.db);
+  const guest = await invitee("shady-guest@corp.test");
+  expect((await auth.invitationsFor(guest.user)).map((i) => [i.inviterEmail, i.inviterEmailVerified])).toEqual([["it-support@corp.test", false]]);
+});
+
+test("a person cannot join an invitation addressed to someone else, even with its id", async () => {
+  const owner = await signIn("steal-owner@acme.test");
+  await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-steal-mine', ${owner.session.activeOrganizationId}, 'steal-me@acme.test', 'member', 'pending', now() + interval '1 day', ${owner.user.id}), ('inv-steal-theirs', ${owner.session.activeOrganizationId}, 'steal-victim@acme.test', 'admin', 'pending', now() + interval '1 day', ${owner.user.id})`.execute(t.db);
+  const thief = await invitee("steal-me@acme.test");
+  expect(await thief.join("inv-steal-theirs")).toBeNull();
+  expect(await membershipsOf(thief.user.id)).toEqual([]);
+  expect(await statusOf("inv-steal-theirs")).toBe("pending");
+  expect(await activeIn(thief.session.id)).toBeNull();
+});
+
+test("an unverified address sees no invitations, gets its own workspace, and leaves the invitation open", async () => {
+  const owner = await signIn("unv-owner@acme.test");
+  await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-unv', ${owner.session.activeOrganizationId}, 'unv-guest@acme.test', 'member', 'pending', now() + interval '1 day', ${owner.user.id})`.execute(t.db);
+  const guest = await invitee("unv-guest@acme.test", false);
+  expect(guest.session.activeOrganizationId).toBeTruthy();
+  expect(await auth.invitationsFor(guest.user)).toEqual([]);
+  expect(await guest.join("inv-unv")).toBe(guest.session.activeOrganizationId);
+  expect(await membershipsOf(guest.user.id)).toEqual([{ org: guest.session.activeOrganizationId, role: "owner" }]);
+  expect(await statusOf("inv-unv")).toBe("pending");
 });
 
 test("an unverified email does not join by invitation", async () => {
@@ -56,15 +163,18 @@ test("there is no password sign-up", async () => {
   expect(res.status).toBeGreaterThanOrEqual(400);
 });
 
-test("sign-ins racing for the same invitation create exactly one membership", async () => {
+test("choices racing from several sessions of the same invitee create exactly one membership", async () => {
   const owner = await signIn("race-owner@acme.test");
   await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-race', ${owner.session.activeOrganizationId}, 'racer@acme.test', 'member', 'pending', now() + interval '1 day', ${owner.user.id})`.execute(t.db);
   const ctx = await auth.$context;
   const racer = await ctx.internalAdapter.createUser({ email: "racer@acme.test", emailVerified: true, name: "Racer" }, { method: "admin" });
-  const sessions = await Promise.all(Array.from({ length: 6 }, () => ctx.internalAdapter.createSession(racer.id, false) as Promise<{ activeOrganizationId?: string | null }>));
+  const sessions = await Promise.all(Array.from({ length: 6 }, () => ctx.internalAdapter.createSession(racer.id, false) as Promise<{ id: string; activeOrganizationId?: string | null }>));
+  expect(sessions.every((s) => (s.activeOrganizationId ?? null) === null)).toBe(true);
+  const chosen = await Promise.all(sessions.map((s, i) => auth.chooseWorkspace({ id: s.id, userId: racer.id }, i % 2 ? { join: "inv-race" } : "own")));
   const { rows } = await sql<{ n: number }>`select count(*)::int as n from member where "userId" = ${racer.id}`.execute(t.db);
   expect(rows[0]!.n).toBe(1);
-  expect(new Set(sessions.map((s) => s.activeOrganizationId))).toEqual(new Set([owner.session.activeOrganizationId]));
+  expect(new Set(chosen).size).toBe(1);
+  expect(new Set(await Promise.all(sessions.map((s) => activeIn(s.id))))).toEqual(new Set(chosen));
 });
 
 test("first sign-ins racing for the same slug all get an organisation", async () => {
@@ -198,7 +308,7 @@ test("a member's email is given only for the workspace asked about, and only whi
   expect(await auth.memberEmail(own.activeOrganizationId!, user.id)).toBeNull();
 });
 
-test("a session that names no workspace is signed out", async () => {
+test("a session that names no workspace, of someone who belongs to one, is signed out", async () => {
   const session = sessionOf((await signIn("unset@acme.test")).session);
   await sql`update session set "activeOrganizationId" = null where id = ${session.id}`.execute(t.db);
   expect(await auth.workspaceOf({ ...session, activeOrganizationId: null })).toBeNull();
@@ -208,9 +318,10 @@ test("a session that names no workspace is signed out", async () => {
 test("a member removed from their only workspace loses that session, so their next request signs in again", async () => {
   const owner = await signIn("boss@acme.test");
   await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-gone', ${owner.session.activeOrganizationId}, 'gone@acme.test', 'member', 'pending', now() + interval '1 day', ${owner.user.id})`.execute(t.db);
-  const { user, session } = await signIn("gone@acme.test");
-  const gone = sessionOf(session);
-  expect(gone.activeOrganizationId).toBe(owner.session.activeOrganizationId);
+  const { user, session, join } = await invitee("gone@acme.test");
+  await join("inv-gone");
+  const gone = { ...sessionOf(session), activeOrganizationId: owner.session.activeOrganizationId as string };
+  expect(await activeOf(gone.id)).toEqual([{ active: owner.session.activeOrganizationId }]);
   await sql`delete from member where "userId" = ${user.id}`.execute(t.db);
   expect(await auth.workspaceOf(gone)).toBeNull();
   expect(await activeOf(gone.id)).toEqual([]);
@@ -220,7 +331,8 @@ test("a member the owner removes through Better Auth still names the workspace i
   const owner = await signIn("remover@acme.test");
   const org = sessionOf(owner.session).activeOrganizationId!;
   await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-removed', ${org}, 'removed@acme.test', 'member', 'pending', now() + interval '1 day', ${owner.user.id})`.execute(t.db);
-  const { user } = await signIn("removed@acme.test");
+  const { user, join } = await invitee("removed@acme.test");
+  await join("inv-removed");
   const other = sessionOf(await (await auth.$context).internalAdapter.createSession(user.id, false));
   await auth.api.removeMember({ headers: cookieFor(sessionOf(owner.session).token), body: { memberIdOrEmail: "removed@acme.test", organizationId: org } });
   const found = await auth.api.getSession({ headers: cookieFor(other.token) });
@@ -250,8 +362,9 @@ async function invited(org: string, inviterId: string, email: string, role = "me
   return id;
 }
 async function joins(org: string, inviterId: string, email: string, role = "member") {
-  await invited(org, inviterId, email, role);
-  const person = await signIn(email, true, email.split("@")[0]!);
+  const id = await invited(org, inviterId, email, role);
+  const person = await invitee(email);
+  expect(await person.join(id)).toBe(org);
   const row = (await sql<{ id: string }>`select id from member where "userId" = ${person.user.id} and "organizationId" = ${org}`.execute(t.db)).rows[0]!;
   return { ...person, memberId: row.id, token: sessionOf(person.session).token };
 }
@@ -333,9 +446,9 @@ test("joining one workspace withdraws the other workspaces' invitations for that
   const first = await signIn("both-first@acme.test");
   const last = await signIn("both-last@acme.test");
   await invited(orgOf(first.session), first.user.id, "both-guest@acme.test", "member", "pending", "now() + interval '1 day'");
-  await invited(orgOf(last.session), last.user.id, "Both-Guest@acme.test", "admin", "pending", "now() + interval '2 days'");
-  const guest = await signIn("both-guest@acme.test");
-  expect(orgOf(guest.session)).toBe(orgOf(last.session));
+  const lastInvitation = await invited(orgOf(last.session), last.user.id, "Both-Guest@acme.test", "admin", "pending", "now() + interval '2 days'");
+  const guest = await invitee("both-guest@acme.test");
+  expect(await guest.join(lastInvitation)).toBe(orgOf(last.session));
   expect(await pendingIds(orgOf(first.session))).toEqual([]);
   expect(await auth.pendingInvitations(orgOf(first.session))).toEqual([]);
   expect(await memberRoles(orgOf(first.session))).toEqual([{ email: "both-first@acme.test", role: "owner" }]);
