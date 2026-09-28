@@ -1,10 +1,11 @@
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Persona } from "@usetrawler/protocol";
 
 const react = vi.hoisted(() => ({
   values: [] as unknown[],
   setters: [] as Array<ReturnType<typeof import("vitest").vi.fn>>,
   started: [] as Array<Promise<unknown>>,
+  effects: [] as Array<() => unknown>,
 }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
@@ -13,7 +14,8 @@ vi.mock("react", async (original) => ({
     react.setters.push(set);
     return [react.values.length ? react.values.shift() : initial, set];
   },
-  useEffect: () => {},
+  useEffect: (effect: () => unknown) => { react.effects.push(effect); },
+  useRef: (current: unknown) => ({ current }),
   useTransition: () => [false, (work: () => Promise<unknown>) => { react.started.push(work()); }],
 }));
 const actions = vi.hoisted(() => ({ savePlanAction: vi.fn(), addAccountAction: vi.fn(), removeAccountAction: vi.fn() }));
@@ -21,6 +23,7 @@ vi.mock("./plan-actions.ts", () => actions);
 vi.mock("./start-run.tsx", () => ({ StartRun: () => null }));
 
 const { PlanWorkspace, SignIn } = await import("./plan-workspace.tsx");
+type PlanPerson = import("./plan-workspace.tsx").PlanPerson;
 const { UnrecognizedActionError } = await import("next/dist/client/components/unrecognized-action-error.js");
 
 type Node = { type?: unknown; props?: Record<string, unknown> & { children?: unknown } };
@@ -37,19 +40,30 @@ const account = { ref: "account-1", username: "kwame@acme.test", hint: "…1234"
 const outdated = () => new UnrecognizedActionError("Server action not found.");
 
 beforeEach(() => {
-  Object.assign(react, { values: [], setters: [], started: [] });
+  Object.assign(react, { values: [], setters: [], started: [], effects: [] });
   for (const action of Object.values(actions)) action.mockReset();
+  vi.useFakeTimers();
+  vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+});
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
-const changedPlan = () => {
-  react.values = [{ personas: [ama], goals }, [{ ...ama, name: "Ama Mensah" }], goals, [], null];
+const startBlocked = (tree: unknown) => nodes(tree).find((node) => node.props && "canManageKey" in node.props)!.props!.blocked;
+
+const changedPlan = (changed: PlanPerson = { ...ama, name: "Ama Mensah" }) => {
+  react.values = [{ personas: [ama], goals }, [changed], goals, [], null];
   const tree = PlanWorkspace({ projectId: "p1", projectName: "Acme", initialPersonas: [ama], initialGoals: goals, initialAccounts: [], keyHint: null, canManageKey: true, authorisedBefore: true });
   const [setSaved, setPersonas, setGoals, , setError] = react.setters;
-  const save = nodes(tree).find((node) => node.type === "button" && text(node) === "Save plan")!;
-  return { save: () => (save.props!.onClick as () => void)(), setSaved: setSaved!, setPersonas: setPersonas!, setGoals: setGoals!, setError: setError! };
+  const cleanups: unknown[] = [];
+  const settle = () => { for (const effect of react.effects.splice(0)) cleanups.push(effect()); };
+  const leave = () => { for (const cleanup of cleanups) if (typeof cleanup === "function") cleanup(); };
+  return { tree, settle, leave, setSaved: setSaved!, setPersonas: setPersonas!, setGoals: setGoals!, setError: setError! };
 };
 
 const accounts = () => {
+  vi.useRealTimers();
   react.values = [true];
   const onChange = vi.fn();
   const onPick = vi.fn();
@@ -60,25 +74,79 @@ const accounts = () => {
   return { add, remove, onChange, onPick, setAdding: setAdding!, setUsername: setUsername!, setPassword: setPassword!, setError: setError! };
 };
 
-test("Save plan on a page left open across an update says the changes cannot be saved from it, and leaves them on screen to copy", async () => {
-  actions.savePlanAction.mockRejectedValue(outdated());
+test("a change saves itself shortly after the last edit, and Start waits for it", async () => {
+  actions.savePlanAction.mockResolvedValue({ ok: true });
   const plan = changedPlan();
-  plan.save();
+  plan.settle();
+  expect(startBlocked(plan.tree)).toBe("Saving your changes to the plan…");
+  vi.advanceTimersByTime(799);
+  expect(actions.savePlanAction).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(1);
   await Promise.all(react.started);
   expect(actions.savePlanAction).toHaveBeenCalledWith("p1", { personas: [{ ...ama, name: "Ama Mensah" }], goals });
-  expect(plan.setError).toHaveBeenLastCalledWith("Trawler has been updated since this page opened. Copy your changes, reload the page, then make them again and save.");
+  expect(plan.setSaved).toHaveBeenLastCalledWith({ personas: [{ ...ama, name: "Ama Mensah" }], goals });
+  expect(nodes(plan.tree).some((node) => text(node) === "Save plan")).toBe(false);
+});
+
+test("a plan that is not valid yet is not saved; the status and Start say what is missing", () => {
+  const plan = changedPlan({ ...ama, name: " " });
+  plan.settle();
+  vi.advanceTimersByTime(5000);
+  expect(actions.savePlanAction).not.toHaveBeenCalled();
+  expect(startBlocked(plan.tree)).toBe("Person 1 needs a name.");
+  expect(nodes(plan.tree).some((node) => node.type === "p" && text(node) === "Person 1 needs a name.")).toBe(true);
+  expect(nodes(plan.tree).find((node) => node.props?.["aria-live"] === "polite")!.props!.children).toBe("");
+});
+
+test("a save from a page left open across an update says to reload, and keeps the changes on screen", async () => {
+  actions.savePlanAction.mockRejectedValue(outdated());
+  const plan = changedPlan();
+  plan.settle();
+  vi.advanceTimersByTime(800);
+  await Promise.all(react.started);
+  expect(plan.setError).toHaveBeenLastCalledWith({ message: "Trawler has been updated since this page opened. Reload the page to keep editing; your last change was not saved.", retry: false });
   expect(plan.setSaved).not.toHaveBeenCalled();
   expect(plan.setPersonas).not.toHaveBeenCalled();
   expect(plan.setGoals).not.toHaveBeenCalled();
 });
 
-test("any other failure of Save plan goes on to the error page as before", async () => {
-  const failure = new TypeError("Failed to fetch");
-  actions.savePlanAction.mockRejectedValue(failure);
+test("a save that cannot reach Trawler keeps the changes on screen and offers to try again", async () => {
+  actions.savePlanAction.mockRejectedValue(new TypeError("Failed to fetch"));
   const plan = changedPlan();
-  plan.save();
-  await expect(react.started[0]).rejects.toBe(failure);
+  plan.settle();
+  vi.advanceTimersByTime(800);
+  await Promise.all(react.started);
+  expect(plan.setError).toHaveBeenLastCalledWith({ message: "Trawler could not be reached, so your last change is not saved yet.", retry: true });
+  expect(plan.setPersonas).not.toHaveBeenCalled();
+});
+
+test("leaving the page before the pause is over still sends the last change", () => {
+  actions.savePlanAction.mockResolvedValue({ ok: true });
+  const plan = changedPlan();
+  plan.settle();
+  vi.advanceTimersByTime(300);
+  plan.leave();
+  expect(actions.savePlanAction).toHaveBeenCalledTimes(1);
+  expect(actions.savePlanAction).toHaveBeenCalledWith("p1", { personas: [{ ...ama, name: "Ama Mensah" }], goals });
+});
+
+test("nothing saves while a run is starting, so the run gets the plan as it was when Start was chosen", () => {
+  react.values = [{ personas: [ama], goals }, [{ ...ama, name: "Ama Mensah" }], goals, [], null, true];
+  PlanWorkspace({ projectId: "p1", projectName: "Acme", initialPersonas: [ama], initialGoals: goals, initialAccounts: [], keyHint: null, canManageKey: true, authorisedBefore: true });
+  for (const effect of react.effects.splice(0)) effect();
+  vi.advanceTimersByTime(5000);
+  expect(actions.savePlanAction).not.toHaveBeenCalled();
+});
+
+test("an account removed meanwhile is taken off the person and the save tries again on its own", async () => {
+  actions.savePlanAction.mockResolvedValue({ ok: false, error: "An account you picked was removed.", accounts: [] });
+  const plan = changedPlan({ ...ama, name: "Ama Mensah", accountRef: "account-gone", signsIn: true });
+  plan.settle();
+  vi.advanceTimersByTime(800);
+  await Promise.all(react.started);
   expect(plan.setError).not.toHaveBeenCalled();
+  const detach = plan.setPersonas.mock.calls.at(-1)![0] as (list: unknown[]) => unknown[];
+  expect(detach([{ ...ama, accountRef: "account-gone", signsIn: true }])).toEqual([{ ...ama, accountRef: undefined, signsIn: true }]);
 });
 
 test("adding or removing a test account on a page left open across an update says to reload, and changes nothing", async () => {

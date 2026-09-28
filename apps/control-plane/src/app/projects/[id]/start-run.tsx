@@ -36,8 +36,8 @@ function Submit({ blocked, pending }: { blocked?: string; pending: boolean }) {
   );
 }
 
-export function StartRun({ projectId, projectName, personas, keyHint: savedHint, canManageKey, authorisedBefore, blocked }: {
-  projectId: string; projectName: string; personas: number; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; blocked?: string;
+export function StartRun({ projectId, projectName, personas, keyHint: savedHint, canManageKey, authorisedBefore, blocked, onStarting }: {
+  projectId: string; projectName: string; personas: number; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; blocked?: string; onStarting?: (starting: boolean) => void;
 }) {
   const [state, action, pending] = useActionState<StartState, FormData>(startTheRun, {});
   const keyHint = state.keyHint ?? savedHint;
@@ -75,6 +75,7 @@ export function StartRun({ projectId, projectName, personas, keyHint: savedHint,
       clearTimeout(timer);
     };
   }, [typingKey, apiKey, provider, baseUrl]);
+  useEffect(() => onStarting?.(pending), [pending, onStarting]);
 
   const price = list?.ok ? list.models.find((m) => m.id === modelId)?.price ?? null : null;
   const estimate = price ? estimateUsd(price, personas) : null;

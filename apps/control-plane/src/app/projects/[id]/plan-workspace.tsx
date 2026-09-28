@@ -1,6 +1,6 @@
 "use client";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { MAX_GOALS_PER_PERSONA, MAX_PERSONAS, type Goal, type Persona } from "@usetrawler/protocol";
 import type { KeyHint } from "../../../credentials/credentials.ts";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
@@ -107,6 +107,21 @@ export function SignIn({ projectId, person, accounts, onPick, onAccounts }: {
   );
 }
 
+const AUTOSAVE_MS = 800;
+
+function planProblem(personas: PlanPerson[], goals: Goal[]): string | null {
+  for (const [i, p] of personas.entries()) {
+    const who = p.name.trim() || `Person ${i + 1}`;
+    if (!p.name.trim()) return `${who} needs a name.`;
+    if (!p.brief.trim()) return `${who} needs a description.`;
+    const own = goals.filter((g) => g.personaId === p.id);
+    if (own.length === 0) return `Give ${who} at least one goal.`;
+    const empty = own.findIndex((g) => !g.instruction.trim());
+    if (empty >= 0) return `Goal ${empty + 1} of ${who} needs some text.`;
+  }
+  return null;
+}
+
 export function PlanWorkspace({ projectId, projectName, initialPersonas, initialGoals, initialAccounts, keyHint, canManageKey, authorisedBefore }: {
   projectId: string; projectName: string; initialPersonas: PlanPerson[]; initialGoals: Goal[]; initialAccounts: AccountView[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean;
 }) {
@@ -114,9 +129,24 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
   const [personas, setPersonas] = useState(initialPersonas);
   const [goals, setGoals] = useState(initialGoals);
   const [accounts, setAccounts] = useState(initialAccounts);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; retry: boolean } | null>(null);
+  const [starting, setStarting] = useState(false);
   const [saving, startSaving] = useTransition();
+  const status = useRef<HTMLParagraphElement>(null);
   const dirty = JSON.stringify({ personas, goals }) !== JSON.stringify(saved);
+  const problem = dirty ? planProblem(personas, goals) : null;
+
+  useEffect(() => {
+    if (!dirty || problem || saving || error || starting) return;
+    const timer = setTimeout(() => save({ personas, goals }), AUTOSAVE_MS);
+    return () => clearTimeout(timer);
+  });
+
+  const unsaved = useRef<{ personas: PlanPerson[]; goals: Goal[] } | null>(null);
+  unsaved.current = dirty && !problem && !saving ? { personas, goals } : null;
+  useEffect(() => () => {
+    if (unsaved.current) void savePlanAction(projectId, unsaved.current).catch(() => undefined);
+  }, [projectId]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -145,9 +175,14 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
     setSaved((s) => ({ ...s, personas: detach(s.personas) }));
   };
   const withoutAccount = saved.personas.find((p) => (p.signsIn || p.accountRef) && !accounts.some((a) => a.ref === p.accountRef));
-  const save = () => startSaving(async () => {
-    const plan = { personas, goals };
-    const res = await savePlanAction(projectId, plan).catch(outdated("Copy your changes, reload the page, then make them again and save."));
+  const save = (plan: { personas: PlanPerson[]; goals: Goal[] }) => startSaving(async () => {
+    let res: Awaited<ReturnType<typeof savePlanAction>>;
+    try {
+      res = await savePlanAction(projectId, plan);
+    } catch (err) {
+      if (unstable_isUnrecognizedActionError(err)) return setError({ message: updatedSinceOpened("Reload the page to keep editing; your last change was not saved."), retry: false });
+      return setError({ message: "Trawler could not be reached, so your last change is not saved yet.", retry: true });
+    }
     if (!res.ok) {
       if ("accounts" in res) {
         const left = new Set(res.accounts.map((a) => a.ref));
@@ -155,8 +190,9 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
         setAccounts(res.accounts);
         setPersonas(detach);
         setSaved((s) => ({ ...s, personas: detach(s.personas) }));
+        return;
       }
-      return setError(res.error);
+      return setError({ message: res.error, retry: true });
     }
     setError(null);
     setSaved(plan);
@@ -165,7 +201,18 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
   return (
     <div className="flex flex-col gap-10">
       <section className="flex flex-col gap-3">
-        <Heading>These people will try it</Heading>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <Heading>These people will try it</Heading>
+          <p ref={status} tabIndex={-1} aria-live="polite" className={`text-xs outline-none ${error ? "text-bad" : "text-muted"}`}>
+            {error ? (
+              <>
+                {error.message}
+                {error.retry && <>{" "}<button type="button" onClick={() => { setError(null); status.current?.focus(); }} className="underline underline-offset-4 hover:text-ink">Try again</button></>}
+              </>
+            ) : problem ? "" : dirty || saving ? "Saving…" : "All changes saved"}
+          </p>
+          {!error && problem && <p className="text-xs text-bad">{problem}</p>}
+        </div>
         <p className="text-sm text-muted">Each person has their own goals, so give an administrator what only an administrator can do.</p>
         <ul className="grid gap-3 sm:grid-cols-2">
           {personas.map((p, i) => {
@@ -204,17 +251,8 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
       </section>
 
 
-      {(dirty || error) && (
-        <div role="region" aria-label="Unsaved plan" className="sticky bottom-4 z-10 flex flex-wrap items-center justify-between gap-3 border border-ink bg-paper p-4 shadow-lg">
-          <p className={`text-sm ${error ? "text-bad" : ""}`} role={error ? "alert" : undefined}>{error ?? "You changed the plan."}</p>
-          <div className="flex gap-2">
-            <button type="button" onClick={() => { setPersonas(saved.personas); setGoals(saved.goals); setError(null); }} className="h-10 px-3 text-sm text-muted hover:text-ink">Discard</button>
-            <button type="button" disabled={saving} onClick={save} className="h-10 bg-ink px-4 text-sm text-paper disabled:opacity-60">{saving ? "Saving…" : "Save plan"}</button>
-          </div>
-        </div>
-      )}
 
-      <StartRun projectId={projectId} projectName={projectName} personas={saved.personas.length} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} blocked={dirty ? "Save or discard your changes to the plan first." : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : undefined} />
+      <StartRun projectId={projectId} projectName={projectName} personas={saved.personas.length} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} onStarting={setStarting} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : undefined)} />
     </div>
   );
 }
