@@ -62,5 +62,6 @@ test("a run whose every replay failed shows no count of confirmed defects, but t
   const [row] = rows(render([line({ confirmed: 0, unchecked: true })]));
   expect(row).toMatch(/><span aria-hidden="true">—<\/span><\/strong><small[^>]*>not checked<span class="sr-only">: every replay failed<\/span><\/small>/);
   expect(row).toMatch(/md:hidden text-ok"> · Complete · not checked<\/span>/);
+  expect(row).toMatch(/max-md:hidden text-ok"><span class="wide:hidden">Complete · not checked<\/span><span class="max-wide:hidden">Complete<\/span><\/span>/);
   expect(row).not.toContain(">confirmed<");
 });
