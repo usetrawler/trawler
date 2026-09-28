@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 type Member = { userId: string; email: string; orgId: string; orgName: string; role: string };
-const state = vi.hoisted(() => ({ without: null as string | null, member: null as Member | null, tenants: [] as string[], projectInWorkspace: true, keyChecks: 0, keysSaved: 0, keyStillStored: true, runsStarted: 0, stillAsked: [] as unknown[][], startedIn: [] as unknown[], revalidated: [] as string[] }));
+const state = vi.hoisted(() => ({ without: null as string | null, member: null as Member | null, tenants: [] as string[], projectInWorkspace: true, keyChecks: 0, keysSaved: 0, keyStillStored: true, runsStarted: 0, stillAsked: [] as unknown[][], startedIn: [] as unknown[], revalidated: [] as string[], check: { ok: true } as Record<string, unknown>, stored: true }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({ redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); } }));
@@ -20,12 +20,12 @@ vi.mock("../../../projects/projects.ts", async (importOriginal) => ({
 }));
 vi.mock("../../../llm/providers.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../llm/providers.ts")>()),
-  checkModelCall: async () => { state.keyChecks++; return { ok: true }; },
+  checkModelCall: async () => { state.keyChecks++; return state.check; },
 }));
 vi.mock("../../../credentials/credentials.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../credentials/credentials.ts")>()),
   setModelKey: async () => { state.keysSaved++; },
-  modelKey: async () => ({ provider: "openrouter", key: "sk-or-v1-" + "s".repeat(40), baseUrl: null }),
+  modelKey: async () => (state.stored ? { provider: "openrouter", key: "sk-or-v1-" + "s".repeat(40), baseUrl: null } : null),
   modelKeyHint: async () => null,
   keyStillStored: async (...args: unknown[]) => { state.stillAsked.push(args); return state.keyStillStored; },
 }));
@@ -60,6 +60,23 @@ beforeEach(() => {
   state.stillAsked = [];
   state.startedIn = [];
   state.revalidated = [];
+  state.check = { ok: true };
+  state.stored = true;
+});
+
+test("a refusal about the key or the base URL names that field, so the page can tie the message to it; other refusals name none", async () => {
+  state.member = { userId: "owner-1", email: "owner@acme.test", orgId: "org-1", orgName: "Acme", role: "owner" };
+  state.stored = false;
+  expect(await startRunAction({}, startForm())).toEqual({ error: "Paste an API key from your model provider to start.", field: "key" });
+  expect(await startRunAction({}, startForm({ apiKey: "not a key at all, just words" }))).toEqual({ error: "That does not look like an API key. Copy it again from your provider.", field: "key" });
+  expect(await startRunAction({}, startForm({ apiKey: KEY, provider: "custom", baseUrl: "http://models.acme.test/v1" }))).toMatchObject({ field: "baseUrl" });
+  state.stored = true;
+  state.check = { ok: false, reason: "key", detail: "User not found." };
+  expect(await startRunAction({}, startForm({ apiKey: KEY }))).toEqual({ error: "OpenRouter did not accept this key (User not found.).", field: "key" });
+  state.check = { ok: false, reason: "model" };
+  expect(await startRunAction({}, startForm({ apiKey: KEY }))).toEqual({ error: "This key cannot use deepseek/deepseek-v4.1-flash. Pick another model." });
+  state.check = { ok: false, reason: "unavailable" };
+  expect(await startRunAction({}, startForm({ apiKey: KEY }))).toEqual({ error: "OpenRouter could not be reached to check the key. Try again in a moment." });
 });
 
 test("a session that no longer belongs to its workspace can neither list models nor start a run, and nothing is read", async () => {

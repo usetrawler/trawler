@@ -18,7 +18,7 @@ export async function startTheRun(previous: StartState, form: FormData): Promise
     return await startRunAction(previous, form);
   } catch (err) {
     if (!unstable_isUnrecognizedActionError(err)) throw err;
-    return { ...previous, error: updatedSinceOpened("Reload the page to start the run.") };
+    return { ...(previous.keyHint ? { keyHint: previous.keyHint } : {}), error: updatedSinceOpened("Reload the page to start the run.") };
   }
 }
 
