@@ -12,7 +12,7 @@ const { THEME_SCRIPT } = await import("../components/theme.ts");
 const { UnrecognizedActionError } = await import("next/dist/client/components/unrecognized-action-error.js");
 
 const props = { error: new Error("boom"), reset: () => {} };
-const text = (html: string) => html.replace(/<script[^>]*>.*?<\/script>/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+const text = (html: string) => html.replace(/<script[^>]*>.*?<\/script>|<title>.*?<\/title>/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 
 type Node = { type?: unknown; props?: Record<string, unknown> & { children?: unknown } };
 const nodes = (node: unknown): Node[] => {
@@ -33,9 +33,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("the error page that replaces the whole app applies the remembered theme too", () => {
+const title = (html: string) => /<head><title>([^<]*)<\/title>/.exec(html)?.[1];
+
+test("the error page that replaces the whole app names its tab and applies the remembered theme too", () => {
   const html = renderToStaticMarkup(createElement(GlobalError, props));
-  expect(html).toMatch(new RegExp(`^<html lang="en"><head><script type="text/javascript">${THEME_SCRIPT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</script></head><body`));
+  expect(title(html)).toBe("Something went wrong · Trawler");
+  expect(html).toMatch(new RegExp(`^<html lang="en"><head><title>[^<]*</title><script type="text/javascript">${THEME_SCRIPT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</script></head><body`));
 });
 
 test("the error page's root element lets the script's theme attribute differ from what the server rendered", () => {
@@ -60,7 +63,9 @@ test("an error the server already reported, which carries its digest, is not rep
 test("a page left open across an update says so and reloads, since trying again cannot work until then, and nothing is reported", () => {
   const outdated = new UnrecognizedActionError("Server action not found.");
   const reset = vi.fn();
-  expect(text(renderToStaticMarkup(createElement(GlobalError, { error: outdated, reset })))).toBe("Trawler has been updated since this page opened. Reload the page to carry on. Reload the page →");
+  const html = renderToStaticMarkup(createElement(GlobalError, { error: outdated, reset }));
+  expect(title(html)).toBe("Page updated · Trawler");
+  expect(text(html)).toBe("Trawler has been updated since this page opened. Reload the page to carry on. Reload the page →");
   report();
   expect(sentry.captureException).not.toHaveBeenCalled();
   const reload = vi.fn();
