@@ -35,9 +35,18 @@ const ev = <T extends Omit<RunEvent, "seq" | "at">>(e: T) => ({ ...e, seq: ++seq
 const usage = (costUsd: number) => ({ model: "m/agent", inputTokens: 10, outputTokens: 5, costUsd, steps: 1 });
 const defect = { id: "f1", kind: "defect", goal: "g", title: "Broken save", observed: "500", reproduction: ["Open /x", "Click Save"], severity: "high" } as const;
 
+async function claimPastChecks() {
+  let job = await claimJob(t.db, keys);
+  while (job?.kind === "account_check") {
+    await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "report", signIn: { outcome: "signed_in", observed: "Signed in." } });
+    job = await claimJob(t.db, keys);
+  }
+  return job;
+}
+
 async function drain() {
   while (true) {
-    const job = await claimJob(t.db, keys);
+    const job = await claimPastChecks();
     if (!job) return;
     seq = 0;
     await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "finish" });
@@ -50,10 +59,10 @@ describe("a whole run", () => {
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
     expect(run.number).toBe(1);
 
-    const first = (await claimJob(t.db, keys))!;
+    const first = (await claimPastChecks())!;
     expect(first).toMatchObject({ kind: "role_session", runId: run.id, personaKey: "ana", maxSteps: 30, agentModel: "m/agent" });
     expect(first.config.accounts).toEqual([{ ref: "ana", username: "ana@acme.test", password: "hunter22-secret" }]);
-    expect(await claimJob(t.db, keys)).toBeNull();
+    expect(await claimPastChecks()).toBeNull();
 
     seq = 0;
     const events = [
@@ -67,21 +76,21 @@ describe("a whole run", () => {
     await completeJob(t.db, first.token, { usage: usage(0.01), stoppedBy: "finish" });
     await completeJob(t.db, first.token, { usage: usage(0.01), stoppedBy: "finish" });
 
-    const second = (await claimJob(t.db, keys))!;
+    const second = (await claimPastChecks())!;
     expect(second).toMatchObject({ kind: "role_session", personaKey: "lee" });
     await completeJob(t.db, second.token, { usage: usage(0), stoppedBy: "finish" });
 
-    const replay = (await claimJob(t.db, keys))!;
+    const replay = (await claimPastChecks())!;
     expect(replay).toMatchObject({ kind: "replay", finding: { id: "ana:f1", title: "Broken save" }, accountRef: "ana", maxSteps: 20 });
     await completeJob(t.db, replay.token, { usage: usage(0.02), stoppedBy: "report", observation: { completed: true, observed: "Internal Server Error", blockedAt: null } });
 
-    const judge = (await claimJob(t.db, keys))!;
+    const judge = (await claimPastChecks())!;
     expect(judge).toMatchObject({ kind: "judge", finding: { id: "ana:f1" }, observation: { completed: true }, judgeModel: "m/judge" });
     seq = 0;
     await ingestEvents(t.db, judge.token, [ev({ type: "verdict", jobId: judge.jobId, findingId: "ana:f1", verdict: "confirmed", observed: "Internal Server Error" })]);
     await completeJob(t.db, judge.token, { usage: usage(0.001), stoppedBy: "done" });
 
-    expect(await claimJob(t.db, keys)).toBeNull();
+    expect(await claimPastChecks()).toBeNull();
     const summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
     expect(summary).toMatchObject({ status: "succeeded", costUsd: 0 });
     expect(summary!.findings).toEqual([expect.objectContaining({ key: "ana:f1", personaKey: "ana", verdict: "confirmed", replay: { completed: true, observed: "Internal Server Error", blockedAt: null } })]);
@@ -98,14 +107,14 @@ describe("a whole run", () => {
   test("a defect whose replay wrote no report is not judged", async () => {
     await drain();
     await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
-    const first = (await claimJob(t.db, keys))!;
+    const first = (await claimPastChecks())!;
     seq = 0;
     await ingestEvents(t.db, first.token, [ev({ type: "finding", jobId: first.jobId, finding: defect })]);
     await completeJob(t.db, first.token, { usage: usage(0), stoppedBy: "finish" });
-    await completeJob(t.db, (await claimJob(t.db, keys))!.token, { usage: usage(0), stoppedBy: "finish" });
-    const replay = (await claimJob(t.db, keys))!;
+    await completeJob(t.db, (await claimPastChecks())!.token, { usage: usage(0), stoppedBy: "finish" });
+    const replay = (await claimPastChecks())!;
     await completeJob(t.db, replay.token, { usage: usage(0), stoppedBy: "error", observation: { completed: false, observed: "the replay session wrote no report", blockedAt: null } });
-    expect(await claimJob(t.db, keys)).toBeNull();
+    expect(await claimPastChecks()).toBeNull();
   });
 });
 
@@ -118,7 +127,7 @@ describe("safety", () => {
   test("events for another job are refused", async () => {
     await drain();
     await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
-    const job = (await claimJob(t.db, keys))!;
+    const job = (await claimPastChecks())!;
     seq = 0;
     await expect(ingestEvents(t.db, job.token, [ev({ type: "note", jobId: "someone-else", text: "x" })])).rejects.toThrow(/another job/);
     await drain();
@@ -127,7 +136,7 @@ describe("safety", () => {
   test("spending the budget stops the run and cancels what is left", async () => {
     await drain();
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { ...options, budgetUsd: 0.05 }));
-    const job = (await claimJob(t.db, keys))!;
+    const job = (await claimPastChecks())!;
     const call = await llmCallFor(t.db, job.token);
     expect(call.remainingUsd).toBeCloseTo(0.05, 6);
     await recordLlmUsage(t.db, call, { model: "m/agent", inputTokens: 1000, outputTokens: 10, costUsd: 0.06 });
@@ -137,19 +146,19 @@ describe("safety", () => {
     expect(res).toEqual({ cancel: true });
     await completeJob(t.db, job.token, { usage: usage(0.06), stoppedBy: "budget" });
     expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.costUsd).toBeCloseTo(0.06, 6);
-    expect(await claimJob(t.db, keys)).toBeNull();
+    expect(await claimPastChecks()).toBeNull();
     expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.status).toBe("stopped_budget");
   });
 
   test("a cancelled run hands out no more jobs and tells the runner to stop", async () => {
     await drain();
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
-    const job = (await claimJob(t.db, keys))!;
+    const job = (await claimPastChecks())!;
     await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id, "stopped"));
     seq = 0;
     expect(await ingestEvents(t.db, job.token, [ev({ type: "note", jobId: job.jobId, text: "x" })])).toEqual({ cancel: true });
     await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "error", error: "cancelled" });
-    expect(await claimJob(t.db, keys)).toBeNull();
+    expect(await claimPastChecks()).toBeNull();
     expect(await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id))).toMatchObject({ status: "cancelled", cancelReason: "stopped" });
   });
 
@@ -161,7 +170,7 @@ describe("safety", () => {
     const finished = await withOrg(t.db, org, (tx) => startRun(tx, org, own, keys, options));
     await drain();
     const going = await withOrg(t.db, org, (tx) => startRun(tx, org, own, keys, options));
-    const claimed = (await claimJob(t.db, keys))!;
+    const claimed = (await claimPastChecks())!;
     expect(claimed.runId).toBe(going.id);
     const waiting = await withOrg(t.db, org, (tx) => startRun(tx, org, own, keys, options));
     const elsewhere = await withOrg(t.db, "org-b", (tx) => startRun(tx, "org-b", other, keys, options));
@@ -181,7 +190,7 @@ describe("safety", () => {
     ]);
     const jobs = await t.db.selectFrom("jobs").select(["run_id", "status"]).where("run_id", "in", [going.id, waiting.id]).execute();
     expect(jobs.filter((j) => j.run_id === waiting.id).every((j) => j.status === "cancelled")).toBe(true);
-    expect(jobs.filter((j) => j.run_id === going.id).map((j) => j.status).sort()).toEqual(["cancelled", "leased"]);
+    expect(jobs.filter((j) => j.run_id === going.id).map((j) => j.status).sort()).toEqual(["cancelled", "leased", "succeeded"]);
     seq = 0;
     expect(await ingestEvents(t.db, claimed.token, [ev({ type: "note", jobId: claimed.jobId, text: "x" })])).toEqual({ cancel: true });
     await completeJob(t.db, claimed.token, { usage: usage(0), stoppedBy: "error", error: "cancelled" });
@@ -202,7 +211,7 @@ describe("safety", () => {
   test("two claimers never get two jobs of the same run", async () => {
     await drain();
     await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
-    const claims = await Promise.all([claimJob(t.db, keys), claimJob(t.db, keys), claimJob(t.db, keys)]);
+    const claims = await Promise.all([claimPastChecks(), claimPastChecks(), claimPastChecks()]);
     expect(claims.filter(Boolean)).toHaveLength(1);
     await drain();
   });
@@ -216,7 +225,7 @@ describe("safety", () => {
       await holder.query("BEGIN");
       await holder.query("SELECT 1 FROM runs WHERE id = $1 FOR UPDATE", [run.id]);
       await holder.query("SELECT 1 FROM jobs WHERE run_id = $1 AND position = 0 FOR UPDATE", [run.id]);
-      expect(await claimJob(t.db, keys)).toBeNull();
+      expect(await claimPastChecks()).toBeNull();
     } finally {
       await holder.query("ROLLBACK");
       await holder.end();
@@ -246,7 +255,7 @@ describe("review round 1", () => {
     await drain();
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
     for (const title of ["Ana bug", "Lee bug"]) {
-      const job = (await claimJob(t.db, keys))!;
+      const job = (await claimPastChecks())!;
       seq = 0;
       await ingestEvents(t.db, job.token, [ev({ type: "finding", jobId: job.jobId, finding: { ...defect, title } })]);
       await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "finish" });
@@ -259,7 +268,7 @@ describe("review round 1", () => {
   test("the database refuses a second leased job in one run", async () => {
     await drain();
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
-    await claimJob(t.db, keys);
+    await claimPastChecks();
     await expect(sql`update jobs set status = 'leased' where run_id = ${run.id} and status = 'queued'`.execute(t.db)).rejects.toThrow(/duplicate key|unique/);
     await drain();
   });
@@ -267,10 +276,10 @@ describe("review round 1", () => {
   test("an expired lease no longer works and the run moves on", async () => {
     await drain();
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
-    const stale = (await claimJob(t.db, keys))!;
+    const stale = (await claimPastChecks())!;
     await sql`update jobs set lease_until = now() - interval '1 minute' where id = ${stale.jobId}`.execute(t.db);
     await expect(ingestEvents(t.db, stale.token, [])).rejects.toBeInstanceOf(InvalidJobToken);
-    const next = (await claimJob(t.db, keys))!;
+    const next = (await claimPastChecks())!;
     expect(next).toMatchObject({ runId: run.id, personaKey: "lee" });
     const { rows } = await sql<{ status: string; error: string }>`select status, error from jobs where id = ${stale.jobId}`.execute(t.db);
     expect(rows[0]).toMatchObject({ status: "failed" });
@@ -280,7 +289,7 @@ describe("review round 1", () => {
   test("invalid events are refused as a whole and never poison later batches", async () => {
     await drain();
     await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
-    const job = (await claimJob(t.db, keys))!;
+    const job = (await claimPastChecks())!;
     seq = 0;
     const bad = [ev({ type: "finding", jobId: job.jobId, finding: { ...defect, id: "x".repeat(101) } })];
     await expect(ingestEvents(t.db, job.token, bad)).rejects.toThrow();
@@ -297,8 +306,8 @@ describe("review round 1", () => {
     const broken = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
     await sql`update runs set config_snapshot = '{"broken": true}' where id = ${broken.id}`.execute(t.db);
     const healthy = await withOrg(t.db, "org-z", (tx) => startRun(tx, "org-z", zProject, keys, options));
-    const claimed = await claimJob(t.db, keys);
-    const again = claimed ?? (await claimJob(t.db, keys));
+    const claimed = await claimPastChecks();
+    const again = claimed ?? (await claimPastChecks());
     expect(again?.runId).toBe(healthy.id);
     const { rows } = await sql<{ status: string }>`select status from jobs where run_id = ${broken.id} order by position limit 1`.execute(t.db);
     expect(rows[0]!.status).toBe("failed");
@@ -308,7 +317,7 @@ describe("review round 1", () => {
   test("events after a cancel are not projected", async () => {
     await drain();
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
-    const job = (await claimJob(t.db, keys))!;
+    const job = (await claimPastChecks())!;
     await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id, "stopped"));
     seq = 0;
     expect(await ingestEvents(t.db, job.token, [ev({ type: "finding", jobId: job.jobId, finding: defect })])).toEqual({ cancel: true });
@@ -323,11 +332,11 @@ describe("review round 2", () => {
     const longConfig = ProjectConfigSchema.parse({ ...config, personas: [{ id: "p".repeat(60), name: "P", brief: "b" }], accounts: [] });
     const longProject = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", longConfig, keys));
     await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", longProject, keys, options));
-    const role = (await claimJob(t.db, keys))!;
+    const role = (await claimPastChecks())!;
     seq = 0;
     await ingestEvents(t.db, role.token, [ev({ type: "finding", jobId: role.jobId, finding: { ...defect, id: "f".repeat(100) } })]);
     await completeJob(t.db, role.token, { usage: usage(0), stoppedBy: "finish" });
-    const replay = (await claimJob(t.db, keys))!;
+    const replay = (await claimPastChecks())!;
     expect(replay).toMatchObject({ kind: "replay", finding: { id: `${"p".repeat(60)}:${"f".repeat(100)}` } });
     await drain();
   });
@@ -335,14 +344,14 @@ describe("review round 2", () => {
   test("an expired lease in a cancelled run plans nothing new", async () => {
     await drain();
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
-    const ana = (await claimJob(t.db, keys))!;
+    const ana = (await claimPastChecks())!;
     seq = 0;
     await ingestEvents(t.db, ana.token, [ev({ type: "finding", jobId: ana.jobId, finding: defect })]);
     await completeJob(t.db, ana.token, { usage: usage(0), stoppedBy: "finish" });
-    const lee = (await claimJob(t.db, keys))!;
+    const lee = (await claimPastChecks())!;
     await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id, "stopped"));
     await sql`update jobs set lease_until = now() - interval '1 minute' where id = ${lee.jobId}`.execute(t.db);
-    await claimJob(t.db, keys);
+    await claimPastChecks();
     const summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
     expect(summary!.jobs.map((j) => j.status)).not.toContain("queued");
     await drain();
@@ -351,7 +360,7 @@ describe("review round 2", () => {
   test("only proxied model calls count toward the cost; what a runner reports never does", async () => {
     await drain();
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
-    const job = (await claimJob(t.db, keys))!;
+    const job = (await claimPastChecks())!;
     seq = 0;
     await ingestEvents(t.db, job.token, [ev({ type: "step", jobId: job.jobId, step: 1, tool: null, costUsd: 0.4 })]);
     await recordLlmUsage(t.db, await llmCallFor(t.db, job.token), { model: "m/agent", inputTokens: 5000, outputTokens: 100, costUsd: 0.012 });
@@ -368,7 +377,7 @@ describe("review round 2", () => {
     await drain();
     await expect(llmCallFor(t.db, "x".repeat(43))).rejects.toBeInstanceOf(InvalidJobToken);
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
-    const job = (await claimJob(t.db, keys))!;
+    const job = (await claimPastChecks())!;
     expect(await llmCallFor(t.db, job.token)).toMatchObject({ orgId: "org-a", runId: run.id, jobId: job.jobId, models: ["m/agent", "m/judge"] });
     await withOrg(t.db, "org-a", (tx) => cancelRun(tx, "org-a", run.id, "stopped"));
     await expect(llmCallFor(t.db, job.token)).rejects.toBeInstanceOf(LlmRefused);
@@ -379,7 +388,7 @@ describe("review round 2", () => {
 test("a finished job's token cannot raise the run's cost afterwards", async () => {
   await drain();
   const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
-  const job = (await claimJob(t.db, keys))!;
+  const job = (await claimPastChecks())!;
   await completeJob(t.db, job.token, { usage: usage(0.1), stoppedBy: "finish" });
   await completeJob(t.db, job.token, { usage: usage(4.9), stoppedBy: "finish" });
   expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.costUsd).toBe(0);
@@ -391,7 +400,7 @@ test("a queued run never pairs its snapshot's username with a different account'
   const own = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
   await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", own, keys, options));
   await sql`update target_accounts set username = 'someone-else@acme.test' where project_id = ${own} and ref = 'ana'`.execute(t.db);
-  const job = (await claimJob(t.db, keys))!;
+  const job = (await claimPastChecks())!;
   expect(job.config.accounts).toEqual([]);
   expect(job.config.personas.find((p) => p.id === "ana")!.accountRef).toBeUndefined();
   await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "finish" });
@@ -402,15 +411,15 @@ test("a replay has no account when its person's account stopped being usable, li
   const own = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
   await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", own, keys, options));
   await sql`update target_accounts set username = 'someone-else@acme.test' where project_id = ${own} and ref = 'ana'`.execute(t.db);
-  const session = (await claimJob(t.db, keys))!;
+  const session = (await claimPastChecks())!;
   expect(session).toMatchObject({ kind: "role_session", personaKey: "ana" });
   expect(session.config.personas.find((p) => p.id === "ana")!.accountRef).toBeUndefined();
   seq = 0;
   await ingestEvents(t.db, session.token, [ev({ type: "finding", jobId: session.jobId, finding: defect })]);
   await completeJob(t.db, session.token, { usage: usage(0), stoppedBy: "finish" });
-  const lee = (await claimJob(t.db, keys))!;
+  const lee = (await claimPastChecks())!;
   await completeJob(t.db, lee.token, { usage: usage(0), stoppedBy: "finish" });
-  const replay = (await claimJob(t.db, keys))!;
+  const replay = (await claimPastChecks())!;
   expect(replay).toMatchObject({ kind: "replay", finding: { id: "ana:f1" } });
   expect(replay.accountRef).toBeUndefined();
   await drain();
@@ -431,14 +440,14 @@ describe("judge again", () => {
     await drain();
     await withOrg(t.db, "org-a", (tx) => setModelKey(tx, "org-a", openRouterKey, "u1", keys));
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { ...options, ...over }));
-    const ana = (await claimJob(t.db, keys))!;
+    const ana = (await claimPastChecks())!;
     seq = 0;
     await ingestEvents(t.db, ana.token, [ev({ type: "finding", jobId: ana.jobId, finding: defect })]);
     await completeJob(t.db, ana.token, { usage: usage(0), stoppedBy: "finish" });
-    await completeJob(t.db, (await claimJob(t.db, keys))!.token, { usage: usage(0), stoppedBy: "finish" });
-    const replay = (await claimJob(t.db, keys))!;
+    await completeJob(t.db, (await claimPastChecks())!.token, { usage: usage(0), stoppedBy: "finish" });
+    const replay = (await claimPastChecks())!;
     await completeJob(t.db, replay.token, { usage: usage(0), stoppedBy: "report", observation: { completed: true, observed: "Internal Server Error", blockedAt: null } });
-    return { run, judge: (await claimJob(t.db, keys))! };
+    return { run, judge: (await claimPastChecks())! };
   }
 
   async function runWithFailedJudge(over: Partial<StartRunOptions> = {}) {
@@ -457,7 +466,7 @@ describe("judge again", () => {
     await again(run.id);
     expect((await summaryOf(run.id)).findings[0]!.verdict).toBeNull();
     expect(await queuedJudges(run.id)).toBe(1);
-    const job = (await claimJob(t.db, keys))!;
+    const job = (await claimPastChecks())!;
     expect(job).toMatchObject({ runId: run.id, kind: "judge", finding: { id: "ana:f1", title: "Broken save" }, observation: { completed: true, observed: "Internal Server Error" }, judgeModel: "m/judge" });
     expect(job.budgetUsd).toBeCloseTo(2, 6);
     expect((await summaryOf(run.id)).status).toBe("succeeded");
@@ -475,16 +484,16 @@ describe("judge again", () => {
     expect(after.jobs.filter((j) => j.kind === "judge").map((j) => j.status)).toEqual(["failed", "succeeded"]);
     const { rows } = await sql<{ requested_by: string | null }>`select requested_by from jobs where run_id = ${run.id} and kind = 'judge' order by position`.execute(t.db);
     expect(rows.map((r) => r.requested_by)).toEqual([null, "u2"]);
-    expect(await claimJob(t.db, keys)).toBeNull();
+    expect(await claimPastChecks()).toBeNull();
   });
 
   test("a judge that is judged again and fails again can be asked once more", async () => {
     const run = await runWithFailedJudge();
     await again(run.id);
-    const first = (await claimJob(t.db, keys))!;
+    const first = (await claimPastChecks())!;
     await completeJob(t.db, first.token, { usage: usage(0), stoppedBy: "error", error: "No output generated." });
     await again(run.id);
-    expect(await claimJob(t.db, keys)).toMatchObject({ runId: run.id, kind: "judge", finding: { id: "ana:f1" } });
+    expect(await claimPastChecks()).toMatchObject({ runId: run.id, kind: "judge", finding: { id: "ana:f1" } });
     await drain();
   });
 
@@ -505,7 +514,7 @@ describe("judge again", () => {
     const run = await runWithFailedJudge();
     await again(run.id);
     await refused(again(run.id), /already/);
-    await claimJob(t.db, keys);
+    await claimPastChecks();
     await refused(again(run.id), /already/);
     await drain();
   });
@@ -531,7 +540,7 @@ describe("judge again", () => {
   test("a judge again that the proxy refused can be judged again once the problem is fixed", async () => {
     const run = await runWithFailedJudge();
     await again(run.id);
-    const refusedJob = (await claimJob(t.db, keys))!;
+    const refusedJob = (await claimPastChecks())!;
     await completeJob(t.db, refusedJob.token, { usage: usage(0), stoppedBy: "error", error: "the provider account behind the workspace key is out of credits" });
     const summary = await summaryOf(run.id);
     expect(summary.jobs.filter((j) => j.kind === "judge").map((j) => [j.status, j.stopped_by, j.error, j.requested])).toEqual([
@@ -539,7 +548,7 @@ describe("judge again", () => {
       ["failed", "error", "the provider account behind the workspace key is out of credits", true],
     ]);
     await again(run.id);
-    expect(await claimJob(t.db, keys)).toMatchObject({ runId: run.id, kind: "judge", finding: { id: "ana:f1" } });
+    expect(await claimPastChecks()).toMatchObject({ runId: run.id, kind: "judge", finding: { id: "ana:f1" } });
     await drain();
   });
 
@@ -583,9 +592,9 @@ describe("judge again", () => {
   test("a runner that stops during a judge again hands it back to the queue", async () => {
     const run = await runWithFailedJudge();
     await again(run.id);
-    const job = (await claimJob(t.db, keys))!;
+    const job = (await claimPastChecks())!;
     await releaseJob(t.db, { jobId: job.jobId, runId: run.id, token: job.token });
-    expect(await claimJob(t.db, keys)).toMatchObject({ runId: run.id, kind: "judge", finding: { id: "ana:f1" } });
+    expect(await claimPastChecks()).toMatchObject({ runId: run.id, kind: "judge", finding: { id: "ana:f1" } });
     expect((await summaryOf(run.id)).status).toBe("succeeded");
     await drain();
   });
@@ -593,9 +602,9 @@ describe("judge again", () => {
   test("a judge again whose runner stops answering fails without reopening the run", async () => {
     const run = await runWithFailedJudge();
     await again(run.id);
-    const job = (await claimJob(t.db, keys))!;
+    const job = (await claimPastChecks())!;
     await sql`update jobs set lease_until = now() - interval '1 minute' where id = ${job.jobId}`.execute(t.db);
-    expect(await claimJob(t.db, keys)).toBeNull();
+    expect(await claimPastChecks()).toBeNull();
     const summary = await summaryOf(run.id);
     expect(summary.status).toBe("succeeded");
     expect(summary.jobs.filter((j) => j.kind === "judge").map((j) => j.status)).toEqual(["failed", "failed"]);
@@ -604,7 +613,7 @@ describe("judge again", () => {
   test("a judge again stops when it spends the rest of the cap", async () => {
     const run = await runWithFailedJudge({ budgetUsd: 0.1 });
     await again(run.id);
-    const job = (await claimJob(t.db, keys))!;
+    const job = (await claimPastChecks())!;
     await recordLlmUsage(t.db, await llmCallFor(t.db, job.token), { model: "m/judge", inputTokens: 900, outputTokens: 40, costUsd: 0.2 });
     await expect(llmCallFor(t.db, job.token)).rejects.toBeInstanceOf(LlmRefused);
     seq = 0;
@@ -636,7 +645,7 @@ describe("screenshots", () => {
   test("a finding carries the latest stored screenshot from its session and from its replay; a pending or discarded one, or one for another finding, never", async () => {
     await drain();
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
-    const session = (await claimJob(t.db, keys))!;
+    const session = (await claimPastChecks())!;
     seq = 0;
     await ingestEvents(t.db, session.token, [
       ev({ type: "job_started", jobId: session.jobId, kind: "role_session" }),
@@ -648,8 +657,8 @@ describe("screenshots", () => {
     await screenshot(session, run.id, "ana:f1", { at: "2026-09-01T10:03:00Z", stored: false });
     await screenshot(session, run.id, "ana:f1", { at: "2026-09-01T10:04:00Z", discarded: true });
     await completeJob(t.db, session.token, { usage: usage(0), stoppedBy: "finish" });
-    await completeJob(t.db, (await claimJob(t.db, keys))!.token, { usage: usage(0), stoppedBy: "finish" });
-    const replay = (await claimJob(t.db, keys))!;
+    await completeJob(t.db, (await claimPastChecks())!.token, { usage: usage(0), stoppedBy: "finish" });
+    const replay = (await claimPastChecks())!;
     expect(replay.finding?.id).toBe("ana:f1");
     const replayed = await screenshot(replay, run.id, "ana:f1", { id: "00000000-0000-4000-8000-000000000003", at: "2026-09-01T10:06:00Z" });
     await screenshot(replay, run.id, "ana:f1", { id: "00000000-0000-4000-8000-000000000002", at: "2026-09-01T10:06:00Z" });
@@ -662,7 +671,7 @@ describe("screenshots", () => {
     await drain();
 
     const next = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
-    const again = (await claimJob(t.db, keys))!;
+    const again = (await claimPastChecks())!;
     seq = 0;
     await ingestEvents(t.db, again.token, [ev({ type: "job_started", jobId: again.jobId, kind: "role_session" }), ev({ type: "finding", jobId: again.jobId, finding: defect })]);
     const own = await screenshot(again, next.id, "ana:f1");
@@ -701,7 +710,7 @@ describe("a team session", () => {
     const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", team, keys));
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", id, keys, options));
 
-    const first = (await claimJob(t.db, keys))!;
+    const first = (await claimPastChecks())!;
     expect(first).toMatchObject({ kind: "role_session", personaKey: "priya", goalIds: ["submit"], turn: 0, story: [] });
     expect(first.signUpSeed).toMatch(/^[\w-]{20,}$/);
     seq = 0;
@@ -712,7 +721,7 @@ describe("a team session", () => {
     ]);
     await completeJob(t.db, first.token, { usage: usage(0), stoppedBy: "finish" });
 
-    const second = (await claimJob(t.db, keys))!;
+    const second = (await claimPastChecks())!;
     expect(second).toMatchObject({ personaKey: "marco", goalIds: ["review"], turn: 1, signUpSeed: first.signUpSeed });
     expect(second.story).toEqual([
       { personaId: "priya", name: "Priya", text: "Submitted pitch EcoLoop." },
@@ -722,7 +731,7 @@ describe("a team session", () => {
     await ingestEvents(t.db, second.token, [ev({ type: "goal_status", jobId: second.jobId, outcome: { goal: "review", status: "reached", note: "Accepted EcoLoop." } })]);
     await completeJob(t.db, second.token, { usage: usage(0), stoppedBy: "finish" });
 
-    const third = (await claimJob(t.db, keys))!;
+    const third = (await claimPastChecks())!;
     expect(third).toMatchObject({ personaKey: "priya", goalIds: ["decision"], turn: 2 });
     expect(third.story!.map((e) => e.text)).toEqual(["Submitted pitch EcoLoop.", "EcoLoop is in review.", "Accepted EcoLoop."]);
     seq = 0;
@@ -731,7 +740,7 @@ describe("a team session", () => {
       ev({ type: "goal_status", jobId: third.jobId, outcome: { goal: "decision", status: "failed", note: "Nothing shown." } }),
     ]);
     await releaseJob(t.db, { jobId: third.jobId, runId: run.id, token: third.token });
-    const again = (await claimJob(t.db, keys))!;
+    const again = (await claimPastChecks())!;
     expect(again).toMatchObject({ personaKey: "priya", goalIds: ["decision"], turn: 2 });
     let summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
     expect(summary!.goals.map((g) => [g.personaKey, g.goal])).toEqual([["marco", "review"], ["priya", "submit"]]);
@@ -753,7 +762,7 @@ describe("a team session", () => {
     await drain();
     const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", team, keys));
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", id, keys, options));
-    const job = (await claimJob(t.db, keys))!;
+    const job = (await claimPastChecks())!;
     const { rows } = await sql<{ seed: string }>`select sign_up_seed as seed from runs where id = ${run.id}`.execute(t.db);
     expect(rows[0]!.seed).not.toContain(job.signUpSeed!);
     expect(job.returning).toBe(false);
@@ -765,11 +774,38 @@ describe("a team session", () => {
     const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", team, keys));
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", id, keys, options));
     await sql`update runs set sign_up_seed = null where id = ${run.id}`.execute(t.db);
-    const job = (await claimJob(t.db, keys))!;
+    const job = (await claimPastChecks())!;
     expect(job).toMatchObject({ kind: "role_session", personaKey: "priya" });
     expect(job.goalIds).toBeUndefined();
     expect(job.story).toBeUndefined();
     expect(job.signUpSeed).toBeUndefined();
+    await drain();
+  });
+});
+
+describe("account check", () => {
+  test("each test account the plan uses is checked before anyone plays, and a refused one stops the run with who and why", async () => {
+    await drain();
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const check = (await claimJob(t.db, keys))!;
+    expect(check).toMatchObject({ kind: "account_check", accountRef: "ana", maxSteps: 12 });
+    expect(check.config.accounts.find((a) => a.ref === "ana")?.password).toBe("hunter22-secret");
+    await completeJob(t.db, check.token, { usage: usage(0.002), stoppedBy: "report", signIn: { outcome: "refused", observed: "Username and password do not match" } });
+    expect(await claimJob(t.db, keys)).toBeNull();
+    const summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
+    expect(summary).toMatchObject({ status: "cancelled", cancelReason: "account_refused" });
+    expect(summary!.jobs.filter((j) => j.kind === "role_session").every((j) => j.status === "cancelled")).toBe(true);
+    expect(summary!.jobs.find((j) => j.kind === "account_check")).toMatchObject({ status: "failed", error: "The product refused the username and password of ana@acme.test: Username and password do not match" });
+    const { rows } = await sql<{ seed: string | null }>`select sign_up_seed as seed from runs where id = ${run.id}`.execute(t.db);
+    expect(rows[0]!.seed).toBeNull();
+  });
+
+  test("an account that signs in, or a check that cannot tell, lets the people start", async () => {
+    await drain();
+    await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const check = (await claimJob(t.db, keys))!;
+    await completeJob(t.db, check.token, { usage: usage(0), stoppedBy: "report", signIn: { outcome: "unclear", observed: "No sign-in form found." } });
+    expect(await claimJob(t.db, keys)).toMatchObject({ kind: "role_session" });
     await drain();
   });
 });

@@ -93,6 +93,7 @@ export function SignIn({ projectId, person, accounts, onPick, onAccounts }: {
         <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); add(); }}>
           <input aria-label={`Username or email for ${who}`} placeholder="Username or email" autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} className="h-9 min-w-0 border border-line bg-soft px-2 text-sm outline-none focus:border-ink" />
           <input aria-label={`Password for ${who}`} placeholder="Password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} className="h-9 min-w-0 border border-line bg-soft px-2 text-sm outline-none focus:border-ink" />
+          {password !== password.trim() && <p className="text-xs text-bad">This password starts or ends with a space, and it is kept exactly as typed. Remove the space if the account&apos;s password has none.</p>}
           <p className="text-xs text-muted">Encrypted, never shown again, typed without the model seeing it. Anyone on the plan can use it. A password shorter than 8 characters cannot be masked if your product shows it on a page.</p>
           <div className="flex gap-2">
             <button type="submit" disabled={pending} className="h-9 border border-ink px-3 text-sm disabled:opacity-60">{pending ? "Saving…" : "Add account"}</button>

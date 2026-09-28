@@ -65,6 +65,10 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
     .returning(["id", "number"])
     .executeTakeFirstOrThrow();
   await tx.updateTable("runs").set({ sign_up_seed: keys.encrypt(randomBytes(24).toString("base64url"), signUpSeedContext(orgId, run.id)) }).where("id", "=", run.id).execute();
+  const accounts = [...new Set(config.personas.flatMap((p) => (p.accountRef ? [p.accountRef] : [])))];
+  if (accounts.length) {
+    await tx.insertInto("jobs").values(accounts.map((ref, i) => ({ org_id: orgId, run_id: run.id, kind: "account_check", position: i - accounts.length, account_ref: ref }))).execute();
+  }
   await tx.insertInto("jobs").values(turnsOf(config).map((turn, i) => ({ org_id: orgId, run_id: run.id, kind: "role_session", position: i, persona_key: turn.personaId }))).execute();
   return run;
 }
@@ -75,7 +79,7 @@ export class RunNotFound extends Error {
   }
 }
 
-export type CancelReason = "stopped" | "key_removed";
+export type CancelReason = "stopped" | "key_removed" | "account_refused";
 
 export async function cancelRun(tx: Tx, orgId: string, runId: string, reason: CancelReason): Promise<boolean> {
   const run = await tx.selectFrom("runs").select("status").where("id", "=", runId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();

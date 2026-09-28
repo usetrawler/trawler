@@ -200,7 +200,7 @@ test("the proxy marks the 402s that mean the run stopped the job, and only those
   const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "mo", name: "Mo", brief: "b" }], goals: [{ id: "g", instruction: "x" }] });
   const project = await withOrg(t.db, "org-m", (tx) => createProject(tx, "org-m", config, keys));
   const run = await withOrg(t.db, "org-m", (tx) => startRun(tx, "org-m", project, keys, { budgetUsd: 0.01, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 10, replaySteps: 10, createdBy: "u", price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } }));
-  const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "2" } }), deps)).json();
+  const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "3" } }), deps)).json();
   expect(job.runId).toBe(run.id);
   const refusal = async () => {
     const res = await handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${job.token}`, "content-type": "application/json" }, body: JSON.stringify({ model: "m/agent", messages: [{ role: "user", content: "hi" }] }) }), { db: t.db, keys, openRouterUrl: openRouterBase, retryBaseMs: 1 });
@@ -232,7 +232,7 @@ test("the proxy refuses a stranger, a model the run did not choose, and streamin
   const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "kim", name: "Kim", brief: "b" }], goals: [{ id: "g", instruction: "x" }] });
   const project = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
   await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { budgetUsd: 1, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 10, replaySteps: 10, createdBy: "u" }));
-  const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "2" } }), deps)).json();
+  const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "3" } }), deps)).json();
   seen.length = 0;
   expect((await call(job.token, { model: "openai/gpt-5-pro", messages: [] })).status).toBe(400);
   expect((await call(job.token, { model: "m/agent", stream: true, messages: [] })).status).toBe(400);
@@ -241,7 +241,7 @@ test("the proxy refuses a stranger, a model the run did not choose, and streamin
   const smuggled = await call(job.token, { model: "m/agent", messages: [{ role: "user", content: "hi" }], models: ["openai/gpt-5-pro"], route: "fallback", plugins: [{ id: "web" }], provider: { data_collection: "allow", order: ["x"] }, n: 5, usage: { include: false } });
   expect(smuggled.status).toBe(200);
   expect(seen[0]!.body).toEqual({ model: "m/agent", messages: [{ role: "user", content: "hi" }], max_tokens: 16_000, usage: { include: true }, provider: { data_collection: "deny", allow_fallbacks: true } });
-  await handleComplete(new Request(`${base}/api/jobs/${job.jobId}/complete`, { method: "POST", headers: { authorization: `Bearer ${job.token}`, "x-trawler-protocol": "2", "content-type": "application/json" }, body: JSON.stringify({ usage: { model: "m/agent", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "finish" }) }), job.jobId, deps);
+  await handleComplete(new Request(`${base}/api/jobs/${job.jobId}/complete`, { method: "POST", headers: { authorization: `Bearer ${job.token}`, "x-trawler-protocol": "3", "content-type": "application/json" }, body: JSON.stringify({ usage: { model: "m/agent", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "finish" }) }), job.jobId, deps);
   expect((await call(job.token, { model: "m/agent", messages: [] })).status).toBe(402);
 });
 
@@ -250,7 +250,7 @@ test("the proxy bounds a call by what is left of the cap, prices calls OpenRoute
   const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "bo", name: "Bo", brief: "b" }], goals: [{ id: "g", instruction: "x" }] });
   const project = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
   const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { budgetUsd: 0.01, agentModel: model, judgeModel: model, maxSteps: 10, replaySteps: 10, createdBy: "u", price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } }));
-  const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "2" } }), deps)).json();
+  const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "3" } }), deps)).json();
   expect(job.runId).toBe(run.id);
   const call = (body: Record<string, unknown> = {}) => handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${job.token}`, "content-type": "application/json" }, body: JSON.stringify({ model, messages: [{ role: "user", content: "hi" }], ...body }) }), { db: t.db, keys, openRouterUrl: openRouterBase, retryBaseMs: 1 });
 
@@ -302,7 +302,7 @@ test("a run on a direct provider goes to that provider without OpenRouter extras
   const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "oz", name: "Oz", brief: "b" }], goals: [{ id: "g", instruction: "x" }] });
   const project = await withOrg(t.db, "org-o", (tx) => createProject(tx, "org-o", config, keys));
   const run = await withOrg(t.db, "org-o", (tx) => startRun(tx, "org-o", project, keys, { budgetUsd: 5, agentModel: "gpt-5-mini", judgeModel: "gpt-5-mini", maxSteps: 10, replaySteps: 10, createdBy: "u", provider: "openai", tokenCap: 2000 }));
-  const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "2" } }), deps)).json();
+  const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "3" } }), deps)).json();
   expect(job.runId).toBe(run.id);
   const toOpenAi: string[] = [];
   const routed: typeof fetch = (url, init) => {

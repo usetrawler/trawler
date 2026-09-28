@@ -117,12 +117,18 @@ export function runView(s: RunSummary) {
 
   const goalsReached = s.goals.filter((g) => g.status === "reached").length;
   const goalsTotal = s.personas.reduce((sum, p) => sum + goalsFor(s.goalTexts, p.id).length, 0);
-  return { live, rejudging, stages, personas, report, goalsReached, goalsTotal, headline: headline(s.status, s.cancelReason, report.confirmed.length, defects.length) };
+  return { live, rejudging, stages, personas, report, goalsReached, goalsTotal, headline: headline(s, report.confirmed.length, defects.length) };
 }
 
-function headline(status: string, cancelReason: CancelReason | null, confirmed: number, defects: number): string {
+function headline(s: RunSummary, confirmed: number, defects: number): string {
+  const { status, cancelReason } = s;
+  const checks = s.jobs.filter((j) => j.kind === "account_check");
   if (status === "queued") return "Waiting for a runner.";
-  if (status === "running") return "Your people are using the product.";
+  if (status === "running") return checks.some((j) => OPEN.has(j.status)) ? "Checking that the test accounts can sign in." : "Your people are using the product.";
+  if (status === "cancelled" && cancelReason === "account_refused") {
+    const refused = checks.find((j) => j.status === "failed")?.error?.trim() ?? "The product refused a test account";
+    return `${/[.!?]$/.test(refused) ? refused : `${refused}.`} Check that account on the plan and run again.`;
+  }
   if (status === "cancelled") return cancelReason === "key_removed" ? "Stopped when the model key was removed." : "This run was stopped.";
   if (status === "failed") return "This run could not finish.";
   const prefix = status === "stopped_budget" ? "Stopped at the cap. " : "";
