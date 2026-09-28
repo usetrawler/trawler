@@ -264,6 +264,7 @@ test("a run with no defects, or a defect whose replay has not failed, is not mar
   const plain = await project(org, "Plain", "https://plain.test/");
   const none = await seedRun(org, plain, hoursAgo(3), { status: "succeeded", cost: 0.1 }, [], 0, 0);
   const pending = await seedRun(org, plain, hoursAgo(2), { status: "succeeded", cost: 0.1 }, [{ kind: "defect", verdict: null }], 0, 0);
+  await asSystem(t.db, (tx) => tx.insertInto("jobs").values({ org_id: org, run_id: pending.id, kind: "replay", position: 100, finding_key: "ana:f0", status: "succeeded" }).execute());
   const runs = (await withOrg(t.db, org, (tx) => workspaceRuns(tx, org, { projectId: plain }))).runs;
   expect(runs.map((r) => [r.id, r.unchecked])).toEqual([[pending.id, false], [none.id, false]]);
 });

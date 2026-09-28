@@ -60,6 +60,7 @@ test("the rows keep the order they are given in, newest first from the query", (
 
 test("a run whose every replay failed shows no count of confirmed defects, but that they were not checked", () => {
   const [row] = rows(render([line({ confirmed: 0, unchecked: true })]));
-  expect(row).toMatch(/>—<\/strong><small[^>]*>not checked<span class="sr-only">: every replay failed<\/span><\/small>/);
+  expect(row).toMatch(/><span aria-hidden="true">—<\/span><\/strong><small[^>]*>not checked<span class="sr-only">: every replay failed<\/span><\/small>/);
+  expect(row).toMatch(/md:hidden text-ok"> · Complete · not checked<\/span>/);
   expect(row).not.toContain(">confirmed<");
 });

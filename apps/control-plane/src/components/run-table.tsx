@@ -11,7 +11,7 @@ export function RunTable({ runs, compact = false, project = true }: { runs: RunL
       {runs.map((r) => {
         const spent = cost(r);
         const tone = runStatusTone(r.status);
-        const status = runStatusLabel(r.status);
+        const status = r.unchecked ? `${runStatusLabel(r.status)} · not checked` : runStatusLabel(r.status);
         const when = <LocalTime iso={r.createdAt.toISOString()} />;
         return (
           <li key={r.id} className="border-b border-line last:border-b-0">
@@ -31,7 +31,7 @@ export function RunTable({ runs, compact = false, project = true }: { runs: RunL
                 )}
               </span>
               <span className={`font-mono text-[10px] max-md:hidden ${tone}`}>{status}</span>
-              <span className="max-wide:hidden">{r.unchecked ? <><strong className="block">—</strong><small className="text-[10px] text-muted">not checked<span className="sr-only">: every replay failed</span></small></> : <><strong className="block">{r.confirmed}</strong><small className="text-[10px] text-muted">confirmed<span className="sr-only"> defects</span></small></>}</span>
+              <span className="max-wide:hidden">{r.unchecked ? <><strong className="block"><span aria-hidden>—</span></strong><small className="text-[10px] text-muted">not checked<span className="sr-only">: every replay failed</span></small></> : <><strong className="block">{r.confirmed}</strong><small className="text-[10px] text-muted">confirmed<span className="sr-only"> defects</span></small></>}</span>
               <span className="max-wide:hidden"><strong className="block"><span aria-hidden>{r.goalsReached} / {r.goalsTotal}</span><span className="sr-only">{r.goalsReached} of {r.goalsTotal}</span></strong><small className="text-[10px] text-muted">goals<span className="sr-only"> reached</span></small></span>
               <span className="max-md:hidden"><strong className="block">{spent.value}</strong><small className="text-[10px] text-muted">{spent.label}</small></span>
               <span aria-hidden className="font-bold">→</span>

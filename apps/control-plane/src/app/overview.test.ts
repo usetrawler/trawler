@@ -43,7 +43,7 @@ describe("Overview", () => {
 
   it("says the last run's defects were not checked when every replay failed, with no count", () => {
     const card = hero(render([{ ...acme, lastRun: run({ confirmed: 0, unchecked: true }) }]), "p1");
-    expect(card).toMatch(/font-bold">—<\/p><p[^>]*>not checked: every replay failed<\/p>/);
+    expect(card).toMatch(/font-bold"><span aria-hidden="true">—<\/span><\/p><p[^>]*>not checked: every replay failed<\/p>/);
     expect(card).not.toContain("defects in the last run");
   });
 
