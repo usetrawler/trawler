@@ -1,5 +1,6 @@
+import { randomBytes } from "node:crypto";
 import { sql } from "kysely";
-import type { ProjectConfig, RunEvent, Verdict } from "@usetrawler/protocol";
+import { turnsOf, type ProjectConfig, type RunEvent, type Verdict } from "@usetrawler/protocol";
 import { modelKey } from "../credentials/credentials.ts";
 import type { Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -32,6 +33,8 @@ export function withoutSecrets(config: ProjectConfig) {
 
 export type ConfigSnapshot = ReturnType<typeof withoutSecrets>;
 
+export const signUpSeedContext = (orgId: string, runId: string) => [orgId, "run", runId, "sign_up_seed"];
+
 export class NeedsAccount extends Error {
   constructor(readonly person: string) {
     super(`${person} needs a test account to sign in.`);
@@ -61,7 +64,8 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
     })
     .returning(["id", "number"])
     .executeTakeFirstOrThrow();
-  await tx.insertInto("jobs").values(config.personas.map((p, i) => ({ org_id: orgId, run_id: run.id, kind: "role_session", position: i, persona_key: p.id }))).execute();
+  await tx.updateTable("runs").set({ sign_up_seed: keys.encrypt(randomBytes(24).toString("base64url"), signUpSeedContext(orgId, run.id)) }).where("id", "=", run.id).execute();
+  await tx.insertInto("jobs").values(turnsOf(config).map((turn, i) => ({ org_id: orgId, run_id: run.id, kind: "role_session", position: i, persona_key: turn.personaId }))).execute();
   return run;
 }
 
@@ -77,7 +81,7 @@ export async function cancelRun(tx: Tx, orgId: string, runId: string, reason: Ca
   const run = await tx.selectFrom("runs").select("status").where("id", "=", runId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
   if (!run) throw new RunNotFound();
   if (run.status !== "queued" && run.status !== "running") return false;
-  await tx.updateTable("runs").set({ status: "cancelled", cancel_reason: reason, finished_at: new Date() }).where("id", "=", runId).execute();
+  await tx.updateTable("runs").set({ status: "cancelled", cancel_reason: reason, finished_at: new Date(), sign_up_seed: null }).where("id", "=", runId).execute();
   await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date() }).where("run_id", "=", runId).where("status", "=", "queued").execute();
   return true;
 }

@@ -1,11 +1,11 @@
 import type { LanguageModel, ToolSet } from "ai";
 import type { Screenshot } from "./browser.ts";
-import { goalsFor, type JobUsage, type Persona, type ProjectConfig, type RoleResult, type RunEventInput } from "@usetrawler/protocol";
+import { goalsFor, type JobUsage, type Persona, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
 import { browserQueue, runAgentLoop } from "./agent-loop.ts";
 import type { Budget } from "./llm.ts";
 import { rolePrompt, sessionStatus } from "./prompts.ts";
 import type { SecretScrubber } from "./secrets.ts";
-import { madeUpEmail, newSessionState, ownPasswordTool, sessionTools, type FillField } from "./session-tools.ts";
+import { madeUpEmail, madeUpPassword, newSessionState, ownPasswordTool, sessionTools, type FillField } from "./session-tools.ts";
 
 const NUDGE = "Every turn must call a tool; plain text does nothing. Continue with the goals, and call finish once every goal has a status.";
 
@@ -23,11 +23,19 @@ export async function runRoleSession(opts: {
   newFindingId: () => string;
   screenshot?: () => Promise<Screenshot | null>;
   keepScreenshot?: (findingId: string, shot: Screenshot) => void;
+  goalIds?: string[];
+  story?: StoryEntry[];
+  signUpSeed?: string;
+  returning?: boolean;
+  jobId?: string;
 }): Promise<{ result: RoleResult; usage: JobUsage }> {
   if (!Number.isInteger(opts.maxSteps) || opts.maxSteps < 1) throw new RangeError(`maxSteps must be a positive integer, got ${opts.maxSteps}`);
-  const jobId = `role:${opts.persona.id}`;
+  const jobId = opts.jobId ?? `role:${opts.persona.id}`;
   const emit = (e: RunEventInput) => opts.emit(opts.scrubber.scrub(e));
-  const goals = goalsFor(opts.project.goals, opts.persona.id);
+  const own = goalsFor(opts.project.goals, opts.persona.id);
+  const goals = opts.goalIds ? own.filter((g) => opts.goalIds!.includes(g.id)) : own;
+  if (goals.length === 0) throw new RangeError(`this turn gives ${opts.persona.id} no goals of theirs`);
+  const seed = opts.signUpSeed === undefined ? undefined : `${opts.signUpSeed}:${opts.persona.id}`;
   const state = newSessionState(goals);
   const queue = browserQueue(opts.browserTools, (ok) => (state.page = ok ? "seen" : "stale"));
   const { screenshot, keepScreenshot } = opts;
@@ -46,12 +54,13 @@ export async function runRoleSession(opts: {
       fillField: opts.fillField, inBrowser: queue.run,
       scrubber: opts.scrubber, newId: opts.newFindingId, capture,
     }),
-    ...(opts.persona.accountRef ? {} : ownPasswordTool({ state, fillField: opts.fillField, inBrowser: queue.run, scrubber: opts.scrubber })),
+    ...(opts.persona.accountRef ? {} : ownPasswordTool({ state, fillField: opts.fillField, inBrowser: queue.run, scrubber: opts.scrubber, password: seed === undefined ? undefined : madeUpPassword(seed) })),
   };
   const base = rolePrompt({
     persona: opts.persona, targetUrl: opts.project.targetUrl, docsUrl: opts.project.docsUrl,
     goals, accountRef: opts.persona.accountRef,
-    signUpEmail: opts.persona.accountRef ? undefined : madeUpEmail(opts.persona.id),
+    signUpEmail: opts.persona.accountRef ? undefined : madeUpEmail(opts.persona.id, seed),
+    story: opts.story, returning: opts.returning,
   });
   const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
 

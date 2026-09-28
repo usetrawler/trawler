@@ -1,7 +1,7 @@
 "use client";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { MAX_GOALS_PER_PERSONA, MAX_PERSONAS, type Goal, type Persona } from "@usetrawler/protocol";
+import { MAX_GOALS_PER_PERSONA, MAX_PERSONAS, turnsOf, type Goal, type Persona } from "@usetrawler/protocol";
 import type { KeyHint } from "../../../credentials/credentials.ts";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { addAccountAction, removeAccountAction, savePlanAction, type AccountView } from "./plan-actions.ts";
@@ -108,6 +108,11 @@ export function SignIn({ projectId, person, accounts, onPick, onAccounts }: {
 }
 
 const AUTOSAVE_MS = 800;
+
+function afterLastOf(goals: Goal[], personaId: string, goal: Goal): Goal[] {
+  const at = goals.findLastIndex((g) => g.personaId === personaId) + 1 || goals.length;
+  return [...goals.slice(0, at), goal, ...goals.slice(at)];
+}
 
 function planProblem(personas: PlanPerson[], goals: Goal[]): string | null {
   for (const [i, p] of personas.entries()) {
@@ -235,7 +240,7 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
                     </li>
                   ))}
                 </ol>
-                {own.length < MAX_GOALS_PER_PERSONA && <AddButton onClick={() => setGoals((list) => [...list, newGoal(p.id, list)])}>Add a goal</AddButton>}
+                {own.length < MAX_GOALS_PER_PERSONA && <AddButton onClick={() => setGoals((list) => afterLastOf(list, p.id, newGoal(p.id, list)))}>Add a goal</AddButton>}
                 <SignIn
                   projectId={projectId}
                   person={p}
@@ -252,7 +257,7 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
 
 
 
-      <StartRun projectId={projectId} projectName={projectName} personas={saved.personas.length} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} onStarting={setStarting} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : undefined)} />
+      <StartRun projectId={projectId} projectName={projectName} personas={saved.personas.length} turns={turnsOf(saved).length} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} onStarting={setStarting} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : undefined)} />
     </div>
   );
 }

@@ -513,3 +513,49 @@ describe("runRoleSession", () => {
     expect(system).toContain("as target");
   });
 });
+
+describe("a turn of a team session", () => {
+  const team = ProjectConfigSchema.parse({
+    ...project,
+    personas: [{ id: "priya", name: "Priya", brief: "You submit pitches." }, { id: "marco", name: "Marco", brief: "You review pitches.", accountRef: "admin" }],
+    goals: [
+      { id: "submit", instruction: "Submit a pitch.", personaId: "priya" },
+      { id: "review", instruction: "Accept the pitch Priya submitted.", personaId: "marco" },
+      { id: "decision", instruction: "See the decision on your pitch.", personaId: "priya" },
+    ],
+  });
+  const story = [
+    { personaId: "priya", name: "Priya", goal: "Submit a pitch.", status: "reached" as const, text: "Submitted pitch EcoLoop." },
+    { personaId: "marco", name: "Marco", text: "Accepted EcoLoop." },
+  ];
+
+  test("plays only this turn's goals, knows what happened so far, and gets back in rather than signing up again", async () => {
+    const model = scriptedModel([reached("decision"), finish]);
+    const { result } = await run(model, { project: team, persona: team.personas[0]!, scrubber: SecretScrubber.forProject(team), goalIds: ["decision"], story, signUpSeed: "run-1", returning: true }).promise;
+    expect(result.goals.map((g) => g.goal)).toEqual(["decision"]);
+    const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
+    expect(prompt).toContain("Accepted EcoLoop.");
+    expect(prompt).toContain("you started using earlier in this session");
+    expect(prompt).toMatch(/sign in with that email address and type_own_password instead of signing up again/);
+    expect(prompt).not.toContain("Submit a pitch.\\n");
+  });
+
+  test("a returning person is told so even when none of their own notes made it into the story", async () => {
+    const model = scriptedModel([reached("decision"), finish]);
+    await run(model, { project: team, persona: team.personas[0]!, scrubber: SecretScrubber.forProject(team), goalIds: ["decision"], story: [story[1]!], signUpSeed: "run-1", returning: true }).promise;
+    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toMatch(/instead of signing up again/);
+    const fresh = scriptedModel([reached("submit"), finish]);
+    await run(fresh, { project: team, persona: team.personas[0]!, scrubber: SecretScrubber.forProject(team), goalIds: ["submit"], story: [story[1]!], signUpSeed: "run-1" }).promise;
+    expect(JSON.stringify(fresh.doGenerateCalls[0]!.prompt)).not.toMatch(/instead of signing up again/);
+  });
+
+  test("the made-up email is the same in every turn of the run, and differs between runs", async () => {
+    const email = async (seed: string) => {
+      const model = scriptedModel([reached("submit"), finish]);
+      await run(model, { project: team, persona: team.personas[0]!, scrubber: SecretScrubber.forProject(team), goalIds: ["submit"], signUpSeed: seed }).promise;
+      return /priya\.[0-9a-f]{8}@example\.com/.exec(JSON.stringify(model.doGenerateCalls[0]!.prompt))![0];
+    };
+    expect(await email("run-1")).toBe(await email("run-1"));
+    expect(await email("run-1")).not.toBe(await email("run-2"));
+  });
+});

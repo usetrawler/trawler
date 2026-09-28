@@ -36,8 +36,8 @@ function Submit({ blocked, pending }: { blocked?: string; pending: boolean }) {
   );
 }
 
-export function StartRun({ projectId, projectName, personas, keyHint: savedHint, canManageKey, authorisedBefore, blocked, onStarting }: {
-  projectId: string; projectName: string; personas: number; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; blocked?: string; onStarting?: (starting: boolean) => void;
+export function StartRun({ projectId, projectName, personas, turns = personas, keyHint: savedHint, canManageKey, authorisedBefore, blocked, onStarting }: {
+  projectId: string; projectName: string; personas: number; turns?: number; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; blocked?: string; onStarting?: (starting: boolean) => void;
 }) {
   const [state, action, pending] = useActionState<StartState, FormData>(startTheRun, {});
   const keyHint = state.keyHint ?? savedHint;
@@ -78,7 +78,7 @@ export function StartRun({ projectId, projectName, personas, keyHint: savedHint,
   useEffect(() => onStarting?.(pending), [pending, onStarting]);
 
   const price = list?.ok ? list.models.find((m) => m.id === modelId)?.price ?? null : null;
-  const estimate = price ? estimateUsd(price, personas) : null;
+  const estimate = price ? estimateUsd(price, turns) : null;
   const label = provider && provider !== "custom" ? PROVIDER_LABEL[provider] : null;
 
   return (
@@ -127,7 +127,7 @@ export function StartRun({ projectId, projectName, personas, keyHint: savedHint,
         {estimate ? (
           <>
             <p className="text-2xl font-bold">{usd(estimate.low)}–{usd(estimate.high)}</p>
-            <p className="text-sm text-muted">{personas} {personas === 1 ? "person" : "people"}, plus about {usd(estimate.perDefect)} for each defect that gets replayed.</p>
+            <p className="text-sm text-muted">{personas} {personas === 1 ? "person" : "people"}{turns > personas ? ` taking ${turns} turns` : ""}, plus about {usd(estimate.perDefect)} for each defect that gets replayed.</p>
           </>
         ) : (
           <>

@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "kysely";
 import { z } from "zod";
-import { FindingSchema, JobUsageSchema, JobStopReasonSchema, ReplayObservationSchema, RunEventSchema, type Finding, type JobStopReason, type JobUsage, type ProjectConfig, type ReplayObservation, type RunEvent } from "@usetrawler/protocol";
+import { FindingSchema, JobUsageSchema, JobStopReasonSchema, ReplayObservationSchema, trimStory, RunEventSchema, turnsOf, type Finding, type JobStopReason, type JobUsage, type ProjectConfig, type ReplayObservation, type RunEvent, type StoryEntry, type Turn } from "@usetrawler/protocol";
 import type { Database } from "../db/index.ts";
 import { asSystem, type Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -9,7 +9,7 @@ import { loadProjectConfig } from "../projects/projects.ts";
 import { logError } from "../server/log.ts";
 import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
-import { capSpent, type ConfigSnapshot } from "./runs.ts";
+import { capSpent, signUpSeedContext, type ConfigSnapshot } from "./runs.ts";
 
 const LEASE_MINUTES = 10;
 const ACTIVE = ["queued", "running"];
@@ -27,6 +27,11 @@ export interface JobAssignment {
   kind: "role_session" | "replay" | "judge";
   config: ProjectConfig;
   personaKey?: string;
+  goalIds?: string[];
+  turn?: number;
+  returning?: boolean;
+  story?: StoryEntry[];
+  signUpSeed?: string;
   accountRef?: string;
   finding?: Finding;
   observation?: ReplayObservation;
@@ -90,12 +95,43 @@ async function reapExpiredLeases(db: Database): Promise<void> {
 
 type ClaimOutcome = { assignment: JobAssignment } | { quarantined: true } | null;
 
+function turnAt(snapshot: ConfigSnapshot, position: number, personaKey: string | null): Turn {
+  const turn = turnsOf(snapshot)[position];
+  if (!turn || turn.personaId !== personaKey) throw new Error(`turn ${position} of the plan does not belong to ${personaKey}`);
+  return turn;
+}
+
+async function storyBefore(tx: Tx, runId: string, position: number, snapshot: ConfigSnapshot): Promise<StoryEntry[]> {
+  const rows = await tx
+    .selectFrom("run_events as e")
+    .innerJoin("jobs as j", "j.id", "e.job_id")
+    .select(["j.persona_key", "e.payload"])
+    .where("j.run_id", "=", runId)
+    .where("j.kind", "=", "role_session")
+    .where("j.position", "<", position)
+    .where("e.type", "in", ["note", "goal_status"])
+    .orderBy("j.position")
+    .orderBy("e.seq")
+    .execute();
+  const name = new Map(snapshot.personas.map((p) => [p.id, p.name]));
+  const goal = new Map(snapshot.goals.map((g) => [g.id, g.instruction]));
+  const story = rows.flatMap((row): StoryEntry[] => {
+    const e = row.payload as unknown as RunEvent;
+    const personaId = row.persona_key ?? "";
+    const base = { personaId, name: name.get(personaId) ?? personaId };
+    if (e.type === "note") return [{ ...base, text: e.text }];
+    if (e.type === "goal_status" && e.outcome.status !== "not_attempted") return [{ ...base, goal: goal.get(e.outcome.goal) ?? e.outcome.goal, status: e.outcome.status, text: e.outcome.note }];
+    return [];
+  });
+  return trimStory(story);
+}
+
 async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
   return asSystem(db, async (tx) => {
     const picked = await tx
       .selectFrom("jobs as j")
       .innerJoin("runs as r", "r.id", "j.run_id")
-      .select(["j.id", "j.org_id", "j.run_id", "j.kind", "j.persona_key", "j.finding_key", "r.project_id", "r.config_snapshot", "r.max_steps", "r.replay_steps", "r.budget_usd", "r.cost_usd", "r.agent_model", "r.judge_model"])
+      .select(["j.id", "j.org_id", "j.run_id", "j.kind", "j.position", "j.persona_key", "j.finding_key", "r.project_id", "r.config_snapshot", "r.max_steps", "r.replay_steps", "r.budget_usd", "r.cost_usd", "r.agent_model", "r.judge_model", "r.sign_up_seed"])
       .where("j.status", "=", "queued")
       .where((eb) => eb.or([eb("r.status", "in", ACTIVE), eb("j.requested_by", "is not", null)]))
       .where((eb) => eb.not(eb.exists(eb.selectFrom("jobs as busy").select("busy.id").whereRef("busy.run_id", "=", "j.run_id").where("busy.status", "=", "leased"))))
@@ -115,6 +151,9 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
       const current = await loadProjectConfig(tx, picked.org_id, picked.project_id, keys);
       const finding = picked.finding_key ? await findingFor(tx, picked.run_id, picked.finding_key) : undefined;
       const config = configFor(snapshot, current);
+      const turn = picked.kind === "role_session" && picked.sign_up_seed ? turnAt(snapshot, picked.position, picked.persona_key) : undefined;
+      const story = turn ? await storyBefore(tx, picked.run_id, picked.position, snapshot) : undefined;
+      const returning = turn ? turnsOf(snapshot).slice(0, picked.position).some((t) => t.personaId === picked.persona_key) : undefined;
       return {
         assignment: {
           jobId: picked.id,
@@ -123,6 +162,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
           kind: picked.kind as JobAssignment["kind"],
           config,
           personaKey: picked.persona_key ?? undefined,
+          ...(turn ? { goalIds: turn.goalIds, turn: picked.position, returning, story, signUpSeed: keys.decrypt(picked.sign_up_seed!, signUpSeedContext(picked.org_id, picked.run_id)) } : {}),
           accountRef: finding ? config.personas.find((p) => p.id === finding.personaKey)?.accountRef : undefined,
           finding: finding?.finding,
           observation: finding?.replay,
@@ -179,12 +219,17 @@ export async function releaseJob(db: Database, job: { jobId: string; runId: stri
 }
 
 async function forgetPartialWork(tx: Tx, jobId: string) {
-  const job = await tx.selectFrom("jobs").select(["run_id", "kind", "persona_key", "finding_key"]).where("id", "=", jobId).executeTakeFirstOrThrow();
+  const job = await tx.selectFrom("jobs as j").innerJoin("runs as r", "r.id", "j.run_id").select(["j.run_id", "j.kind", "j.position", "j.persona_key", "j.finding_key", "r.config_snapshot", "r.sign_up_seed"]).where("j.id", "=", jobId).executeTakeFirstOrThrow();
   await tx.deleteFrom("run_events").where("job_id", "=", jobId).execute();
   await tx.updateTable("artifacts").set({ discarded_at: new Date() }).where("job_id", "=", jobId).where("discarded_at", "is", null).execute();
   if (job.kind === "role_session") {
     await tx.deleteFrom("findings").where("job_id", "=", jobId).execute();
-    await tx.deleteFrom("goal_outcomes").where("run_id", "=", job.run_id).where("persona_key", "=", job.persona_key!).execute();
+    const outcomes = tx.deleteFrom("goal_outcomes").where("run_id", "=", job.run_id).where("persona_key", "=", job.persona_key!);
+    if (!job.sign_up_seed) await outcomes.execute();
+    else {
+      const goalIds = turnsOf(job.config_snapshot as unknown as ConfigSnapshot)[job.position]?.goalIds ?? [];
+      if (goalIds.length) await outcomes.where("goal", "in", goalIds).execute();
+    }
   } else if (job.kind === "judge") {
     await tx.updateTable("findings").set({ verdict: null, updated_at: new Date() }).where("run_id", "=", job.run_id).where("key", "=", job.finding_key!).execute();
   }
@@ -240,7 +285,7 @@ async function stopIfOverBudget(tx: Tx, runId: string): Promise<boolean> {
   const run = await lockedRun(tx, runId);
   if (!ACTIVE.includes(run.status)) return true;
   if (!capSpent(run)) return false;
-  await tx.updateTable("runs").set({ status: "stopped_budget", finished_at: new Date() }).where("id", "=", runId).execute();
+  await tx.updateTable("runs").set({ status: "stopped_budget", finished_at: new Date(), sign_up_seed: null }).where("id", "=", runId).execute();
   await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date() }).where("run_id", "=", runId).where("status", "=", "queued").execute();
   return true;
 }
@@ -358,6 +403,7 @@ async function planNext(tx: Tx, job: { run_id: string; org_id: string; kind: str
   if (job.kind === "role_session") {
     const rolesLeft = await tx.selectFrom("jobs").select("id").where("run_id", "=", job.run_id).where("kind", "=", "role_session").where("status", "in", ["queued", "leased"]).executeTakeFirst();
     if (!rolesLeft) {
+      await tx.updateTable("runs").set({ sign_up_seed: null }).where("id", "=", job.run_id).execute();
       const defects = await tx.selectFrom("findings").select("key").where("run_id", "=", job.run_id).where("kind", "=", "defect").orderBy("created_at").orderBy("key").execute();
       if (defects.length) {
         await tx.insertInto("jobs").values(defects.map((d, i) => ({ org_id: job.org_id, run_id: job.run_id, kind: "replay", position: next + i, finding_key: d.key }))).execute();

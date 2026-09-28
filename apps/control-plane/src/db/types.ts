@@ -237,6 +237,7 @@ export interface Runs {
   provider: Generated<string>;
   provider_base_url: string | null;
   replay_steps: number;
+  sign_up_seed: string | null;
   started_at: Timestamp | null;
   status: Generated<string>;
   token_cap: Int8 | null;
