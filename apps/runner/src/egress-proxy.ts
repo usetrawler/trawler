@@ -18,6 +18,7 @@ interface Session {
   blocked: BlockedAttempt[];
   reported: Set<string>;
   expires: number;
+  connections: number;
 }
 
 const MAX_SESSIONS = 32;
@@ -26,6 +27,8 @@ const MAX_ORIGINS = 50;
 const MAX_BLOCKED = 100;
 const MAX_CONTROL_BODY = 64 * 1024;
 const CONNECT_TIMEOUT_MS = 15_000;
+const MAX_CONNECTIONS = 128;
+const IDLE_MS = 10 * 60 * 1000;
 const HOP_HEADERS = new Set(["proxy-authorization", "proxy-connection"]);
 
 const systemResolve: Resolve = (hostname) => lookup(hostname, { all: true, verbatim: true });
@@ -38,7 +41,9 @@ function reply(socket: Duplex, status: string, extra = "") {
   socket.end(`HTTP/1.1 ${status}\r\n${extra}Content-Length: 0\r\nConnection: close\r\n\r\n`);
 }
 
-export async function startEgressProxy(opts: { token: string; port?: number; resolve?: Resolve; blocked?: BlockList; now?: () => number }): Promise<{ port: number; close: () => Promise<void> }> {
+export async function startEgressProxy(opts: { token: string; port?: number; resolve?: Resolve; blocked?: BlockList; now?: () => number; maxConnections?: number; idleMs?: number }): Promise<{ port: number; close: () => Promise<void> }> {
+  const maxConnections = opts.maxConnections ?? MAX_CONNECTIONS;
+  const idleMs = opts.idleMs ?? IDLE_MS;
   const token = Buffer.from(opts.token);
   if (token.length < 32) throw new RangeError("the egress control token must be at least 32 characters");
   const resolve = opts.resolve ?? systemResolve;
@@ -107,6 +112,7 @@ export async function startEgressProxy(opts: { token: string; port?: number; res
     };
     client.on("error", end).on("close", end);
     upstream.on("error", end).on("close", end);
+    if (client instanceof net.Socket) client.setTimeout(idleMs, end);
     upstream.pipe(client);
     client.pipe(upstream);
   }
@@ -122,7 +128,16 @@ export async function startEgressProxy(opts: { token: string; port?: number; res
       return { status: "403 Forbidden" };
     }
     if (target === "unresolved") return { status: "502 Bad Gateway" };
-    return dial(target, Number(port)).catch(() => ({ status: "502 Bad Gateway" }));
+    if (s.connections >= maxConnections) return { status: "429 Too Many Requests" };
+    s.connections++;
+    const upstream = await dial(target, Number(port)).catch(() => null);
+    if (!upstream) {
+      s.connections--;
+      return { status: "502 Bad Gateway" };
+    }
+    upstream.setTimeout(idleMs, () => upstream.destroy());
+    upstream.once("close", () => s.connections--);
+    return upstream;
   }
 
   async function onConnect(s: Session, req: http.IncomingMessage, client: Duplex, head: Buffer) {
@@ -273,7 +288,7 @@ export async function startEgressProxy(opts: { token: string; port?: number; res
 
   async function openSession(id: string, allowedOrigins: Set<string>): Promise<number> {
     const proxyServer = tracked(http.createServer());
-    const s: Session = { server: proxyServer, origins: allowedOrigins, blocked: [], reported: new Set(), expires: now() + SESSION_MS };
+    const s: Session = { server: proxyServer, origins: allowedOrigins, blocked: [], reported: new Set(), expires: now() + SESSION_MS, connections: 0 };
     proxyServer.requestTimeout = 0;
     proxyServer.on("request", (req, res) => void onProxyRequest(s, req, res).catch(failed(res)));
     proxyServer.on("connect", (req, socket, head) => void onConnect(s, req, socket, head).catch(() => socket.destroy()));

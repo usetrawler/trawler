@@ -174,3 +174,51 @@ test("an answer the proxy cannot pass on is a bad gateway, and the proxy keeps w
 test("the proxy will not start with a short control token", async () => {
   await expect(startEgressProxy({ token: "short" })).rejects.toThrow(/at least 32/);
 });
+
+async function openTunnel(port: number, target: string): Promise<{ socket: net.Socket; status: string; closed: Promise<void> }> {
+  const socket = net.connect(port, "127.0.0.1");
+  const closed = new Promise<void>((r) => socket.on("close", () => r()));
+  socket.on("error", () => undefined);
+  const status = await new Promise<string>((r) => {
+    socket.once("data", (chunk) => r(chunk.toString("latin1").split("\r\n")[0]!));
+    socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`);
+  });
+  return { socket, status, closed };
+}
+
+test("a session over its connection limit is told to wait, until one of its connections closes", async () => {
+  const limited = await startEgressProxy({ token: TOKEN, resolve, blocked: blockedAddresses({ allowLoopback: true }), maxConnections: 2 });
+  try {
+    const res = await fetch(`http://127.0.0.1:${limited.port}/sessions`, { method: "POST", headers: { authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ origins: [`https://shop.test:${upstreamPort}`] }) });
+    const { port } = (await res.json()) as { port: number };
+    const target = `shop.test:${upstreamPort}`;
+    const first = await openTunnel(port, target);
+    const second = await openTunnel(port, target);
+    expect([first.status, second.status]).toEqual(["HTTP/1.1 200 Connection Established", "HTTP/1.1 200 Connection Established"]);
+    expect((await openTunnel(port, target)).status).toBe("HTTP/1.1 429 Too Many Requests");
+    first.socket.destroy();
+    await first.closed;
+    await new Promise((r) => setTimeout(r, 50));
+    const third = await openTunnel(port, target);
+    expect(third.status).toBe("HTTP/1.1 200 Connection Established");
+    second.socket.destroy();
+    third.socket.destroy();
+  } finally {
+    await limited.close();
+  }
+});
+
+test("a tunnel left idle is closed", async () => {
+  const idle = await startEgressProxy({ token: TOKEN, resolve, blocked: blockedAddresses({ allowLoopback: true }), idleMs: 200 });
+  try {
+    const res = await fetch(`http://127.0.0.1:${idle.port}/sessions`, { method: "POST", headers: { authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ origins: [`https://shop.test:${upstreamPort}`] }) });
+    const { port } = (await res.json()) as { port: number };
+    const tunnel = await openTunnel(port, `shop.test:${upstreamPort}`);
+    expect(tunnel.status).toBe("HTTP/1.1 200 Connection Established");
+    const started = Date.now();
+    await tunnel.closed;
+    expect(Date.now() - started).toBeLessThan(2_000);
+  } finally {
+    await idle.close();
+  }
+});
