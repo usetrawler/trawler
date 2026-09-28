@@ -153,9 +153,9 @@ export function createAuth(options: AuthOptions) {
       : undefined;
     if (membership) return membership;
     if (!session.activeOrganizationId) {
+      if (!(await storeFor(db).organizationsOf(session.userId)).length) return "choosing";
       const stored = await db.selectFrom("session").select("activeOrganizationId").where("id", "=", session.id).executeTakeFirst();
       if (stored?.activeOrganizationId) return workspaceOf({ ...session, activeOrganizationId: stored.activeOrganizationId });
-      if (!(await storeFor(db).organizationsOf(session.userId)).length) return "choosing";
     }
     await db.deleteFrom("session").where("id", "=", session.id).execute();
     return null;
