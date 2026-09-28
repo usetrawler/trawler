@@ -1,5 +1,6 @@
 FROM node:24-slim
 WORKDIR /app
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin egress
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright NODE_ENV=production
 COPY package.json package-lock.json tsconfig.base.json tsconfig.json ./
 COPY packages/core/package.json packages/core/
@@ -14,5 +15,4 @@ COPY apps/runner apps/runner
 ARG TRAWLER_COMMIT
 ARG RAILWAY_GIT_COMMIT_SHA
 ENV TRAWLER_COMMIT=${TRAWLER_COMMIT:-$RAILWAY_GIT_COMMIT_SHA}
-USER node
-CMD ["sh", "-c", "exec node apps/runner/bin/trawler-runner.js work --control-plane \"$TRAWLER_CONTROL_PLANE\""]
+CMD ["apps/runner/start.sh"]
