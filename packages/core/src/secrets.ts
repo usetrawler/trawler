@@ -35,8 +35,7 @@ function credentialParts(headerValue: string): string[] {
   if (scheme.toLowerCase() !== "basic" || !BASE64.test(credential)) return [credential];
   const decoded = Buffer.from(credential, "base64").toString("utf8");
   const colon = decoded.indexOf(":");
-  if (colon === -1 || Buffer.from(decoded, "utf8").toString("base64").replace(/=+$/, "") !== credential.replace(/=+$/, "")) return [credential];
-  return [credential, decoded, decoded.slice(colon + 1)];
+  return colon === -1 ? [credential, decoded] : [credential, decoded, decoded.slice(colon + 1)];
 }
 
 function isPlainObject(v: object): boolean {

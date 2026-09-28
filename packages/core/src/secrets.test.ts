@@ -201,6 +201,11 @@ describe("SecretScrubber.forProject", () => {
     const plain = SecretScrubber.forProject({ accounts: [], secretHeaders: { "x-bypass": "Carrier bypass-token-123" } });
     expect(plain.scrub("Carrier bypass-token-123 and bypass-token-123")).toBe("••• and bypass-token-123");
   });
+  test("a Basic token that decodes to a value with no colon masks that value too", () => {
+    const token = Buffer.from("single-api-secret").toString("base64");
+    const s = SecretScrubber.forProject({ accounts: [], secretHeaders: { authorization: `Basic ${token}` } });
+    expect(s.scrub(`${token} and single-api-secret`)).toBe("••• and •••");
+  });
   test("a Basic token that is not base64 of a user and password is masked as it is, and nothing decoded from it", () => {
     const s = SecretScrubber.forProject({ accounts: [], secretHeaders: { authorization: "Basic not-base64-token!" } });
     expect(s.scrub("not-base64-token! alone")).toBe("••• alone");
