@@ -33,12 +33,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const title = (html: string) => /<head><title>([^<]*)<\/title>/.exec(html)?.[1];
+const title = (html: string) => /<head>.*?<title>([^<]*)<\/title>.*?<\/head>/.exec(html)?.[1];
 
 test("the error page that replaces the whole app names its tab and applies the remembered theme too", () => {
   const html = renderToStaticMarkup(createElement(GlobalError, props));
   expect(title(html)).toBe("Something went wrong · Trawler");
-  expect(html).toMatch(new RegExp(`^<html lang="en"><head><title>[^<]*</title><script type="text/javascript">${THEME_SCRIPT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</script></head><body`));
+  expect(html).toMatch(new RegExp(`^<html lang="en"><head>(?:<title>[^<]*</title>)?<script type="text/javascript">${THEME_SCRIPT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</script></head><body`));
 });
 
 test("the error page's root element lets the script's theme attribute differ from what the server rendered", () => {
