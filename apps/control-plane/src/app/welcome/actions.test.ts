@@ -33,6 +33,7 @@ test("an invitation that is no longer open is said so, and nobody is sent anywhe
   state.chosen = null;
   expect(await joinWorkspaceAction({}, form({ invitationId: "inv-1" }))).toEqual({ error: NO_LONGER_OPEN });
   expect(state.choices).toHaveLength(1);
+  expect(state.revalidated).toEqual([["/", "layout"]]);
 });
 
 test("a join with no invitation named asks for nothing", async () => {

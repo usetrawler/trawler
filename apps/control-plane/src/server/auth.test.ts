@@ -59,7 +59,7 @@ test("a signed-in person with no workspace yet is a newcomer choosing one, and n
   expect(await signedInMember(new Headers())).toBeNull();
 });
 
-test("a member is a member to both checks, and a visitor is nobody", async () => {
+test("a member is a member to the person check too, and a visitor is nobody", async () => {
   state.found = found;
   state.workspace = { orgId: "org-1", orgName: "Acme", role: "owner" };
   expect(await signedInPerson(new Headers())).toEqual({ member: { userId: "u1", name: "Ana Lopez", email: "ana@acme.test", orgId: "org-1", orgName: "Acme", role: "owner" } });

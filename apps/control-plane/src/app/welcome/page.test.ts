@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
-type Invitation = { id: string; orgName: string; role: string; inviterName: string; inviterEmail: string; expiresAt: Date };
+type Invitation = { id: string; orgName: string; role: string; inviterName: string; inviterEmail: string; inviterEmailVerified: boolean; expiresAt: Date };
 const newcomer = { userId: "u1", sessionId: "s1", name: "Ana", email: "ana@acme.test", emailVerified: true };
 const state = vi.hoisted(() => ({ person: null as unknown, invitations: [] as Invitation[], askedFor: [] as unknown[] }));
 
@@ -14,7 +14,7 @@ vi.mock("../../server/auth.ts", () => ({
 }));
 
 const { default: WelcomePage } = await import("./page.tsx");
-const invitation = (over: Partial<Invitation> = {}): Invitation => ({ id: "inv-1", orgName: "Acme Labs", role: "admin", inviterName: "Bo Chen", inviterEmail: "bo@acme.test", expiresAt: new Date(), ...over });
+const invitation = (over: Partial<Invitation> = {}): Invitation => ({ id: "inv-1", orgName: "Acme Labs", role: "admin", inviterName: "Bo Chen", inviterEmail: "bo@acme.test", inviterEmailVerified: true, expiresAt: new Date(), ...over });
 const html = async () => renderToStaticMarkup(await WelcomePage()).replaceAll("<!-- -->", "");
 
 beforeEach(() => {
@@ -39,25 +39,31 @@ test("an invitation shows the workspace, who invited and as what, with Join and 
   const page = await html();
   expect(state.askedFor).toEqual([newcomer]);
   expect(page).toContain("You were invited to a workspace.");
-  expect(page).toContain("Acme Labs");
-  expect(page).toContain("Bo Chen (bo@acme.test) invited you as an admin.");
+  expect(page).toMatch(/<h2[^>]*>Acme Labs<\/h2>/);
+  expect(page).toContain("bo@acme.test (Bo Chen) invited you as an admin.");
   expect(page).toMatch(/<input type="hidden" name="invitationId" value="inv-1"\/><button type="submit"[^>]*>Join<span class="sr-only"> Acme Labs<\/span>/);
   expect(page).toContain("Start my own workspace");
-  expect(page).toContain("The invitation above is declined.");
-  expect(page).toContain("shared with its owners and admins");
-  expect(page).toContain("ana@acme.test");
+  expect(page).toContain("Every invitation to your address is declined.");
+  expect(page).toContain("everyone in it sees your projects and test accounts, and its runs are paid with the model key it holds.");
+  expect(page).not.toContain("Joining one withdraws");
+  expect(page).toMatch(/Signed in as<span[^>]*>ana@acme\.test<\/span>/);
 });
 
 test("several invitations are each shown with their own Join, and an inviter with no name by address", async () => {
   state.invitations = [invitation(), invitation({ id: "inv-2", orgName: "<b>Totally Legit</b>", role: "member", inviterName: " ", inviterEmail: "m@evil.test" })];
   const page = await html();
   expect(page).toContain("You were invited to 2 workspaces.");
-  expect(page).toContain("The invitations above are declined.");
+  expect(page).toContain("Joining one withdraws the other invitations.");
   expect(page).toContain("m@evil.test invited you as a member.");
   expect(page).toContain("&lt;b&gt;Totally Legit&lt;/b&gt;");
   expect(page).not.toContain("<b>Totally Legit</b>");
   expect(page.match(/name="invitationId"/g)).toHaveLength(2);
   expect(page).toContain('value="inv-2"');
+});
+
+test("an inviter whose provider did not verify their address is said to be unverified, their name after the address", async () => {
+  state.invitations = [invitation({ inviterName: "IT Support (it@corp.test)", inviterEmail: "x@free.test", inviterEmailVerified: false })];
+  expect(await html()).toContain("x@free.test (IT Support (it@corp.test)), an address its provider has not verified, invited you as an admin.");
 });
 
 test("with no invitation left open, the page says so and offers only a workspace of one's own", async () => {

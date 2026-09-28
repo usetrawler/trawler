@@ -106,6 +106,29 @@ test("starting one's own workspace creates it and declines every invitation to t
   expect(await auth.invitationsFor(guest.user)).toEqual([]);
 });
 
+test("a request that read the session before the choice committed keeps the chosen workspace, and every waiting session of the person gets it", async () => {
+  const owner = await signIn("tabs-owner@acme.test");
+  const org = owner.session.activeOrganizationId as string;
+  await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-tabs', ${org}, 'tabs-guest@acme.test', 'member', 'pending', now() + interval '1 day', ${owner.user.id})`.execute(t.db);
+  const guest = await invitee("tabs-guest@acme.test");
+  const phone = (await (await auth.$context).internalAdapter.createSession(guest.user.id, false)) as { id: string; activeOrganizationId?: string | null };
+  const readBeforeJoin = { id: guest.session.id, userId: guest.user.id, activeOrganizationId: null };
+  expect(await guest.join("inv-tabs")).toBe(org);
+  expect(await auth.workspaceOf(readBeforeJoin)).toMatchObject({ orgId: org, role: "member" });
+  expect(await activeIn(guest.session.id)).toBe(org);
+  expect(await activeIn(phone.id)).toBe(org);
+  expect(await auth.workspaceOf({ id: phone.id, userId: guest.user.id, activeOrganizationId: null })).toMatchObject({ orgId: org });
+  const elsewhere = await signIn("tabs-other@acme.test");
+  expect(await activeIn(sessionOf(elsewhere.session).id)).toBe(elsewhere.session.activeOrganizationId);
+});
+
+test("an invitation shows whether the inviter's address is verified", async () => {
+  const shady = await signIn("it-support@corp.test", false, "IT Support");
+  await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-shady', ${shady.session.activeOrganizationId}, 'shady-guest@corp.test', 'admin', 'pending', now() + interval '1 day', ${shady.user.id})`.execute(t.db);
+  const guest = await invitee("shady-guest@corp.test");
+  expect((await auth.invitationsFor(guest.user)).map((i) => [i.inviterEmail, i.inviterEmailVerified])).toEqual([["it-support@corp.test", false]]);
+});
+
 test("a person cannot join an invitation addressed to someone else, even with its id", async () => {
   const owner = await signIn("steal-owner@acme.test");
   await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-steal-mine', ${owner.session.activeOrganizationId}, 'steal-me@acme.test', 'member', 'pending', now() + interval '1 day', ${owner.user.id}), ('inv-steal-theirs', ${owner.session.activeOrganizationId}, 'steal-victim@acme.test', 'admin', 'pending', now() + interval '1 day', ${owner.user.id})`.execute(t.db);
@@ -116,7 +139,7 @@ test("a person cannot join an invitation addressed to someone else, even with it
   expect(await activeIn(thief.session.id)).toBeNull();
 });
 
-test("an unverified address sees no invitations and cannot join one by its id", async () => {
+test("an unverified address sees no invitations, gets its own workspace, and leaves the invitation open", async () => {
   const owner = await signIn("unv-owner@acme.test");
   await sql`insert into invitation (id, "organizationId", email, role, status, "expiresAt", "inviterId") values ('inv-unv', ${owner.session.activeOrganizationId}, 'unv-guest@acme.test', 'member', 'pending', now() + interval '1 day', ${owner.user.id})`.execute(t.db);
   const guest = await invitee("unv-guest@acme.test", false);
@@ -284,7 +307,7 @@ test("a member's email is given only for the workspace asked about, and only whi
   expect(await auth.memberEmail(own.activeOrganizationId!, user.id)).toBeNull();
 });
 
-test("a session that names no workspace is signed out", async () => {
+test("a session that names no workspace, of someone who belongs to one, is signed out", async () => {
   const session = sessionOf((await signIn("unset@acme.test")).session);
   await sql`update session set "activeOrganizationId" = null where id = ${session.id}`.execute(t.db);
   expect(await auth.workspaceOf({ ...session, activeOrganizationId: null })).toBeNull();
