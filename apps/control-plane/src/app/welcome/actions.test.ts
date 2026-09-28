@@ -11,7 +11,8 @@ vi.mock("../../server/auth.ts", () => ({
   getAuth: () => ({ chooseWorkspace: async (...args: unknown[]) => { state.choices.push(args); return state.chosen; } }),
 }));
 
-const { joinWorkspaceAction, NO_LONGER_OPEN, startOwnWorkspaceAction } = await import("./actions.ts");
+const { joinWorkspaceAction, startOwnWorkspaceAction } = await import("./actions.ts");
+const { NO_LONGER_OPEN } = await import("./choice-state.ts");
 const form = (fields: Record<string, string>) => {
   const data = new FormData();
   for (const [k, v] of Object.entries(fields)) data.set(k, v);

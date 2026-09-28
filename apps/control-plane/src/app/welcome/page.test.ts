@@ -43,7 +43,7 @@ test("an invitation shows the workspace, who invited and as what, with Join and 
   expect(page).toContain("Bo Chen (bo@acme.test) invited you as an admin.");
   expect(page).toMatch(/<input type="hidden" name="invitationId" value="inv-1"\/><button type="submit"[^>]*>Join<span class="sr-only"> Acme Labs<\/span>/);
   expect(page).toContain("Start my own workspace");
-  expect(page).toContain("The invitations above are declined.");
+  expect(page).toContain("The invitation above is declined.");
   expect(page).toContain("shared with its owners and admins");
   expect(page).toContain("ana@acme.test");
 });
@@ -52,6 +52,7 @@ test("several invitations are each shown with their own Join, and an inviter wit
   state.invitations = [invitation(), invitation({ id: "inv-2", orgName: "<b>Totally Legit</b>", role: "member", inviterName: " ", inviterEmail: "m@evil.test" })];
   const page = await html();
   expect(page).toContain("You were invited to 2 workspaces.");
+  expect(page).toContain("The invitations above are declined.");
   expect(page).toContain("m@evil.test invited you as a member.");
   expect(page).toContain("&lt;b&gt;Totally Legit&lt;/b&gt;");
   expect(page).not.toContain("<b>Totally Legit</b>");

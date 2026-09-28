@@ -4,12 +4,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { WorkspaceChoice } from "../../auth/onboarding.ts";
 import { getAuth, signedInPerson, type Newcomer } from "../../server/auth.ts";
-
-export interface ChoiceState {
-  error?: string;
-}
-
-export const NO_LONGER_OPEN = "That invitation is no longer open: it was revoked, it expired or it was already used. Join another one or start your own workspace.";
+import { NO_LONGER_OPEN, type ChoiceState } from "./choice-state.ts";
 
 async function newcomer(): Promise<Newcomer> {
   const person = await signedInPerson(await headers());

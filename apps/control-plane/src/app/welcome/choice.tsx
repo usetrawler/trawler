@@ -2,7 +2,8 @@
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { useActionState } from "react";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
-import { joinWorkspaceAction, startOwnWorkspaceAction, type ChoiceState } from "./actions.ts";
+import { joinWorkspaceAction, startOwnWorkspaceAction } from "./actions.ts";
+import type { ChoiceState } from "./choice-state.ts";
 
 export interface InvitationRow {
   id: string;
@@ -27,8 +28,8 @@ async function reloadable(action: () => Promise<ChoiceState>): Promise<ChoiceSta
 const join = (previous: ChoiceState, form: FormData) => reloadable(() => joinWorkspaceAction(previous, form));
 const startOwn = () => reloadable(() => startOwnWorkspaceAction());
 
-const primary = "flex h-12 shrink-0 items-center justify-between gap-6 bg-action px-5 font-mono text-sm tracking-[0.12em] text-[#17191c] uppercase transition hover:brightness-110 aria-disabled:cursor-wait aria-disabled:opacity-60";
-const secondary = "flex h-12 shrink-0 items-center justify-between gap-6 border border-line px-5 font-mono text-sm tracking-[0.12em] uppercase hover:border-ink aria-disabled:cursor-wait aria-disabled:opacity-60";
+const primary = "flex h-12 shrink-0 items-center whitespace-nowrap justify-between gap-6 bg-action px-5 font-mono text-sm tracking-[0.12em] text-[#17191c] uppercase transition hover:brightness-110 aria-disabled:cursor-wait aria-disabled:opacity-60";
+const secondary = "flex h-12 shrink-0 items-center whitespace-nowrap justify-between gap-6 border border-line px-5 font-mono text-sm tracking-[0.12em] uppercase hover:border-ink aria-disabled:cursor-wait aria-disabled:opacity-60";
 const alert = "border-l-2 border-bad pl-3 text-sm text-bad";
 
 export function WorkspaceChoice({ invitations }: { invitations: InvitationRow[] }) {
@@ -61,7 +62,7 @@ export function WorkspaceChoice({ invitations }: { invitations: InvitationRow[] 
       {joined.error && <p role="alert" className={alert}>{joined.error}</p>}
       <div className="flex flex-col gap-3 border-t border-line pt-6 sm:flex-row sm:items-center sm:justify-between">
         <p className="max-w-md text-sm text-muted">
-          {invitations.length > 0 ? "Or keep your work separate: a new workspace only you can see. The invitations above are declined." : "Start a workspace only you can see. You can invite teammates later."}
+          {invitations.length === 0 ? "Start a workspace only you can see. You can invite teammates later." : `Or keep your work separate: a new workspace only you can see. ${invitations.length === 1 ? "The invitation above is declined." : "The invitations above are declined."}`}
         </p>
         <form action={startAction}>
           <button type="submit" aria-disabled={busy || undefined} onClick={hold} className={invitations.length > 0 ? secondary : primary}>
