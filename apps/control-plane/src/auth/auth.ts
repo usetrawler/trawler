@@ -179,7 +179,7 @@ export function createAuth(options: AuthOptions) {
           "invitation.role",
           "invitation.expiresAt",
           eb
-            .exists(eb.selectFrom("user").innerJoin("member", "member.userId", "user.id").select("member.id").where(sql<string>`lower("user".email)`, "=", sql<string>`lower(invitation.email)`))
+            .exists(eb.selectFrom("user").innerJoin("member", "member.userId", "user.id").select("member.id").where("user.email", "=", sql<string>`lower(invitation.email)`))
             .as("addressHasWorkspace"),
         ])
         .where("organizationId", "=", orgId)

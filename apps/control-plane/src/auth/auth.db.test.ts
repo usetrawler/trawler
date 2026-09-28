@@ -374,12 +374,15 @@ const memberRoles = async (org: string) => (await sql<{ email: string; role: str
 test("an invitation whose address signed in unverified and got its own workspace is marked, not cancelled", async () => {
   const owner = await signIn("mark-owner@acme.test");
   const org = orgOf(owner.session);
-  const taken = await invited(org, owner.user.id, "mark-taken@acme.test");
+  const taken = await invited(org, owner.user.id, "Mark-Taken@Acme.test");
   const waiting = await invited(org, owner.user.id, "mark-waiting@acme.test");
-  const person = await signIn("Mark-Taken@acme.test", false);
+  const choosing = await invited(org, owner.user.id, "mark-choosing@acme.test");
+  const person = await signIn("mark-taken@acme.test", false);
   expect(orgOf(person.session)).not.toBe(org);
-  expect((await auth.pendingInvitations(org)).map((i) => [i.id, i.addressHasWorkspace])).toEqual([[taken, true], [waiting, false]]);
-  expect(await pendingIds(org)).toEqual(expect.arrayContaining([taken, waiting]));
+  const newcomer = await invitee("mark-choosing@acme.test");
+  expect(newcomer.session.activeOrganizationId ?? null).toBeNull();
+  expect((await auth.pendingInvitations(org)).map((i) => [i.id, i.addressHasWorkspace])).toEqual([[taken, true], [waiting, false], [choosing, false]]);
+  expect(await pendingIds(org)).toEqual(expect.arrayContaining([taken, waiting, choosing]));
 });
 
 test("a workspace lists its own members, oldest first, and its own invitations that can still be used", async () => {

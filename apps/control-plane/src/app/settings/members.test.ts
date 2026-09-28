@@ -188,3 +188,10 @@ test("an invitation whose address has since got a workspace says it can no longe
   expect(text(rowOf(html, "max@acme.test"))).toContain("max@acme.test");
   expect(text(rowOf(html, "max@acme.test"))).not.toContain("can no longer use");
 });
+
+test("only those who manage the workspace see that an invited address already has one", () => {
+  const taken = { id: "inv-2", email: "gone@acme.test", role: "member", expiresAt: "2026-10-03T10:00:00.000Z", addressHasWorkspace: true };
+  const html = renderToStaticMarkup(createElement(Members, { members, invitations: [taken], canManage: false, signInAt: "app.usetrawler.test" }));
+  expect(text(html)).toContain("gone@acme.test");
+  expect(text(html)).not.toContain("can no longer use");
+});
