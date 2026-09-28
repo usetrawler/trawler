@@ -36,9 +36,9 @@ Nothing a person reports reaches the top of your report on their word alone. Eve
 
 ## How it works
 
-**01 · Paste a URL.** Trawler reads your product's page and, within a minute or two, proposes up to four people and six goals. Edit the people and goals — or just start.
+**01 · Paste a URL.** Trawler reads your product's page and, within a minute or two, proposes up to four people, each with up to four goals of their own. Edit the people and goals — or just start.
 
-**02 · Meet your users.** The people take their turns in your real product: clicking, typing and navigating as they see fit, working through every goal, and reporting defects and friction with the steps that led there. No scripts, no recorded flows to maintain.
+**02 · Meet your users.** The people take their turns in your real product: clicking, typing and navigating as they see fit, working through every goal, and reporting defects and friction with the steps that led there. When one person needs what another did first — a reviewer accepts the pitch a founder submitted — they take turns in that order, and each turn is told what happened before it. No scripts, no recorded flows to maintain.
 
 **03 · Believe the second agent.** The fresh agent gets a defect's steps — not its title, not what the person saw, not the goal they were after — and follows them in a new browser. The judge compares what the replay saw with the claim and answers *confirmed*, *refuted* or *inconclusive*.
 
@@ -189,8 +189,6 @@ Exit codes, the other `setup` options and every field of the project file: [The 
 In case you go looking:
 
 - comparing a run with an earlier one;
-- people using the product together;
-- screenshots on findings;
 - switching between workspaces, or belonging to more than one;
 - deleting a project or a run;
 - handing runs from the app to a runner inside your own network;
