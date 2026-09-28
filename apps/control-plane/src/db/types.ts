@@ -119,6 +119,7 @@ export interface Invitation {
 }
 
 export interface Jobs {
+  account_ref: string | null;
   counted_cost: Generated<Numeric>;
   created_at: Generated<Timestamp>;
   error: string | null;
