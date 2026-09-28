@@ -21,6 +21,24 @@ export function goalsFor<G extends { personaId?: string }>(goals: G[], personaId
   return goals.filter((g) => g.personaId === undefined || g.personaId === personaId);
 }
 
+export interface Turn {
+  personaId: string;
+  goalIds: string[];
+}
+
+export function turnsOf(config: { personas: { id: string }[]; goals: { id: string; personaId?: string }[] }): Turn[] {
+  if (config.goals.some((g) => g.personaId === undefined)) {
+    return config.personas.map((p) => ({ personaId: p.id, goalIds: goalsFor(config.goals, p.id).map((g) => g.id) }));
+  }
+  const turns: Turn[] = [];
+  for (const goal of config.goals) {
+    const last = turns.at(-1);
+    if (last && last.personaId === goal.personaId) last.goalIds.push(goal.id);
+    else turns.push({ personaId: goal.personaId!, goalIds: [goal.id] });
+  }
+  return turns;
+}
+
 export const MIN_SECRET_HEADER_LENGTH = 8;
 export const MAX_PERSONAS = 12;
 export const MAX_GOALS_PER_PERSONA = 20;

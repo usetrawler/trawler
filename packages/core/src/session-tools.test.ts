@@ -353,3 +353,10 @@ describe("through the agent loop", () => {
     expect(state.goals.get("sign-up")).toEqual({ goal: "sign-up", status: "reached", note: "" });
   });
 });
+
+test("a made-up password is stable for a seed and random without one", () => {
+  expect(madeUpPassword("run-1:priya")).toBe(madeUpPassword("run-1:priya"));
+  expect(madeUpPassword("run-1:priya")).not.toBe(madeUpPassword("run-2:priya"));
+  expect(madeUpPassword()).not.toBe(madeUpPassword());
+  expect(madeUpPassword("run-1:priya")).toMatch(/^.{12}!Aa7$/);
+});

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { FindingSchema, goalsFor, ProjectConfigSchema, RunEventSchema } from "./index.ts";
+import { FindingSchema, goalsFor, ProjectConfigSchema, RunEventSchema, turnsOf } from "./index.ts";
 
 const project = {
   name: "Acme",
@@ -141,5 +141,30 @@ describe("RunEvent", () => {
   });
   test("rejects an unknown event type", () => {
     expect(() => RunEventSchema.parse({ seq: 1, at: "2026-09-24T10:00:00.000Z", jobId: "x", type: "nope" })).toThrow();
+  });
+});
+
+describe("turnsOf", () => {
+  const people = [{ id: "priya" }, { id: "marco" }];
+  test("consecutive goals of one person make a turn, in the plan's order across people", () => {
+    const goals = [
+      { id: "sign-in", personaId: "priya" }, { id: "submit", personaId: "priya" },
+      { id: "review", personaId: "marco" },
+      { id: "decision", personaId: "priya" },
+    ];
+    expect(turnsOf({ personas: people, goals })).toEqual([
+      { personaId: "priya", goalIds: ["sign-in", "submit"] },
+      { personaId: "marco", goalIds: ["review"] },
+      { personaId: "priya", goalIds: ["decision"] },
+    ]);
+  });
+
+  test("a plan grouped by person, or with goals for everyone, is one turn per person as before", () => {
+    expect(turnsOf({ personas: people, goals: [{ id: "a", personaId: "priya" }, { id: "b", personaId: "marco" }] })).toEqual([
+      { personaId: "priya", goalIds: ["a"] }, { personaId: "marco", goalIds: ["b"] },
+    ]);
+    expect(turnsOf({ personas: people, goals: [{ id: "shared" }, { id: "own", personaId: "marco" }] })).toEqual([
+      { personaId: "priya", goalIds: ["shared"] }, { personaId: "marco", goalIds: ["shared", "own"] },
+    ]);
   });
 });

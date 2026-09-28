@@ -1,4 +1,4 @@
-import { randomBytes, randomInt } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 import { tool } from "ai";
 import { z } from "zod";
 import { FindingSchema, type Finding, type Goal, type GoalOutcome, type RunEventInput, type TargetAccount, MAX_GOAL_NOTE, MAX_NOTE } from "@usetrawler/protocol";
@@ -19,12 +19,18 @@ export type InBrowser = <T>(action: () => Promise<T>) => Promise<T>;
 const CLOSED = "rejected: the session is already finished";
 const PASSWORD_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 
-export function madeUpPassword(): string {
-  return `${Array.from({ length: 12 }, () => PASSWORD_CHARS[randomInt(PASSWORD_CHARS.length)]).join("")}!Aa7`;
+function seeded(seed: string, purpose: string): Buffer {
+  return createHash("sha256").update(`${seed}\0${purpose}`).digest();
 }
 
-export function madeUpEmail(name: string): string {
-  return `${name.slice(0, 40)}.${randomBytes(4).toString("hex")}@example.com`;
+export function madeUpPassword(seed?: string): string {
+  const bytes = seed === undefined ? null : seeded(seed, "password");
+  return `${Array.from({ length: 12 }, (_, i) => PASSWORD_CHARS[bytes ? bytes[i]! % PASSWORD_CHARS.length : randomInt(PASSWORD_CHARS.length)]).join("")}!Aa7`;
+}
+
+export function madeUpEmail(name: string, seed?: string): string {
+  const tag = seed === undefined ? randomBytes(4).toString("hex") : seeded(seed, `email:${name}`).subarray(0, 4).toString("hex");
+  return `${name.slice(0, 40)}.${tag}@example.com`;
 }
 
 export function newSessionState(goals: Goal[]): SessionState {
@@ -166,8 +172,8 @@ export function sessionTools(opts: {
 
 export type SessionTools = ReturnType<typeof sessionTools>;
 
-export function ownPasswordTool(opts: { state: SessionState; fillField: FillField; inBrowser: InBrowser; scrubber: SecretScrubber }) {
-  const password = madeUpPassword();
+export function ownPasswordTool(opts: { state: SessionState; fillField: FillField; inBrowser: InBrowser; scrubber: SecretScrubber; password?: string }) {
+  const password = opts.password ?? madeUpPassword();
   for (let length = MIN_SECRET_LENGTH; length <= password.length; length++) opts.scrubber.add(password.slice(0, length));
   return {
     type_own_password: tool({

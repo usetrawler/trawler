@@ -11,6 +11,17 @@ export const JOB_STOPPED = "job_stopped";
 export const JobKindSchema = z.enum(["role_session", "replay", "judge"]);
 export type JobKind = z.infer<typeof JobKindSchema>;
 
+export const MAX_STORY = 60;
+
+export const StoryEntrySchema = z.object({
+  personaId: z.string(),
+  name: z.string(),
+  goal: z.string().optional(),
+  status: z.enum(["reached", "failed"]).optional(),
+  text: z.string().max(4000),
+});
+export type StoryEntry = z.infer<typeof StoryEntrySchema>;
+
 export const JobAssignmentSchema = z.object({
   jobId: z.uuid(),
   runId: z.uuid(),
@@ -18,6 +29,9 @@ export const JobAssignmentSchema = z.object({
   kind: JobKindSchema,
   config: ProjectConfigSchema,
   personaKey: z.string().optional(),
+  goalIds: z.array(z.string()).optional(),
+  story: z.array(StoryEntrySchema).max(MAX_STORY).optional(),
+  signUpSeed: z.string().max(200).optional(),
   accountRef: z.string().optional(),
   finding: FindingSchema.optional(),
   observation: ReplayObservationSchema.optional(),
