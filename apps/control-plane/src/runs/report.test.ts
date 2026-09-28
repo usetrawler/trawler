@@ -254,3 +254,37 @@ test("the headline says the accounts are being checked, and why a refused accoun
   }));
   expect(refused.headline).toBe("The product refused the username and password of ana@acme.test: Username and password do not match. Check that account on the plan and run again.");
 });
+
+test("a defect whose replay job failed says so under Not judged, with the job's error, whatever the replay stored", () => {
+  const view = runView(summary({
+    status: "succeeded",
+    jobs: [
+      job("role_session", "succeeded", { persona_key: "ana" }),
+      job("replay", "failed", { finding_key: "ana:f1", error: "the browser failed 3 times in a row" }),
+      job("replay", "failed", { finding_key: "ana:f2", stopped_by: "error", error: "the model's replies kept being cut off" }),
+      job("replay", "succeeded", { finding_key: "ana:f3" }),
+    ],
+    findings: [
+      finding("ana:f1", "ana", { replay: { completed: false, observed: "", blockedAt: null } }),
+      finding("ana:f2", "ana"),
+      finding("ana:f3", "ana", { replay: { completed: false, observed: "", blockedAt: null } }),
+    ],
+  }));
+  expect(view.report.notJudged.map((f) => [f.key, f.reason])).toEqual([
+    ["ana:f1", "The replay failed. Failed: the browser failed 3 times in a row"],
+    ["ana:f2", "The replay failed. Model error: the model's replies kept being cut off"],
+    ["ana:f3", "The fresh agent could not follow the steps far enough to report."],
+  ]);
+  expect(view.headline).toBe("None of the reported defects was confirmed.");
+});
+
+test("a run whose every defect went unchecked because its replay failed does not read as if they were checked", () => {
+  const failed = (key: string) => job("replay", "failed", { finding_key: key, error: "the provider refused the key" });
+  const all = runView(summary({ status: "succeeded", jobs: [job("role_session", "succeeded", { persona_key: "ana" }), failed("ana:f1"), failed("ana:f2")], findings: [finding("ana:f1", "ana"), finding("ana:f2", "ana")] }));
+  expect(all.headline).toBe("None of the reported defects could be checked: every replay failed.");
+  const capped = runView(summary({ status: "stopped_budget", jobs: [job("role_session", "succeeded", { persona_key: "ana" }), failed("ana:f1")], findings: [finding("ana:f1", "ana")] }));
+  expect(capped.headline).toBe("Stopped at the cap. None of the reported defects could be checked: every replay failed.");
+  const retried = runView(summary({ status: "succeeded", jobs: [job("role_session", "succeeded", { persona_key: "ana" }), failed("ana:f1"), job("replay", "succeeded", { finding_key: "ana:f1" })], findings: [finding("ana:f1", "ana")] }));
+  expect(retried.headline).toBe("None of the reported defects was confirmed.");
+  expect(retried.report.notJudged[0]!.reason).toBe("The run ended before it was replayed.");
+});
