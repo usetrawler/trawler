@@ -77,19 +77,19 @@ const runAgainAction = (runId: string) => {
 beforeEach(() => {
   Object.assign(state, {
     signedIn: true, without: null, refusal: null, checks: {}, checked: [], price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }, started: [], asked: [], keyHeld: true, held: [], startFails: null, logged: [],
-    previous: { project_id: "project-1", status: "succeeded", agent_model: "deepseek/deepseek-v4.1-flash", judge_model: "deepseek/deepseek-v4.1-flash", budget_usd: "3.5000", max_steps: 90, replay_steps: 30, provider: "openrouter", provider_base_url: null, prompt_usd_per_mtok: null, completion_usd_per_mtok: null },
+    previous: { project_id: "project-1", status: "succeeded", agent_model: "deepseek/deepseek-v4.1-flash", judge_model: "deepseek/deepseek-v4.1-flash", budget_usd: "3.5000", max_steps: 60, replay_steps: 20, provider: "openrouter", provider_base_url: null, prompt_usd_per_mtok: null, completion_usd_per_mtok: null },
     stored: { provider: "openrouter", key: "sk-or-v1-" + "k".repeat(40), baseUrl: null },
   });
 });
 
-test("Run again starts the plan as it is now with the previous run's model, cap and steps, and opens the new run", async () => {
+test("Run again starts the plan as it is now with the previous run's model and cap, today's step limits, and opens the new run", async () => {
   await expect(runAgainAction(RUN)).rejects.toMatchObject({ to: "/runs/new-run" });
   expect(state.asked).toEqual([["org-1", "id", RUN], ["org-1", "org_id", "org-1"]]);
   expect(state.checked).toEqual(["deepseek/deepseek-v4.1-flash"]);
   expect(state.started).toEqual([{
     orgId: "org-1", projectId: "project-1", tx: expect.anything(),
     options: {
-      budgetUsd: 3.5, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash", maxSteps: 90, replaySteps: 30, createdBy: "user-1",
+      budgetUsd: 3.5, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash", maxSteps: 120, replaySteps: 30, createdBy: "user-1",
       provider: "openrouter", providerBaseUrl: null, price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }, tokenCap: null,
     },
   }]);

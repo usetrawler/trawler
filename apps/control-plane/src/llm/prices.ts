@@ -44,6 +44,52 @@ export async function openRouterPrices(openRouterUrl: string, fetchImpl: typeof 
   return loading;
 }
 
+export interface PriceRange {
+  low: Price;
+  high: Price;
+}
+
+const MAX_RANGES = 500;
+const RETRY_AFTER_MS = 60 * 1000;
+const ranges = new Map<string, { at: number; range: PriceRange | null; ttl: number }>();
+const asking = new Map<string, Promise<PriceRange | null>>();
+
+export function parseEndpointPrices(body: unknown): PriceRange | null {
+  const endpoints = (body as { data?: { endpoints?: unknown } })?.data?.endpoints;
+  if (!Array.isArray(endpoints)) return null;
+  const prices = (endpoints as Array<{ pricing?: { prompt?: unknown; completion?: unknown } }>)
+    .map((e) => ({ promptUsdPerMtok: usd(e?.pricing?.prompt), completionUsdPerMtok: usd(e?.pricing?.completion) }))
+    .filter((p) => Number.isFinite(p.promptUsdPerMtok) && Number.isFinite(p.completionUsdPerMtok) && p.promptUsdPerMtok <= MAX_USD_PER_MTOK && p.completionUsdPerMtok <= MAX_USD_PER_MTOK);
+  if (prices.length === 0) return null;
+  const prompt = prices.map((p) => p.promptUsdPerMtok);
+  const completion = prices.map((p) => p.completionUsdPerMtok);
+  return {
+    low: { promptUsdPerMtok: Math.min(...prompt), completionUsdPerMtok: Math.min(...completion) },
+    high: { promptUsdPerMtok: Math.max(...prompt), completionUsdPerMtok: Math.max(...completion) },
+  };
+}
+
+export async function openRouterPriceRange(openRouterUrl: string, model: string, fetchImpl: typeof fetch = fetch, now = Date.now()): Promise<PriceRange | null> {
+  const cached = ranges.get(model);
+  if (cached && now - cached.at < cached.ttl) return cached.range;
+  const pending = asking.get(model);
+  if (pending) return pending;
+  const segments = model.split("/");
+  if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) return null;
+  const path = segments.map(encodeURIComponent).join("/");
+  const asked = fetchImpl(`${openRouterUrl}/models/${path}/endpoints`, { signal: AbortSignal.timeout(10_000) })
+    .then(async (res) => (res.ok ? { range: parseEndpointPrices(await res.json()) } : res.status === 404 ? { range: null } : undefined))
+    .catch(() => undefined)
+    .then((answer) => {
+      if (ranges.size >= MAX_RANGES) ranges.delete(ranges.keys().next().value!);
+      ranges.set(model, answer ? { at: now, range: answer.range, ttl: TTL_MS } : { at: now, range: null, ttl: RETRY_AFTER_MS });
+      return answer?.range ?? null;
+    })
+    .finally(() => asking.delete(model));
+  asking.set(model, asked);
+  return asked;
+}
+
 export async function priceFor(provider: Provider, model: string, openRouterUrl: string, fetchImpl?: typeof fetch): Promise<Price | null> {
   const key = priceKey(provider, model);
   if (!key) return null;
@@ -52,4 +98,6 @@ export async function priceFor(provider: Provider, model: string, openRouterUrl:
 
 export function resetPriceCache() {
   cache = undefined;
+  ranges.clear();
+  asking.clear();
 }
