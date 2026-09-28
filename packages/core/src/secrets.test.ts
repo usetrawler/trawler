@@ -174,7 +174,10 @@ test("a secret is also masked as a page view shows it: spaces collapsed, invisib
   s.add(" ad  min-secret");
   s.add("pw\u200b  12345");
   s.add("a  b   c   d");
+  s.add("pass\u2764\ufe0f  word");
+  s.add("ad\u200c  min-secret");
   expect(s.scrub("paragraph: ad min-secret, then pw 12345, then a b c d")).toBe("paragraph: •••, then •••, then a b c d");
+  expect(s.scrub("pass\u2764\ufe0f word and ad\u200c min-secret")).toBe("••• and •••");
 });
 
 describe("SecretScrubber.forProject", () => {

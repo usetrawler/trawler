@@ -25,8 +25,8 @@ function forms(s: string): string[] {
 export const asShown = (s: string) => s.replace(/\p{Default_Ignorable_Code_Point}/gu, "").replace(/\s+/g, " ").trim();
 
 function variants(secret: string): string[] {
-  const shown = asShown(secret);
-  const extra = shown !== secret && shown.length >= MIN_SECRET_LENGTH ? [shown] : [];
+  const collapsed = secret.replace(/[\u200b\u00ad]/g, "").replace(/\s+/g, " ").trim();
+  const extra = [...new Set([asShown(secret), collapsed])].filter((shown) => shown !== secret && shown.length >= MIN_SECRET_LENGTH);
   return [secret, ...extra].flatMap((s) => [...forms(s), ...forms(s.normalize("NFC")), ...forms(s.normalize("NFD"))]);
 }
 
