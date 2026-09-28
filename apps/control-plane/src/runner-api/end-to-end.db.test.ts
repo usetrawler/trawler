@@ -323,7 +323,7 @@ test("a run on a direct provider goes to that provider without OpenRouter extras
   expect((await call()).status).toBe(402);
 });
 
-test("a timed-out call is answered 504 after one attempt whichever fetch timed out, a refused address is not tried again, and a dropped connection still is", async () => {
+test("a timed-out call is answered 504 after one attempt whichever fetch timed out, even while its answer is read, a refused address is not tried again, and a dropped connection still is", async () => {
   await sql`insert into organization (id, name, slug, "createdAt") values ('org-t', 'T', 't', now())`.execute(t.db);
   await withOrg(t.db, "org-t", (tx) => setModelKey(tx, "org-t", { provider: "openrouter", key: ORG_KEY }, "u", keys));
   const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "ti", name: "Ti", brief: "b" }], goals: [{ id: "g", instruction: "x" }] });
@@ -348,6 +348,14 @@ test("a timed-out call is answered 504 after one attempt whichever fetch timed o
   expect(await attempts(() => new FetchRefused("status", "HTTP 700"))).toEqual({ status: 502, message: "the provider could not be reached", tried: 1 });
   expect(await attempts(() => Object.assign(new Error("The operation was aborted"), { name: "AbortError" }))).toEqual({ status: 502, message: "the provider could not be reached", tried: 3 });
   expect(await attempts(() => new TypeError("fetch failed"))).toEqual({ status: 502, message: "the provider could not be reached", tried: 3 });
+
+  const cutOff = async (reason: unknown) => {
+    const body = new ReadableStream({ start: (controller) => controller.error(reason) });
+    const res = await handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${job.token}`, "content-type": "application/json" }, body: JSON.stringify({ model: "m/agent", messages: [{ role: "user", content: "hi" }] }) }), { db: t.db, keys, openRouterUrl: openRouterBase, fetch: async () => new Response(body, { status: 200 }), retryBaseMs: 1 });
+    return { status: res.status, message: ((await res.json()) as { error: { message: string } }).error.message };
+  };
+  expect(await cutOff(new DOMException("The operation was aborted due to timeout", "TimeoutError"))).toEqual({ status: 504, message: "the provider did not answer in time" });
+  expect(await cutOff(new TypeError("terminated"))).toEqual({ status: 502, message: "the provider could not be reached" });
 });
 
 test("a session interrupted by a runner shutdown goes back to the queue with its partial work forgotten, and the next runner finishes the run", async () => {

@@ -130,7 +130,14 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
   }
   if (upstream.status === 401 || upstream.status === 403) return failure(402, "the provider refused the workspace key; an owner or admin can replace it in Settings");
   if (upstream.status === 402) return failure(402, "the provider account behind the workspace key is out of credits");
-  const text = await upstream.text();
+  let text: string;
+  try {
+    text = await upstream.text();
+  } catch (err) {
+    if (req.signal.aborted) return failure(499, "the runner hung up");
+    if (timedOut(err)) return failure(504, "the provider did not answer in time");
+    return failure(502, "the provider could not be reached");
+  }
   let parsed: { usage?: Usage; model?: unknown; error?: { message?: unknown } };
   try {
     parsed = JSON.parse(text);
