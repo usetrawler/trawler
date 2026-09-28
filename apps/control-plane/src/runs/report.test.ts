@@ -271,8 +271,8 @@ test("a defect whose replay job failed says so under Not judged, with the job's 
     ],
   }));
   expect(view.report.notJudged.map((f) => [f.key, f.reason])).toEqual([
-    ["ana:f1", "The replay failed. Failed: the browser failed 3 times in a row"],
-    ["ana:f2", "The replay failed. Model error: the model's replies kept being cut off"],
+    ["ana:f1", "The replay failed: the browser failed 3 times in a row"],
+    ["ana:f2", "The replay hit a model error: the model's replies kept being cut off"],
     ["ana:f3", "The fresh agent could not follow the steps far enough to report."],
   ]);
   expect(view.headline).toBe("None of the reported defects was confirmed.");
@@ -284,7 +284,14 @@ test("a run whose every defect went unchecked because its replay failed does not
   expect(all.headline).toBe("None of the reported defects could be checked: every replay failed.");
   const capped = runView(summary({ status: "stopped_budget", jobs: [job("role_session", "succeeded", { persona_key: "ana" }), failed("ana:f1")], findings: [finding("ana:f1", "ana")] }));
   expect(capped.headline).toBe("Stopped at the cap. None of the reported defects could be checked: every replay failed.");
-  const retried = runView(summary({ status: "succeeded", jobs: [job("role_session", "succeeded", { persona_key: "ana" }), failed("ana:f1"), job("replay", "succeeded", { finding_key: "ana:f1" })], findings: [finding("ana:f1", "ana")] }));
-  expect(retried.headline).toBe("None of the reported defects was confirmed.");
-  expect(retried.report.notJudged[0]!.reason).toBe("The run ended before it was replayed.");
+});
+
+test("a replay marked failed that still reported and went to the judge reads as judged, not as unchecked", () => {
+  const replayed = { replay: { completed: true, observed: "Submit did nothing.", blockedAt: null } };
+  const reported = job("replay", "failed", { finding_key: "ana:f1", stopped_by: "error", error: "the runner could not report events: timeout" });
+  const capped = runView(summary({ status: "stopped_budget", jobs: [job("role_session", "succeeded", { persona_key: "ana" }), reported, job("judge", "cancelled", { finding_key: "ana:f1" })], findings: [finding("ana:f1", "ana", replayed)] }));
+  expect(capped.headline).toBe("Stopped at the cap. None of the reported defects was confirmed.");
+  expect(capped.report.notJudged.map((f) => f.reason)).toEqual(["The run ended before it was judged."]);
+  const waiting = runView(summary({ jobs: [job("role_session", "succeeded", { persona_key: "ana" }), reported, job("judge", "queued", { finding_key: "ana:f1" })], findings: [finding("ana:f1", "ana", replayed)] }));
+  expect(waiting.report.notJudged.map((f) => f.reason)).toEqual(["Waiting for the judge."]);
 });

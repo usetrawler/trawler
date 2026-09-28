@@ -193,3 +193,11 @@ test("while a run is live the active stage and the person exploring visibly move
   expect(moving.every((c) => /motion-safe:animate-/.test(c))).toBe(true);
   expect(render({ ...live, status: "succeeded", finishedAt: new Date("2026-09-25T20:00:00Z") })).not.toMatch(/animate-(spin|ping|pulse)/);
 });
+
+test("a defect whose replay failed is not judged, its row gives the reason, and the opened row keeps the whole of it", () => {
+  const error = `the browser failed 3 times in a row; last error: ${"x".repeat(300)}`;
+  const html = render(summary({ ...finished, jobs: [...finished.jobs, job("replay", "failed", { finding_key: "x:d1", error })], findings: [finding("x:d1", "ana", { title: "Export is empty" })] }));
+  const [row] = rows(html, "Not judged");
+  expect(text(row!.split("</summary>")[0]!)).toBe(`high severity 01 · Ana Export is empty The replay failed: ${error} →`);
+  expect(text(row!.split("</summary>")[1]!)).toContain(`Why it was not judged: The replay failed: ${error}`);
+});

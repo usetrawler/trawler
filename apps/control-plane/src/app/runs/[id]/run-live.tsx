@@ -452,7 +452,7 @@ export function RunLive({ initial }: { initial: Data }) {
             : f.action === "after_run" ? <p className="text-sm text-muted">You can judge it again after the run, if its cap has room left.</p>
             : <p className="text-sm text-muted">This run has spent its cap, so it cannot be judged again.</p>} />
           <Section title="Inconclusive" hint="The replay could not settle it" items={report.inconclusive} focusKey={focusKey} onFocused={focused} />
-          <Section title="Not judged" hint="Reported, but not replayed and judged to the end" items={report.notJudged} note focusKey={focusKey} onFocused={focused} />
+          <Section title="Not judged" hint="Reported, but not replayed and judged to the end" items={report.notJudged} note detail={(f) => f.reason} focusKey={focusKey} onFocused={focused} />
           <Section title="Refuted" hint="The replay did not see the problem" items={report.refuted} focusKey={focusKey} onFocused={focused} />
           <Section title="Friction" hint="Not broken, but slowed someone down" items={report.friction} />
         </div>

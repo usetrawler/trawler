@@ -29,13 +29,13 @@ function stage(jobs: Job[], runLive: boolean): StageState {
   return jobs.some((j) => j.status !== "queued") ? "active" : "waiting";
 }
 
-function failedBecause(job: Job): string {
+function replayFailedBecause(job: Job): string {
   const detail = job.error ?? "no reason was recorded";
-  return job.stopped_by === "error" && MODEL_FAULT.test(detail) ? `Model error: ${detail}` : `Failed: ${detail}`;
+  return job.stopped_by === "error" && MODEL_FAULT.test(detail) ? `The replay hit a model error: ${detail}` : `The replay failed: ${detail}`;
 }
 
-function notJudgedReason(f: Finding, runLive: boolean, replayJob: Job | undefined): string {
-  if (replayJob?.status === "failed") return `The replay failed. ${failedBecause(replayJob)}`;
+function notJudgedReason(f: Finding, runLive: boolean, failedReplay: Job | undefined): string {
+  if (failedReplay) return replayFailedBecause(failedReplay);
   const replay = f.replay as { completed: boolean; blockedAt: number | null } | null;
   if (replay && !replay.completed && replay.blockedAt === null) return "The fresh agent could not follow the steps far enough to report.";
   if (replay) return runLive ? "Waiting for the judge." : "The run ended before it was judged.";
@@ -50,7 +50,10 @@ export function gaveNoVerdict(job: { status: string; stopped_by: string | null; 
 }
 
 function whyNotJudged(job: Job, runStatus: string, cancelReason: CancelReason | null, capSpent: boolean): string {
-  if (job.status === "failed") return failedBecause(job);
+  if (job.status === "failed") {
+    const detail = job.error ?? "no reason was recorded";
+    return job.stopped_by === "error" && MODEL_FAULT.test(detail) ? `Model error: ${detail}` : `Failed: ${detail}`;
+  }
   if (capSpent) return "The run's cap ran out before the judge answered.";
   if (runStatus === "cancelled" && !job.requested) return cancelReason === "key_removed" ? "The model key was removed before the judge answered." : "The run was stopped before the judge answered.";
   return job.error ? `Stopped: ${job.error}` : "The model call was refused before the judge answered.";
@@ -60,7 +63,10 @@ export function runView(s: RunSummary) {
   const live = isLive(s.status);
   const byKind = (kind: string) => s.jobs.filter((j) => j.kind === kind);
   const lastJudge = (f: Finding) => byKind("judge").filter((j) => j.finding_key === f.key).at(-1);
-  const lastReplay = (f: Finding) => byKind("replay").filter((j) => j.finding_key === f.key).at(-1);
+  const failedReplay = (f: Finding) => {
+    const replayJob = byKind("replay").filter((j) => j.finding_key === f.key).at(-1);
+    return replayJob?.status === "failed" && !lastJudge(f) ? replayJob : undefined;
+  };
   const judgingAgain = (f: Finding) => { const j = lastJudge(f); return !!j && j.requested && OPEN.has(j.status); };
   const unjudged = (f: Finding) => { const j = lastJudge(f); return !!j && gaveNoVerdict(j, f.verdict); };
   const defects = s.findings.filter((f) => f.kind === "defect");
@@ -115,13 +121,13 @@ export function runView(s: RunSummary) {
       reason: judgingAgain(f) ? "Judging again…" : whyNotJudged(lastJudge(f)!, s.status, s.cancelReason, capSpent),
       action: (judgingAgain(f) ? "judging" : live ? "after_run" : capSpent ? "cap_spent" : "judge_again") as JudgeAgainState,
     })),
-    notJudged: settled.filter((f) => !f.verdict).map((f) => ({ ...withPersona(f), reason: notJudgedReason(f, live, lastReplay(f)) })),
+    notJudged: settled.filter((f) => !f.verdict).map((f) => ({ ...withPersona(f), reason: notJudgedReason(f, live, failedReplay(f)) })),
     friction: s.findings.filter((f) => f.kind === "friction").map(withPersona),
   };
 
   const goalsReached = s.goals.filter((g) => g.status === "reached").length;
   const goalsTotal = s.personas.reduce((sum, p) => sum + goalsFor(s.goalTexts, p.id).length, 0);
-  const replaysAllFailed = defects.length > 0 && defects.every((f) => !f.verdict && lastReplay(f)?.status === "failed");
+  const replaysAllFailed = defects.length > 0 && defects.every((f) => !f.verdict && failedReplay(f));
   return { live, rejudging, stages, personas, report, goalsReached, goalsTotal, headline: headline(s, report.confirmed.length, defects.length, replaysAllFailed) };
 }
 
