@@ -525,7 +525,7 @@ export async function openBrowser(opts: {
     };
     const scrubWithFilledValues = async <T>(result: T): Promise<T> => {
       const live = new SecretScrubber();
-      const tooShortToScrub = new Set([...typedPasswords].filter((typed) => typed.length < MIN_SECRET_LENGTH));
+      const heldInFields = new Set(typedPasswords);
       const fields = await liveFilled();
       if (dialogOpen && fields.length > 0) return refused(WITHHELD_FOR_DIALOG) as T;
       const values = await within(Promise.all(fields.map(readValue)), opts.filledReadMs ?? FILLED_READ_MS, null);
@@ -533,14 +533,12 @@ export async function openBrowser(opts: {
       for (const [i, h] of fields.entries()) {
         const value = values[i]!;
         if (value === valuesBeforeTyping.get(h)) continue;
-        if (value.length < MIN_SECRET_LENGTH) {
-          if (value) tooShortToScrub.add(value);
-          continue;
-        }
+        if (value) heldInFields.add(value);
+        if (value.length < MIN_SECRET_LENGTH) continue;
         live.add(value);
         if ([...typedPasswords].some((typed) => typed.length >= MIN_SECRET_LENGTH && (keptFrom(value, typed) || keptFrom(typed, value)))) keepSecret(value);
       }
-      return withFieldValuesMasked(live.scrub(opts.scrubber.scrub(result)), tooShortToScrub);
+      return withFieldValuesMasked(live.scrub(opts.scrubber.scrub(result)), heldInFields);
     };
     const focusCheck = async () => {
       const held = await liveFilled();

@@ -121,6 +121,8 @@ beforeAll(async () => {
         return html(`<input aria-label="Password" type="password" placeholder="Enter your password">`);
       case "/password-colon-label":
         return html(`<input aria-label="Password: at least 4 characters" type="password">`);
+      case "/signed-in-as-long":
+        return html(`<p>ad min-secret</p><input aria-label="Password" type="password">`);
       case "/signed-in-as":
         return html(`<p>admin</p><input aria-label="Password" type="password">`);
       case "/readonly-password":
@@ -950,6 +952,31 @@ describe("password fields", () => {
       const after = await snapshot(b);
       expect(after).toContain("•••");
       expect(after).not.toContain(shown);
+    });
+  }, 60_000);
+
+  test.each([
+    ["/password-placeholder", "Password"],
+    ["/", "Password"],
+  ])("a long password with leading and doubled spaces stays hidden in its own field on %s", async (path, name) => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}${path}`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, name), " ad  min-secret", "password")).toBe("typed the password");
+      const after = await snapshot(b);
+      expect(after).toMatch(/textbox \\"Password\\"[^\\]*(: •••|\\n\s*- \/placeholder: [^\\]*\\n\s*- text: •••)/);
+      expect(after).not.toContain("ad min-secret");
+    });
+  }, 60_000);
+
+  test("page text that happens to equal a long password with spaces stays readable, only the field is hidden", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/signed-in-as-long`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), " ad  min-secret", "password")).toBe("typed the password");
+      const shown = await snapshot(b);
+      expect(shown).toMatch(/paragraph[^\\]*: ad min-secret/);
+      expect(shown).toMatch(/textbox \\"Password\\"[^\\]*: •••/);
     });
   }, 60_000);
 
