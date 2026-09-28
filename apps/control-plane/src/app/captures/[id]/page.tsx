@@ -44,7 +44,7 @@ export default async function CapturePage({ params }: { params: Promise<{ id: st
       </a>
       <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
         <span>Passwords and other secrets are blacked out in screen captures.</span>
-        <a href={`/api/artifacts/${capture.id}`} target="_blank" rel="noreferrer" className="text-ink underline underline-offset-4 hover:text-action">
+        <a href={`/api/artifacts/${capture.id}`} target="_blank" rel="noreferrer" className="text-ink underline underline-offset-4 hover:text-action-ink">
           Open the original, 1280 × 720<span aria-hidden="true"> ↗</span><span className="sr-only"> (opens in a new tab)</span>
         </a>
       </p>

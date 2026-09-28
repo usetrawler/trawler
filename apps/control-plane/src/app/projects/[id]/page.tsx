@@ -34,7 +34,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           {project.focus && <p className="text-sm">Focus: <span className="text-muted">{project.focus}</span></p>}
           <p className="text-sm">
             {project.features.length > 0 && <>Features: <span className="text-muted">{project.features.join(" · ")}</span> · </>}
-            <Link href={`/projects/${project.id}/features`} className="underline underline-offset-4 hover:text-action">{project.features.length > 0 ? "Change features" : "Choose features and propose people"}</Link>
+            <Link href={`/projects/${project.id}/features`} className="underline underline-offset-4 hover:text-action-ink">{project.features.length > 0 ? "Change features" : "Choose features and propose people"}</Link>
           </p>
         </div>
         <PlanWorkspace

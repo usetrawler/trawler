@@ -184,7 +184,7 @@ function Section<T extends ReportFinding & { reason?: string }>({ title, hint, i
   return (
     <section aria-labelledby={id} className="flex flex-col">
       <div className="pb-3">
-        <h2 id={id} className={`${label} text-action`}>{title} · {items.length}</h2>
+        <h2 id={id} className={`${label} text-action-ink`}>{title} · {items.length}</h2>
         <p className="mt-[3px] text-[11px] text-muted">{hint}</p>
       </div>
       {items.length === 0 ? <p className="border border-line bg-panel p-[17px] text-sm text-muted">{empty}</p> : <ol className="border border-line">{items.map((f, i) => <FindingRow key={f.key} f={f} n={i + 1} mark={mark} note={note ? f.reason : undefined} detail={detail?.(f)} action={action?.(f)} focus={f.key === focusKey} onFocused={onFocused} />)}</ol>}
@@ -294,7 +294,7 @@ function PeopleOutcomes({ view }: { view: View }) {
   const id = useId();
   return (
     <section aria-labelledby={id} className="border border-line bg-panel p-[17px]">
-      <h2 id={id} className={`${label} text-action`}>People</h2>
+      <h2 id={id} className={`${label} text-action-ink`}>People</h2>
       <ul>
         {view.personas.map((p) => {
           const good = p.state === "reached";

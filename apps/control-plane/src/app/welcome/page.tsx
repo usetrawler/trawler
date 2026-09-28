@@ -28,7 +28,7 @@ export default async function WelcomePage() {
       </header>
       <main className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-12 md:py-16">
         <p className="flex min-w-0 flex-wrap items-center gap-x-2 font-mono text-xs tracking-[0.2em] text-muted uppercase"><span aria-hidden className="h-2 w-2 bg-ok" />Signed in as<span className="min-w-0 tracking-normal normal-case wrap-anywhere text-ink">{newcomer.email}</span></p>
-        <p className="font-mono text-xs tracking-[0.2em] text-action uppercase">Your workspace</p>
+        <p className="font-mono text-xs tracking-[0.2em] text-action-ink uppercase">Your workspace</p>
         <h1 className="text-4xl leading-[0.95] font-bold tracking-tight md:text-6xl">{rows.length === 0 ? "Your invitation is no longer open." : rows.length === 1 ? "You were invited to a workspace." : `You were invited to ${rows.length} workspaces.`}</h1>
         <p className="max-w-xl text-lg text-muted">
           {rows.length === 0

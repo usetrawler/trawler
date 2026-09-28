@@ -25,8 +25,9 @@
   --soft: rgb(23 25 28 / 0.055);
   --panel: #ebe7df;
   --action: #ff6b3d;
-  --ok: #3e7251;
-  --warn: #8a5e0f;
+  --action-ink: #ad3f17;
+  --ok: #3a6b4c;
+  --warn: #835a0e;
   --bad: #a63d32;
   --info: #3d6478;
   --header: rgb(244 241 235 / 0.84);
@@ -42,6 +43,7 @@
     --soft: rgb(244 241 235 / 0.055);
     --panel: #191c1f;
     --action: #ff7045;
+    --action-ink: #ff7045;
     --ok: #93b89e;
     --warn: #d9b25a;
     --bad: #e08a7e;
@@ -60,6 +62,7 @@
   --soft: rgb(244 241 235 / 0.055);
   --panel: #191c1f;
   --action: #ff7045;
+  --action-ink: #ff7045;
   --ok: #93b89e;
   --warn: #d9b25a;
   --bad: #e08a7e;
@@ -79,6 +82,7 @@
   --color-soft: var(--soft);
   --color-panel: var(--panel);
   --color-action: var(--action);
+  --color-action-ink: var(--action-ink);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-bad: var(--bad);
