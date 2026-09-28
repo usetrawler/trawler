@@ -192,6 +192,8 @@ beforeAll(async () => {
         return html(`<p>API key: sk-live-other-2</p><input aria-label="Key" value="sk-live-other-2"><input aria-label="Hint" placeholder="sk-live-other-2">`);
       case "/swap-echo":
         return html(`<input aria-label="Password" type="password"><button onclick="const p = document.querySelector('input'); p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value">Swap</button><p id="echo"></p>`);
+      case "/password-keeps-changing":
+        return html(`<input aria-label="Password" type="password"><button onclick="const p = document.querySelector('input'); p.value = p.value + 'x'">Change</button>`);
       case "/password-grows":
         return html(`<input aria-label="Password" type="password" oninput="clearTimeout(window.grow); window.grow = setTimeout(() => { this.value = this.value + 'x'.repeat(2000); document.getElementById('state').textContent = 'Grown'; }, 300)"><p id="state">Waiting</p>`);
       case "/password-lone-surrogate":
@@ -1694,6 +1696,19 @@ describe("screenshots", () => {
       expect(text).toContain("holds a value too long to check");
       expect(text).not.toContain("first-secret-");
       expect(await b.screenshot()).toBeNull();
+    });
+  }, 120_000);
+
+  test("a page that keeps changing a typed password field stops getting results after 20 new values", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/password-keeps-changing`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "first-secret-1", "password")).toBe("typed the password");
+      const results: string[] = [];
+      for (let i = 0; i < 21; i++) results.push(JSON.stringify(await b.tools.browser_click!.execute!({ target: refOf(snap, "Change"), element: "Change" }, ctx)));
+      expect(results.slice(0, 20).some((r) => r.includes("too long to check"))).toBe(false);
+      expect(results[20]).toContain("too long to check, or keeps changing it");
+      expect(results.join("")).not.toContain("first-secret-");
     });
   }, 120_000);
 

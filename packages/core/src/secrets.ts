@@ -52,14 +52,40 @@ function userAndPassword(decoded: string): string[] {
   return [decoded, password.length >= MIN_SECRET_LENGTH ? password : decoded.slice(0, colon)];
 }
 
-function periodTail(needle: string): string {
+const NATIVE_SEARCH_MAX = 250;
+
+function borders(needle: string): number[] {
   const border = new Array<number>(needle.length).fill(0);
   for (let i = 1, k = 0; i < needle.length; i++) {
     while (k > 0 && needle[i] !== needle[k]) k = border[k - 1]!;
     if (needle[i] === needle[k]) k++;
     border[i] = k;
   }
-  return needle.slice(border[needle.length - 1]!);
+  return border;
+}
+
+function nativeMatches(text: string, needle: string, tail: string, ranges: Array<[number, number]>): void {
+  let found: [number, number] | undefined;
+  for (let at = text.indexOf(needle); at !== -1; ) {
+    let end = at + needle.length;
+    while (text.startsWith(tail, end)) end += tail.length;
+    if (found && at <= found[1]) found[1] = end;
+    else ranges.push((found = [at, end]));
+    at = text.indexOf(needle, end - needle.length + 1);
+  }
+}
+
+function kmpMatches(text: string, needle: string, border: number[], ranges: Array<[number, number]>): void {
+  let found: [number, number] | undefined;
+  for (let i = 0, k = 0; i < text.length; i++) {
+    while (k > 0 && text[i] !== needle[k]) k = border[k - 1]!;
+    if (text[i] === needle[k]) k++;
+    if (k < needle.length) continue;
+    const at = i + 1 - needle.length;
+    if (found && at <= found[1]) found[1] = i + 1;
+    else ranges.push((found = [at, i + 1]));
+    k = border[k - 1]!;
+  }
 }
 
 function isPlainObject(v: object): boolean {
@@ -69,7 +95,7 @@ function isPlainObject(v: object): boolean {
 
 export class SecretScrubber {
   #needles: string[] = [];
-  #tails = new Map<string, string>();
+  #borders = new Map<string, number[]>();
   #browserNeedles: string[] = [];
 
   static forProject(project: {
@@ -96,7 +122,7 @@ export class SecretScrubber {
     if (secret.length < MIN_SECRET_LENGTH) throw new RangeError(`secrets must be at least ${MIN_SECRET_LENGTH} characters to be scrubbed reliably`);
     const found = variants(secret).filter((n) => n.length > 0);
     this.#needles = [...new Set([...this.#needles, ...found])];
-    for (const needle of found) if (!this.#tails.has(needle)) this.#tails.set(needle, periodTail(needle));
+    for (const needle of found) if (!this.#borders.has(needle)) this.#borders.set(needle, borders(needle));
     if (reachesBrowser) this.#browserNeedles = [...new Set([...this.#browserNeedles, ...found])];
   }
 
@@ -112,15 +138,9 @@ export class SecretScrubber {
     const text = input;
     const ranges: Array<[number, number]> = [];
     for (const needle of this.#needles) {
-      const tail = this.#tails.get(needle) ?? needle;
-      let found: [number, number] | undefined;
-      for (let at = text.indexOf(needle); at !== -1; ) {
-        let end = at + needle.length;
-        while (text.startsWith(tail, end)) end += tail.length;
-        if (found && at <= found[1]) found[1] = end;
-        else ranges.push((found = [at, end]));
-        at = text.indexOf(needle, end - needle.length + 1);
-      }
+      const border = this.#borders.get(needle) ?? borders(needle);
+      if (needle.length > NATIVE_SEARCH_MAX) kmpMatches(text, needle, border, ranges);
+      else nativeMatches(text, needle, needle.slice(border[needle.length - 1]!), ranges);
     }
     if (ranges.length === 0) return text;
     ranges.sort((a, b) => a[0] - b[0]);

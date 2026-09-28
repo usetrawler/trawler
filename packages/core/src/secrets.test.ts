@@ -181,17 +181,28 @@ test("a secret is also masked as a page view shows it: spaces collapsed, invisib
 });
 
 test("masking stays fast for a long secret that repeats in a long text, and still covers every overlapping match", () => {
-  const cases: Array<[string, string]> = [["a".repeat(4000), "a".repeat(2_000_000)], ["ab".repeat(2000), "ab".repeat(1_000_000)], ["a".repeat(100_000), "a".repeat(400_000)]];
-  for (const [secret, text] of cases) {
+  const cases: Array<[string, string, boolean]> = [
+    ["a".repeat(4000), "a".repeat(2_000_000), true],
+    ["ab".repeat(2000), "ab".repeat(1_000_000), true],
+    ["a".repeat(100_000), "a".repeat(499_999), true],
+    ["ab" + "a".repeat(998), "a".repeat(1_000_000), false],
+    ["b" + "\\".repeat(999), "\\".repeat(1_000_000), false],
+  ];
+  for (const [secret, text, masked] of cases) {
     const s = new SecretScrubber();
     s.add(secret);
     const started = performance.now();
-    expect(s.scrub(`x${text}y`)).toBe(`x${MASK}y`);
+    expect(s.scrub(`x${text}y`) === `x${MASK}y`).toBe(masked);
     expect(performance.now() - started).toBeLessThan(1000);
   }
   const s = new SecretScrubber();
   s.add("abcabcab");
   expect(s.scrub("-abcabcabcabcab- abcabcab abcabca")).toBe(`-${MASK}- ${MASK} abcabca`);
+  s.add("aaaaabaa");
+  expect(s.scrub("-aaaaabaaaaaabaa-")).toBe(`-${MASK}-`);
+  const long = new SecretScrubber();
+  long.add("ab".repeat(200));
+  expect(long.scrub(`-${"ab".repeat(1000)}- ${"ab".repeat(199)}`)).toBe(`-${MASK}- ${"ab".repeat(199)}`);
 });
 
 test("a secret with a lone surrogate is taken, and masked as written", () => {
