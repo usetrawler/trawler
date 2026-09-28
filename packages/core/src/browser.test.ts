@@ -1708,6 +1708,7 @@ describe("screenshots", () => {
       await navigate(b, `${origin}/password-keeps-changing`);
       const snap = await snapshot(b);
       expect(await b.fillField(refOf(snap, "Password"), "first-secret-1", "password")).toBe("typed the password");
+      expect(await snapshot(b)).not.toContain("too long to check");
       const results: string[] = [];
       for (let i = 0; i < 21; i++) results.push(JSON.stringify(await b.tools.browser_click!.execute!({ target: refOf(snap, "Change"), element: "Change" }, ctx)));
       expect(results.slice(0, 20).some((r) => r.includes("too long to check"))).toBe(false);
@@ -1722,6 +1723,9 @@ describe("screenshots", () => {
       const snap = await snapshot(b);
       expect(await b.fillField(refOf(snap, "Password"), "first-secret-1", "password")).toBe("typed the password");
       const first = JSON.stringify(await b.tools.browser_click!.execute!({ target: refOf(snap, "Change"), element: "Change" }, ctx));
+      const unchanged = await snapshot(b);
+      expect(unchanged).not.toContain("too long to check");
+      expect(unchanged).not.toContain("first-secret-");
       const started = performance.now();
       const second = JSON.stringify(await b.tools.browser_click!.execute!({ target: refOf(snap, "Change"), element: "Change" }, ctx));
       expect(performance.now() - started).toBeLessThan(10_000);

@@ -542,12 +542,12 @@ export async function openBrowser(opts: {
         if (value === valuesBeforeTyping.get(h)) continue;
         if (value.length > MAX_HELD_VALUE) return refused(WITHHELD_TOO_LONG) as T;
         if (value) heldInFields.add(value);
-        if (value.length < MIN_SECRET_LENGTH) continue;
+        if (value.length < MIN_SECRET_LENGTH || keptFromPage.has(value)) continue;
         const longForms = typedPasswords.has(value) ? 0 : longFormsOf(value);
         longFormsLive += longForms;
         if (longFormsKept + longFormsLive > MAX_LONG_FORMS_FROM_PAGE) return refused(WITHHELD_TOO_LONG) as T;
         live.add(value);
-        if (keptFromPage.has(value) || ![...typedPasswords].some((typed) => typed.length >= MIN_SECRET_LENGTH && (keptFrom(value, typed) || keptFrom(typed, value)))) continue;
+        if (![...typedPasswords].some((typed) => typed.length >= MIN_SECRET_LENGTH && (keptFrom(value, typed) || keptFrom(typed, value)))) continue;
         if (!typedPasswords.has(value)) {
           if (keptFromPage.size >= MAX_KEPT_FROM_PAGE) return refused(WITHHELD_TOO_LONG) as T;
           keptFromPage.add(value);
