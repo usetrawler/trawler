@@ -51,19 +51,36 @@ export function featuresFrom(summary: ProductSummary, chosenBefore: string[] = [
   return [...offered, ...kept];
 }
 
-function Progress({ step, host }: { step: Step; host: string }) {
+function Working() {
+  return (
+    <span aria-hidden className="relative grid h-24 w-24 place-items-center self-center">
+      <span className="absolute inset-0 rounded-full border border-action/40" />
+      <span className="absolute inset-4 rounded-full border border-line" />
+      <span className="absolute inset-0 motion-safe:animate-spin [animation-duration:2.4s]">
+        <span className="absolute -top-1 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full bg-action" />
+      </span>
+      <span className="absolute h-5 w-5 rounded-full bg-action/40 motion-safe:animate-ping" />
+      <span className="h-5 w-5 rounded-full bg-action" />
+    </span>
+  );
+}
+
+export function Progress({ step, host }: { step: Step; host: string }) {
   const at = STEPS.findIndex((s) => s.step === step);
   return (
     <div role="status" className="flex flex-col gap-6">
+      <Working />
       <div className="flex flex-col gap-3">
         <p className="font-mono text-xs tracking-[0.2em] text-action uppercase">Building your test plan</p>
         <h2 className="text-3xl leading-tight font-bold tracking-tight break-words md:text-5xl">Understanding {host}</h2>
-        <p className="max-w-xl text-muted">Trawler reads the product&apos;s page, works out what it does, and then chooses people with different roles and goals. Each step takes a few seconds to a minute.</p>
+        <p className="max-w-xl text-muted">Trawler reads the product&apos;s page, works out what it does, and then chooses people with different roles and goals. This usually takes 1–2 minutes; keep this page open.</p>
       </div>
       <ol className="flex flex-col border-t border-line">
         {STEPS.map((s, i) => (
-          <li key={s.step} className="flex items-start gap-3 border-b border-line py-3">
-            <span aria-hidden className={`w-4 pt-0.5 font-mono text-sm ${i < at ? "text-ok" : i === at ? "text-action" : "text-muted"}`}>{i < at ? "✓" : i === at ? "○" : "·"}</span>
+          <li key={s.step} aria-current={i === at ? "step" : undefined} className="flex items-start gap-3 border-b border-line py-3">
+            <span aria-hidden className="grid h-5 w-4 place-items-center font-mono text-sm">
+              {i < at ? <span className="text-ok">✓</span> : i === at ? <span className="h-3.5 w-3.5 rounded-full border-2 border-action border-t-transparent motion-safe:animate-spin" /> : <span className="text-muted">·</span>}
+            </span>
             <span className="flex flex-col">
               <strong className="text-sm">{s.title}</strong>
               <span className="text-xs text-muted">{i < at ? s.done : i === at ? s.working : "Waiting"}</span>
