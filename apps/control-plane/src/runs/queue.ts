@@ -29,6 +29,7 @@ export interface JobAssignment {
   personaKey?: string;
   goalIds?: string[];
   turn?: number;
+  returning?: boolean;
   story?: StoryEntry[];
   signUpSeed?: string;
   accountRef?: string;
