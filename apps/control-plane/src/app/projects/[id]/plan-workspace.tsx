@@ -107,6 +107,21 @@ export function SignIn({ projectId, person, accounts, onPick, onAccounts }: {
   );
 }
 
+const AUTOSAVE_MS = 800;
+
+export function planProblem(personas: PlanPerson[], goals: Goal[]): string | null {
+  for (const [i, p] of personas.entries()) {
+    const who = p.name.trim() || `Person ${i + 1}`;
+    if (!p.name.trim()) return `${who} needs a name.`;
+    if (!p.brief.trim()) return `${who} needs a description.`;
+    const own = goals.filter((g) => g.personaId === p.id);
+    if (own.length === 0) return `Give ${who} at least one goal.`;
+    const empty = own.findIndex((g) => !g.instruction.trim());
+    if (empty >= 0) return `Goal ${empty + 1} of ${who} needs some text.`;
+  }
+  return null;
+}
+
 export function PlanWorkspace({ projectId, projectName, initialPersonas, initialGoals, initialAccounts, keyHint, canManageKey, authorisedBefore }: {
   projectId: string; projectName: string; initialPersonas: PlanPerson[]; initialGoals: Goal[]; initialAccounts: AccountView[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean;
 }) {
@@ -117,6 +132,13 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
   const [error, setError] = useState<string | null>(null);
   const [saving, startSaving] = useTransition();
   const dirty = JSON.stringify({ personas, goals }) !== JSON.stringify(saved);
+  const problem = dirty ? planProblem(personas, goals) : null;
+
+  useEffect(() => {
+    if (!dirty || problem || saving || error) return;
+    const timer = setTimeout(() => save({ personas, goals }), AUTOSAVE_MS);
+    return () => clearTimeout(timer);
+  });
 
   useEffect(() => {
     if (!dirty) return;
@@ -145,9 +167,8 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
     setSaved((s) => ({ ...s, personas: detach(s.personas) }));
   };
   const withoutAccount = saved.personas.find((p) => (p.signsIn || p.accountRef) && !accounts.some((a) => a.ref === p.accountRef));
-  const save = () => startSaving(async () => {
-    const plan = { personas, goals };
-    const res = await savePlanAction(projectId, plan).catch(outdated("Copy your changes, reload the page, then make them again and save."));
+  const save = (plan: { personas: PlanPerson[]; goals: Goal[] }) => startSaving(async () => {
+    const res = await savePlanAction(projectId, plan).catch(outdated("Reload the page to keep editing; your last change was not saved."));
     if (!res.ok) {
       if ("accounts" in res) {
         const left = new Set(res.accounts.map((a) => a.ref));
@@ -155,6 +176,7 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
         setAccounts(res.accounts);
         setPersonas(detach);
         setSaved((s) => ({ ...s, personas: detach(s.personas) }));
+        return;
       }
       return setError(res.error);
     }
@@ -165,7 +187,17 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
   return (
     <div className="flex flex-col gap-10">
       <section className="flex flex-col gap-3">
-        <Heading>These people will try it</Heading>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <Heading>These people will try it</Heading>
+          <p aria-live="polite" className={`text-xs ${error || problem ? "text-bad" : "text-muted"}`}>
+            {error ? (
+              <>
+                {error}{" "}
+                <button type="button" onClick={() => { setError(null); }} className="underline underline-offset-4 hover:text-ink">Try again</button>
+              </>
+            ) : problem ?? (dirty || saving ? "Saving…" : "All changes saved")}
+          </p>
+        </div>
         <p className="text-sm text-muted">Each person has their own goals, so give an administrator what only an administrator can do.</p>
         <ul className="grid gap-3 sm:grid-cols-2">
           {personas.map((p, i) => {
@@ -204,17 +236,8 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
       </section>
 
 
-      {(dirty || error) && (
-        <div role="region" aria-label="Unsaved plan" className="sticky bottom-4 z-10 flex flex-wrap items-center justify-between gap-3 border border-ink bg-paper p-4 shadow-lg">
-          <p className={`text-sm ${error ? "text-bad" : ""}`} role={error ? "alert" : undefined}>{error ?? "You changed the plan."}</p>
-          <div className="flex gap-2">
-            <button type="button" onClick={() => { setPersonas(saved.personas); setGoals(saved.goals); setError(null); }} className="h-10 px-3 text-sm text-muted hover:text-ink">Discard</button>
-            <button type="button" disabled={saving} onClick={save} className="h-10 bg-ink px-4 text-sm text-paper disabled:opacity-60">{saving ? "Saving…" : "Save plan"}</button>
-          </div>
-        </div>
-      )}
 
-      <StartRun projectId={projectId} projectName={projectName} personas={saved.personas.length} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} blocked={dirty ? "Save or discard your changes to the plan first." : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : undefined} />
+      <StartRun projectId={projectId} projectName={projectName} personas={saved.personas.length} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} blocked={error ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : undefined)} />
     </div>
   );
 }
