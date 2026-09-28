@@ -26,16 +26,23 @@ function variants(secret: string): string[] {
   return [...forms(secret), ...forms(secret.normalize("NFC")), ...forms(secret.normalize("NFD"))];
 }
 
-const AUTH_SCHEME = /^\s*(bearer|basic|token|bot)\s+(\S(?:.*\S)?)\s*$/is;
+const AUTH_SCHEME = /^\s*([A-Za-z][!#$%&'*+.^_`|~0-9A-Za-z-]*)\s+(\S(?:.*\S)?)\s*$/s;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
 function credentialParts(headerValue: string): string[] {
   const [, scheme, credential] = AUTH_SCHEME.exec(headerValue) ?? [];
   if (!scheme || !credential) return [];
   if (scheme.toLowerCase() !== "basic" || !BASE64.test(credential)) return [credential];
-  const decoded = Buffer.from(credential, "base64").toString("utf8");
+  const bytes = Buffer.from(credential, "base64");
+  const utf8 = bytes.toString("utf8");
+  return [credential, ...[utf8, ...(utf8.includes("\uFFFD") ? [bytes.toString("latin1")] : [])].flatMap(userAndPassword)];
+}
+
+function userAndPassword(decoded: string): string[] {
   const colon = decoded.indexOf(":");
-  return colon === -1 ? [credential, decoded] : [credential, decoded, decoded.slice(colon + 1)];
+  if (colon === -1) return [decoded];
+  const password = decoded.slice(colon + 1);
+  return [decoded, password.length >= MIN_SECRET_LENGTH ? password : decoded.slice(0, colon)];
 }
 
 function isPlainObject(v: object): boolean {

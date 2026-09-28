@@ -195,18 +195,36 @@ describe("SecretScrubber.forProject", () => {
     const s = SecretScrubber.forProject({ accounts: [], secretHeaders: { authorization: `Basic ${token}` } });
     expect(s.scrub(`${token} | deploy-user:gate-secret-9 | password gate-secret-9 | user deploy-user`)).toBe("••• | ••• | password ••• | user deploy-user");
   });
-  test("a scheme's token too short to mask reliably, or a header with no scheme, adds nothing beyond the whole value", () => {
+  test("any scheme in front of a token counts, such as SSWS or ApiKey, and a value with no scheme adds nothing beyond itself", () => {
+    const okta = SecretScrubber.forProject({ accounts: [], secretHeaders: { authorization: "SSWS 00okta-token-1" } });
+    expect(okta.scrub("key 00okta-token-1")).toBe("key •••");
+    const apiKey = SecretScrubber.forProject({ accounts: [], secretHeaders: { "x-auth": "ApiKey live-key-7788" } });
+    expect(apiKey.scrub("live-key-7788")).toBe("•••");
+    const bare = SecretScrubber.forProject({ accounts: [], secretHeaders: { "x-bypass": "bypass-token-123" } });
+    expect(bare.scrub("bypass-token-123 and bypass")).toBe("••• and bypass");
+  });
+  test("a scheme's token too short to mask reliably adds nothing beyond the whole value", () => {
     const short = SecretScrubber.forProject({ accounts: [], secretHeaders: { authorization: "Bearer abc123" } });
     expect(short.scrub("Bearer abc123 and abc123")).toBe("••• and abc123");
-    const plain = SecretScrubber.forProject({ accounts: [], secretHeaders: { "x-bypass": "Carrier bypass-token-123" } });
-    expect(plain.scrub("Carrier bypass-token-123 and bypass-token-123")).toBe("••• and bypass-token-123");
+  });
+  test("a Basic secret header whose secret is the user, with an empty or short password, masks the user", () => {
+    for (const decoded of ["sk_live_abcdef123456:", "FRESHDESK-API-KEY:X"]) {
+      const s = SecretScrubber.forProject({ accounts: [], secretHeaders: { authorization: `Basic ${Buffer.from(decoded).toString("base64")}` } });
+      const key = decoded.split(":")[0]!;
+      expect(s.scrub(`key ${key} shown`)).toBe("key ••• shown");
+    }
+  });
+  test("a Basic secret header encoded in Latin-1 masks its password too", () => {
+    const token = Buffer.from("staging:pässwort-123", "latin1").toString("base64");
+    const s = SecretScrubber.forProject({ accounts: [], secretHeaders: { authorization: `Basic ${token}` } });
+    expect(s.scrub("password pässwort-123")).toBe("password •••");
   });
   test("a Basic token that decodes to a value with no colon masks that value too", () => {
     const token = Buffer.from("single-api-secret").toString("base64");
     const s = SecretScrubber.forProject({ accounts: [], secretHeaders: { authorization: `Basic ${token}` } });
     expect(s.scrub(`${token} and single-api-secret`)).toBe("••• and •••");
   });
-  test("a Basic token that is not base64 of a user and password is masked as it is, and nothing decoded from it", () => {
+  test("a Basic token that is not base64 is masked as it is", () => {
     const s = SecretScrubber.forProject({ accounts: [], secretHeaders: { authorization: "Basic not-base64-token!" } });
     expect(s.scrub("not-base64-token! alone")).toBe("••• alone");
   });
