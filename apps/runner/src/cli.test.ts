@@ -55,6 +55,7 @@ test("setup writes a project file the run command accepts", async () => {
   const proposal = {
     name: "Acme", description: "Invoices.",
     personas: [{ id: "ana", name: "Ana", brief: "You invoice.", signsIn: false, goals: [{ id: "sign-up", instruction: "Get in." }] }],
+    playOrder: [],
   };
   const dir = mkdtempSync(join(tmpdir(), "cfg-"));
   const file = join(dir, "p.yaml");
@@ -89,7 +90,7 @@ test("a broken YAML file exits 2 without printing its lines", async () => {
 });
 
 test("setup does not overwrite an existing project file unless forced", async () => {
-  const proposal = { name: "Acme", description: "x", personas: [{ id: "ana", name: "Ana", brief: "b", signsIn: false, goals: [{ id: "g", instruction: "Get in." }] }] };
+  const proposal = { name: "Acme", description: "x", personas: [{ id: "ana", name: "Ana", brief: "b", signsIn: false, goals: [{ id: "g", instruction: "Get in." }] }], playOrder: [] };
   const dir = mkdtempSync(join(tmpdir(), "cfg-"));
   const file = join(dir, "p.yaml");
   writeFileSync(file, "keep: me\n");
@@ -191,7 +192,7 @@ test("the installed command works from any directory", async () => {
 });
 
 test("setup passes a focus through to the proposal", async () => {
-  const proposal = { name: "Acme", description: "x", personas: [{ id: "ana", name: "Ana", brief: "b", signsIn: false, goals: [{ id: "g", instruction: "Get in." }] }] };
+  const proposal = { name: "Acme", description: "x", personas: [{ id: "ana", name: "Ana", brief: "b", signsIn: false, goals: [{ id: "g", instruction: "Get in." }] }], playOrder: [] };
   const model = scriptedModel([text(JSON.stringify(proposal))]);
   const { d } = deps({ model: () => model });
   expect(await runCli(["setup", "https://a.test/", "-o", join(mkdtempSync(join(tmpdir(), "cfg-")), "p.yaml"), "--focus", "the invite flow"], d)).toBe(0);

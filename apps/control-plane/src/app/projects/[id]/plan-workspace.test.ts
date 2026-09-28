@@ -15,6 +15,21 @@ function render(initialPersonas: PlanPerson[], initialAccounts: AccountView[], a
 }
 
 describe("PlanWorkspace", () => {
+  it("shows the order of play across people, marks each new turn, and hides it for a single person", () => {
+    const html = render([ama, kwame], accounts, false, [
+      { id: "submit", instruction: "Submit a pitch.", personaId: "ama" },
+      { id: "review", instruction: "Review Ama's pitch.", personaId: "kwame" },
+      { id: "decision", instruction: "See the decision.", personaId: "ama" },
+    ]);
+    const order = html.slice(html.indexOf('id="order-of-play"'));
+    expect(order).toMatch(/01<\/span><span[^>]*><span[^>]*>Ama<\/span><span[^>]*>Submit a pitch\.[^]*02<\/span><span[^>]*><span[^>]*>Kwame<\/span>[^]*03<\/span><span[^>]*><span[^>]*>Ama<\/span>/);
+    expect(order).toContain('aria-live="polite"');
+    expect(order).toContain("3 turns.");
+    expect(order).toMatch(/aria-label="Move step 1, Ama up" disabled=""/);
+    expect(order).toMatch(/aria-label="Move step 3, Ama down" disabled=""/);
+    expect(render([ama], [])).not.toContain("Order of play");
+  });
+
   it("shows each person's own goals on their card", () => {
     const html = render([ama, kwame], accounts, false, [
       { id: "submit", instruction: "Submit a pitch.", personaId: "ama" },

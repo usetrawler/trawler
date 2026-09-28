@@ -205,3 +205,19 @@ test("a goal added to a person goes right after that person's last goal, never t
   const add = setGoals!.mock.calls.at(-1)![0] as (l: typeof list) => Array<{ personaId?: string }>;
   expect(add(list).map((g) => g.personaId)).toEqual(["ama", "ama", "kofi"]);
 });
+
+test("moving a step in the order of play reorders the plan's goals and leaves the rest alone", () => {
+  const two = [{ id: "a", instruction: "A.", personaId: "ama" }, { id: "b", instruction: "B.", personaId: "kofi" }, { id: "c", instruction: "C.", personaId: "ama" }];
+  const kofi = { id: "kofi", name: "Kofi", brief: "b" };
+  react.values = [{ personas: [ama, kofi], goals: two }, [ama, kofi], two, [], null];
+  const tree = PlanWorkspace({ projectId: "p1", projectName: "Acme", initialPersonas: [ama, kofi], initialGoals: two, initialAccounts: [], keyHint: null, canManageKey: true, authorisedBefore: true });
+  const [, , setGoals] = react.setters;
+  const order = nodes(tree).find((node) => node.props && "onMove" in node.props)!;
+  (order.props!.onMove as (from: number, to: number) => void)(2, 1);
+  const reorder = setGoals!.mock.calls.at(-1)![0] as (list: typeof two) => typeof two;
+  expect(reorder(two).map((g) => g.id)).toEqual(["a", "c", "b"]);
+  expect(reorder(two)).not.toBe(two);
+  (order.props!.onMove as (from: number, to: number) => void)(0, -1);
+  const stay = setGoals!.mock.calls.at(-1)![0] as (list: typeof two) => typeof two;
+  expect(stay(two)).toBe(two);
+});

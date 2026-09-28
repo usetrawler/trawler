@@ -21,7 +21,7 @@ const summary = { name: "Acme", description: "Invoices for freelancers.", signUp
 const people = { personas: [
   { id: "ana", name: "Ana", brief: "You invoice.", signsIn: false, goals: [{ id: "invoice", instruction: "Send an invoice." }] },
   { id: "tom", name: "Tom", brief: "You approve payments.", signsIn: true, goals: [{ id: "approve", instruction: "Approve a payment." }] },
-] };
+], playOrder: [] };
 const reads = (finalUrl = "https://login.acme.test/start") => async () => ({ text: "<h1>Acme invoices</h1>", finalUrl });
 const deps = (model: ReturnType<typeof scriptedModel>, fetchText: SetupDeps["fetchText"] = reads()): SetupDeps => ({ db: t.db, keys, model, modelId: "m", fetchText });
 
