@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "kysely";
 import { z } from "zod";
-import { FindingSchema, JobUsageSchema, JobStopReasonSchema, ReplayObservationSchema, RunEventSchema, SignInCheckSchema, trimStory, turnsOf, type Finding, type JobStopReason, type JobUsage, type ProjectConfig, type ReplayObservation, type RunEvent, type SignInCheck, type StoryEntry, type Turn } from "@usetrawler/protocol";
+import { FindingSchema, JobUsageSchema, JobStopReasonSchema, ReplayObservationSchema, RunEventSchema, SignInCheckSchema, ACCOUNT_CHECK_STEPS, trimStory, turnsOf, type Finding, type JobStopReason, type JobUsage, type ProjectConfig, type ReplayObservation, type RunEvent, type SignInCheck, type StoryEntry, type Turn } from "@usetrawler/protocol";
 import type { Database } from "../db/index.ts";
 import { asSystem, type Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -9,7 +9,7 @@ import { loadProjectConfig } from "../projects/projects.ts";
 import { logError } from "../server/log.ts";
 import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
-import { capSpent, signUpSeedContext, type ConfigSnapshot } from "./runs.ts";
+import { ACCOUNT_REFUSED, capSpent, signUpSeedContext, type ConfigSnapshot } from "./runs.ts";
 
 const LEASE_MINUTES = 10;
 const ACTIVE = ["queued", "running"];
@@ -379,12 +379,11 @@ export async function recordLlmUsage(db: Database, call: LlmCall, usage: { model
 const noReport = (o?: ReplayObservation) => !o || (!o.completed && o.blockedAt === null);
 
 const JobResultSchema = z.object({ usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().max(2000).optional(), observation: ReplayObservationSchema.optional(), signIn: SignInCheckSchema.optional() });
-const ACCOUNT_CHECK_STEPS = 12;
 
 async function refusal(tx: Tx, runId: string, accountRef: string, observed: string): Promise<string> {
   const run = await tx.selectFrom("runs").select("config_snapshot").where("id", "=", runId).executeTakeFirstOrThrow();
   const username = (run.config_snapshot as unknown as ConfigSnapshot).accounts.find((a) => a.ref === accountRef)?.username ?? accountRef;
-  return `The product refused the username and password of ${username}: ${observed}`.slice(0, 2000);
+  return `${ACCOUNT_REFUSED} ${username}: ${observed}`.slice(0, 2000);
 }
 
 export async function completeJob(db: Database, token: string, input: JobResult, expectedJobId?: string): Promise<void> {

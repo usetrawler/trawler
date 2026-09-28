@@ -1,5 +1,5 @@
 import { goalsFor } from "@usetrawler/protocol";
-import type { CancelReason, RunSummary } from "./runs.ts";
+import { ACCOUNT_REFUSED, type CancelReason, type RunSummary } from "./runs.ts";
 
 export type StageState = "waiting" | "active" | "done" | "skipped";
 function useDetail(people: number, turns: number): string {
@@ -126,7 +126,7 @@ function headline(s: RunSummary, confirmed: number, defects: number): string {
   if (status === "queued") return "Waiting for a runner.";
   if (status === "running") return checks.some((j) => OPEN.has(j.status)) ? "Checking that the test accounts can sign in." : "Your people are using the product.";
   if (status === "cancelled" && cancelReason === "account_refused") {
-    const refused = checks.find((j) => j.status === "failed")?.error?.trim() ?? "The product refused a test account";
+    const refused = checks.findLast((j) => j.status === "failed" && j.error?.startsWith(ACCOUNT_REFUSED))?.error?.trim() ?? "The product refused a test account";
     return `${/[.!?]$/.test(refused) ? refused : `${refused}.`} Check that account on the plan and run again.`;
   }
   if (status === "cancelled") return cancelReason === "key_removed" ? "Stopped when the model key was removed." : "This run was stopped.";

@@ -81,6 +81,8 @@ export class RunNotFound extends Error {
 
 export type CancelReason = "stopped" | "key_removed" | "account_refused";
 
+export const ACCOUNT_REFUSED = "The product refused the username and password of";
+
 export async function cancelRun(tx: Tx, orgId: string, runId: string, reason: CancelReason): Promise<boolean> {
   const run = await tx.selectFrom("runs").select("status").where("id", "=", runId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
   if (!run) throw new RunNotFound();

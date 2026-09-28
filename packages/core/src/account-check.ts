@@ -9,7 +9,7 @@ import { newSessionState, sessionTools, type FillField } from "./session-tools.t
 
 const NUDGE = "Every turn must call a tool; plain text does nothing. Sign in with the account, then call report_sign_in.";
 const NO_REPORT: SignInCheck = { outcome: "unclear", observed: "the check wrote no report" };
-const MAX_OBSERVED = 1000;
+const MAX_OBSERVED = 500;
 
 export async function checkAccount(opts: {
   model: LanguageModel;
@@ -29,9 +29,23 @@ export async function checkAccount(opts: {
   const emit = (e: RunEventInput) => opts.emit(opts.scrubber.scrub(e));
   const queue = browserQueue(opts.browserTools);
   const state = newSessionState([]);
-  const { sign_in } = sessionTools({
+  const tools = sessionTools({
     state, accounts: [account], emit, jobId,
     fillField: opts.fillField, inBrowser: queue.run, scrubber: opts.scrubber, newId: () => "unused",
+  });
+  let attempted = false;
+  let typed = false;
+  const sign_in = tool({
+    description: tools.sign_in.description,
+    inputSchema: z.object({ account: z.string(), usernameField: z.string(), passwordField: z.string() }),
+    execute: async (input, options) => {
+      if (attempted) return "rejected: you already signed in once; look at the page and call report_sign_in";
+      const result = String(await tools.sign_in.execute!(input, options));
+      if (result.startsWith("rejected:")) return result;
+      attempted = true;
+      typed = !result.startsWith("failed:");
+      return result;
+    },
   });
   let report: SignInCheck | null = null;
   const report_sign_in = tool({
@@ -41,6 +55,7 @@ export async function checkAccount(opts: {
       if (report) return "rejected: already reported";
       if (outcome !== "signed_in" && outcome !== "refused" && outcome !== "unclear") return "rejected: outcome: signed_in, refused or unclear";
       if (!observed?.trim()) return "rejected: observed: describe what the page showed";
+      if (outcome === "refused" && !typed) return "rejected: outcome: the username and password were never typed, so the product cannot have refused them; report unclear";
       report = { outcome, observed: Array.from(opts.scrubber.scrub(observed.trim())).slice(0, MAX_OBSERVED).join("") };
       return "reported";
     }),

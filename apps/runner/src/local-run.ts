@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { LanguageModel } from "ai";
 import { Budget, checkAccount, judge, runReplay, runRoleSession, SecretScrubber, type Browser } from "@usetrawler/core";
-import { MAX_URL, trimStory, turnsOf, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
+import { ACCOUNT_CHECK_STEPS, MAX_URL, trimStory, turnsOf, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
 import type { RunSummary } from "./run-dir.ts";
 
 const CLOSE_TIMEOUT_MS = 10_000;
@@ -62,9 +62,10 @@ export async function localRun(opts: {
     const jobId = `account:${ref}`;
     const scrubber = scrubberFor();
     const checked = await withBrowser(jobId, scrubber, (b) =>
-      checkAccount({ model: opts.agentModel, modelId: opts.agentModelId, project: opts.project, accountRef: ref, browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: Math.min(12, opts.replaySteps), emit: opts.emit }),
+      checkAccount({ model: opts.agentModel, modelId: opts.agentModelId, project: opts.project, accountRef: ref, browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: Math.min(ACCOUNT_CHECK_STEPS, opts.replaySteps), emit: opts.emit }),
     ).catch((err) => {
       recordFailure(jobId, "account_check", failure(scrubber, err));
+      summary.jobs.push({ jobId, ...noUsage(opts.agentModelId) });
       return null;
     });
     if (!checked) continue;

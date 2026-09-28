@@ -63,6 +63,8 @@ export type EventBatch = z.infer<typeof EventBatchSchema>;
 
 export const EventsAcceptedSchema = z.object({ cancel: z.boolean() });
 
+export const ACCOUNT_CHECK_STEPS = 12;
+
 export const SignInCheckSchema = z.object({
   outcome: z.enum(["signed_in", "refused", "unclear"]),
   observed: z.string().max(1000),

@@ -231,7 +231,10 @@ test("people take turns in the plan's order, each told what happened before, and
 });
 
 test("a test account the product refuses stops the run before any person spends the budget", async () => {
-  const agent = scriptedModel([toolCall("report_sign_in", { outcome: "refused", observed: "Epic sadface: Username and password do not match" })]);
+  const agent = scriptedModel([
+    toolCall("sign_in", { account: "acct", usernameField: "e1", passwordField: "e2" }),
+    toolCall("report_sign_in", { outcome: "refused", observed: "Epic sadface: Username and password do not match" }),
+  ]);
   const browsers = fakeBrowsers();
   const summary = await localRun({
     project, agentModel: agent, agentModelId: "a", judgeModel: agent, judgeModelId: "a", budgetUsd: 5, maxSteps: 10, replaySteps: 10,

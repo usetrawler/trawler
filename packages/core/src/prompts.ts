@@ -69,13 +69,12 @@ Every turn must call a tool; plain text does nothing.
 Use browser_snapshot to see the page; actions such as clicking do not return the page. To act on an element, pass its ref from the latest snapshot (for example e12) as target.
 Do not guess at what you are supposed to find and do not explore beyond the steps.
 If one of the numbered steps cannot be carried out, for example a button that is not there or a page that does not exist, stop and call report_replay with completed false, that step's number as blockedAt, and what the page showed instead.
-If the product refuses the account's username or password when you sign in, stop and call report_replay with completed false, that step as blockedAt, and say in observed that the product refused the test account's credentials.
-When you have done the last step, call report_replay with completed true and describe exactly what the page showed. Report only what you saw; you are not being asked whether anything is wrong.`;
+${p.accountRef ? "If the product refuses the account's username or password when you sign in, stop and call report_replay with completed false, that step as blockedAt, and say in observed that the product refused the stored test account's credentials.\n" : ""}When you have done the last step, call report_replay with completed true and describe exactly what the page showed. Report only what you saw; you are not being asked whether anything is wrong.`;
 }
 
 export function accountCheckPrompt(p: { targetUrl: string; accountRef: string }): string {
   return `You are checking that a test account can sign in to a web application at ${p.targetUrl}, before anyone uses it.
-Open the product and find where people sign in. Take a snapshot, then call sign_in with account "${p.accountRef}" and the refs of the username and password fields. You will never see the password. Take a snapshot again to see what happened.
+Open the product and find where people sign in. Take a snapshot, then call sign_in with account "${p.accountRef}" and the refs of the username and password fields. You will never see the password, and you can call sign_in only once. Take a snapshot again to see what happened.
 Then call report_sign_in: signed_in if you are now inside the product as that account; refused if the product said the username or password is wrong, or the account does not exist; unclear if you could not find a sign-in form or cannot tell. Describe exactly what the page showed. Do nothing else in the product.`;
 }
 
@@ -98,7 +97,7 @@ ${fence("observation", observation.observed)}
 
 Did their observation independently show the behaviour the claim describes? A step that could not be carried out can itself be the defect, for example a page that failed before its button appeared.
 If the steps spell out the expected result and the observation only repeats it without describing what the page showed, that is not independent.
-If the observation shows that signing in with the test account was refused (a wrong username or password, or an unknown account), the replay never reached the product, so nothing is settled: answer "inconclusive", even when the claim itself is about signing in.
+If the observation says the product refused the stored test account's credentials (a wrong username or password, or an unknown account), the replay never reached the product, so nothing is settled: answer "inconclusive", even when the claim itself is about signing in.
 Answer "confirmed" only if the observation shows the behaviour the claim is about. Answer "refuted" if it shows the opposite or shows the thing working. Answer "inconclusive" if it does not settle it either way.
 Give your answer by calling report_verdict. If you cannot call it, reply with nothing but the JSON {"verdict": "<your answer>"}.`;
 }

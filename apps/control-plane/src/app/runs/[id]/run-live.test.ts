@@ -99,12 +99,12 @@ test("a live run shows its cost against the cap, the four stages, each person an
 test("each person's line says how far they got, in every state", () => {
   const view = runView(summary({
     status: "succeeded",
-    personas: [{ id: "a", name: "A" }, { id: "b", name: "B" }, { id: "c", name: "C" }, { id: "d", name: "D" }],
-    jobs: [job("role_session", "succeeded", { persona_key: "a" }), job("role_session", "succeeded", { persona_key: "b" }), job("role_session", "failed", { persona_key: "c", error: "the browser crashed" })],
+    personas: [{ id: "a", name: "A" }, { id: "b", name: "B" }, { id: "c", name: "C" }, { id: "d", name: "D" }, { id: "e", name: "E" }],
+    jobs: [job("role_session", "succeeded", { persona_key: "a" }), job("role_session", "succeeded", { persona_key: "b" }), job("role_session", "failed", { persona_key: "c", error: "the browser crashed" }), job("role_session", "succeeded", { persona_key: "e" }), job("role_session", "cancelled", { persona_key: "e" })],
     goals: [{ personaKey: "a", goal: "g1", status: "reached", note: "" }, { personaKey: "b", goal: "g2", status: "failed", note: "" }],
   }));
-  expect(view.personas.map(personLine)).toEqual(["Reached 1 of 2 goals.", "Did not reach: Send an invoice.", "Could not finish: the browser crashed", "Stopped before the end."]);
-  expect(outcome(view)).toEqual({ people: "0 of 4 people reached every goal.", goals: "1 of 8 goals reached in all." });
+  expect(view.personas.map(personLine)).toEqual(["Reached 1 of 2 goals.", "Did not reach: Send an invoice.", "Could not finish: the browser crashed", "Stopped before their turn.", "Stopped before the end."]);
+  expect(outcome(view)).toEqual({ people: "0 of 5 people reached every goal.", goals: "1 of 10 goals reached in all." });
 });
 
 test("a person's line also covers waiting, failing without a reason, a single goal, and a failed goal the plan no longer has", () => {
