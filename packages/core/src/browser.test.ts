@@ -190,6 +190,8 @@ beforeAll(async () => {
         return html(`<input aria-label="Password" type="password" oninput="clearTimeout(window.swap); window.swap = setTimeout(() => { const p = this; p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value; document.getElementById('state').textContent = 'Swapped'; const real = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); Object.defineProperty(HTMLInputElement.prototype, 'value', { get() { const until = Date.now() + 7000; while (Date.now() < until) {} return real.get.call(this); }, set(v) { real.set.call(this, v); }, configurable: true }); }, 300)"><p id="echo"></p><p id="state">Waiting</p>`);
       case "/swap-later-throws":
         return html(`<input aria-label="Password" type="password" oninput="clearTimeout(window.swap); window.swap = setTimeout(() => { const p = this; p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value; document.getElementById('state').textContent = 'Swapped'; const real = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); Object.defineProperty(p, 'value', { get() { throw new Error('no'); }, set(v) { real.set.call(this, v); } }); Object.defineProperty(HTMLInputElement.prototype, 'value', { get() { throw new Error('no'); }, set(v) { real.set.call(this, v); }, configurable: true }); }, 300)"><p id="echo"></p><p id="state">Waiting</p>`);
+      case "/swap-later-own-getter":
+        return html(`<input aria-label="Password" type="password" oninput="clearTimeout(window.swap); window.swap = setTimeout(() => { const p = this; p.value = p.value.slice(0, -1) + 'X'; document.getElementById('echo').textContent = p.value; document.getElementById('state').textContent = 'Swapped'; const real = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); Object.defineProperty(p, 'value', { get() { throw new Error('no'); }, set(v) { real.set.call(this, v); } }); }, 300)"><p id="echo"></p><p id="state">Waiting</p>`);
       case "/swap-then-alert":
         return html(`<input aria-label="Password" type="password"><button onclick="const p = document.querySelector('input'); p.value = p.value.slice(0, -1) + 'X'; alert('Your password: ' + p.value)">Check</button>`);
       case "/reveal-clear":
@@ -1546,6 +1548,18 @@ describe("screenshots", () => {
       await new Promise((r) => setTimeout(r, 1500));
       const text = await snapshot(b);
       expect(text).toContain("could not be read, so its result is withheld");
+      expect(text).not.toContain("first-secret-");
+    });
+  }, 120_000);
+
+  test("a field whose own value getter throws is still read, so the password the page changed is masked, not withheld", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/swap-later-own-getter`);
+      expect(await b.fillField(refOf(await snapshot(b), "Password"), "first-secret-1", "password")).toBe("typed the password");
+      await new Promise((r) => setTimeout(r, 1500));
+      const text = await snapshot(b);
+      expect(text).toContain("Swapped");
+      expect(text).not.toContain("withheld");
       expect(text).not.toContain("first-secret-");
     });
   }, 120_000);
