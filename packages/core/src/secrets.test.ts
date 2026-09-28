@@ -186,7 +186,7 @@ test("masking stays fast for a long secret that repeats in a long text, and stil
     ["ab".repeat(2000), "ab".repeat(1_000_000), true],
     ["a".repeat(100_000), "a".repeat(499_999), true],
     ["ab" + "a".repeat(998), "a".repeat(1_000_000), false],
-    ["b" + "\\".repeat(999), "\\".repeat(1_000_000), false],
+    ["\\b" + "\\".repeat(998), "\\".repeat(1_000_000), false],
   ];
   for (const [secret, text, masked] of cases) {
     const s = new SecretScrubber();
