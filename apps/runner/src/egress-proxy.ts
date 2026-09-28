@@ -112,7 +112,7 @@ export async function startEgressProxy(opts: { token: string; port?: number; res
     };
     client.on("error", end).on("close", end);
     upstream.on("error", end).on("close", end);
-    client.setTimeout(idleMs, end);
+    if (client instanceof net.Socket) client.setTimeout(idleMs, end);
     upstream.pipe(client);
     client.pipe(upstream);
   }
