@@ -800,6 +800,42 @@ describe("account check", () => {
     expect(rows[0]!.seed).toBeNull();
   });
 
+  test("with two accounts both are checked before anyone plays, and the refused one is the one named", async () => {
+    await drain();
+    const two = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", ProjectConfigSchema.parse({
+      ...config,
+      personas: [...config.personas, { id: "max", name: "Max", brief: "b", accountRef: "max" }],
+      accounts: [...config.accounts, { ref: "max", username: "max@acme.test", password: "max-secret-22" }],
+    }), keys));
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", two, keys, options));
+    const first = (await claimJob(t.db, keys))!;
+    expect(first).toMatchObject({ kind: "account_check", accountRef: "ana" });
+    await completeJob(t.db, first.token, { usage: usage(0), stoppedBy: "report", signIn: { outcome: "signed_in", observed: "Signed in." } });
+    const second = (await claimJob(t.db, keys))!;
+    expect(second).toMatchObject({ kind: "account_check", accountRef: "max" });
+    await completeJob(t.db, second.token, { usage: usage(0), stoppedBy: "report", signIn: { outcome: "refused", observed: "Unknown user." } });
+    const summary = (await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!;
+    expect(summary.status).toBe("cancelled");
+    expect(summary.jobs.filter((j) => j.kind === "account_check").map((j) => [j.status, j.error])).toEqual([
+      ["succeeded", null],
+      ["failed", "The product refused the username and password of max@acme.test: Unknown user."],
+    ]);
+    expect(summary.jobs.filter((j) => j.kind === "role_session").every((j) => j.status === "cancelled")).toBe(true);
+  });
+
+  test("a check handed back is checked again, and a check whose lease runs out lets the people start", async () => {
+    await drain();
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const handed = (await claimJob(t.db, keys))!;
+    await releaseJob(t.db, { jobId: handed.jobId, runId: run.id, token: handed.token });
+    const again = (await claimJob(t.db, keys))!;
+    expect(again).toMatchObject({ kind: "account_check", accountRef: "ana" });
+    await sql`update jobs set lease_until = now() - interval '1 minute' where id = ${again.jobId}`.execute(t.db);
+    expect(await claimJob(t.db, keys)).toMatchObject({ runId: run.id, kind: "role_session" });
+    expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.status).toBe("running");
+    await drain();
+  });
+
   test("an account that signs in, or a check that cannot tell, lets the people start", async () => {
     await drain();
     await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
