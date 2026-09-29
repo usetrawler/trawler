@@ -6,7 +6,7 @@ import { keyStillStored, modelKey, modelKeyHint, setModelKey, type KeyHint } fro
 import { withOrg } from "../../../db/tenancy.ts";
 import { openRouterPriceRange, openRouterPrices, priceFor, type Price, type PriceRange } from "../../../llm/prices.ts";
 import { projectExists, ProjectNotFound } from "../../../projects/projects.ts";
-import { freshEndpoint, TOO_MANY_RUN_CHECKS, withinListingLimit, withinRunCheckLimit, type KeyInput } from "../../../llm/key-input.ts";
+import { freshEndpoint, runCheckRefusal, withinListingLimit, type KeyInput } from "../../../llm/key-input.ts";
 import { checkModelCall, endpointFor, listModels, PREFERRED_MODELS, PROVIDER_LABEL, priceKey, type Endpoint, type Provider } from "../../../llm/providers.ts";
 import { projectRunCount } from "../../../projects/overview.ts";
 import { DEFAULT_RUN } from "../../../runs/models.ts";
@@ -102,7 +102,8 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   if ("error" in resolved) return { error: resolved.error, ...(resolved.field ? { field: resolved.field } : {}) };
   const { endpoint, fresh } = resolved;
   if (fresh && !canManageBilling(member)) return { error: "Only an owner or admin of this workspace can change its model key." };
-  if (!withinRunCheckLimit(member)) return { error: TOO_MANY_RUN_CHECKS };
+  const tooOften = runCheckRefusal(member);
+  if (tooOften) return { error: tooOften };
   const label = PROVIDER_LABEL[endpoint.provider];
   const check = await checkModelCall(endpoint, modelId);
   if (!check.ok) {

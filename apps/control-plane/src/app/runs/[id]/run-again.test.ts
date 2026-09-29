@@ -193,10 +193,10 @@ test("a price known now wins over the one the previous run was held to", async (
 });
 
 test("Run again shares the Start panel's limit on key checks, and refuses past it before calling the provider", async () => {
-  const { withinListingLimit, TOO_MANY_RUN_CHECKS } = await import("../../../llm/key-input.ts");
+  const { runCheckRefusal } = await import("../../../llm/key-input.ts");
   state.userId = "user-again";
-  for (let i = 0; i < 30; i++) withinListingLimit("run-check:user-again");
-  expect(await runAgainAction(RUN)).toEqual({ error: TOO_MANY_RUN_CHECKS });
+  for (let i = 0; i < 30; i++) runCheckRefusal({ userId: "user-again", orgId: "org-elsewhere" });
+  expect(await runAgainAction(RUN)).toEqual({ error: "You have checked the model key too often in the last 10 minutes. Try again in 10 minutes." });
   expect(state.checked).toEqual([]);
   expect(state.started).toEqual([]);
 });
