@@ -548,6 +548,17 @@ test("a first run on Trawler whose calls Trawler's provider refused without char
   await stop(refused.id);
   expect(await allowance()).toEqual([]);
 
+  const stoppedMidCall = await start();
+  const inFlight = await claim(stoppedMidCall.id);
+  const stopThenRefuse: typeof fetch = async () => {
+    await withOrg(t.db, "org-unpaid", (tx) => cancelRun(tx, "org-unpaid", stoppedMidCall.id, "stopped"));
+    return new Response(JSON.stringify({ error: { code: 402, message: "Insufficient credits." } }), { status: 402, headers: { "content-type": "application/json" } });
+  };
+  const midCall = await handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${inFlight.token}`, "content-type": "application/json" }, body: JSON.stringify({ model: "m/agent", messages: [] }) }), { db: t.db, keys, openRouterUrl: openRouterBase, trawlerKey: TRAWLER_KEY, retryBaseMs: 1, attempts: 1, fetch: stopThenRefuse });
+  expect(midCall.status).toBe(402);
+  expect(await allowance()).toEqual([]);
+  await sql`update jobs set status = 'succeeded' where id = ${inFlight.jobId}`.execute(t.db);
+
   const timedOut = await start();
   const slow = await claim(timedOut.id);
   replies = [upstreamError(503, "busy")];
