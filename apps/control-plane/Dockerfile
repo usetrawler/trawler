@@ -6,6 +6,7 @@ COPY packages/core/package.json packages/core/
 COPY packages/protocol/package.json packages/protocol/
 COPY apps/control-plane/package.json apps/control-plane/
 COPY apps/runner/package.json apps/runner/
+COPY apps/demo/package.json apps/demo/
 RUN npm ci
 COPY packages packages
 COPY apps/control-plane apps/control-plane

@@ -213,6 +213,7 @@ In a hosted run, the runner takes jobs from the control plane, streams events ba
 | [`packages/protocol`](packages/protocol) | Apache-2.0 | The zod schemas both sides share: the project file, findings, run events and the runner API |
 | [`packages/core`](packages/core) | FSL-1.1-ALv2 | The engine: the agent loop, the browser and its origin allowlist, secret masking, setup, replay and the judge |
 | [`apps/control-plane`](apps/control-plane) | FSL-1.1-ALv2 | The app at app.usetrawler.com: sign-in, workspaces, plans, runs, the runner API and the model proxy |
+| [`apps/demo`](apps/demo) | FSL-1.1-ALv2 | Greenhouse, a small plant shop with defects planted on purpose, which the app offers to try Trawler on |
 | [`db`](db) | FSL-1.1-ALv2 | The Postgres schema as Flyway migrations, with row-level security per workspace |
 | [`scripts/release`](scripts/release) | FSL-1.1-ALv2 | Releases: staging, a smoke check, then production |
 

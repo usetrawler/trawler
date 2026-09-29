@@ -26,6 +26,7 @@ jobs:
       migrate: ghcr.io/usetrawler/trawler-migrate@${{ steps.migrate.outputs.digest }}
       control-plane: ghcr.io/usetrawler/trawler-control-plane@${{ steps.control-plane.outputs.digest }}
       runner: ghcr.io/usetrawler/trawler-runner@${{ steps.runner.outputs.digest }}
+      demo: ghcr.io/usetrawler/trawler-demo@${{ steps.demo.outputs.digest }}
     steps:
       - uses: actions/checkout@v5
         with: { ref: "${{ github.event.workflow_run.head_sha }}" }
@@ -77,6 +78,18 @@ jobs:
             org.opencontainers.image.revision=${{ env.COMMIT }}
           cache-from: type=gha,scope=runner
           cache-to: type=gha,scope=runner,mode=max
+      - id: demo
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/demo/Dockerfile
+          push: true
+          provenance: false
+          build-args: TRAWLER_COMMIT=${{ env.COMMIT }}
+          tags: ghcr.io/usetrawler/trawler-demo:${{ env.COMMIT }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/usetrawler/trawler
+            org.opencontainers.image.revision=${{ env.COMMIT }}
 
   staging:
     needs: images
