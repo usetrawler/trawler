@@ -99,10 +99,13 @@ export async function cancelLiveRuns(tx: Tx, orgId: string, reason: CancelReason
   return cancelled;
 }
 
+export const affordableOutputTokens = (leftUsd: number, completionUsdPerMtok: number | null) =>
+  completionUsdPerMtok !== null && completionUsdPerMtok > 0 ? Math.floor((leftUsd * 1_000_000) / completionUsdPerMtok) : Infinity;
+
 export function outOfBudget(run: { costUsd: number; budgetUsd: number; tokenCap: number | null; tokensUsed: number; completionUsdPerMtok: number | null }): boolean {
   const left = run.budgetUsd - run.costUsd;
   if (left <= 0 || (run.tokenCap !== null && run.tokensUsed >= run.tokenCap)) return true;
-  return run.completionUsdPerMtok !== null && run.completionUsdPerMtok > 0 && Math.floor((left * 1_000_000) / run.completionUsdPerMtok) < 1;
+  return affordableOutputTokens(left, run.completionUsdPerMtok) < 1;
 }
 
 export const capSpent = (run: { cost_usd: string; budget_usd: string; token_cap: string | null; tokens_used: string; completion_usd_per_mtok: string | null }) =>
