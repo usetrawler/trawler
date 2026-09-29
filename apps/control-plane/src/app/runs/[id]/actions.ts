@@ -9,7 +9,7 @@ import { runCheckRefusal } from "../../../llm/key-input.ts";
 import { checkModelCall, endpointFor, PROVIDER_LABEL, type Provider } from "../../../llm/providers.ts";
 import { DEFAULT_RUN } from "../../../runs/models.ts";
 import { isLive } from "../../../runs/report.ts";
-import { cancelRun, CannotJudgeAgain, judgeAgain, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunNotFound, RunRefused, startRun } from "../../../runs/runs.ts";
+import { cancelRun, CannotJudgeAgain, firstRunOnUsLeft, judgeAgain, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunNotFound, RunRefused, startRun } from "../../../runs/runs.ts";
 import { signedInMember } from "../../../server/auth.ts";
 import { runPath } from "../../../runs/status.ts";
 import { betaRefusal } from "../../../server/beta.ts";
@@ -90,6 +90,7 @@ export async function runAgainAction(_previous: RunAgainState, form: FormData): 
   const refused = await withOrg(getDb(), orgId, (tx) => refusalToStart(tx, orgId, previous.project_id));
   if (refused) return refusedState(refused);
   const onUs = previous.paid_by === "trawler";
+  if (onUs && (await withOrg(getDb(), orgId, (tx) => firstRunOnUsLeft(tx, orgId)))) return { error: "This run ended before Trawler paid for any model call, so the first run on Trawler is still yours. Start it from the plan." };
   if (!stored) return { error: onUs ? "Trawler paid for this workspace's first run. To run it again, start a run from the plan and add a model key there." : "The workspace has no model key any more. An owner or admin can add one in Settings." };
   const provider = previous.provider as Provider;
   if (stored.provider !== provider) return { error: `This run was paid ${onUs ? "by Trawler on OpenRouter" : `with ${keyName(provider)}`}, and the workspace key is now ${keyName(stored.provider)}. Start a run from the plan to choose a model for it.` };

@@ -63,6 +63,7 @@ test("a finished run sums up who reached every goal, what the replay confirmed a
 test("a run Trawler paid for says so next to its cost, live and finished", () => {
   expect(text(band(render(summary({ ...finished, paidBy: "trawler", budgetUsd: 1 }))))).toContain("Cost $0.35 cap was $1.00 · paid by Trawler");
   expect(text(head(render(summary({ ...live, paidBy: "trawler", budgetUsd: 1 }))))).toContain("Live cost $0.84 of $1.00 cap · paid by Trawler");
+  expect(text(band(render(summary({ ...finished, paidBy: "trawler", tokenCap: 3_000_000, tokensUsed: 1_200_000 }))))).toContain("Tokens 1.20M cap was 3.0M · price unknown · paid by Trawler");
   expect(text(band(render(finished)))).not.toContain("paid by Trawler");
 });
 

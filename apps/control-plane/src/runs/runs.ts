@@ -86,7 +86,7 @@ export async function giveBackUnusedFirstRun(tx: Tx, runId: string): Promise<voi
   await tx
     .deleteFrom("first_runs_on_us")
     .where("run_id", "=", runId)
-    .where(({ not, exists, selectFrom }) => not(exists(selectFrom("llm_usage").select("id").where("run_id", "=", runId))))
+    .where("model_called_at", "is", null)
     .execute();
 }
 

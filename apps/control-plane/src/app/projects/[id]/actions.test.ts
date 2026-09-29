@@ -95,7 +95,7 @@ test("the first run on Trawler is refused plainly when this server has no platfo
   expect(await startRunAction({}, startForm({ onUs: "1" }))).toEqual({ error: "Trawler cannot pay for runs on this server. Add a model key to start." });
   state.platformKey = true;
   state.onUsLeft = false;
-  expect(await startRunAction({}, startForm({ onUs: "1" }))).toEqual({ error: "This workspace has used its first run on Trawler. Reload the page to add a model key." });
+  expect(await startRunAction({}, startForm({ onUs: "1" }))).toEqual({ error: "This workspace has used its first run on Trawler. Add a model key to start more runs." });
   const { FirstRunOnUsUsed } = await vi.importActual<typeof import("../../../runs/runs.ts")>("../../../runs/runs.ts");
   state.onUsLeft = true;
   state.startFails = new FirstRunOnUsUsed();

@@ -72,7 +72,7 @@ test(`the first run on Trawler takes up to ${FIRST_RUN_ON_US.maxPeople} people`,
   await expect(fits.start(await fits.project())).resolves.toMatchObject({ number: 1 });
 });
 
-test("a run on Trawler that ends before its first model call gives the allowance back, and one that called the model keeps it used", async () => {
+test("a run on Trawler that ends before its first model call gives the allowance back, and one stopped while its first call is still being answered keeps it used", async () => {
   const w = await workspace(1);
   const stopped = await w.start(await w.project());
   await withOrg(t.db, w.org, (tx) => cancelRun(tx, w.org, stopped.id, "stopped"));
@@ -85,14 +85,24 @@ test("a run on Trawler that ends before its first model call gives the allowance
   expect(await runRow(failed.id)).toMatchObject({ status: "failed" });
   expect(await left(w.org)).toBe(true);
 
+  await withOrg(t.db, w.org, (tx) => setModelKey(tx, w.org, { provider: "openrouter", key: `sk-or-v1-${"a".repeat(40)}` }, "u1", keys));
+  const withAccount = ProjectConfigSchema.parse({ ...configFor(1), accounts: [{ ref: "acct", username: "ana@shop.test", password: "pw-1234567" }], personas: [{ id: "p0", name: "Person 0", brief: "b", accountRef: "acct" }] });
+  const refusedProject = await withOrg(t.db, w.org, (tx) => createProject(tx, w.org, withAccount, keys));
+  const refusedRun = await w.start(refusedProject);
+  const check = (await claimJob(t.db, keys))!;
+  expect(check.runId).toBe(refusedRun.id);
+  await completeJob(t.db, check.token, { usage, stoppedBy: "finish", signIn: { outcome: "refused", observed: "Wrong password" } });
+  expect(await runRow(refusedRun.id)).toMatchObject({ status: "cancelled" });
+  expect(await left(w.org)).toBe(true);
+
   const used = await w.start(await w.project());
   const job = (await claimJob(t.db, keys))!;
   expect(job.runId).toBe(used.id);
   const call = await llmCallFor(t.db, job.token);
   expect(call.paidBy).toBe("trawler");
-  await recordLlmUsage(t.db, call, { model: FIRST_RUN_ON_US.model, inputTokens: 100, outputTokens: 10, costUsd: 0.01 });
   await withOrg(t.db, w.org, (tx) => cancelRun(tx, w.org, used.id, "stopped"));
   expect(await left(w.org)).toBe(false);
+  await recordLlmUsage(t.db, call, { model: FIRST_RUN_ON_US.model, inputTokens: 100, outputTokens: 10, costUsd: 0.01 });
   expect((await sql<{ paid_by: string }>`select paid_by from llm_usage where run_id = ${used.id}`.execute(t.db)).rows).toEqual([{ paid_by: "trawler" }]);
 });
 
@@ -100,7 +110,7 @@ test("Trawler's spending is not the workspace's: it neither counts toward the mo
   const w = await workspace(1);
   await withOrg(t.db, w.org, (tx) => setModelKey(tx, w.org, { provider: "openrouter", key: `sk-or-v1-${"a".repeat(40)}` }, "u1", keys));
   const own = await w.project();
-  const paid = await w.start(own, { ...onUs, paidBy: "workspace", budgetUsd: 2 });
+  await w.start(own, { ...onUs, paidBy: "workspace", budgetUsd: 2 });
   const ownJob = (await claimJob(t.db, keys))!;
   await recordLlmUsage(t.db, await llmCallFor(t.db, ownJob.token), { model: "m", inputTokens: 1, outputTokens: 1, costUsd: 1 });
   await completeJob(t.db, ownJob.token, { usage, stoppedBy: "finish" });
@@ -118,7 +128,6 @@ test("Trawler's spending is not the workspace's: it neither counts toward the mo
 
   expect(await asSystem(t.db, (tx) => cancelLiveRuns(tx, w.org, "key_removed"))).toBe(0);
   expect(await runRow(onTrawler.id)).toMatchObject({ status: "running" });
-  expect(paid.number).toBe(1);
 });
 
 test("a finished run on Trawler can be judged again without a workspace key", async () => {

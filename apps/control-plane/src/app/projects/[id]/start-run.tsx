@@ -69,22 +69,19 @@ function OpenRun({ run }: { run?: { id: string; number: number } }) {
   return run ? <> <a href={runPath(run.number)} className="underline underline-offset-4 hover:text-ink">Open {runTitle(run.number)}</a></> : null;
 }
 
-function Submit({ blocked, pending, noticed }: { blocked?: string; pending: boolean; noticed: boolean }) {
+export function Submit({ blocked, pending, noticed, checksKey }: { blocked?: string; pending: boolean; noticed: boolean; checksKey: boolean }) {
   const describedBy = [blocked ? "start-blocked" : null, noticed ? "start-notice" : null].filter(Boolean).join(" ");
   return (
     <button type="submit" disabled={pending || Boolean(blocked)} aria-describedby={describedBy || undefined} className="flex h-12 items-center justify-between gap-6 bg-action px-5 font-mono text-sm tracking-[0.12em] text-[#17191c] uppercase transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50">
-      {pending ? "Checking the key…" : "Start run"}
+      {pending ? (checksKey ? "Checking the key…" : "Starting…") : "Start run"}
       <span aria-hidden>→</span>
     </button>
   );
 }
 
-export interface FirstRunOnUs {
-  price: Price | null;
-}
-
-function OnUs({ price, goalsPerTurn, personas }: { price: Price | null; goalsPerTurn: number[]; personas: number }) {
-  const estimate = price ? estimateUsd(price, goalsPerTurn) : null;
+export function OnUs({ range, goalsPerTurn, personas }: { range: PriceRange | null | undefined; goalsPerTurn: number[]; personas: number }) {
+  const estimate = range ? estimateUsd(range.low, goalsPerTurn, range.high) : null;
+  const people = `${personas} ${personas === 1 ? "person" : "people"}`;
   return (
     <>
       <input type="hidden" name="onUs" value="1" />
@@ -92,7 +89,15 @@ function OnUs({ price, goalsPerTurn, personas }: { price: Price | null; goalsPer
         <p className="text-sm">Your first run is on Trawler.</p>
         <p className="text-sm text-muted">Trawler pays for the model: {FIRST_RUN_ON_US.modelName}, up to {usd(FIRST_RUN_ON_US.budgetUsd)}, for up to {FIRST_RUN_ON_US.maxPeople} people. No key needed. After this run, runs are paid with your own model key.</p>
       </div>
-      <Estimate price={price} range={null} goalsPerTurn={goalsPerTurn} personas={personas} modelChosen />
+      {range ? (
+        <Estimate price={range.low} range={range} goalsPerTurn={goalsPerTurn} personas={personas} modelChosen />
+      ) : (
+        <div className="flex flex-col gap-1">
+          <p className="text-sm text-muted">Estimated run</p>
+          <p className="text-2xl font-bold">{range === undefined ? "…" : "Unknown"}</p>
+          <p className="text-sm text-muted">{range === undefined ? `${people}. Reading the model's price…` : `${people}. The model's price could not be read just now, so there is no estimate; the cap below still holds.`}</p>
+        </div>
+      )}
       <p className="text-sm text-muted">Hard cap {usd(FIRST_RUN_ON_US.budgetUsd)}, paid by Trawler. The run stops once it reaches it; findings so far are kept.</p>
       {estimate && estimate.high > FIRST_RUN_ON_US.budgetUsd && <p className="text-sm text-warn">The cap is below the estimate, so the run may stop before everyone finishes.</p>}
     </>
@@ -100,7 +105,7 @@ function OnUs({ price, goalsPerTurn, personas }: { price: Price | null; goalsPer
 }
 
 export function StartRun({ projectId, projectName, personas, goalsPerTurn = Array.from({ length: personas }, () => 1), keyHint: savedHint, canManageKey, authorisedBefore, firstRunOnUs, blocked, refusal, onStarting }: {
-  projectId: string; projectName: string; personas: number; goalsPerTurn?: number[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; firstRunOnUs?: FirstRunOnUs | null; blocked?: string; refusal?: StartRefusal; onStarting?: (starting: boolean) => void;
+  projectId: string; projectName: string; personas: number; goalsPerTurn?: number[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; firstRunOnUs?: boolean; blocked?: string; refusal?: StartRefusal; onStarting?: (starting: boolean) => void;
 }) {
   const [state, action, pending] = useActionState<StartState, FormData>(startTheRun, {});
   const keyHint = state.keyHint ?? savedHint;
@@ -115,8 +120,19 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
   const [cap, setCap] = useState(DEFAULT_RUN.budgetUsd);
   const [authorised, setAuthorised] = useState(false);
   const [payingOwn, setPayingOwn] = useState(false);
+  const toggledPayer = useRef(false);
+  const focusAfterToggle = (toggle: HTMLButtonElement | null) => {
+    if (toggle && toggledPayer.current) {
+      toggledPayer.current = false;
+      toggle.focus();
+    }
+  };
+  const choosePayer = (own: boolean) => {
+    toggledPayer.current = true;
+    setPayingOwn(own);
+  };
   const tooManyForUs = Boolean(firstRunOnUs) && personas > FIRST_RUN_ON_US.maxPeople;
-  const onUs = firstRunOnUs && !tooManyForUs && !payingOwn ? firstRunOnUs : null;
+  const onUs = Boolean(firstRunOnUs) && !tooManyForUs && !payingOwn;
   const backToReplace = useRef(false);
 
   const typingKey = !keyHint || replacingKey;
@@ -161,6 +177,17 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
       clearTimeout(timer);
     };
   }, [routed, modelId]);
+  useEffect(() => {
+    if (!onUs) return;
+    let cancelled = false;
+    priceRangeFor(FIRST_RUN_ON_US.model).then((found) => {
+      if (!cancelled) setRanged({ modelId: FIRST_RUN_ON_US.model, range: found });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [onUs]);
+  const onUsRange = ranged?.modelId === FIRST_RUN_ON_US.model ? ranged.range : undefined;
   const [refusalAtAnswer, setRefusalAtAnswer] = useState(refusal?.message);
   useEffect(() => setRefusalAtAnswer(refusal?.message), [state]);
   const shownError = state.error && (!state.refused || refusalAtAnswer === refusal?.message) ? state.error : null;
@@ -184,10 +211,10 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
 
       {onUs ? (
         <>
-          <OnUs price={onUs.price} goalsPerTurn={goalsPerTurn} personas={personas} />
+          <OnUs range={onUsRange} goalsPerTurn={goalsPerTurn} personas={personas} />
           {(keyHint || canManageKey) && (
             <p className="text-sm">
-              <button type="button" onClick={() => setPayingOwn(true)} className="text-muted underline underline-offset-4 hover:text-ink">{keyHint ? `Pay with your ${PROVIDER_LABEL[keyHint.provider]} key ${keyHint.hint} instead` : "Pay with your own model key instead"}</button>
+              <button type="button" ref={focusAfterToggle} onClick={() => choosePayer(true)} className="text-muted underline underline-offset-4 hover:text-ink">{keyHint ? `Pay with your ${PROVIDER_LABEL[keyHint.provider]} key ${keyHint.hint} instead` : "Pay with your own model key instead"}</button>
             </p>
           )}
         </>
@@ -196,7 +223,7 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
           {tooManyForUs && <p className="text-sm text-muted">The first run on Trawler takes up to {FIRST_RUN_ON_US.maxPeople} people, and this plan has {personas}. Remove people from the plan to use it, or pay with your own model key.</p>}
           {payingOwn && (
             <p className="text-sm">
-              <button type="button" onClick={() => setPayingOwn(false)} className="text-muted underline underline-offset-4 hover:text-ink">Use the first run on Trawler instead</button>
+              <button type="button" ref={focusAfterToggle} onClick={() => choosePayer(false)} className="text-muted underline underline-offset-4 hover:text-ink">Use the first run on Trawler instead</button>
             </p>
           )}
           {!typingKey ? (
@@ -251,7 +278,7 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
       {shownError && <p role="alert" id="start-error" className="border-l-2 border-bad pl-3 text-sm text-bad">{shownError}<OpenRun run={state.activeRun} /></p>}
       <div className="flex flex-wrap items-center justify-end gap-3">
         {(blocked ?? noKey) && <p id="start-blocked" className="text-sm text-muted">{blocked ?? noKey}</p>}
-        <Submit blocked={blocked ?? noKey} pending={pending} noticed={Boolean(notice)} />
+        <Submit blocked={blocked ?? noKey} pending={pending} noticed={Boolean(notice)} checksKey={!onUs} />
       </div>
     </form>
   );

@@ -10,7 +10,7 @@ import { freshEndpoint, runCheckRefusal, withinListingLimit, type KeyInput } fro
 import { checkModelCall, endpointFor, listModels, PREFERRED_MODELS, PROVIDER_LABEL, priceKey, type Endpoint, type Provider } from "../../../llm/providers.ts";
 import { projectRunCount } from "../../../projects/overview.ts";
 import { DEFAULT_RUN, FIRST_RUN_ON_US } from "../../../runs/models.ts";
-import { firstRunOnUsLeft, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunRefused, startRun, type PaidBy } from "../../../runs/runs.ts";
+import { FirstRunOnUsUsed, firstRunOnUsLeft, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunRefused, startRun, type PaidBy } from "../../../runs/runs.ts";
 import { canManageBilling, signedInMember } from "../../../server/auth.ts";
 import { runPath } from "../../../runs/status.ts";
 import { betaRefusal } from "../../../server/beta.ts";
@@ -155,7 +155,7 @@ const runOptions = (model: string, budgetUsd: number, createdBy: string, provide
 
 async function startOnUs(orgId: string, projectId: string, userId: string): Promise<StartState> {
   if (!readEnv().setup) return { error: "Trawler cannot pay for runs on this server. Add a model key to start." };
-  if (!(await withOrg(getDb(), orgId, (tx) => firstRunOnUsLeft(tx, orgId)))) return { error: "This workspace has used its first run on Trawler. Reload the page to add a model key." };
+  if (!(await withOrg(getDb(), orgId, (tx) => firstRunOnUsLeft(tx, orgId)))) return { error: new FirstRunOnUsUsed().message };
   const price = await priceFor("openrouter", FIRST_RUN_ON_US.model, readEnv().openRouterUrl);
   let runNumber: number;
   try {

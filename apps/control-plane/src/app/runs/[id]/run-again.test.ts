@@ -19,6 +19,7 @@ const state = vi.hoisted(() => ({
   held: [] as unknown[],
   startFails: null as Error | null,
   logged: [] as Array<{ message: string; masked: string }>,
+  onUsLeft: false,
 }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
@@ -58,6 +59,7 @@ vi.mock("../../../runs/runs.ts", async (importOriginal) => ({
   RunRefused: (await importOriginal<typeof import("../../../runs/runs.ts")>()).RunRefused,
   RunInProgress: (await importOriginal<typeof import("../../../runs/runs.ts")>()).RunInProgress,
   refusalToStart: async () => state.startRefusal ?? null,
+  firstRunOnUsLeft: async () => state.onUsLeft,
   cancelRun: async () => {},
   judgeAgain: async () => {},
   CannotJudgeAgain: class extends Error {},
@@ -81,7 +83,7 @@ const runAgainAction = (runId: string) => {
 
 beforeEach(() => {
   Object.assign(state, {
-    signedIn: true, userId: "user-1", without: null, refusal: null, startRefusal: null, checks: {}, checked: [], price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }, started: [], asked: [], keyHeld: true, held: [], startFails: null, logged: [],
+    signedIn: true, userId: "user-1", without: null, refusal: null, startRefusal: null, checks: {}, checked: [], price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }, started: [], asked: [], keyHeld: true, held: [], startFails: null, logged: [], onUsLeft: false,
     previous: { project_id: "project-1", status: "succeeded", agent_model: "deepseek/deepseek-v4.1-flash", judge_model: "deepseek/deepseek-v4.1-flash", budget_usd: "3.5000", max_steps: 60, replay_steps: 20, provider: "openrouter", provider_base_url: null, prompt_usd_per_mtok: null, completion_usd_per_mtok: null },
     stored: { provider: "openrouter", key: "sk-or-v1-" + "k".repeat(40), baseUrl: null },
   });
@@ -144,6 +146,10 @@ test("a clear message when the key is gone, is now from another provider, or poi
 
 test("Run again on the run Trawler paid for says why a key is needed now, and names Trawler as the payer when the key is another provider's", async () => {
   state.previous = { ...state.previous!, paid_by: "trawler" };
+  state.onUsLeft = true;
+  state.stored = { provider: "openrouter", key: "sk-or-v1-" + "k".repeat(40), baseUrl: null };
+  expect(await runAgainAction(RUN)).toEqual({ error: "This run ended before Trawler paid for any model call, so the first run on Trawler is still yours. Start it from the plan." });
+  state.onUsLeft = false;
   state.stored = null;
   expect(await runAgainAction(RUN)).toEqual({ error: "Trawler paid for this workspace's first run. To run it again, start a run from the plan and add a model key there." });
   state.stored = { provider: "anthropic", key: "sk-ant-" + "k".repeat(40), baseUrl: null };

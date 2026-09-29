@@ -19,13 +19,13 @@ import { handleChatCompletions } from "../llm-proxy/proxy.ts";
 import { createProject } from "../projects/projects.ts";
 import { runView } from "../runs/report.ts";
 import { runSummary, startRun } from "../runs/runs.ts";
-import { scrubberWith } from "../server/log.ts";
+import { logError, scrubberWith } from "../server/log.ts";
 import { FetchRefused } from "../setup/safe-fetch.ts";
 import { handleArtifactUpload, handleClaim, handleComplete, handleEvents, handleRelease, type RunnerApiDeps } from "./handlers.ts";
 
 vi.mock("../server/log.ts", async (importOriginal) => {
   const real = await importOriginal<typeof import("../server/log.ts")>();
-  return { ...real, scrubberWith: vi.fn(real.scrubberWith) };
+  return { ...real, scrubberWith: vi.fn(real.scrubberWith), logError: vi.fn(real.logError) };
 });
 
 const t = await testDb();
@@ -500,11 +500,17 @@ test("a run on Trawler is paid with Trawler's key whether or not the workspace h
   const recorded = await sql<{ paid_by: string; cost_usd: string }>`select paid_by, cost_usd from llm_usage where run_id = ${run.id}`.execute(t.db);
   expect(recorded.rows).toEqual([{ paid_by: "trawler", cost_usd: "0.001000" }, { paid_by: "trawler", cost_usd: "0.001000" }]);
 
+  replies = [upstreamError(400, `this request was sent with ${TRAWLER_KEY}`)];
+  const explained = (await error(await call(TRAWLER_KEY))) as { message: string };
+  expect(explained.message).toContain("this request was sent with");
+  expect(explained.message).not.toContain(TRAWLER_KEY);
+  vi.mocked(logError).mockClear();
   replies = [upstreamError(401, "User not found.")];
   const refused = await call(TRAWLER_KEY);
   expect(await error(refused)).toEqual({ code: 402, message: "the provider refused Trawler's key; this run cannot go on, and Trawler has been told" });
   replies = [upstreamError(402, "Insufficient credits.")];
   expect(await error(await call(TRAWLER_KEY))).toEqual({ code: 402, message: "Trawler's model account is out of credits; this run cannot go on, and Trawler has been told" });
+  expect(vi.mocked(logError).mock.calls.map(([message, fields]) => [message, fields?.runId])).toEqual([["the provider refused Trawler's model key", run.id], ["Trawler's model account is out of credits", run.id]]);
   await sql`update jobs set status = 'succeeded' where id = ${job.jobId}`.execute(t.db);
   await sql`update runs set status = 'succeeded' where id = ${run.id}`.execute(t.db);
 });

@@ -7,7 +7,7 @@ const state = vi.hoisted(() => ({
   runs: 0, counted: [] as Array<[string, string]>, tenants: [] as string[], shells: [] as string[], planned: [] as Array<Record<string, unknown>>,
   runState: { paused: false, liveRun: null } as { paused: boolean; liveRun: { id: string; number: number } | null },
   refusal: null as Error | null,
-  platformKey: true, onUsLeft: true, refusalFor: [] as unknown[],
+  platformKey: true, onUsLeft: true, refusalFor: [] as unknown[], people: 0,
 }));
 const ID = vi.hoisted(() => "0f8fad5b-d9cb-469f-a165-70867728950e");
 
@@ -32,7 +32,7 @@ vi.mock("../../../credentials/credentials.ts", () => ({ modelKeyHint: async () =
 vi.mock("../../../projects/projects.ts", () => ({
   projectForEditing: async (_tx: unknown, _orgId: string, id: string) => ({
     id, name: "Acme", target_url: "https://app.acme.test/", docs_url: null, description: "Invoices.", focus: null, features: ["Send an invoice"], allowed_origins: [],
-    personas: [], goals: [], accounts: [], gates: [],
+    personas: Array.from({ length: state.people }, (_, i) => ({ key: `p${i}`, name: `P${i}`, brief: "b", signs_in: false, account_ref: null })), goals: [], accounts: [], gates: [],
   }),
 }));
 vi.mock("../../../projects/overview.ts", async (original) => ({
@@ -40,7 +40,6 @@ vi.mock("../../../projects/overview.ts", async (original) => ({
   projectRunCount: async (_tx: unknown, orgId: string, id: string) => { state.counted.push([orgId, id]); return state.runs; },
 }));
 vi.mock("../../../server/env.ts", () => ({ readEnv: () => ({ openRouterUrl: "https://openrouter.test/api/v1", ...(state.platformKey ? { setup: { apiKey: "sk-or-v1-" + "p".repeat(40), model: "m" } } : {}) }) }));
-vi.mock("../../../llm/prices.ts", () => ({ priceFor: async (provider: string, model: string) => (provider === "openrouter" && model === "deepseek/deepseek-v4.1-flash" ? { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } : null) }));
 vi.mock("../../../runs/runs.ts", async (original) => ({
   RunInProgress: (await original<typeof import("../../../runs/runs.ts")>()).RunInProgress,
   firstRunOnUsLeft: async () => state.onUsLeft,
@@ -64,17 +63,25 @@ beforeEach(() => {
   state.platformKey = true;
   state.onUsLeft = true;
   state.refusalFor = [];
+  state.people = 0;
 });
 
-test("the Start panel offers the first run on Trawler, priced, while the workspace has not used it and this server can pay; refusals are judged for the run it offers", async () => {
+test("the Start panel offers the first run on Trawler while the workspace has not used it and this server can pay; refusals are judged for the run the panel will start", async () => {
   await render();
   state.onUsLeft = false;
   await render();
   state.onUsLeft = true;
   state.platformKey = false;
   await render();
-  expect(state.planned.map((props) => props.firstRunOnUs)).toEqual([{ price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } }, null, null]);
+  expect(state.planned.map((props) => props.firstRunOnUs)).toEqual([true, false, false]);
   expect(state.refusalFor).toEqual(["trawler", "workspace", "workspace"]);
+});
+
+test("a plan with more people than the first run on Trawler takes is judged as a run paid with a key", async () => {
+  state.people = 5;
+  await render();
+  expect(state.planned[0]!.firstRunOnUs).toBe(true);
+  expect(state.refusalFor).toEqual(["workspace"]);
 });
 
 test("a visitor who is not signed in, or no longer belongs to any workspace, is sent to sign in before anything is read", async () => {

@@ -89,6 +89,7 @@ export interface Findings {
 }
 
 export interface FirstRunsOnUs {
+  model_called_at: Timestamp | null;
   org_id: string;
   run_id: string;
   used_at: Generated<Timestamp>;
