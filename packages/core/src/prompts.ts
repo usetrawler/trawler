@@ -110,8 +110,6 @@ function websiteFence(p: { page: string; docs?: string }) {
   return { tag, fence, intro, body: `The text of its front page:\n${fence(p.page)}\n${docs}` };
 }
 
-const AS_JSON = "\n\nAnswer with one JSON object that has exactly these fields and nothing around it.";
-
 export function describePrompt(p: { url: string; page: string; docs?: string }): string {
   const site = websiteFence(p);
   return `You are preparing a usability and defect evaluation of a web product at ${p.url}.
@@ -122,7 +120,7 @@ Describe:
 - name: the product's name.
 - description: two sentences on what it is and who it is for, in plain words.
 - signUp: "open" if the page lets anyone create an account themselves (a sign-up, register, create account, get started or free trial link), "closed" if accounts come only by invitation, request, sales or an administrator, or the page offers only signing in, and "unclear" if the page does not show either.
-- features: 3 to 6 things a person does in the product, most central first, each a short title in plain words naming the activity (for example "Submit a pitch" or "Review pitches") and one sentence on what it involves. Only features the page gives evidence for; never settings pages or marketing claims.${AS_JSON}`;
+- features: 3 to 6 things a person does in the product, most central first, each a short title in plain words naming the activity (for example "Submit a pitch" or "Review pitches") and one sentence on what it involves. Only features the page gives evidence for; never settings pages or marketing claims.`;
 }
 
 const PEOPLE = `- personas: 2 to 4 realistic people who would try this product. When the product serves different roles (for example someone who submits and someone who reviews, or a member and an administrator), include each role. Each person has an id (lowercase words joined by dashes), a first name, a brief of 2 to 4 sentences in second person ("You …") about their situation, role, patience and what they care about, whether they need to sign in to an existing account for their role (signsIn), and their own goals. A brief must not describe the product's features or where anything is.
@@ -141,7 +139,7 @@ ${chosen}
 
 Choose people and goals that exercise these features and nothing else, starting from wherever a user would begin. Decide how many people and which roles the features need. When newUsersCanSignUp is "closed", nobody can create an account, so every person signs in to an existing one; when it is "open", only roles that a new user cannot sign up for, such as a reviewer or an administrator, sign in.
 Propose:
-${PEOPLE}${AS_JSON}`;
+${PEOPLE}`;
   }
   const focus = p.focus
     ? `\nThe person running this evaluation wants it to cover: ${JSON.stringify(p.focus)}. Choose personas and goals that exercise that area, starting from wherever a user would begin.\n`
@@ -153,5 +151,5 @@ ${site.body}${focus}
 Propose:
 - name: the product's name.
 - description: two sentences on what it is and who it is for, in plain words.
-${PEOPLE}${AS_JSON}`;
+${PEOPLE}`;
 }
