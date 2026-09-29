@@ -165,6 +165,7 @@ async function askOnce<T>(opts: { model: LanguageModel; budget: Budget }, schema
       output: Output.object({ schema }),
       prompt,
       maxOutputTokens: SETUP_OUTPUT_TOKENS,
+      providerOptions: { openrouter: { provider: { require_parameters: true } } },
       onStepEnd: (step) => void tallyStep(usage, opts.budget, step),
     });
   } catch (err) {
