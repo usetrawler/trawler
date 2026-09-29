@@ -7,6 +7,7 @@ export const PROTOCOL_VERSION = 3;
 export const PROTOCOL_HEADER = "x-trawler-protocol";
 export const MAX_EVENTS_PER_BATCH = 200;
 export const JOB_STOPPED = "job_stopped";
+export const ANSWER_UNUSABLE = "answer_unusable";
 
 export const JobKindSchema = z.enum(["account_check", "role_session", "replay", "judge"]);
 export type JobKind = z.infer<typeof JobKindSchema>;

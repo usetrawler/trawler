@@ -1,6 +1,6 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { APICallError, RetryError, wrapLanguageModel, type LanguageModelMiddleware } from "ai";
-import { JOB_STOPPED, type JobUsage } from "@usetrawler/protocol";
+import { ANSWER_UNUSABLE, JOB_STOPPED, type JobUsage } from "@usetrawler/protocol";
 
 type OpenRouterOptions = { provider?: Record<string, unknown> } & Record<string, unknown>;
 
@@ -24,8 +24,15 @@ const denyDataCollection: LanguageModelMiddleware = {
   },
 };
 
+export const withoutRetryOfUnusableAnswers = (fetchImpl: typeof globalThis.fetch): typeof globalThis.fetch => async (input, init) => {
+  const res = await fetchImpl(input, init);
+  if (res.status !== 502) return res;
+  const type = await res.clone().json().then((body: { error?: { type?: unknown } }) => body?.error?.type, () => undefined);
+  return type === ANSWER_UNUSABLE ? new Response(res.body, { status: 422, statusText: "Unusable answer", headers: res.headers }) : res;
+};
+
 export function createModel(opts: { modelId: string; apiKey: string; baseURL?: string; fetch?: typeof globalThis.fetch }) {
-  const provider = createOpenRouter({ apiKey: opts.apiKey, baseURL: opts.baseURL, fetch: opts.fetch, compatibility: "strict" });
+  const provider = createOpenRouter({ apiKey: opts.apiKey, baseURL: opts.baseURL, fetch: withoutRetryOfUnusableAnswers(opts.fetch ?? globalThis.fetch), compatibility: "strict" });
   return wrapLanguageModel({
     model: provider(opts.modelId),
     middleware: denyDataCollection,
