@@ -1,6 +1,6 @@
 import { generateText, RetryError, streamText } from "ai";
 import { expect, test } from "vitest";
-import { JOB_STOPPED } from "@usetrawler/protocol";
+import { ANSWER_UNUSABLE, JOB_STOPPED } from "@usetrawler/protocol";
 import { Budget, createModel, failureMessage, stoppedByRun, stepCost } from "./llm.ts";
 import { scriptedModel, text, toolCall } from "./testing.ts";
 
@@ -201,4 +201,16 @@ test("a 402 without a readable body is not taken for the budget", async () => {
   const model = createModel({ modelId: "m", apiKey: "k", baseURL: "https://cp.test/api/llm/v1", fetch: async () => new Response("<html>Payment Required</html>", { status: 402, headers: { "content-type": "text/html" } }) });
   const err = await generateText({ model, prompt: "hello" }).then(() => expect.unreachable("the call was refused"), (e: unknown) => e);
   expect(stoppedByRun(err)).toBe(false);
+});
+
+test("an answer the proxy could not use is not asked for again, since it would be refused the same way, while a provider that could not be reached still is", async () => {
+  const answer = (type?: string) => () => new Response(JSON.stringify({ error: { code: type ? 422 : 502, message: "the provider's answer was too large", ...(type ? { type } : {}) } }), { status: type ? 422 : 502, headers: { "content-type": "application/json", "retry-after-ms": "1" } });
+  const calls = async (reply: () => Response) => {
+    let made = 0;
+    const model = createModel({ modelId: "m", apiKey: "k", baseURL: "https://cp.test/api/llm/v1", fetch: async () => { made++; return reply(); } });
+    const err = await generateText({ model, prompt: "hello" }).then(() => expect.unreachable("the call was refused"), (e: unknown) => e);
+    return { made, message: failureMessage(err), stopped: stoppedByRun(err) };
+  };
+  expect(await calls(answer(ANSWER_UNUSABLE))).toEqual({ made: 1, message: "the provider's answer was too large", stopped: false });
+  expect(await calls(answer())).toEqual({ made: 3, message: "the provider's answer was too large (after 3 attempts)", stopped: false });
 });

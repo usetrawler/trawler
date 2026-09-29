@@ -1,4 +1,4 @@
-import { JOB_STOPPED } from "@usetrawler/protocol";
+import { ANSWER_UNUSABLE, JOB_STOPPED } from "@usetrawler/protocol";
 import type { Database } from "../db/index.ts";
 import { asSystem } from "../db/tenancy.ts";
 import { modelKey } from "../credentials/credentials.ts";
@@ -29,6 +29,7 @@ const inFlight = new Set<string>();
 
 const failure = (status: number, message: string, type?: string) => Response.json({ error: { code: status, message, ...(type ? { type } : {}) } }, { status, headers: { "cache-control": "no-store" } });
 const jobStopped = (message: string) => failure(402, message, JOB_STOPPED);
+const unusable = (message: string) => failure(422, message, ANSWER_UNUSABLE);
 
 class UpstreamTimeout extends Error {}
 
@@ -125,13 +126,20 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
   const fields = openRouter ? [...FORWARDED, ...OPENROUTER_ONLY] : FORWARDED;
   const payload = Object.fromEntries(fields.filter((field) => field in request).map((field) => [field, request[field]]));
   const extras = openRouter ? { usage: { include: true }, provider: { data_collection: "deny", allow_fallbacks: true } } : {};
+  const guessedInputTokens = Math.ceil(Buffer.byteLength(JSON.stringify(payload)) / 3);
+  const chargeTheUnreadAnswer = () =>
+    record(deps, call, { model: request.model as string, inputTokens: guessedInputTokens, outputTokens: maxTokens, costUsd: priced(price, guessedInputTokens, maxTokens) });
   let upstream: Response;
   try {
     upstream = await forward(deps, endpoint, { ...payload, max_tokens: maxTokens, ...extras }, req.signal);
   } catch (err) {
     if (err instanceof UpstreamTimeout) return failure(504, "the provider did not answer in time");
     if (req.signal.aborted) return failure(499, "the runner hung up");
-    if (err instanceof FetchRefused && err.reason === "too_long") return failure(502, "the provider's answer was too large");
+    if (err instanceof FetchRefused && err.reason === "too_long" && err.status !== undefined && err.status >= 200 && err.status < 300) {
+      await chargeTheUnreadAnswer();
+      return unusable("the provider's answer was too large");
+    }
+    if (err instanceof FetchRefused && err.reason === "too_long" && err.status !== undefined) return failure(502, "the provider's answer was too large");
     return failure(502, "the provider could not be reached");
   }
   if (upstream.status === 402) return failure(402, "the provider account behind the workspace key is out of credits");
@@ -139,6 +147,7 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
   try {
     text = await upstream.text();
   } catch (err) {
+    if (upstream.ok) await chargeTheUnreadAnswer();
     if (req.signal.aborted) return failure(499, "the runner hung up");
     if (timedOut(err)) return failure(504, "the provider did not answer in time");
     return failure(502, "the provider could not be reached");
@@ -151,7 +160,11 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
   }
   const error = providerError(parsed);
   if (upstream.status === 401 || saysTheKeyIsInvalid(upstream.status, error) || (upstream.status === 403 && !refusedTheContent(error))) return failure(402, KEY_REFUSED);
-  if (!parsed || typeof parsed !== "object") return failure(upstream.ok ? 502 : upstream.status, "the provider sent an unreadable answer");
+  if (!parsed || typeof parsed !== "object") {
+    if (!upstream.ok) return failure(upstream.status, "the provider sent an unreadable answer");
+    await chargeTheUnreadAnswer();
+    return unusable("the provider sent an unreadable answer");
+  }
   if (!upstream.ok || error) {
     const explanation = error?.message;
     const message = typeof explanation !== "string"

@@ -13,7 +13,7 @@ const MAX_URL_LENGTH = 2048;
 export type RefusalReason = "address" | "too_long" | "private" | "unresolved" | "timeout" | "status" | "redirects";
 
 export class FetchRefused extends Error {
-  constructor(readonly reason: RefusalReason, message: string) {
+  constructor(readonly reason: RefusalReason, message: string, readonly status?: number) {
     super(message);
   }
 }
@@ -132,12 +132,12 @@ export function guardedFetch(options: { allowLoopback?: boolean; maxResponseByte
           res.destroy();
           return reject(new FetchRefused("status", `HTTP ${status}`));
         }
-        if (Number(res.headers["content-length"]) > maxResponseBytes) return res.destroy(new FetchRefused("too_long", "the answer is too large"));
+        if (Number(res.headers["content-length"]) > maxResponseBytes) return res.destroy(new FetchRefused("too_long", "the answer is too large", status));
         const chunks: Buffer[] = [];
         let size = 0;
         res.on("data", (chunk: Buffer) => {
           size += chunk.length;
-          if (size > maxResponseBytes) return res.destroy(new FetchRefused("too_long", "the answer is too large"));
+          if (size > maxResponseBytes) return res.destroy(new FetchRefused("too_long", "the answer is too large", status));
           chunks.push(chunk);
         });
         res.on("end", () => {
