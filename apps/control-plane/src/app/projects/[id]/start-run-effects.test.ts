@@ -102,12 +102,12 @@ test("a model list asks about the key as typed, the server's answer is passed on
   await expect(modelsForKey({})).rejects.toBe(failure);
 });
 
-test("the first run on Trawler reads its model's price for the estimate, and lists no models, since there is no key to list them with", async () => {
+test("the first run on Trawler reads its model's price for the estimate, and lists no models with the saved key it does not use", async () => {
   const range = { low: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }, high: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } };
   actions.priceRangeAction.mockResolvedValue(range);
   react.effects = [];
   react.setters = [];
-  StartRun({ projectId: "p1", projectName: "Acme", personas: 2, keyHint: null, canManageKey: true, authorisedBefore: true, firstRunOnUs: true });
+  StartRun({ projectId: "p1", projectName: "Acme", personas: 2, keyHint, canManageKey: true, authorisedBefore: true, firstRunOnUs: true });
   const setRanged = react.setters[7]!;
   for (const effect of react.effects) effect();
   await vi.advanceTimersByTimeAsync(1_000);

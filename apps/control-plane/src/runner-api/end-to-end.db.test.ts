@@ -18,7 +18,7 @@ import { resetPriceCache } from "../llm/prices.ts";
 import { handleChatCompletions } from "../llm-proxy/proxy.ts";
 import { createProject } from "../projects/projects.ts";
 import { runView } from "../runs/report.ts";
-import { runSummary, startRun } from "../runs/runs.ts";
+import { cancelRun, runSummary, startRun } from "../runs/runs.ts";
 import { logError, scrubberWith } from "../server/log.ts";
 import { FetchRefused } from "../setup/safe-fetch.ts";
 import { handleArtifactUpload, handleClaim, handleComplete, handleEvents, handleRelease, type RunnerApiDeps } from "./handlers.ts";
@@ -489,9 +489,12 @@ test("a run on Trawler is paid with Trawler's key whether or not the workspace h
   expect(unpaid.status).toBe(402);
   expect(await error(unpaid)).toEqual({ code: 402, message: "Trawler cannot pay for model calls on this server" });
   expect(seen).toHaveLength(0);
+  const calledAt = async () => (await sql<{ model_called_at: Date | null }>`select model_called_at from first_runs_on_us where run_id = ${run.id}`.execute(t.db)).rows[0]!.model_called_at;
+  expect(await calledAt()).toBeNull();
 
   replies = [textReply("ok")];
   expect((await call(TRAWLER_KEY)).status).toBe(200);
+  expect(await calledAt()).not.toBeNull();
   await withOrg(t.db, "org-paid-by-us", (tx) => setModelKey(tx, "org-paid-by-us", { provider: "anthropic", key: "sk-ant-api03-" + "w".repeat(80) }, "u", keys));
   replies = [textReply("ok")];
   expect((await call(TRAWLER_KEY)).status).toBe(200);
@@ -513,4 +516,45 @@ test("a run on Trawler is paid with Trawler's key whether or not the workspace h
   expect(vi.mocked(logError).mock.calls.map(([message, fields]) => [message, fields?.runId])).toEqual([["the provider refused Trawler's model key", run.id], ["Trawler's model account is out of credits", run.id]]);
   await sql`update jobs set status = 'succeeded' where id = ${job.jobId}`.execute(t.db);
   await sql`update runs set status = 'succeeded' where id = ${run.id}`.execute(t.db);
+});
+
+test("a first run on Trawler whose calls Trawler's provider refused without charging keeps its allowance, and gets it back when it ends; a call that may have been charged uses it", async () => {
+  const TRAWLER_KEY = "sk-or-v1-" + "t".repeat(64);
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-unpaid', 'U', 'unpaid', now())`.execute(t.db);
+  const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "ida", name: "Ida", brief: "b" }], goals: [{ id: "g", instruction: "x" }] });
+  const project = await withOrg(t.db, "org-unpaid", (tx) => createProject(tx, "org-unpaid", config, keys));
+  const start = () => withOrg(t.db, "org-unpaid", (tx) => startRun(tx, "org-unpaid", project, keys, { budgetUsd: 1, agentModel: "m/agent", judgeModel: "m/agent", maxSteps: 10, replaySteps: 10, createdBy: "u", provider: "openrouter", paidBy: "trawler" }));
+  const claim = async (runId: string) => {
+    const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "3" } }), deps)).json();
+    expect(job.runId).toBe(runId);
+    return job as { token: string; jobId: string };
+  };
+  const call = (token: string, model = "m/agent") =>
+    handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ model, messages: [{ role: "user", content: "hi" }] }) }), { db: t.db, keys, openRouterUrl: openRouterBase, trawlerKey: TRAWLER_KEY, retryBaseMs: 1, attempts: 1 });
+  const allowance = async () => (await sql<{ run_id: string; model_called_at: Date | null }>`select run_id, model_called_at from first_runs_on_us where org_id = 'org-unpaid'`.execute(t.db)).rows;
+  const stop = async (runId: string) => {
+    await sql`update jobs set status = 'succeeded' where run_id = ${runId} and status = 'leased'`.execute(t.db);
+    await withOrg(t.db, "org-unpaid", (tx) => cancelRun(tx, "org-unpaid", runId, "stopped"));
+  };
+
+  const refused = await start();
+  const job = await claim(refused.id);
+  replies = [upstreamError(402, "Insufficient credits.")];
+  expect((await call(job.token)).status).toBe(402);
+  replies = [upstreamError(401, "User not found.")];
+  expect((await call(job.token)).status).toBe(402);
+  expect((await call(job.token, "openai/gpt-5-pro")).status).toBe(400);
+  expect(await allowance()).toEqual([{ run_id: refused.id, model_called_at: null }]);
+  await stop(refused.id);
+  expect(await allowance()).toEqual([]);
+
+  const timedOut = await start();
+  const slow = await claim(timedOut.id);
+  replies = [upstreamError(503, "busy")];
+  expect((await call(slow.token)).status).toBe(503);
+  expect(await allowance()).toEqual([{ run_id: timedOut.id, model_called_at: null }]);
+  const unread = await handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${slow.token}`, "content-type": "application/json" }, body: JSON.stringify({ model: "m/agent", messages: [] }) }), { db: t.db, keys, openRouterUrl: openRouterBase, trawlerKey: TRAWLER_KEY, retryBaseMs: 1, attempts: 1, fetch: async () => { throw Object.assign(new Error("timed out"), { name: "TimeoutError" }); } });
+  expect(unread.status).toBe(504);
+  await stop(timedOut.id);
+  expect(await allowance()).toEqual([{ run_id: timedOut.id, model_called_at: expect.any(Date) }]);
 });

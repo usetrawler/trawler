@@ -427,6 +427,19 @@ export async function llmCallFor(db: Database, token: string): Promise<LlmCall> 
   return outcome;
 }
 
+export async function forgetUnpaidFirstCall(db: Database, runId: string): Promise<void> {
+  await asSystem(db, async (tx) => {
+    const run = await tx.selectFrom("runs").select("status").where("id", "=", runId).forUpdate().executeTakeFirstOrThrow();
+    await tx
+      .updateTable("first_runs_on_us")
+      .set({ model_called_at: null })
+      .where("run_id", "=", runId)
+      .where(({ not, exists, selectFrom }) => not(exists(selectFrom("llm_usage").select("id").where("run_id", "=", runId))))
+      .execute();
+    if (!ACTIVE.includes(run.status)) await giveBackUnusedFirstRun(tx, runId);
+  });
+}
+
 export async function recordLlmUsage(db: Database, call: LlmCall, usage: { model: string; inputTokens: number; outputTokens: number; costUsd: number }): Promise<void> {
   await asSystem(db, async (tx) => {
     await tx.selectFrom("jobs").select("id").where("id", "=", call.jobId).forUpdate().executeTakeFirstOrThrow();

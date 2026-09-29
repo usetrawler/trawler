@@ -6,7 +6,7 @@ import type { Keyring } from "../lib/secrets.ts";
 import { bearer, readBody } from "../runner-api/handlers.ts";
 import type { Price } from "../llm/prices.ts";
 import { chatFetchFor, chatHeaders, endpointFor, LONGEST_EXPLANATION_READ, providerError, saysTheKeyIsInvalid, type Endpoint, type ProviderError } from "../llm/providers.ts";
-import { InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage, type LlmCall } from "../runs/queue.ts";
+import { forgetUnpaidFirstCall, InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage, type LlmCall } from "../runs/queue.ts";
 import { affordableOutputTokens } from "../runs/runs.ts";
 import { logError, scrubberWith } from "../server/log.ts";
 import { FetchRefused } from "../setup/safe-fetch.ts";
@@ -27,6 +27,7 @@ const UPSTREAM_TIMEOUT_MS = 180_000;
 const FORWARDED = ["model", "messages", "tools", "tool_choice", "parallel_tool_calls", "temperature", "top_p", "seed", "stop", "frequency_penalty", "presence_penalty", "response_format"] as const;
 const OPENROUTER_ONLY = ["top_k", "reasoning", "include_reasoning"] as const;
 const inFlight = new Set<string>();
+const MAY_HAVE_BEEN_CHARGED = new Set([200, 422, 499, 504]);
 
 const failure = (status: number, message: string, type?: string) => Response.json({ error: { code: status, message, ...(type ? { type } : {}) } }, { status, headers: { "cache-control": "no-store" } });
 const jobStopped = (message: string) => failure(402, message, JOB_STOPPED);
@@ -114,7 +115,9 @@ export async function handleChatCompletions(req: Request, deps: ProxyDeps): Prom
   if (inFlight.has(call.jobId)) return failure(429, "one model call at a time per job");
   inFlight.add(call.jobId);
   try {
-    return await proxied(req, deps, call);
+    const res = await proxied(req, deps, call);
+    if (call.paidBy === "trawler" && !MAY_HAVE_BEEN_CHARGED.has(res.status)) await forgetUnpaidFirstCall(deps.db, call.runId);
+    return res;
   } finally {
     inFlight.delete(call.jobId);
   }
