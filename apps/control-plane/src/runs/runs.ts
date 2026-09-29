@@ -86,7 +86,7 @@ async function refusalToRun(tx: Tx, orgId: string, projectId: string): Promise<R
   if (runsHalted()) return new RunRefused(HALTED);
   if (await projectPaused(tx, projectId)) return new RunRefused(PAUSED);
   const budget = await monthlyBudget(tx, orgId);
-  if (budget && budgetLeft(budget) <= 0) return new WorkspaceBudgetSpent(budget);
+  if (budget && budgetLeft(budget) < 0.01) return new WorkspaceBudgetSpent(budget);
   return null;
 }
 
@@ -195,7 +195,7 @@ export async function judgeAgain(tx: Tx, orgId: string, runId: string, findingKe
   if (runsHalted()) throw new CannotJudgeAgain("Trawler has paused hosted runs for now, so nothing can be judged again. Try again later.");
   if (await projectPaused(tx, run.project_id)) throw new CannotJudgeAgain("Runs on this project are paused. Resume them on the project's page, then judge it again.");
   const budget = await monthlyBudget(tx, orgId);
-  if (budget && budgetLeft(budget) <= 0) throw new CannotJudgeAgain(budgetSpentMessage(budget));
+  if (budget && affordableOutputTokens(budgetLeft(budget), run.completion_usd_per_mtok === null ? null : Number(run.completion_usd_per_mtok)) < 1) throw new CannotJudgeAgain(budgetSpentMessage(budget));
   const latest = await tx
     .selectFrom("jobs")
     .select(["status", "stopped_by", sql<boolean>`requested_by is not null`.as("requested")])

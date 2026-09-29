@@ -32,12 +32,12 @@ let seq = 0;
 const ev = <T extends Omit<RunEvent, "seq" | "at">>(e: T) => ({ ...e, seq: ++seq, at: new Date().toISOString() }) as unknown as RunEvent;
 
 let orgs = 0;
-async function workspace() {
+async function workspace(price = options.price) {
   const org = `org-${++orgs}`;
   await sql`insert into organization (id, name, slug, "createdAt") values (${org}, ${org}, ${org}, now())`.execute(t.db);
   await withOrg(t.db, org, (tx) => setModelKey(tx, org, { provider: "openrouter", key: `sk-or-v1-${"a".repeat(40)}` }, "u1", keys));
   const project = await withOrg(t.db, org, (tx) => createProject(tx, org, config, keys));
-  return { org, project, start: () => withOrg(t.db, org, (tx) => startRun(tx, org, project, keys, options)) };
+  return { org, project, start: () => withOrg(t.db, org, (tx) => startRun(tx, org, project, keys, { ...options, price })) };
 }
 
 const statusOf = async (org: string, runId: string) => {
@@ -240,11 +240,12 @@ describe("the monthly workspace budget", () => {
   });
 
   test("a spend equal to the budget refuses a start, and a remainder too small for one output token stops the run", async () => {
-    const w = await workspace();
+    const w = await workspace({ promptUsdPerMtok: 1, completionUsdPerMtok: 100 });
     await withOrg(t.db, w.org, (tx) => setMonthlyBudget(tx, w.org, 1, "u1"));
     const run = await w.start();
     const job = await claimFor(run.id);
-    await recordLlmUsage(t.db, await llmCallFor(t.db, job.token), { model: "m/agent", inputTokens: 1, outputTokens: 1, costUsd: 0.9999995 });
+    await recordLlmUsage(t.db, await llmCallFor(t.db, job.token), { model: "m/agent", inputTokens: 1, outputTokens: 1, costUsd: 0.99995 });
+    expect(await withOrg(t.db, w.org, (tx) => monthlyBudget(tx, w.org))).toEqual({ limitUsd: 1, spentUsd: 0.99995 });
     expect(await statusOf(w.org, run.id)).toEqual({ status: "cancelled", cancelReason: "workspace_budget" });
 
     const exact = await workspace();
@@ -306,6 +307,16 @@ describe("pausing a project", () => {
     expect(await claimJob(t.db, keys)).toBeNull();
     await withOrg(t.db, w.org, (tx) => resumeProject(tx, w.org, w.project));
     expect(await claimJob(t.db, keys)).toMatchObject({ kind: "judge", runId: run.id });
+  });
+
+  test("a pause confirmed for a run that has since ended does not stop another run that started meanwhile", async () => {
+    const w = await workspace();
+    const first = await w.start();
+    await withOrg(t.db, w.org, (tx) => cancelRun(tx, w.org, first.id, "stopped"));
+    const second = await w.start();
+    expect(await withOrg(t.db, w.org, (tx) => pauseProject(tx, w.org, w.project, "u2", first.id))).toEqual({ unconfirmed: { id: second.id, number: second.number } });
+    expect(await statusOf(w.org, second.id)).toEqual({ status: "queued", cancelReason: null });
+    expect((await t.db.selectFrom("projects").select("paused_at").where("id", "=", w.project).executeTakeFirstOrThrow()).paused_at).toBeNull();
   });
 
   test("a judge again is refused while the project is paused, with why", async () => {
@@ -381,6 +392,8 @@ describe("a judge again and the limits", () => {
     seq = 0;
     expect(await ingestEvents(t.db, judge.token, [ev({ type: "note", jobId: judge.jobId, text: "x" })])).toEqual({ cancel: false });
     expect(await stopRunsPastLimits(t.db)).toBe(0);
+    expect(await statusOf(w.org, run.id)).toEqual({ status: "succeeded", cancelReason: null });
+    expect((await t.db.selectFrom("jobs").select("status").where("id", "=", judge.jobId).executeTakeFirstOrThrow()).status).toBe("leased");
   });
 
   const stoppers = {
@@ -423,5 +436,13 @@ describe("a judge again and the limits", () => {
     await sql`insert into llm_usage (org_id, run_id, job_id, model, input_tokens, output_tokens, cost_usd)
       select org_id, run_id, id, 'm/agent', 1, 1, 2 from jobs where run_id = ${second.id} limit 1`.execute(t.db);
     expect(await refusedWith(judgeAgainOf(other, second.id))).toBe(`This workspace has spent its $1.00 monthly budget: $2.00 since ${await utcMonth()} 1 (UTC). An owner or admin can raise it in Settings.`);
+
+    const third = await workspace({ promptUsdPerMtok: 1, completionUsdPerMtok: 100 });
+    const almost = await runWithFailedJudge(third);
+    await withOrg(t.db, third.org, (tx) => setMonthlyBudget(tx, third.org, 1, "u1"));
+    await sql`insert into llm_usage (org_id, run_id, job_id, model, input_tokens, output_tokens, cost_usd)
+      select org_id, run_id, id, 'm/agent', 1, 1, 0.99995 from jobs where run_id = ${almost.id} limit 1`.execute(t.db);
+    expect(await withOrg(t.db, third.org, (tx) => monthlyBudget(tx, third.org))).toEqual({ limitUsd: 1, spentUsd: 0.99995 });
+    expect(await refusedWith(judgeAgainOf(third, almost.id))).toMatch(/^This workspace has spent its \$1\.00 monthly budget/);
   });
 });
