@@ -281,7 +281,7 @@ async function addCost(tx: Tx, runId: string, jobId: string, usd: number) {
 }
 
 const lockedRun = (tx: Tx, runId: string) =>
-  tx.selectFrom("runs").select(["status", "cost_usd", "budget_usd", "token_cap", "tokens_used"]).where("id", "=", runId).forUpdate().executeTakeFirstOrThrow();
+  tx.selectFrom("runs").select(["status", "cost_usd", "budget_usd", "token_cap", "tokens_used", "completion_usd_per_mtok"]).where("id", "=", runId).forUpdate().executeTakeFirstOrThrow();
 
 async function stopIfOverBudget(tx: Tx, runId: string): Promise<boolean> {
   const run = await lockedRun(tx, runId);

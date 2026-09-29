@@ -7,6 +7,7 @@ import { bearer, readBody } from "../runner-api/handlers.ts";
 import type { Price } from "../llm/prices.ts";
 import { chatFetchFor, chatHeaders, endpointFor, LONGEST_EXPLANATION_READ, type Endpoint } from "../llm/providers.ts";
 import { InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage, type LlmCall } from "../runs/queue.ts";
+import { affordableOutputTokens } from "../runs/runs.ts";
 import { logError, scrubberWith } from "../server/log.ts";
 import { FetchRefused } from "../setup/safe-fetch.ts";
 
@@ -70,7 +71,7 @@ const priced = (price: Price | null, input: number, output: number) => (price ? 
 
 function outputAllowance(price: Price | null, requested: unknown, call: LlmCall): number {
   let allowed = Math.min(count(requested) || MAX_OUTPUT_TOKENS, MAX_OUTPUT_TOKENS);
-  if (price && price.completionUsdPerMtok > 0) allowed = Math.min(allowed, Math.floor((call.remainingUsd * 1_000_000) / price.completionUsdPerMtok));
+  if (price) allowed = Math.min(allowed, affordableOutputTokens(call.remainingUsd, price.completionUsdPerMtok));
   if (call.remainingTokens !== null) allowed = Math.min(allowed, call.remainingTokens);
   return allowed;
 }

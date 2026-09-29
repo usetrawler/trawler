@@ -9,7 +9,7 @@ const finding = (key: string, persona: string, extra: Partial<RunSummary["findin
 
 function summary(over: Partial<RunSummary>): RunSummary {
   return {
-    id: "r", number: 1, status: "running", cancelReason: null, projectId: "p", costUsd: 0.1, budgetUsd: 2, agentModel: "m", judgeModel: "m",
+    id: "r", number: 1, status: "running", cancelReason: null, projectId: "p", costUsd: 0.1, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "m", judgeModel: "m",
     provider: "openrouter", tokenCap: null, tokensUsed: 0,
     createdAt: new Date(), startedAt: new Date(), finishedAt: null, jobs: [], findings: [], goals: [], target: "https://a.test/",
     personas: [{ id: "ana", name: "Ana" }, { id: "lee", name: "Lee" }], goalTexts: [{ id: "g", instruction: "Get in." }], activity: [],
@@ -216,6 +216,14 @@ test("a judge that was still running when the run stopped is not shown as judgin
   expect(view.rejudging).toBe(false);
   expect(view.report.couldNotJudge).toEqual([]);
   expect(view.report.notJudged.map((f) => f.reason)).toEqual(["The run ended before it was judged."]);
+});
+
+test("a finished run left with less than one output token of its cap counts as spent, so its unjudged defects are not offered Judge again", () => {
+  const unjudged = (over: Partial<RunSummary>) => finished({ jobs: [judged("failed", modelError)], findings: [finding("ana:f1", "ana", replayed)], budgetUsd: 2, ...over }).report.couldNotJudge.map((f) => f.action);
+  expect(unjudged({ costUsd: 2 - 0.000001, completionUsdPerMtok: 1.2 })).toEqual(["cap_spent"]);
+  expect(unjudged({ costUsd: 2 - 0.0000013, completionUsdPerMtok: 1.2 })).toEqual(["judge_again"]);
+  expect(unjudged({ costUsd: 2 - 0.000001, completionUsdPerMtok: null })).toEqual(["judge_again"]);
+  expect(unjudged({ costUsd: 2, completionUsdPerMtok: null })).toEqual(["cap_spent"]);
 });
 
 test("a defect whose judge again failed too can be judged again", () => {

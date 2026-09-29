@@ -99,17 +99,27 @@ export async function cancelLiveRuns(tx: Tx, orgId: string, reason: CancelReason
   return cancelled;
 }
 
-export function capSpent(run: { cost_usd: string; budget_usd: string; token_cap: string | null; tokens_used: string }): boolean {
-  const overTokens = run.token_cap !== null && Number(run.tokens_used) >= Number(run.token_cap);
-  return Number(run.cost_usd) >= Number(run.budget_usd) || overTokens;
+export const affordableOutputTokens = (leftUsd: number, completionUsdPerMtok: number | null) =>
+  completionUsdPerMtok !== null && completionUsdPerMtok > 0 ? Math.floor((leftUsd * 1_000_000) / completionUsdPerMtok) : Infinity;
+
+export function outOfBudget(run: { costUsd: number; budgetUsd: number; tokenCap: number | null; tokensUsed: number; completionUsdPerMtok: number | null }): boolean {
+  const left = run.budgetUsd - run.costUsd;
+  if (left <= 0 || (run.tokenCap !== null && run.tokensUsed >= run.tokenCap)) return true;
+  return affordableOutputTokens(left, run.completionUsdPerMtok) < 1;
 }
+
+export const capSpent = (run: { cost_usd: string; budget_usd: string; token_cap: string | null; tokens_used: string; completion_usd_per_mtok: string | null }) =>
+  outOfBudget({
+    costUsd: Number(run.cost_usd), budgetUsd: Number(run.budget_usd), tokenCap: run.token_cap === null ? null : Number(run.token_cap), tokensUsed: Number(run.tokens_used),
+    completionUsdPerMtok: run.completion_usd_per_mtok === null ? null : Number(run.completion_usd_per_mtok),
+  });
 
 export class CannotJudgeAgain extends Error {}
 
 export async function judgeAgain(tx: Tx, orgId: string, runId: string, findingKey: string, requestedBy: string, keys: Keyring): Promise<void> {
   const run = await tx
     .selectFrom("runs")
-    .select(["status", "cost_usd", "budget_usd", "token_cap", "tokens_used", "provider", "provider_base_url"])
+    .select(["status", "cost_usd", "budget_usd", "token_cap", "tokens_used", "completion_usd_per_mtok", "provider", "provider_base_url"])
     .where("id", "=", runId)
     .where("org_id", "=", orgId)
     .forUpdate()
@@ -140,7 +150,7 @@ export async function judgeAgain(tx: Tx, orgId: string, runId: string, findingKe
 export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const run = await tx
     .selectFrom("runs")
-    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "cancel_reason"])
+    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason"])
     .where("id", "=", runId)
     .where("org_id", "=", orgId)
     .executeTakeFirst();
@@ -176,7 +186,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const latestScreenshot = (key: string, kind: string) => screenshots.filter((a) => a.finding_key === key && a.kind === kind).at(-1)?.id ?? null;
   return {
     id: run.id, number: run.number, status: run.status, cancelReason: run.cancel_reason as CancelReason | null, projectId: run.project_id,
-    costUsd: Number(run.cost_usd), budgetUsd: Number(run.budget_usd), agentModel: run.agent_model, judgeModel: run.judge_model,
+    costUsd: Number(run.cost_usd), budgetUsd: Number(run.budget_usd), completionUsdPerMtok: run.completion_usd_per_mtok === null ? null : Number(run.completion_usd_per_mtok), agentModel: run.agent_model, judgeModel: run.judge_model,
     provider: run.provider, tokenCap: run.token_cap === null ? null : Number(run.token_cap), tokensUsed: Number(run.tokens_used),
     createdAt: run.created_at, startedAt: run.started_at, finishedAt: run.finished_at,
     jobs,
