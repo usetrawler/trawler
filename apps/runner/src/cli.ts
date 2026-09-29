@@ -82,7 +82,13 @@ function positiveNumber(name: string, value: string | undefined, fallback: numbe
 }
 
 function readProject(file: string) {
-  const source = readFileSync(file, "utf8");
+  let source: string;
+  try {
+    source = readFileSync(file, "utf8");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    throw new UsageError(code === "ENOENT" ? `${file} does not exist` : `${file} could not be read${code ? ` (${code})` : ""}`);
+  }
   const doc = YAML.parseDocument(source, { prettyErrors: false });
   if (doc.errors.length > 0) {
     const position = (offset: number) => {

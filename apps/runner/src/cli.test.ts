@@ -53,6 +53,16 @@ test("an invalid project file exits 2 and names the problem", async () => {
   expect(err.join("\n")).toMatch(/targetUrl/);
 });
 
+test("a project file that is missing or cannot be read exits 2 and says which", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cfg-"));
+  const missing = deps();
+  expect(await runCli(["run", "--config", join(dir, "nope.yaml")], missing.d)).toBe(2);
+  expect(missing.err.join("\n")).toContain(`${join(dir, "nope.yaml")} does not exist`);
+  const folder = deps();
+  expect(await runCli(["run", "--config", dir], folder.d)).toBe(2);
+  expect(folder.err.join("\n")).toContain(`${dir} could not be read (EISDIR)`);
+});
+
 test("setup writes a project file the run command accepts", async () => {
   const proposal = {
     name: "Acme", description: "Invoices.",
