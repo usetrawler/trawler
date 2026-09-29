@@ -350,7 +350,7 @@ export function RunLive({ initial }: { initial: Data }) {
     }
   }, [run.id]);
 
-  const polling = view.live || view.rejudging || stale;
+  const polling = view.refreshes || stale;
   useEffect(() => {
     if (!polling || gone) return;
     let timer: ReturnType<typeof setTimeout>;

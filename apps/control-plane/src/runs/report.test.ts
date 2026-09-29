@@ -64,6 +64,20 @@ test("a run stopped while someone was still exploring settles instead of looking
   expect(view.stages.map((s) => s.state)).toEqual(["done", "skipped", "skipped", "done"]);
 });
 
+test("a finished run keeps refreshing while a session or judge is still out, so a person who reports after the run stopped shows how they really ended", () => {
+  const stopped = (last: string) => runView(summary({ status: "stopped_budget", jobs: [job("role_session", "succeeded", { persona_key: "ana" }), job("role_session", last, { persona_key: "lee" })] }));
+  expect(stopped("leased").refreshes).toBe(true);
+  expect(stopped("queued").refreshes).toBe(true);
+  const reported = stopped("succeeded");
+  expect(reported.refreshes).toBe(false);
+  expect(reported.personas.map((p) => p.state)).toEqual(["finished", "finished"]);
+  expect(stopped("cancelled").refreshes).toBe(false);
+  expect(runView(summary({ status: "cancelled", jobs: [job("replay", "succeeded"), judged("leased")], findings: [finding("ana:f1", "ana", replayed)] })).refreshes).toBe(true);
+  expect(runView(summary({ jobs: [job("role_session", "queued", { persona_key: "ana" })] })).refreshes).toBe(true);
+  expect(finished({ jobs: [judged("failed", modelError), judged("queued", { requested: true })], findings: [finding("ana:f1", "ana", replayed)] }).refreshes).toBe(true);
+  expect(finished({ jobs: [judged("succeeded")], findings: [finding("ana:f1", "ana", replayed)] }).refreshes).toBe(false);
+});
+
 test("a stopped run says why it stopped, and never that the person reading it stopped it", () => {
   const headline = (cancelReason: RunSummary["cancelReason"]) => runView(summary({ status: "cancelled", cancelReason })).headline;
   expect([headline("stopped"), headline("key_removed"), headline(null)]).toEqual(["This run was stopped.", "Stopped when the model key was removed.", "This run was stopped."]);
