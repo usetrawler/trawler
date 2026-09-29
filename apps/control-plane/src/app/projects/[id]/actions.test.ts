@@ -40,6 +40,7 @@ vi.mock("../../../runs/runs.ts", async (importOriginal) => ({
 }));
 
 const { modelsForKeyAction, startRunAction } = await import("./actions.ts");
+const { TOO_MANY_RUN_CHECKS } = await import("../../../llm/key-input.ts");
 const OWNERS_AND_ADMINS = "Only an owner or admin of this workspace can change its model key.";
 const PROJECT = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const KEY = "sk-or-v1-" + "k".repeat(40);
@@ -132,4 +133,23 @@ test("Start refuses before checking the key while a signing-in person has no acc
   expect(state.keyChecks).toBe(0);
   expect(state.keysSaved).toBe(0);
   state.without = null;
+});
+
+test("key checks for new runs are limited to 30 per person and 60 per workspace in 10 minutes, and a refusal before the check does not count", async () => {
+  const busy = (userId: string, orgId: string) => ({ userId, email: `${userId}@acme.test`, orgId, orgName: "Acme", role: "owner" });
+  state.member = busy("busy-1", "org-busy");
+  for (let i = 0; i < 40; i++) expect(await startRunAction({}, startForm({ budget: "0" }))).toEqual({ error: "Set a cap between $0.10 and $50." });
+  state.check = { ok: false, reason: "model" };
+  for (let i = 0; i < 30; i++) expect(await startRunAction({}, startForm())).toEqual({ error: "This key cannot use deepseek/deepseek-v4.1-flash. Pick another model." });
+  expect(await startRunAction({}, startForm())).toEqual({ error: TOO_MANY_RUN_CHECKS });
+  expect(state.keyChecks).toBe(30);
+
+  state.member = busy("busy-2", "org-busy");
+  for (let i = 0; i < 30; i++) await startRunAction({}, startForm());
+  expect(state.keyChecks).toBe(60);
+  state.member = busy("busy-3", "org-busy");
+  expect(await startRunAction({}, startForm())).toEqual({ error: TOO_MANY_RUN_CHECKS });
+  state.member = busy("quiet-1", "org-quiet");
+  expect(await startRunAction({}, startForm())).toEqual({ error: "This key cannot use deepseek/deepseek-v4.1-flash. Pick another model." });
+  expect(state.keyChecks).toBe(61);
 });

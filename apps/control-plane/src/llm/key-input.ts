@@ -25,9 +25,14 @@ const LISTINGS_PER_WINDOW = 30;
 const LISTING_WINDOW_MS = 10 * 60 * 1000;
 const listings = new Map<string, number[]>();
 
-export function withinListingLimit(userId: string, now = Date.now()): boolean {
+export function withinListingLimit(userId: string, now = Date.now(), perWindow = LISTINGS_PER_WINDOW): boolean {
   const recent = (listings.get(userId) ?? []).filter((t) => now - t < LISTING_WINDOW_MS);
-  if (recent.length >= LISTINGS_PER_WINDOW) return false;
+  if (recent.length >= perWindow) return false;
   listings.set(userId, [...recent, now]);
   return true;
 }
+
+export const TOO_MANY_RUN_CHECKS = "Too many runs started in the last 10 minutes. Try again in a few minutes.";
+
+export const withinRunCheckLimit = (member: { userId: string; orgId: string }, now = Date.now()) =>
+  withinListingLimit(`run-check:${member.userId}`, now) && withinListingLimit(`run-check-org:${member.orgId}`, now, 2 * LISTINGS_PER_WINDOW);
