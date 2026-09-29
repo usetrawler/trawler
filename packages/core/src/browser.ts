@@ -740,7 +740,7 @@ export async function openBrowser(opts: {
             return Promise.race([running, heldByDialog]).finally(() => onNextDialog.delete(notify!));
           };
           let result = await untilADialog();
-          if (name === "browser_navigate" && result?.isError && INTERRUPTED.test(textOf(result))) result = await untilADialog();
+          if (name === "browser_navigate" && result?.isError && INTERRUPTED.test(textOf(result)) && !dialogOnActingPage()) result = await untilADialog();
           if (result?.isError && CLOSED.test(textOf(result))) throw new Error("the browser has closed");
           if (name === "browser_handle_dialog" && !result?.isError && dialogsOpened === dialogsBefore) dialogOpen = false;
           if (!result?.isError && !textOf(result).trim()) result.content = [{ type: "text", text: "Done. Call browser_snapshot to see the page." }];
