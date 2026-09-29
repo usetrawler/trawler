@@ -376,11 +376,13 @@ test("a 403 for flagged or blocked input passes the provider's reason on, while 
   expect(await answer(403, moderated)).toEqual({ status: 403, error: { code: 403, message: "openai/gpt-5 requires moderation on OpenRouter. Your input was flagged for \"violence\"." } });
   expect(await answer(403, { error: { code: 403, message: "Request blocked by your organization's guardrail." } })).toEqual({ status: 403, error: { code: 403, message: "Request blocked by your organization's guardrail." } });
   expect(await answer(403, { error: { code: 403, message: "Request rejected.", metadata: { reasons: ["self-harm"], flagged_input: "..." } } })).toEqual({ status: 403, error: { code: 403, message: "Request rejected." } });
+  expect(await answer(403, { error: { code: 403, message: "Request rejected.", metadata: { flagged_input: "..." } } })).toEqual({ status: 403, error: { code: 403, message: "Request rejected." } });
   expect(await answer(403, { error: { code: 403, message: `Input flagged; key ${ORG_KEY} was used.`, metadata: { reasons: ["hate"] } } })).toEqual({ status: 403, error: { code: 403, message: "Input flagged; key ••• was used." } });
 
   const keyRefused = { status: 402, error: { code: 402, message: "the provider refused the workspace key; an owner or admin can replace it in Settings" } };
   expect(await answer(403, { type: "error", error: { type: "permission_error", message: "Your API key does not have permission to use the specified resource." } })).toEqual(keyRefused);
   expect(await answer(403, "<html>Forbidden</html>")).toEqual(keyRefused);
+  expect(await answer(403, [{ error: { code: 403, message: "Permission denied: Consumer has been suspended.", status: "PERMISSION_DENIED" } }])).toEqual(keyRefused);
   expect(await answer(401, { error: { code: 401, message: "Input flagged by moderation." } })).toEqual(keyRefused);
   expect(await answer(401, "")).toEqual(keyRefused);
 });
