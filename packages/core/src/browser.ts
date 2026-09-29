@@ -48,6 +48,11 @@ const MAX_LONG_FORMS_FROM_PAGE = 100;
 const WITHHELD_TOO_LONG = "The action ran, but a field Trawler typed a password into now holds a value too long to check, or keeps changing it, so its result is withheld to keep the password out of it. Do not repeat the action: navigate elsewhere.";
 const WITHHELD_FOR_DIALOG = "The action ran, and a dialog is open on a page where Trawler typed a password, so its text is withheld to keep the password out of it. Answer the dialog with browser_handle_dialog, then call browser_snapshot.";
 const SCREENSHOT_MS = 5000;
+const DIALOG_GRACE_MS = 500;
+const SILENT_LEAVE_PROMPT = /\["beforeunload" dialog with message ""\]/g;
+const LEAVE_PROMPT = '"beforeunload" dialog: the browser asks "Leave site? Changes you made may not be saved."';
+const dialogLine = (dialog: Dialog) =>
+  dialog.type() === "beforeunload" && !dialog.message() ? `[${LEAVE_PROMPT}]` : `["${dialog.type()}" dialog with message "${dialog.message()}"]`;
 const MASK_COLOR = "#17191c";
 const MASK_CHECK_MS = 2500;
 const STEADY_MS = 20;
@@ -509,11 +514,22 @@ export async function openBrowser(opts: {
     let dialogOpen = false;
     let dialogsOpened = 0;
     const dialogs = new Set<Dialog>();
+    const onNextDialog = new Set<(dialog: Dialog) => void>();
+    const openDialogs = new Map<Dialog, Page>();
+    const actingPage = () => context.pages()[0];
+    const dialogOnActingPage = () => [...openDialogs].filter(([, page]) => page === actingPage()).at(-1)?.[0];
+    const modalState = (dialog: Dialog) => `### Modal state\n- ${dialogLine(dialog)}: can be handled by browser_handle_dialog`;
     context.on("page", (page) => {
       page.on("dialog", (dialog) => {
         dialogOpen = true;
         dialogsOpened++;
         dialogs.add(dialog);
+        openDialogs.set(dialog, page);
+        if (page === actingPage()) for (const notify of onNextDialog) notify(dialog);
+      });
+      page.on("dialogclosed", (dialog) => openDialogs.delete(dialog));
+      page.on("close", () => {
+        for (const [dialog, on] of openDialogs) if (on === page) openDialogs.delete(dialog);
       });
       page.on("framenavigated", (frame) => {
         if (frame === page.mainFrame()) dialogOpen = false;
@@ -707,13 +723,28 @@ export async function openBrowser(opts: {
               return { content: [{ type: "text", text: `### Error\nOnly http(s) addresses on the allowed origins can be opened: ${[...allowed].join(", ")}` }], isError: true };
             }
           }
+          const waiting = name === "browser_handle_dialog" ? undefined : dialogOnActingPage();
+          if (waiting) {
+            return scrubWithFilledValues({ content: [{ type: "text", text: `### Error\nError: Tool "${name}" does not handle the modal state.\n${modalState(waiting)}` }], isError: true });
+          }
           blockedNavigation = null;
           const dialogsBefore = dialogsOpened;
-          let result = (await execute(safeInput, options)) as McpResult;
-          if (name === "browser_navigate" && result?.isError && INTERRUPTED.test(textOf(result))) result = (await execute(safeInput, options)) as McpResult;
+          const untilADialog = async () => {
+            const running = Promise.resolve(execute(safeInput, options)) as Promise<McpResult>;
+            running.catch(() => {});
+            let notify: ((dialog: Dialog) => void) | undefined;
+            const heldByDialog = new Promise<McpResult>((resolve) => {
+              notify = (dialog) => setTimeout(() => resolve({ content: [{ type: "text", text: modalState(dialog) }] }), DIALOG_GRACE_MS);
+              onNextDialog.add(notify);
+            });
+            return Promise.race([running, heldByDialog]).finally(() => onNextDialog.delete(notify!));
+          };
+          let result = await untilADialog();
+          if (name === "browser_navigate" && result?.isError && INTERRUPTED.test(textOf(result)) && !dialogOnActingPage()) result = await untilADialog();
           if (result?.isError && CLOSED.test(textOf(result))) throw new Error("the browser has closed");
           if (name === "browser_handle_dialog" && !result?.isError && dialogsOpened === dialogsBefore) dialogOpen = false;
           if (!result?.isError && !textOf(result).trim()) result.content = [{ type: "text", text: "Done. Call browser_snapshot to see the page." }];
+          result.content = result.content?.map((part) => (typeof part.text === "string" ? { ...part, text: part.text.replace(SILENT_LEAVE_PROMPT, `[${LEAVE_PROMPT}]`) } : part));
           if (blockedNavigation) {
             result.content = [...(result.content ?? []), { type: "text", text: `### Blocked\n${blockedNavigation} is outside the allowed origins, so the browser did not open it. Go back or navigate to an allowed page.` }];
           }

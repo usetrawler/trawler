@@ -148,6 +148,12 @@ beforeAll(async () => {
       }
       case "/echo":
         return html(`<p>Your password is ${PASSWORD}</p>`);
+      case "/opens-alerting-popup":
+        return html(`<h1>Main</h1><a href="/alerts-on-load" target="_blank">Open popup</a><a href="/plain">Plain</a>`);
+      case "/alerts-on-load":
+        return html(`<script>alert("from popup")</script>`);
+      case "/unsaved-edit":
+        return html(`<h1>Edit venture</h1><a href="/plain">Back to list</a><button onclick="alert('Saved!')">Save</button><script>addEventListener("beforeunload", (e) => { e.preventDefault(); e.returnValue = ""; });</script>`);
       case "/frame":
         return html(`<iframe src="data:text/html,<input aria-label='Password' type='password'>"></iframe>`);
       case "/redirect-foreign":
@@ -614,6 +620,68 @@ describe("tools", () => {
       expect(out).toContain(origin);
       expect(out).not.toMatch(/\.yml/);
       expect(existsSync(dir) ? (await import("node:fs")).readdirSync(dir).filter((f) => f.endsWith(".yml")) : []).toEqual([]);
+    });
+  }, 60_000);
+});
+
+describe("native dialogs", () => {
+  const LEAVE = `["beforeunload" dialog: the browser asks "Leave site? Changes you made may not be saved."]: can be handled by browser_handle_dialog`;
+  const call = async (b: Browser, name: string, args: Record<string, unknown> = {}) => {
+    const started = Date.now();
+    const out = (await b.tools[name]!.execute!(args, ctx)) as { content: Array<{ text: string }>; isError?: boolean };
+    return { text: out.content.map((c) => c.text).join("\n"), isError: out.isError === true, ms: Date.now() - started };
+  };
+  const linkRef = async (b: Browser, label: string) => new RegExp(`(?:link|button) \\\\"${label}\\\\"[^\\n]*?\\[ref=([a-z0-9]+)\\]`).exec(await snapshot(b))![1]!;
+
+  test("a Leave site? prompt on going to another address shows at once, as when a link is clicked, instead of the tool hanging for a minute", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/unsaved-edit`);
+      const byAddress = await call(b, "browser_navigate", { url: `${origin}/plain` });
+      expect(byAddress.text).toContain(LEAVE);
+      expect(byAddress.ms).toBeLessThan(5000);
+      expect(await call(b, "browser_handle_dialog", { accept: false })).toMatchObject({ isError: false });
+      expect(await snapshot(b)).toContain("Edit venture");
+
+      const byLink = await call(b, "browser_click", { element: "Back to list", target: await linkRef(b, "Back to list") });
+      expect(byLink.text).toContain(LEAVE);
+      expect(await call(b, "browser_handle_dialog", { accept: true })).toMatchObject({ isError: false });
+      expect(await snapshot(b)).toContain(`${origin}/plain`);
+    });
+  }, 60_000);
+
+  test("while a dialog waits for an answer, every other tool says so at once and names it", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/unsaved-edit`);
+      await call(b, "browser_navigate", { url: `${origin}/plain` });
+      for (const [name, args] of [["browser_snapshot", {}], ["browser_navigate", { url: `${origin}/plain` }], ["browser_navigate_back", {}]] as const) {
+        const answer = await call(b, name, args);
+        expect(answer).toMatchObject({ isError: true });
+        expect(answer.text).toContain(LEAVE);
+        expect(answer.ms).toBeLessThan(5000);
+      }
+      await call(b, "browser_handle_dialog", { accept: false });
+      expect(await call(b, "browser_snapshot")).toMatchObject({ isError: false });
+    });
+  }, 60_000);
+
+  test("an alert in a popup the tools cannot reach locks nothing: the tab the tools act on carries on", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/opens-alerting-popup`);
+      await call(b, "browser_click", { element: "Open popup", target: await linkRef(b, "Open popup") });
+      await new Promise((r) => setTimeout(r, 1000));
+      expect(await call(b, "browser_snapshot")).toMatchObject({ isError: false });
+      const moved = await call(b, "browser_navigate", { url: `${origin}/plain` });
+      expect(moved).toMatchObject({ isError: false });
+      expect(moved.ms).toBeLessThan(5000);
+    });
+  }, 60_000);
+
+  test("an alert shows its own message", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/unsaved-edit`);
+      const clicked = await call(b, "browser_click", { element: "Save", target: await linkRef(b, "Save") });
+      expect(clicked.text).toContain(`["alert" dialog with message "Saved!"]: can be handled by browser_handle_dialog`);
+      expect(await call(b, "browser_handle_dialog", { accept: true })).toMatchObject({ isError: false });
     });
   }, 60_000);
 });
