@@ -154,6 +154,12 @@ beforeAll(async () => {
         return html(`<p>Your password is ${PASSWORD}</p>`);
       case "/opens-alerting-popup":
         return html(`<h1>Main</h1><a href="/alerts-on-load" target="_blank">Open popup</a><a href="/plain">Plain</a>`);
+      case "/search-and-alerting-popup":
+        return html(`<input aria-label="Search" type="search"><a href="/alerts-on-load" target="_blank">Open popup</a>`);
+      case "/opens-alerting-window":
+        return html(`<h1>Main</h1><button onclick="window.open('/alerts-on-load')">Sign in with a popup</button>`);
+      case "/password-and-alerting-popup":
+        return html(`<input aria-label="Password" type="password"><a href="/alerts-on-load" target="_blank">Open popup</a>`);
       case "/alerts-on-load":
         return html(`<script>alert("from popup")</script>`);
       case "/unsaved-edit":
@@ -1791,6 +1797,46 @@ describe("screenshots", () => {
       expect(results.slice(0, 2).every((r) => r.includes("a dialog is open"))).toBe(true);
       expect(results[2]).not.toContain("a dialog is open");
       expect(results.join("")).not.toContain("first-secret-");
+    });
+  }, 120_000);
+
+  test("an alert in a popup the tools cannot reach does not withhold the results of the tab with the typed password, and the password stays masked", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/password-and-alerting-popup`);
+      const snap = await snapshot(b);
+      expect(await b.fillField(refOf(snap, "Password"), "first-secret-1", "password")).toBe("typed the password");
+      const link = /link \\"Open popup\\"[^\n]*?\[ref=([a-z0-9]+)\]/.exec(snap)![1]!;
+      await b.tools.browser_click!.execute!({ target: link, element: "Open popup" }, ctx);
+      await new Promise((r) => setTimeout(r, 1500));
+      const after = await snapshot(b);
+      expect(after).not.toContain("withheld");
+      expect(after).not.toContain("first-secret-");
+      expect(after).toContain("Open popup");
+    });
+  }, 120_000);
+
+  test("keys still reach the tab the tools act on while a popup shows an alert", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/search-and-alerting-popup`);
+      let snap = await snapshot(b);
+      await b.tools.browser_click!.execute!({ target: /link \\"Open popup\\"[^\n]*?\[ref=([a-z0-9]+)\]/.exec(snap)![1]!, element: "Open popup" }, ctx);
+      await new Promise((r) => setTimeout(r, 1500));
+      snap = await snapshot(b);
+      await b.tools.browser_click!.execute!({ target: /searchbox \\"Search\\"[^\n]*?\[ref=([a-z0-9]+)\]/.exec(snap)![1]!, element: "Search" }, ctx);
+      const pressed = JSON.stringify(await b.tools.browser_press_key!.execute!({ key: "ArrowDown" }, ctx));
+      expect(pressed).not.toContain("Keys cannot be pressed");
+    });
+  }, 120_000);
+
+  test("a popup opened by window.open that shows an alert neither hangs the tab that opened it nor needs an answer", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/opens-alerting-window`);
+      const snap = await snapshot(b);
+      const started = Date.now();
+      const clicked = JSON.stringify(await b.tools.browser_click!.execute!({ target: refOf(snap, "Sign in with a popup"), element: "Sign in with a popup" }, ctx));
+      expect(Date.now() - started).toBeLessThan(15_000);
+      expect(clicked).not.toContain("Modal state");
+      expect(await snapshot(b)).toContain("Main");
     });
   }, 120_000);
 
