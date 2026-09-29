@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
-import { Budget } from "./llm.ts";
+import { Budget, createModel } from "./llm.ts";
 import { setupPrompt } from "./prompts.ts";
 import { describeProduct, pageText, proposePeople, proposeProject, readProduct, SetupModelFailed } from "./setup.ts";
 import { scriptedModel, text } from "./testing.ts";
@@ -404,4 +404,16 @@ describe("readProduct", () => {
     expect(read).toEqual({ url: "https://app.acme.test/", docsUrl: "https://docs.acme.test/", page: "https://app.acme.test/", docs: "https://docs.acme.test/" });
     await expect(readProduct({ url: "file:///etc/passwd", fetchText: async () => "" })).rejects.toThrow(/http\(s\)/);
   });
+});
+
+test("setup asks OpenRouter only for endpoints that honour its JSON schema, and still refuses to let them keep the data", async () => {
+  const bodies: Array<Record<string, unknown>> = [];
+  const openRouter: typeof fetch = async (_url, init) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({ id: "gen", object: "chat.completion", created: 1, model: "m", choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: "not json" } }], usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 } }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const model = createModel({ modelId: "deepseek/deepseek-v4.1-flash", apiKey: "k", fetch: openRouter });
+  await describeProduct({ model, modelId: "deepseek/deepseek-v4.1-flash", budget: new Budget(1), product: { url: "https://app.acme.test/", page: "Acme" } }).catch(() => undefined);
+  expect(bodies.length).toBeGreaterThan(0);
+  for (const body of bodies) expect(body).toMatchObject({ provider: { require_parameters: true, data_collection: "deny" }, response_format: { type: "json_schema" } });
 });
