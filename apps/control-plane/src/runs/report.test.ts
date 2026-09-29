@@ -206,9 +206,9 @@ test("a judge that was still running when the run stopped is not shown as judgin
 
 test("a finished run left with less than one output token of its cap counts as spent, so its unjudged defects are not offered Judge again", () => {
   const unjudged = (over: Partial<RunSummary>) => finished({ jobs: [judged("failed", modelError)], findings: [finding("ana:f1", "ana", replayed)], budgetUsd: 2, ...over }).report.couldNotJudge.map((f) => f.action);
-  expect(unjudged({ costUsd: 2 - 0.0000005, completionUsdPerMtok: 1.2 })).toEqual(["cap_spent"]);
+  expect(unjudged({ costUsd: 2 - 0.000001, completionUsdPerMtok: 1.2 })).toEqual(["cap_spent"]);
   expect(unjudged({ costUsd: 2 - 0.0000013, completionUsdPerMtok: 1.2 })).toEqual(["judge_again"]);
-  expect(unjudged({ costUsd: 2 - 0.0000005, completionUsdPerMtok: null })).toEqual(["judge_again"]);
+  expect(unjudged({ costUsd: 2 - 0.000001, completionUsdPerMtok: null })).toEqual(["judge_again"]);
   expect(unjudged({ costUsd: 2, completionUsdPerMtok: null })).toEqual(["cap_spent"]);
 });
 

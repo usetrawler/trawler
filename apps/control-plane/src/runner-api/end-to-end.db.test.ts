@@ -182,7 +182,7 @@ test("a run left with less than one output token of its cap is stopped at the ca
   const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "mia", name: "Mia", brief: "b" }, { id: "raj", name: "Raj", brief: "b" }], goals: [{ id: "g", instruction: "Look around." }] });
   const project = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
   const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { budgetUsd: 0.01, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 10, replaySteps: 10, createdBy: "u", price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } }));
-  await sql`update runs set cost_usd = budget_usd - 0.0000005 where id = ${run.id}`.execute(t.db);
+  await sql`update runs set cost_usd = budget_usd - 0.000001 where id = ${run.id}`.execute(t.db);
   seen.length = 0;
   expect(await workOnce(worker())).toBe("done");
   expect(seen).toHaveLength(0);
