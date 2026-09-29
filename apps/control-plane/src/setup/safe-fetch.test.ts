@@ -196,9 +196,9 @@ describe("answers that cannot become a fetch Response", () => {
 
   test("an answer over the fetch's cap is refused as too large while it streams, and one that declares its size before a byte is read; the connection is closed", async () => {
     const capped = guardedFetch({ maxResponseBytes: 200_000 });
-    await expect(capped("https://llm.example.com/flood/1")).rejects.toMatchObject({ reason: "too_long" });
+    await expect(capped("https://llm.example.com/flood/1")).rejects.toMatchObject({ reason: "too_long", status: 200 });
     expect(await closesWithin("/flood/1", 2000)).toBe(true);
-    await expect(capped("https://llm.example.com/declared/1")).rejects.toMatchObject({ reason: "too_long" });
+    await expect(capped("https://llm.example.com/declared/1")).rejects.toMatchObject({ reason: "too_long", status: 200 });
     expect(await closesWithin("/declared/1", 2000)).toBe(true);
     const answered = await capped("https://llm.example.com/status/200");
     expect(await answered.text()).toBe('{"data":[]}');
@@ -208,8 +208,8 @@ describe("answers that cannot become a fetch Response", () => {
     const { CHAT_ANSWER_BYTES, chatFetchFor, fetchFor } = await import("../llm/providers.ts");
     expect(CHAT_ANSWER_BYTES).toBe(2_000_000);
     const custom = { provider: "custom" as const, key: "k", baseUrl: "https://llm.example.com/v1" };
-    await expect(chatFetchFor(custom)("https://llm.example.com/flood/2")).rejects.toMatchObject({ reason: "too_long" });
-    await expect(fetchFor(custom)("https://llm.example.com/flood/3")).rejects.toMatchObject({ reason: "too_long" });
+    await expect(chatFetchFor(custom)("https://llm.example.com/flood/2")).rejects.toMatchObject({ reason: "too_long", status: 200 });
+    await expect(fetchFor(custom)("https://llm.example.com/flood/3")).rejects.toMatchObject({ reason: "too_long", status: 200 });
     expect(sent.get("/flood/2")).toBeGreaterThan(CHAT_ANSWER_BYTES);
     expect(sent.get("/flood/3")).toBeGreaterThan(16_000_000);
     expect(sent.get("/flood/2")).toBeLessThan(sent.get("/flood/3")! / 2);

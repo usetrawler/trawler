@@ -429,7 +429,7 @@ test("an answer the provider gave but the proxy could not pass on is charged to 
   expect(tooLarge).toMatchObject({ status: 422, error: { code: 422, message: "the provider's answer was too large", type: "answer_unusable" } });
   expect(guessed(tooLarge.charged)).toBe(true);
   expect(await call(async () => { throw new FetchRefused("too_long", "the answer is too large", 500); })).toEqual({ status: 502, error: { code: 502, message: "the provider's answer was too large" }, charged: 0 });
-  expect(await call(async () => { throw new FetchRefused("too_long", "the address is too long"); })).toEqual({ status: 502, error: { code: 502, message: "the provider's answer was too large" }, charged: 0 });
+  expect(await call(async () => { throw new FetchRefused("too_long", "the address is too long"); })).toEqual({ status: 502, error: { code: 502, message: "the provider could not be reached" }, charged: 0 });
   expect(await call(async () => new Response(new ReadableStream({ start: (controller) => controller.error(new TypeError("terminated")) }), { status: 503 }))).toEqual({ status: 502, error: { code: 502, message: "the provider could not be reached" }, charged: 0 });
   const cutOff = await call(async () => new Response(new ReadableStream({ start: (controller) => controller.error(new TypeError("terminated")) }), { status: 200 }));
   expect(cutOff).toMatchObject({ status: 502, error: { code: 502, message: "the provider could not be reached" } });

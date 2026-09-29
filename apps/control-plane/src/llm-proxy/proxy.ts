@@ -139,7 +139,7 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
       await chargeTheUnreadAnswer();
       return unusable("the provider's answer was too large");
     }
-    if (err instanceof FetchRefused && err.reason === "too_long") return failure(502, "the provider's answer was too large");
+    if (err instanceof FetchRefused && err.reason === "too_long" && err.status !== undefined) return failure(502, "the provider's answer was too large");
     return failure(502, "the provider could not be reached");
   }
   if (upstream.status === 402) return failure(402, "the provider account behind the workspace key is out of credits");
