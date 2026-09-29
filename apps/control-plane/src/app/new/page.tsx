@@ -4,7 +4,9 @@ import { redirect } from "next/navigation";
 import { AppShell } from "../../components/app-shell.tsx";
 import { signedInMember } from "../../server/auth.ts";
 import { shellFor } from "../../server/shell.ts";
+import { readEnv } from "../../server/env.ts";
 import { SetupWizard } from "./setup-wizard.tsx";
+import { TryDemo } from "./try-demo.tsx";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "New project" };
@@ -16,6 +18,7 @@ export default async function NewProjectPage() {
   return (
     <AppShell shell={shell} current="new">
       <SetupWizard
+        demo={readEnv().demoUrl ? <TryDemo /> : undefined}
         intro={
           <div className="flex flex-col gap-4">
             <p className="font-mono text-xs tracking-[0.2em] text-action-ink uppercase">New project</p>

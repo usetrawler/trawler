@@ -66,3 +66,11 @@ test("artifact storage is read from its five variables together, path style only
 test("a half-configured bucket never stops the rest of the app from reading its environment", () => {
   expect(readEnv({ ...base, TRAWLER_ARTIFACTS_BUCKET: "trawler-artifacts" }).databaseUrl).toBe("postgres://x");
 });
+
+test("the demo's address is read as its origin, must be http or https, and https in production", () => {
+  expect(readEnv(base).demoUrl).toBeUndefined();
+  expect(readEnv({ ...base, TRAWLER_DEMO_URL: " https://demo.usetrawler.com/shop?x=1 " }).demoUrl).toBe("https://demo.usetrawler.com/");
+  expect(() => readEnv({ ...base, TRAWLER_DEMO_URL: "demo.usetrawler.com" })).toThrow("TRAWLER_DEMO_URL must be an http or https address");
+  expect(() => readEnv({ ...base, TRAWLER_DEMO_URL: "ftp://demo.usetrawler.com" })).toThrow("TRAWLER_DEMO_URL must be an http or https address");
+  expect(() => readEnv({ ...base, NODE_ENV: "production", BETTER_AUTH_URL: "https://app.test", TRAWLER_DEMO_URL: "http://demo.test" })).toThrow("TRAWLER_DEMO_URL must use https in production");
+});

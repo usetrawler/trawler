@@ -12,6 +12,7 @@ export interface ServerEnv {
   smokeToken?: string;
   openRouterUrl: string;
   betaEmails?: string[];
+  demoUrl?: string;
 }
 
 export const DEFAULT_SETUP_MODEL = "deepseek/deepseek-v4.1-flash";
@@ -41,8 +42,17 @@ export function readEnv(env: Record<string, string | undefined> = process.env): 
     smokeToken: bearerToken(env.TRAWLER_SMOKE_TOKEN, "TRAWLER_SMOKE_TOKEN"),
     openRouterUrl,
     betaEmails: env.TRAWLER_BETA_EMAILS?.trim() ? env.TRAWLER_BETA_EMAILS.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean) : undefined,
+    demoUrl: demoUrl(env),
     setup: env.OPENROUTER_API_KEY ? { apiKey: env.OPENROUTER_API_KEY, model: env.TRAWLER_SETUP_MODEL ?? DEFAULT_SETUP_MODEL } : undefined,
   };
+}
+
+function demoUrl(env: Record<string, string | undefined>): string | undefined {
+  const raw = env.TRAWLER_DEMO_URL?.trim();
+  if (!raw) return undefined;
+  if (!URL.canParse(raw) || !/^https?:$/.test(new URL(raw).protocol)) throw new Error("TRAWLER_DEMO_URL must be an http or https address");
+  if (env.NODE_ENV === "production" && new URL(raw).protocol !== "https:") throw new Error("TRAWLER_DEMO_URL must use https in production");
+  return new URL(raw).origin + "/";
 }
 
 const ARTIFACT_VARIABLES = {

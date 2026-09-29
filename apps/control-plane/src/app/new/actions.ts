@@ -10,6 +10,8 @@ import { logError, writeLog } from "../../server/log.ts";
 import { FetchRefused, safeFetchText, type RefusalReason } from "../../setup/safe-fetch.ts";
 import { describeDraft, DraftGone, proposeFromDraft, SetupLimited, startDraft, type SetupDeps } from "../../setup/propose.ts";
 import { ProjectNotFound } from "../../projects/projects.ts";
+import { demoProject } from "../../projects/demo.ts";
+import { withOrg } from "../../db/tenancy.ts";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 
@@ -99,6 +101,21 @@ export async function proposePeopleAction(input: { draftId: string; description:
     projectId = await proposeFromDraft(setup.deps, { orgId: setup.orgId, ...chosen.data });
   } catch (err) {
     return failed(err, setup.orgId, "setup could not propose people");
+  }
+  redirect(`/projects/${projectId}`);
+}
+
+export async function tryDemoAction(): Promise<{ error: string }> {
+  const member = await signedInMember(await headers());
+  if (!member) redirect("/sign-in");
+  const demoUrl = readEnv().demoUrl;
+  if (!demoUrl) return { error: "The demo is not available on this server." };
+  let projectId: string;
+  try {
+    projectId = await withOrg(getDb(), member.orgId, (tx) => demoProject(tx, member.orgId, demoUrl, getKeyring()));
+  } catch (err) {
+    await logError("the demo project could not be set up", { orgId: member.orgId, err });
+    return { error: "The demo could not be set up. Try again in a moment." };
   }
   redirect(`/projects/${projectId}`);
 }
