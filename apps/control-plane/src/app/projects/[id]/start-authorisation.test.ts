@@ -23,7 +23,7 @@ vi.mock("../../../credentials/credentials.ts", () => ({
 vi.mock("../../../projects/projects.ts", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../../projects/projects.ts")>()), projectExists: async () => true }));
 vi.mock("../../../llm/prices.ts", () => ({ priceFor: async () => ({ promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }), openRouterPrices: async () => new Map() }));
 vi.mock("../../../llm/providers.ts", async (original) => ({ ...(await original<typeof import("../../../llm/providers.ts")>()), checkModelCall: async () => ({ ok: true }) }));
-vi.mock("../../../runs/runs.ts", () => ({ NeedsAccount: class extends Error {}, personWithoutAccount: async () => null, startRun: async (_tx: unknown, _orgId: string, projectId: string) => { state.started.push(projectId); return { id: "new-run", number: 2 }; } }));
+vi.mock("../../../runs/runs.ts", () => ({ NeedsAccount: class extends Error {}, RunRefused: class extends Error {}, RunInProgress: class extends Error {}, personWithoutAccount: async () => null, refusalToStart: async () => null, startRun: async (_tx: unknown, _orgId: string, projectId: string) => { state.started.push(projectId); return { id: "new-run", number: 2 }; } }));
 
 const { startRunAction } = await import("./actions.ts");
 const RAN = "0f8fad5b-d9cb-469f-a165-70867728950e";

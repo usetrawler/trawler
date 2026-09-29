@@ -11,6 +11,8 @@ export async function register(): Promise<void> {
   if (options) Sentry.init(options);
   const { startArtifactCleanup } = await import("./server/artifacts.ts");
   startArtifactCleanup();
+  const { startRunLimitSweep } = await import("./server/run-limits.ts");
+  startRunLimitSweep();
 }
 
 export const onRequestError: Instrumentation.onRequestError = async (err, request, context) => {

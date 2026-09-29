@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 type Member = { userId: string; email: string; orgId: string; orgName: string; role: string };
-const state = vi.hoisted(() => ({ without: null as string | null, member: null as Member | null, tenants: [] as string[], projectInWorkspace: true, keyChecks: 0, keysSaved: 0, keyStillStored: true, runsStarted: 0, stillAsked: [] as unknown[][], startedIn: [] as unknown[], revalidated: [] as string[], check: { ok: true } as Record<string, unknown>, stored: true }));
+const state = vi.hoisted(() => ({ without: null as string | null, startRefusal: null as Error | null, member: null as Member | null, tenants: [] as string[], projectInWorkspace: true, keyChecks: 0, keysSaved: 0, keyStillStored: true, runsStarted: 0, stillAsked: [] as unknown[][], startedIn: [] as unknown[], revalidated: [] as string[], check: { ok: true } as Record<string, unknown>, stored: true }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({ redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); } }));
@@ -36,6 +36,7 @@ vi.mock("../../../llm/prices.ts", async (importOriginal) => ({
 vi.mock("../../../runs/runs.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../runs/runs.ts")>()),
   personWithoutAccount: async () => state.without,
+  refusalToStart: async () => state.startRefusal ?? null,
   startRun: async (tx: unknown) => { state.startedIn.push(tx); state.runsStarted++; return { id: "run-1", number: 1 }; },
 }));
 
@@ -62,6 +63,22 @@ beforeEach(() => {
   state.revalidated = [];
   state.check = { ok: true };
   state.stored = true;
+  state.startRefusal = null;
+});
+
+test("Start refuses before any key check while the project has a live run, and names that run", async () => {
+  const { RunInProgress } = await vi.importActual<typeof import("../../../runs/runs.ts")>("../../../runs/runs.ts");
+  state.startRefusal = new RunInProgress({ id: "live-run", number: 7 });
+  expect(await startRunAction({}, startForm())).toEqual({ error: "Run 0007 is still going on this project. Wait for it to finish or stop it, then start again.", activeRun: { id: "live-run", number: 7 } });
+  expect(state.keyChecks).toBe(0);
+  expect(state.runsStarted).toBe(0);
+});
+
+test("Start refuses a paused project, a spent monthly budget or paused hosted runs with the reason, before any key check", async () => {
+  const { RunRefused } = await vi.importActual<typeof import("../../../runs/runs.ts")>("../../../runs/runs.ts");
+  state.startRefusal = new RunRefused("Trawler has paused hosted runs for now. Try again later, or run it on your own machine with the local runner.");
+  expect(await startRunAction({}, startForm())).toEqual({ error: "Trawler has paused hosted runs for now. Try again later, or run it on your own machine with the local runner." });
+  expect(state.keyChecks).toBe(0);
 });
 
 test("a refusal about the key or the base URL names that field, so the page can tie the message to it; other refusals name none", async () => {

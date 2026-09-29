@@ -9,8 +9,9 @@ import { loadProjectConfig } from "../projects/projects.ts";
 import { logError } from "../server/log.ts";
 import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
+import { budgetLeft, monthlyBudget, RUN_TIME_LIMIT_HOURS, runsHalted } from "./limits.ts";
 import { turnSteps } from "./models.ts";
-import { ACCOUNT_REFUSED, capSpent, signUpSeedContext, type ConfigSnapshot } from "./runs.ts";
+import { ACCOUNT_REFUSED, capSpent, endRun, signUpSeedContext, type CancelReason, type ConfigSnapshot } from "./runs.ts";
 
 const LEASE_MINUTES = 10;
 const ACTIVE = ["queued", "running"];
@@ -90,7 +91,7 @@ async function reapExpiredLeases(db: Database): Promise<void> {
       .execute();
     for (const job of expired) {
       await tx.updateTable("jobs").set({ status: "failed", error: "the runner stopped answering", lease_until: null, finished_at: new Date() }).where("id", "=", job.id).execute();
-      if (!(await stopIfOverBudget(tx, job.run_id))) await planNext(tx, job, { usage: { model: "", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "error" });
+      if (!(await stopIfOverLimits(tx, job.run_id))) await planNext(tx, job, { usage: { model: "", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "error" });
     }
   });
 }
@@ -133,8 +134,10 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
     const picked = await tx
       .selectFrom("jobs as j")
       .innerJoin("runs as r", "r.id", "j.run_id")
-      .select(["j.id", "j.org_id", "j.run_id", "j.kind", "j.position", "j.persona_key", "j.finding_key", "j.account_ref", "r.project_id", "r.config_snapshot", "r.max_steps", "r.replay_steps", "r.budget_usd", "r.cost_usd", "r.agent_model", "r.judge_model", "r.sign_up_seed"])
+      .innerJoin("projects as p", "p.id", "r.project_id")
+      .select(["j.id", "j.org_id", "j.run_id", "j.kind", "j.position", "j.persona_key", "j.finding_key", "j.account_ref", "r.project_id", "r.status as run_status", "r.config_snapshot", "r.max_steps", "r.replay_steps", "r.budget_usd", "r.cost_usd", "r.agent_model", "r.judge_model", "r.sign_up_seed"])
       .where("j.status", "=", "queued")
+      .where("p.paused_at", "is", null)
       .where((eb) => eb.or([eb("r.status", "in", ACTIVE), eb("j.requested_by", "is not", null)]))
       .where((eb) => eb.not(eb.exists(eb.selectFrom("jobs as busy").select("busy.id").whereRef("busy.run_id", "=", "j.run_id").where("busy.status", "=", "leased"))))
       .orderBy("r.created_at")
@@ -144,6 +147,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
       .skipLocked()
       .executeTakeFirst();
     if (!picked) return null;
+    if (ACTIVE.includes(picked.run_status) && (await stopIfOverLimits(tx, picked.run_id))) return { quarantined: true };
     const token = randomBytes(32).toString("base64url");
     await tx.updateTable("jobs").set({ status: "leased", token_hash: hashToken(token), lease_until: sql<Date>`now() + make_interval(mins => ${LEASE_MINUTES})`, started_at: new Date() }).where("id", "=", picked.id).execute();
     await tx.updateTable("runs").set({ status: "running", started_at: sql<Date>`coalesce(started_at, now())` }).where("id", "=", picked.run_id).where("status", "in", ACTIVE).execute();
@@ -178,7 +182,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
       await sql`rollback to savepoint prepare_assignment`.execute(tx);
       await logError("job could not be prepared", { orgId: picked.org_id, runId: picked.run_id, jobId: picked.id, err });
       await tx.updateTable("jobs").set({ status: "failed", error: "the job could not be prepared from the project; it may have changed since the run started", token_hash: null, lease_until: null, finished_at: new Date() }).where("id", "=", picked.id).execute();
-      if (!(await stopIfOverBudget(tx, picked.run_id))) await planNext(tx, picked, { usage: { model: "", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "error" });
+      if (!(await stopIfOverLimits(tx, picked.run_id))) await planNext(tx, picked, { usage: { model: "", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "error" });
       return { quarantined: true };
     }
   });
@@ -186,6 +190,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
 
 export async function claimJob(db: Database, keys: Keyring): Promise<JobAssignment | null> {
   await reapExpiredLeases(db);
+  if (runsHalted()) return null;
   for (let attempt = 0; attempt < 5; attempt++) {
     let outcome: ClaimOutcome;
     try {
@@ -281,15 +286,55 @@ async function addCost(tx: Tx, runId: string, jobId: string, usd: number) {
 }
 
 const lockedRun = (tx: Tx, runId: string) =>
-  tx.selectFrom("runs").select(["status", "cost_usd", "budget_usd", "token_cap", "tokens_used", "completion_usd_per_mtok"]).where("id", "=", runId).forUpdate().executeTakeFirstOrThrow();
+  tx
+    .selectFrom("runs as r")
+    .innerJoin("projects as p", "p.id", "r.project_id")
+    .select(["r.org_id", "r.status", "r.cost_usd", "r.budget_usd", "r.token_cap", "r.tokens_used", "r.completion_usd_per_mtok", sql<boolean>`p.paused_at is not null`.as("paused"), sql<boolean>`coalesce(r.started_at <= now() - make_interval(hours => ${RUN_TIME_LIMIT_HOURS}), false)`.as("over_time")])
+    .where("r.id", "=", runId)
+    .forUpdate(["r"])
+    .executeTakeFirstOrThrow();
 
-async function stopIfOverBudget(tx: Tx, runId: string): Promise<boolean> {
+type LockedRun = Awaited<ReturnType<typeof lockedRun>>;
+type RunEnd = { status: "stopped_budget" } | { status: "cancelled"; reason: CancelReason };
+
+async function spentWorkspaceBudget(tx: Tx, orgId: string): Promise<boolean> {
+  return budgetLeft(await monthlyBudget(tx, orgId)) <= 0;
+}
+
+async function limitReached(tx: Tx, run: LockedRun): Promise<RunEnd | null> {
+  if (runsHalted()) return { status: "cancelled", reason: "halted" };
+  if (run.paused) return { status: "cancelled", reason: "paused" };
+  if (capSpent(run)) return { status: "stopped_budget" };
+  if (await spentWorkspaceBudget(tx, run.org_id)) return { status: "cancelled", reason: "workspace_budget" };
+  if (run.over_time) return { status: "cancelled", reason: "time_limit" };
+  return null;
+}
+
+async function limitStop(tx: Tx, runId: string): Promise<RunEnd | "inactive" | null> {
   const run = await lockedRun(tx, runId);
-  if (!ACTIVE.includes(run.status)) return true;
-  if (!capSpent(run)) return false;
-  await tx.updateTable("runs").set({ status: "stopped_budget", finished_at: new Date(), sign_up_seed: null }).where("id", "=", runId).execute();
-  await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date() }).where("run_id", "=", runId).where("status", "=", "queued").execute();
-  return true;
+  if (!ACTIVE.includes(run.status)) return "inactive";
+  const end = await limitReached(tx, run);
+  if (end) await endRun(tx, runId, end);
+  return end;
+}
+
+async function stopIfOverLimits(tx: Tx, runId: string): Promise<boolean> {
+  return (await limitStop(tx, runId)) !== null;
+}
+
+async function judgeAgainStopped(tx: Tx, runId: string): Promise<boolean> {
+  const run = await lockedRun(tx, runId);
+  return runsHalted() || run.paused || capSpent(run) || (await spentWorkspaceBudget(tx, run.org_id));
+}
+
+export async function stopRunsPastLimits(db: Database): Promise<number> {
+  return asSystem(db, async (tx) => {
+    const live = tx.selectFrom("runs").select("id").where("status", "in", ACTIVE);
+    const due = await (runsHalted() ? live : live.where(sql<boolean>`started_at <= now() - make_interval(hours => ${RUN_TIME_LIMIT_HOURS})`)).forUpdate().skipLocked().execute();
+    let stopped = 0;
+    for (const run of due) if (await stopIfOverLimits(tx, run.id)) stopped++;
+    return stopped;
+  });
 }
 
 export async function ingestEvents(db: Database, token: string, events: RunEvent[], expectedJobId?: string): Promise<{ cancel: boolean }> {
@@ -328,7 +373,7 @@ export async function ingestEvents(db: Database, token: string, events: RunEvent
       }
     }
     await tx.updateTable("jobs").set({ lease_until: sql<Date>`now() + make_interval(mins => ${LEASE_MINUTES})` }).where("id", "=", job.id).execute();
-    return { cancel: judgingAgain ? capSpent(await lockedRun(tx, job.run_id)) : await stopIfOverBudget(tx, job.run_id) };
+    return { cancel: judgingAgain ? await judgeAgainStopped(tx, job.run_id) : await stopIfOverLimits(tx, job.run_id) };
   });
 }
 
@@ -347,19 +392,27 @@ export interface LlmCall {
 export class LlmRefused extends Error {}
 
 export async function llmCallFor(db: Database, token: string): Promise<LlmCall> {
-  return asSystem(db, async (tx) => {
+  const outcome = await asSystem(db, async (tx): Promise<LlmCall | { refused: string }> => {
     const job = await jobForToken(tx, token);
-    if (job.status !== "leased") throw new LlmRefused("the job is over");
+    if (job.status !== "leased") return { refused: "the job is over" };
+    if (job.requested_by) {
+      const run = await lockedRun(tx, job.run_id);
+      if (runsHalted() || run.paused) return { refused: "the run is no longer active" };
+    } else {
+      const stop = await limitStop(tx, job.run_id);
+      if (stop) return { refused: stop !== "inactive" && stop.status === "stopped_budget" ? "the run has spent its budget" : "the run is no longer active" };
+    }
     const run = await tx.selectFrom("runs").select(["status", "cost_usd", "budget_usd", "agent_model", "judge_model", "provider", "provider_base_url", "prompt_usd_per_mtok", "completion_usd_per_mtok", "token_cap", "tokens_used"]).where("id", "=", job.run_id).executeTakeFirstOrThrow();
-    if (!ACTIVE.includes(run.status) && !job.requested_by) throw new LlmRefused("the run is no longer active");
-    const remainingUsd = Number(run.budget_usd) - Number(run.cost_usd);
+    const remainingUsd = Math.min(Number(run.budget_usd) - Number(run.cost_usd), budgetLeft(await monthlyBudget(tx, job.org_id)));
     const remainingTokens = run.token_cap === null ? null : Number(run.token_cap) - Number(run.tokens_used);
-    if (remainingUsd <= 0 || (remainingTokens !== null && remainingTokens <= 0)) throw new LlmRefused("the run has spent its budget");
+    if (remainingUsd <= 0 || (remainingTokens !== null && remainingTokens <= 0)) return { refused: "the run has spent its budget" };
     await tx.updateTable("jobs").set({ lease_until: sql<Date>`now() + make_interval(mins => ${LEASE_MINUTES})` }).where("id", "=", job.id).execute();
     return { orgId: job.org_id, runId: job.run_id, jobId: job.id, models: [...new Set([run.agent_model, run.judge_model])], provider: run.provider as Provider, providerBaseUrl: run.provider_base_url,
       price: run.prompt_usd_per_mtok === null || run.completion_usd_per_mtok === null ? null : { promptUsdPerMtok: Number(run.prompt_usd_per_mtok), completionUsdPerMtok: Number(run.completion_usd_per_mtok) },
       remainingUsd, remainingTokens };
   });
+  if ("refused" in outcome) throw new LlmRefused(outcome.refused);
+  return outcome;
 }
 
 export async function recordLlmUsage(db: Database, call: LlmCall, usage: { model: string; inputTokens: number; outputTokens: number; costUsd: number }): Promise<void> {
@@ -373,7 +426,7 @@ export async function recordLlmUsage(db: Database, call: LlmCall, usage: { model
     await addCost(tx, call.runId, call.jobId, usage.costUsd);
     const tokens = Math.max(0, Math.round(usage.inputTokens)) + Math.max(0, Math.round(usage.outputTokens));
     await tx.updateTable("runs").set({ tokens_used: sql`tokens_used + ${tokens}` }).where("id", "=", call.runId).execute();
-    await stopIfOverBudget(tx, call.runId);
+    await stopIfOverLimits(tx, call.runId);
   });
 }
 
@@ -407,7 +460,7 @@ export async function completeJob(db: Database, token: string, input: JobResult,
     if (job.kind === "replay" && result.observation) {
       await tx.updateTable("findings").set({ replay: JSON.stringify(ReplayObservationSchema.parse(result.observation)), updated_at: new Date() }).where("run_id", "=", job.run_id).where("key", "=", job.finding_key!).execute();
     }
-    if (await stopIfOverBudget(tx, job.run_id)) return;
+    if (await stopIfOverLimits(tx, job.run_id)) return;
     await planNext(tx, job, result);
   });
 }
