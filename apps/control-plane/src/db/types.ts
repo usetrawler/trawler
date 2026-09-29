@@ -203,6 +203,8 @@ export interface Projects {
   id: Generated<string>;
   name: string;
   org_id: string;
+  paused_at: Timestamp | null;
+  paused_by: string | null;
   target_url: string;
   updated_at: Generated<Timestamp>;
 }
@@ -322,6 +324,13 @@ export interface Verification {
   value: string;
 }
 
+export interface WorkspaceBudgets {
+  monthly_usd: Numeric;
+  org_id: string;
+  set_at: Generated<Timestamp>;
+  set_by: string;
+}
+
 export interface DB {
   account: Account;
   artifacts: Artifacts;
@@ -346,4 +355,5 @@ export interface DB {
   target_gates: TargetGates;
   user: User;
   verification: Verification;
+  workspace_budgets: WorkspaceBudgets;
 }
