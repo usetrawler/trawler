@@ -79,10 +79,15 @@ beforeEach(() => {
 test("the first run on Trawler starts without a key, on the fixed model and cap whatever the form says, paid by Trawler", async () => {
   state.platformKey = true;
   state.stored = false;
+  const asThePanelSendsIt = startForm({ onUs: "1" });
+  asThePanelSendsIt.delete("model");
+  asThePanelSendsIt.delete("budget");
+  await expect(startRunAction({}, asThePanelSendsIt)).rejects.toMatchObject({ to: "/runs/0001" });
   await expect(startRunAction({}, startForm({ onUs: "1", model: "openai/gpt-5-pro", budget: "50" }))).rejects.toMatchObject({ to: "/runs/0001" });
   expect(state.keyChecks).toBe(0);
   expect(state.keysSaved).toBe(0);
-  expect(state.startOptions).toEqual([expect.objectContaining({ agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash", budgetUsd: 1, provider: "openrouter", providerBaseUrl: null, paidBy: "trawler", createdBy: "member-1" })]);
+  const onTrawler = expect.objectContaining({ agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash", budgetUsd: 1, provider: "openrouter", providerBaseUrl: null, paidBy: "trawler", createdBy: "member-1" });
+  expect(state.startOptions).toEqual([onTrawler, onTrawler]);
 });
 
 test("the first run on Trawler is refused plainly when this server has no platform key, or the workspace has used it, and nothing starts", async () => {
