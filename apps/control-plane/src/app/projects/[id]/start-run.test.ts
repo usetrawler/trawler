@@ -37,3 +37,8 @@ test("the estimate spans OpenRouter's providers, names the turns, and says how m
   expect(text({ price: listed, range: null, goalsPerTurn: [2, 1, 1], personas: 2, modelChosen: true })).toContain("2 people taking 3 turns");
   expect(text({ price: null, range: null, goalsPerTurn: [1], personas: 1, modelChosen: true })).toContain("the run stops after 3 million tokens instead");
 });
+
+test("the cap's hint says the last call can take a run slightly past it, as the proxy counts a call once it has happened", () => {
+  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: true, authorisedBefore: true }));
+  expect(html).toContain("Hard cap (USD). The run stops once it reaches it, and the last call can take it slightly past; findings so far are kept.");
+});

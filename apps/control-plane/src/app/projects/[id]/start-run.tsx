@@ -174,7 +174,7 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
       <Estimate price={price} range={range} goalsPerTurn={goalsPerTurn} personas={personas} modelChosen={Boolean(modelId)} />
       {estimate || !modelId ? (
         <label className="flex flex-col gap-2">
-          <span className="text-sm text-muted">Hard cap (USD). The run stops before going over it; findings so far are kept.</span>
+          <span className="text-sm text-muted">Hard cap (USD). The run stops once it reaches it, and the last call can take it slightly past; findings so far are kept.</span>
           <input name="budget" type="number" min={0.1} max={50} step={0.1} value={cap} onChange={(e) => setCap(Number(e.target.value))} className={`${field} w-40`} />
           {estimate && cap > 0 && cap < estimate.high && <span className="text-sm text-warn">The cap is below the estimate, so the run may stop before everyone finishes.</span>}
         </label>
