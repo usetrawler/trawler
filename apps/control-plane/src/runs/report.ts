@@ -1,5 +1,5 @@
 import { goalsFor } from "@usetrawler/protocol";
-import { ACCOUNT_REFUSED, type CancelReason, type RunSummary } from "./runs.ts";
+import { ACCOUNT_REFUSED, outOfBudget, type CancelReason, type RunSummary } from "./runs.ts";
 
 export type StageState = "waiting" | "active" | "done" | "skipped";
 function useDetail(people: number, turns: number): string {
@@ -109,7 +109,7 @@ export function runView(s: RunSummary) {
 
   const name = new Map(s.personas.map((p) => [p.id, p.name]));
   const withPersona = (f: Finding) => ({ ...f, personaName: name.get(f.personaKey) ?? f.personaKey, goalText: goalText.get(f.goal) ?? f.goal, reproduction: f.reproduction as string[] });
-  const capSpent = s.costUsd >= s.budgetUsd || (s.tokenCap !== null && s.tokensUsed >= s.tokenCap);
+  const capSpent = outOfBudget(s);
   const unsettled = defects.filter((f) => judgingAgain(f) || unjudged(f));
   const settled = defects.filter((f) => !unsettled.includes(f));
   const report = {
