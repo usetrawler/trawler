@@ -116,7 +116,9 @@ export async function handleChatCompletions(req: Request, deps: ProxyDeps): Prom
   inFlight.add(call.jobId);
   try {
     const res = await proxied(req, deps, call);
-    if (call.paidBy === "trawler" && !MAY_HAVE_BEEN_CHARGED.has(res.status)) await forgetUnpaidFirstCall(deps.db, call.runId);
+    if (call.firstOnUs && !MAY_HAVE_BEEN_CHARGED.has(res.status)) {
+      await forgetUnpaidFirstCall(deps.db, call.runId).catch((err) => logError("the first run on Trawler could not be given back after an unpaid call", { orgId: call.orgId, runId: call.runId, err }));
+    }
     return res;
   } finally {
     inFlight.delete(call.jobId);

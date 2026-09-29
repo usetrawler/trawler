@@ -389,6 +389,7 @@ export async function ingestEvents(db: Database, token: string, events: RunEvent
 export interface LlmCall {
   orgId: string;
   paidBy: PaidBy;
+  firstOnUs: boolean;
   runId: string;
   jobId: string;
   models: string[];
@@ -417,9 +418,9 @@ export async function llmCallFor(db: Database, token: string): Promise<LlmCall> 
     const remainingUsd = Math.min(Number(run.budget_usd) - Number(run.cost_usd), workspaceLeft);
     const remainingTokens = run.token_cap === null ? null : Number(run.token_cap) - Number(run.tokens_used);
     if (remainingUsd <= 0 || (remainingTokens !== null && remainingTokens <= 0)) return { refused: "the run has spent its budget" };
-    if (run.paid_by === "trawler") await tx.updateTable("first_runs_on_us").set({ model_called_at: sql<Date>`coalesce(model_called_at, now())` }).where("run_id", "=", job.run_id).execute();
+    const firstOnUs = run.paid_by === "trawler" && !!(await tx.updateTable("first_runs_on_us").set({ model_called_at: sql<Date>`now()` }).where("run_id", "=", job.run_id).where("model_called_at", "is", null).returning("run_id").executeTakeFirst());
     await tx.updateTable("jobs").set({ lease_until: sql<Date>`now() + make_interval(mins => ${LEASE_MINUTES})` }).where("id", "=", job.id).execute();
-    return { orgId: job.org_id, paidBy: run.paid_by as PaidBy, runId: job.run_id, jobId: job.id, models: [...new Set([run.agent_model, run.judge_model])], provider: run.provider as Provider, providerBaseUrl: run.provider_base_url,
+    return { orgId: job.org_id, paidBy: run.paid_by as PaidBy, firstOnUs, runId: job.run_id, jobId: job.id, models: [...new Set([run.agent_model, run.judge_model])], provider: run.provider as Provider, providerBaseUrl: run.provider_base_url,
       price: run.prompt_usd_per_mtok === null || run.completion_usd_per_mtok === null ? null : { promptUsdPerMtok: Number(run.prompt_usd_per_mtok), completionUsdPerMtok: Number(run.completion_usd_per_mtok) },
       remainingUsd, remainingTokens };
   });

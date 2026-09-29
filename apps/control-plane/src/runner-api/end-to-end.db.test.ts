@@ -564,8 +564,44 @@ test("a first run on Trawler whose calls Trawler's provider refused without char
   replies = [upstreamError(503, "busy")];
   expect((await call(slow.token)).status).toBe(503);
   expect(await allowance()).toEqual([{ run_id: timedOut.id, model_called_at: null }]);
-  const unread = await handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${slow.token}`, "content-type": "application/json" }, body: JSON.stringify({ model: "m/agent", messages: [] }) }), { db: t.db, keys, openRouterUrl: openRouterBase, trawlerKey: TRAWLER_KEY, retryBaseMs: 1, attempts: 1, fetch: async () => { throw Object.assign(new Error("timed out"), { name: "TimeoutError" }); } });
-  expect(unread.status).toBe(504);
+  const callWith = (token: string, fetchImpl: typeof fetch, signal?: AbortSignal) =>
+    handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", signal, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ model: "m/agent", messages: [] }) }), { db: t.db, keys, openRouterUrl: openRouterBase, trawlerKey: TRAWLER_KEY, retryBaseMs: 1, attempts: 1, fetch: fetchImpl });
+  const timeout = await callWith(slow.token, async () => { throw Object.assign(new Error("timed out"), { name: "TimeoutError" }); });
+  expect(timeout.status).toBe(504);
+  replies = [upstreamError(503, "busy")];
+  expect((await call(slow.token)).status).toBe(503);
   await stop(timedOut.id);
   expect(await allowance()).toEqual([{ run_id: timedOut.id, model_called_at: expect.any(Date) }]);
+});
+
+test("a first call on Trawler that the runner hung up on, or whose answer broke off after the provider charged, uses the allowance", async () => {
+  const TRAWLER_KEY = "sk-or-v1-" + "t".repeat(64);
+  const orgs = ["org-hung-up", "org-broke-off"];
+  for (const org of orgs) await sql`insert into organization (id, name, slug, "createdAt") values (${org}, ${org}, ${org}, now())`.execute(t.db);
+  const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "ida", name: "Ida", brief: "b" }], goals: [{ id: "g", instruction: "x" }] });
+  const runOn = async (org: string) => {
+    const project = await withOrg(t.db, org, (tx) => createProject(tx, org, config, keys));
+    const run = await withOrg(t.db, org, (tx) => startRun(tx, org, project, keys, { budgetUsd: 1, agentModel: "m/agent", judgeModel: "m/agent", maxSteps: 10, replaySteps: 10, createdBy: "u", provider: "openrouter", paidBy: "trawler", price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } }));
+    const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "3" } }), deps)).json();
+    expect(job.runId).toBe(run.id);
+    return { run, job: job as { token: string; jobId: string } };
+  };
+  const callWith = (token: string, fetchImpl: typeof fetch, signal?: AbortSignal) =>
+    handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", signal, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ model: "m/agent", messages: [] }) }), { db: t.db, keys, openRouterUrl: openRouterBase, trawlerKey: TRAWLER_KEY, retryBaseMs: 1, attempts: 1, fetch: fetchImpl });
+  const ended = async (org: string, runId: string, jobId: string) => {
+    await sql`update jobs set status = 'succeeded' where id = ${jobId}`.execute(t.db);
+    await withOrg(t.db, org, (tx) => cancelRun(tx, org, runId, "stopped"));
+    return (await sql<{ n: string }>`select count(*) as n from first_runs_on_us where org_id = ${org}`.execute(t.db)).rows[0]!.n;
+  };
+
+  const hungUp = await runOn("org-hung-up");
+  const hangUp = new AbortController();
+  const aborted = await callWith(hungUp.job.token, async () => { hangUp.abort(); throw new Error("aborted"); }, hangUp.signal);
+  expect(aborted.status).toBe(499);
+  expect(await ended("org-hung-up", hungUp.run.id, hungUp.job.jobId)).toBe("1");
+
+  const brokeOff = await runOn("org-broke-off");
+  const breaking = await callWith(brokeOff.job.token, async () => new Response(new ReadableStream({ start: (c) => c.error(new Error("connection reset")) }), { status: 200 }));
+  expect(breaking.status).toBe(502);
+  expect(await ended("org-broke-off", brokeOff.run.id, brokeOff.job.jobId)).toBe("1");
 });
