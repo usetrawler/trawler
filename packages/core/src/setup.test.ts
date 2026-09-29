@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
 import { Budget, createModel } from "./llm.ts";
-import { setupPrompt } from "./prompts.ts";
+import { describePrompt, setupPrompt } from "./prompts.ts";
 import { describeProduct, pageText, proposePeople, proposeProject, readProduct, SetupModelFailed } from "./setup.ts";
 import { scriptedModel, text } from "./testing.ts";
 
@@ -416,4 +416,10 @@ test("setup asks OpenRouter only for endpoints that honour its JSON schema, and 
   await describeProduct({ model, modelId: "deepseek/deepseek-v4.1-flash", budget: new Budget(1), product: { url: "https://app.acme.test/", page: "Acme" } }).catch(() => undefined);
   expect(bodies.length).toBeGreaterThan(0);
   for (const body of bodies) expect(body).toMatchObject({ provider: { require_parameters: true, data_collection: "deny" }, response_format: { type: "json_schema" } });
+});
+
+test("every setup prompt also asks for the JSON in words, for an endpoint that honours only a plain JSON mode", () => {
+  const page = { url: "https://app.acme.test/", page: "Acme" };
+  const prompts = [describePrompt(page), setupPrompt(page), setupPrompt({ ...page, context: { description: "d", features: ["f"], signUp: "open" } })];
+  for (const prompt of prompts) expect(prompt).toMatch(/Answer with one JSON object that has exactly these fields and nothing around it\.$/);
 });
