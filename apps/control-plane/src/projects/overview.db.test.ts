@@ -277,8 +277,9 @@ test("a run with no defects, or a defect whose replay has not failed, is not mar
 test("a run number reaches only the workspace's own run with that number, never another workspace's", async () => {
   expect(await withOrg(t.db, "org-b", (tx) => runIdByNumber(tx, "org-b", theirs.number))).toBe(theirs.id);
   expect(await withOrg(t.db, "org-a", (tx) => runIdByNumber(tx, "org-a", latest.number))).toBe(latest.id);
-  expect(await withOrg(t.db, "org-a", (tx) => runIdByNumber(tx, "org-a", theirs.number))).not.toBe(theirs.id);
+  const ownRun = async (orgId: string, number: number) => (await asSystem(t.db, (tx) => tx.selectFrom("runs").select("id").where("org_id", "=", orgId).where("number", "=", number).executeTakeFirst()))?.id ?? null;
+  expect(await withOrg(t.db, "org-a", (tx) => runIdByNumber(tx, "org-a", theirs.number))).toBe(await ownRun("org-a", theirs.number));
   expect(await withOrg(t.db, "org-b", (tx) => runIdByNumber(tx, "org-a", latest.number))).toBeNull();
-  expect(await asSystem(t.db, (tx) => runIdByNumber(tx, "org-b", latest.number))).not.toBe(latest.id);
+  expect(await asSystem(t.db, (tx) => runIdByNumber(tx, "org-b", latest.number))).toBe(await ownRun("org-b", latest.number));
   expect(await withOrg(t.db, "org-a", (tx) => runIdByNumber(tx, "org-a", 9999))).toBeNull();
 });
