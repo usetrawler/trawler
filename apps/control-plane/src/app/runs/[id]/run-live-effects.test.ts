@@ -96,6 +96,17 @@ test("a finished run is not fetched again", async () => {
   expect(fetched).not.toHaveBeenCalled();
 });
 
+test("a run stopped while a session is still out keeps being fetched, so that person's real ending shows without a reload", async () => {
+  const ana = { id: "job-ana", kind: "role_session", status: "leased", persona_key: "ana", finding_key: null, usage: null, requested: false, stopped_by: null, error: null } as RunSummary["jobs"][number];
+  const fetched = vi.fn(async () => new Response(JSON.stringify(data("stopped_budget"))));
+  vi.stubGlobal("fetch", fetched);
+  RunLive({ initial: data("stopped_budget", { jobs: [ana] }) });
+  const stop = react.effects[0]!() as () => void;
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(fetched).toHaveBeenCalledOnce();
+  stop();
+});
+
 test("Judge again starts the judge for that defect, then refreshes the page, and shows a refusal", async () => {
   const refreshed = vi.fn(async () => {});
   actions.judgeAgainAction.mockResolvedValueOnce({}).mockResolvedValueOnce({ error: "This run has spent its cap, so it cannot be judged again." });
