@@ -148,6 +148,10 @@ beforeAll(async () => {
       }
       case "/echo":
         return html(`<p>Your password is ${PASSWORD}</p>`);
+      case "/opens-alerting-popup":
+        return html(`<h1>Main</h1><a href="/alerts-on-load" target="_blank">Open popup</a><a href="/plain">Plain</a>`);
+      case "/alerts-on-load":
+        return html(`<script>alert("from popup")</script>`);
       case "/unsaved-edit":
         return html(`<h1>Edit venture</h1><a href="/plain">Back to list</a><button onclick="alert('Saved!')">Save</button><script>addEventListener("beforeunload", (e) => { e.preventDefault(); e.returnValue = ""; });</script>`);
       case "/frame":
@@ -657,6 +661,18 @@ describe("native dialogs", () => {
       }
       await call(b, "browser_handle_dialog", { accept: false });
       expect(await call(b, "browser_snapshot")).toMatchObject({ isError: false });
+    });
+  }, 60_000);
+
+  test("an alert in a popup the tools cannot reach locks nothing: the tab the tools act on carries on", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/opens-alerting-popup`);
+      await call(b, "browser_click", { element: "Open popup", target: await linkRef(b, "Open popup") });
+      await new Promise((r) => setTimeout(r, 1000));
+      expect(await call(b, "browser_snapshot")).toMatchObject({ isError: false });
+      const moved = await call(b, "browser_navigate", { url: `${origin}/plain` });
+      expect(moved).toMatchObject({ isError: false });
+      expect(moved.ms).toBeLessThan(5000);
     });
   }, 60_000);
 
