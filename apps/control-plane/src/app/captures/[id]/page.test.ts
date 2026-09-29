@@ -50,7 +50,7 @@ test("a capture opens at an address that stays valid, under its finding's title,
   state.capture = capture;
   const html = renderToStaticMarkup(await open());
   const crumbs = html.match(/<nav aria-label="Breadcrumb".*?<\/nav>/)?.[0] ?? "";
-  expect(crumbs).toMatch(new RegExp(`<a href="/projects/p1"[^>]*>Acme</a>.*<a href="/runs/${RUN}#finding-ana%3Af1"[^>]*>Run 0017</a>.*<li aria-current="page"[^>]*>Screen capture</li>`));
+  expect(crumbs).toMatch(new RegExp(`<a href="/projects/p1"[^>]*>Acme</a>.*<a href="/runs/0017#finding-ana%3Af1"[^>]*>Run 0017</a>.*<li aria-current="page"[^>]*>Screen capture</li>`));
   expect(html).toMatch(/<h1[^>]*>Saving fails<\/h1>/);
   expect(html).toContain(">Screen capture · when reported</p>");
   expect(html).toMatch(new RegExp(`<a href="/api/artifacts/${ID}" target="_blank" rel="noreferrer" tabindex="-1" class="[^"]*\\bmax-w-\\[1282px\\][^"]*"><img src="/api/artifacts/${ID}" alt="The page when “Saving fails” was reported" width="1280" height="720" class="[^"]*\\bborder\\b[^"]*"/><span class="sr-only"> \\(opens the original in a new tab\\)</span></a>`));
@@ -72,6 +72,6 @@ test("a capture whose finding is gone leads back to its run alone", async () => 
   state.member = member;
   state.capture = { ...capture, findingKey: null, findingTitle: null };
   const html = renderToStaticMarkup(await open());
-  expect(html).toMatch(new RegExp(`<a href="/runs/${RUN}" [^>]*>Run 0017</a>`));
+  expect(html).toMatch(new RegExp(`<a href="/runs/0017" [^>]*>Run 0017</a>`));
   expect(html).toMatch(/<h1[^>]*>Screen capture<\/h1>/);
 });

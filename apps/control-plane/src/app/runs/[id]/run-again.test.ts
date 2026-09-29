@@ -88,7 +88,7 @@ beforeEach(() => {
 });
 
 test("Run again starts the plan as it is now with the previous run's model and cap, today's step limits, and opens the new run", async () => {
-  await expect(runAgainAction(RUN)).rejects.toMatchObject({ to: "/runs/new-run" });
+  await expect(runAgainAction(RUN)).rejects.toMatchObject({ to: "/runs/0009" });
   expect(state.asked).toEqual([["org-1", "id", RUN], ["org-1", "org_id", "org-1"]]);
   expect(state.checked).toEqual(["deepseek/deepseek-v4.1-flash"]);
   expect(state.started).toEqual([{
@@ -126,7 +126,7 @@ test("a run on a model without a known price runs again under the token cap, and
   state.price = null;
   state.previous = { ...state.previous!, prompt_usd_per_mtok: null, completion_usd_per_mtok: null };
   state.previous = { ...state.previous!, judge_model: "anthropic/claude-haiku-4.5" };
-  await expect(runAgainAction(RUN)).rejects.toMatchObject({ to: "/runs/new-run" });
+  await expect(runAgainAction(RUN)).rejects.toMatchObject({ to: "/runs/0009" });
   expect(state.checked).toEqual(["deepseek/deepseek-v4.1-flash", "anthropic/claude-haiku-4.5"]);
   expect(state.started[0]).toMatchObject({ options: { price: null, tokenCap: 3_000_000 } });
 });
@@ -172,12 +172,12 @@ test("someone who is not signed in is sent to sign in", async () => {
 });
 
 test("the key is held in the transaction the run starts in, for the provider and address the run will call", async () => {
-  await expect(runAgainAction(RUN)).rejects.toMatchObject({ to: "/runs/new-run" });
+  await expect(runAgainAction(RUN)).rejects.toMatchObject({ to: "/runs/0009" });
   expect(state.held).toEqual([{ tx: expect.anything(), orgId: "org-1", provider: "openrouter", baseUrl: null }]);
   expect((state.held[0] as { tx: unknown }).tx).toBe((state.started[0] as { tx: unknown }).tx);
   state.previous = { ...state.previous!, provider: "custom", provider_base_url: "https://llm.example.com/v1" };
   state.stored = { provider: "custom", key: "k".repeat(30), baseUrl: "https://llm.example.com/v1" };
-  await expect(runAgainAction(RUN)).rejects.toMatchObject({ to: "/runs/new-run" });
+  await expect(runAgainAction(RUN)).rejects.toMatchObject({ to: "/runs/0009" });
   expect(state.held.at(-1)).toMatchObject({ provider: "custom", baseUrl: "https://llm.example.com/v1" });
 });
 
@@ -201,13 +201,13 @@ test("when no price can be found now, the new run keeps the price the previous r
   state.price = null;
   state.previous = { ...state.previous!, provider: "anthropic", agent_model: "claude-haiku-4-5", judge_model: "claude-haiku-4-5", prompt_usd_per_mtok: "1.000000", completion_usd_per_mtok: "5.000000" };
   state.stored = { provider: "anthropic", key: "sk-ant-" + "k".repeat(40), baseUrl: null };
-  await expect(runAgainAction(RUN)).rejects.toMatchObject({ to: "/runs/new-run" });
+  await expect(runAgainAction(RUN)).rejects.toMatchObject({ to: "/runs/0009" });
   expect(state.started[0]).toMatchObject({ options: { price: { promptUsdPerMtok: 1, completionUsdPerMtok: 5 }, tokenCap: null } });
 });
 
 test("a price known now wins over the one the previous run was held to", async () => {
   state.previous = { ...state.previous!, prompt_usd_per_mtok: "9.000000", completion_usd_per_mtok: "9.000000" };
-  await expect(runAgainAction(RUN)).rejects.toMatchObject({ to: "/runs/new-run" });
+  await expect(runAgainAction(RUN)).rejects.toMatchObject({ to: "/runs/0009" });
   expect(state.started[0]).toMatchObject({ options: { price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } } });
 });
 

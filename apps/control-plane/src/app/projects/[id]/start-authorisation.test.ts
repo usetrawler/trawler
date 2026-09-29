@@ -39,7 +39,7 @@ beforeEach(() => {
 });
 
 test("a product that has had a run starts again without the box, because its first Start confirmed it", async () => {
-  await expect(start(RAN, false)).rejects.toMatchObject({ to: "/runs/new-run" });
+  await expect(start(RAN, false)).rejects.toMatchObject({ to: "/runs/0002" });
   expect(state.counted).toEqual([["org-1", RAN]]);
   expect(state.started).toEqual([RAN]);
 });
@@ -47,7 +47,7 @@ test("a product that has had a run starts again without the box, because its fir
 test("the confirmation is per product: another product of the same workspace still needs the box", async () => {
   expect(await start(NEW, false)).toEqual({ error: "Confirm that you may test this product." });
   expect(state.started).toEqual([]);
-  await expect(start(NEW, true)).rejects.toMatchObject({ to: "/runs/new-run" });
+  await expect(start(NEW, true)).rejects.toMatchObject({ to: "/runs/0002" });
   expect(state.started).toEqual([NEW]);
 });
 

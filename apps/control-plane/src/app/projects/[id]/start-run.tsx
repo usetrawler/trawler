@@ -8,7 +8,7 @@ import { detectProvider, PROVIDER_LABEL, type Provider } from "../../../llm/prov
 import type { KeyInput } from "../../../llm/key-input.ts";
 import type { Price, PriceRange } from "../../../llm/prices.ts";
 import { DEFAULT_RUN, estimateUsd, STEPS } from "../../../runs/models.ts";
-import { runTitle } from "../../../runs/status.ts";
+import { runPath, runTitle } from "../../../runs/status.ts";
 import { modelsForKeyAction, priceRangeAction, startRunAction, type ModelList, type StartState } from "./actions.ts";
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
@@ -66,7 +66,7 @@ export interface StartRefusal {
 }
 
 function OpenRun({ run }: { run?: { id: string; number: number } }) {
-  return run ? <> <a href={`/runs/${run.id}`} className="underline underline-offset-4 hover:text-ink">Open {runTitle(run.number)}</a></> : null;
+  return run ? <> <a href={runPath(run.number)} className="underline underline-offset-4 hover:text-ink">Open {runTitle(run.number)}</a></> : null;
 }
 
 function Submit({ blocked, pending, noticed }: { blocked?: string; pending: boolean; noticed: boolean }) {

@@ -2,7 +2,7 @@
 import { unstable_isUnrecognizedActionError, unstable_rethrow } from "next/navigation";
 import { useActionState } from "react";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
-import { runTitle } from "../../../runs/status.ts";
+import { runPath, runTitle } from "../../../runs/status.ts";
 import { runAgainAction, type RunAgainState } from "./actions.ts";
 
 export async function runAgain(previous: RunAgainState, form: FormData): Promise<RunAgainState> {
@@ -37,7 +37,7 @@ export function RunAgainButton({ runId, again }: { runId: string; again: RunAgai
 export function RunAgainError({ again }: { again: RunAgain }) {
   return again.error ? (
     <p role="alert" className="max-w-md border-l-2 border-bad pl-3 text-sm text-bad">
-      {again.activeRun ? <>{again.error} <a href={`/runs/${again.activeRun.id}`} className="underline underline-offset-4 hover:text-ink">Open {runTitle(again.activeRun.number)}</a></> : again.error}
+      {again.activeRun ? <>{again.error} <a href={runPath(again.activeRun.number)} className="underline underline-offset-4 hover:text-ink">Open {runTitle(again.activeRun.number)}</a></> : again.error}
     </p>
   ) : null;
 }

@@ -148,7 +148,7 @@ test("a run whose saved key is removed or changed while it starts is refused, no
 });
 
 test("a run whose saved key is still there starts and opens, checked in the same transaction that starts it", async () => {
-  await expect(startRunAction({}, startForm())).rejects.toMatchObject({ to: "/runs/run-1" });
+  await expect(startRunAction({}, startForm())).rejects.toMatchObject({ to: "/runs/0001" });
   expect(state.runsStarted).toBe(1);
   expect(state.stillAsked).toEqual([[state.startedIn[0], "org-1", "openrouter", null]]);
   expect(state.stillAsked[0]![0]).toBe(state.startedIn[0]);

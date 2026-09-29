@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 type Member = { userId: string; email: string; orgId: string; orgName: string; role: string };
-const state = vi.hoisted(() => ({ member: null as Member | null, tenants: [] as string[], projects: {} as Record<string, string>, runs: {} as Record<string, { number: number; projectName: string }>, captures: {} as Record<string, { runNumber: number; projectId: string }> }));
+const state = vi.hoisted(() => ({ member: null as Member | null, tenants: [] as string[], projects: {} as Record<string, string>, runs: {} as Record<string, { number: number; projectName: string }>, numbers: {} as Record<string, string>, captures: {} as Record<string, { runNumber: number; projectId: string }> }));
 
 vi.mock("./auth.ts", () => ({ signedInMember: async (headers: Headers) => (headers.get("cookie") === "session=ana" ? state.member : null) }));
 vi.mock("./db.ts", () => ({ getDb: () => ({}) }));
@@ -10,6 +10,7 @@ vi.mock("../projects/overview.ts", () => ({
   projectHead: async (_tx: unknown, orgId: string, id: string) => (state.projects[`${orgId}/${id}`] ? { id, name: state.projects[`${orgId}/${id}`], targetUrl: "https://acme.test/" } : null),
   runHead: async (_tx: unknown, orgId: string, id: string) => state.runs[`${orgId}/${id}`] ?? null,
 }));
+vi.mock("../runs/runs.ts", () => ({ runIdByNumber: async (_tx: unknown, orgId: string, number: number) => state.numbers[`${orgId}/${number}`] ?? null }));
 vi.mock("../artifacts/artifacts.ts", () => ({ screenCapture: async (_db: unknown, orgId: string, id: string) => state.captures[`${orgId}/${id}`] ?? null }));
 
 const { capturePageTitle, projectPageTitle, runPageTitle } = await import("./titles.ts");
@@ -27,6 +28,7 @@ beforeEach(() => {
   state.tenants = [];
   state.projects = { [`org-a/${PROJECT}`]: "Acme Shop" };
   state.runs = { [`org-a/${ID}`]: { number: 17, projectName: "Acme Shop" } };
+  state.numbers = { "org-a/17": ID };
   state.captures = { [`org-a/${ID}`]: { runNumber: 17, projectId: PROJECT } };
 });
 
@@ -34,6 +36,7 @@ test("a project's pages, a run and a screen capture are named after what they sh
   expect(await projectPageTitle(request(), PROJECT, "Plan")).toEqual({ title: "Acme Shop · Plan" });
   expect(await projectPageTitle(request(), PROJECT, "Runs")).toEqual({ title: "Acme Shop · Runs" });
   expect(await runPageTitle(request(), ID)).toEqual({ title: "Run 0017 · Acme Shop" });
+  expect(await runPageTitle(request(), "0017")).toEqual({ title: "Run 0017 · Acme Shop" });
   expect(await capturePageTitle(request(), ID)).toEqual({ title: "Screen capture · Run 0017 · Acme Shop" });
   expect(state.tenants.every((org) => org === "org-a")).toBe(true);
 });
@@ -42,13 +45,14 @@ test("a project, run or capture the workspace cannot see switches the metadata t
   state.member = { ...state.member!, orgId: "org-b" };
   expect(await notFoundBy(projectPageTitle(request(), PROJECT, "Plan"))).toBe(404);
   expect(await notFoundBy(runPageTitle(request(), ID))).toBe(404);
+  expect(await notFoundBy(runPageTitle(request(), "0017"))).toBe(404);
   expect(await notFoundBy(capturePageTitle(request(), ID))).toBe(404);
   expect(state.tenants.every((org) => org === "org-b")).toBe(true);
 });
 
-test("an id that is not a uuid is not found without a query, and a signed-out request reads nothing, since the page sends it to sign in", async () => {
+test("an id that is neither a uuid nor a run number is not found without a query, and a signed-out request reads nothing, since the page sends it to sign in", async () => {
   expect(await notFoundBy(projectPageTitle(request(), "plan", "Plan"))).toBe(404);
-  expect(await notFoundBy(runPageTitle(request(), "0017"))).toBe(404);
+  expect(await notFoundBy(runPageTitle(request(), "run-17"))).toBe(404);
   expect(await projectPageTitle(new Headers(), PROJECT, "Plan")).toEqual({});
   expect(await runPageTitle(new Headers(), ID)).toEqual({});
   expect(await capturePageTitle(new Headers(), ID)).toEqual({});

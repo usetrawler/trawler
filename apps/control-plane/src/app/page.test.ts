@@ -65,5 +65,5 @@ test("the workspace's newest runs reach the overview's line and its recent runs"
   state.recent = [recent];
   const html = renderToStaticMarkup(await Home());
   expect(html).toContain(">The latest run failed.</p>");
-  expect(html).toMatch(/<section aria-labelledby="recent-runs".*href="\/runs\/r7"/);
+  expect(html).toMatch(/<section aria-labelledby="recent-runs".*href="\/runs\/0007"/);
 });

@@ -36,7 +36,7 @@ describe("RunsView", () => {
   it("shows the page's own head above the filters, and lists the runs", () => {
     const html = render();
     expect(html).toMatch(/^<div><h1>Every run, newest first\.<\/h1><nav aria-label="Filter runs"/);
-    expect(html).toContain('href="/runs/r1"');
+    expect(html).toContain('href="/runs/0012"');
   });
 
   it("pages to older runs and back to the newest, keeping the filter", () => {

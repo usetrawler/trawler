@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { notFound, redirect } from "next/navigation";
+import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { AppShell } from "../../../components/app-shell.tsx";
 import { runView } from "../../../runs/report.ts";
-import { runTitle } from "../../../runs/status.ts";
+import { runPath, runTitle } from "../../../runs/status.ts";
 import { runFor } from "../../../server/runs.ts";
 import { shellFor } from "../../../server/shell.ts";
 import { runPageTitle } from "../../../server/titles.ts";
@@ -21,6 +21,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   const access = await runFor(await headers(), id);
   if (!access.signedIn) redirect("/sign-in");
   if (!access.run) notFound();
+  if (`/runs/${id}` !== runPath(access.run.number)) permanentRedirect(runPath(access.run.number));
   const shell = await shellFor(access.member);
   const project = shell.workspace.projects.find((p) => p.id === access.run!.projectId);
   return (

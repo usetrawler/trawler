@@ -30,7 +30,7 @@ describe("Overview", () => {
     expect(card).toMatch(/<a href="https:\/\/app\.acme\.test\/billing" target="_blank" rel="noreferrer" class="relative [^"]*\btruncate\b[^"]*">app\.acme\.test<span aria-hidden="true"> ↗<\/span><span class="sr-only"> \(opens in a new tab\)<\/span><\/a>/);
     expect(card).toMatch(/><span aria-hidden="true">4 \/ 6<\/span><span class="sr-only">4 of 6<\/span><\/p><p[^>]*>goals reached<\/p>/);
     expect(card).toMatch(/>2<\/p><p[^>]*>defects in the last run<\/p>/);
-    expect(card).toMatch(/<a href="\/runs\/r9"[^>]*>Open latest report<span class="sr-only"> for Acme Invoices<\/span>/);
+    expect(card).toMatch(/<a href="\/runs\/0009"[^>]*>Open latest report<span class="sr-only"> for Acme Invoices<\/span>/);
   });
 
   it("marks confirmed defects with a shape as well as colour, and says one defect in the singular", () => {
@@ -53,7 +53,7 @@ describe("Overview", () => {
     expect(card).toContain(">nothing reported yet</p>");
     expect(card).toMatch(/<a href="\/projects\/p2"[^>]*>Open the plan<span class="sr-only"> for Globex<\/span>/);
     for (const status of ["queued", "running"]) {
-      expect(hero(render([{ ...acme, lastRun: run({ status }) }]), "p1")).toMatch(/<a href="\/runs\/r9"[^>]*>Follow the run</);
+      expect(hero(render([{ ...acme, lastRun: run({ status }) }]), "p1")).toMatch(/<a href="\/runs\/0009"[^>]*>Follow the run</);
     }
   });
 
@@ -78,7 +78,7 @@ describe("Overview", () => {
     const html = render([acme], [run(), run({ id: "r8", number: 8 })]);
     expect(html).toContain('<h2 id="recent-runs"');
     expect(html).toMatch(/<a href="\/runs"[^>]*>View all/);
-    expect(html.match(/href="\/runs\/r\d"/g)).toEqual(['href="/runs/r9"', 'href="/runs/r9"', 'href="/runs/r8"']);
+    expect(html.match(/href="\/runs\/\d{4}"/g)).toEqual(['href="/runs/0009"', 'href="/runs/0009"', 'href="/runs/0008"']);
     expect(html.slice(html.indexOf('id="recent-runs"'))).toContain(">Acme</strong>");
     expect(render([fresh])).not.toContain("recent-runs");
   });
