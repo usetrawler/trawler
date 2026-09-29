@@ -471,3 +471,40 @@ test("a session interrupted by a runner shutdown goes back to the queue with its
   expect(summary!.goals).toEqual([{ personaKey: "priya", goal: "g", status: "reached", note: "" }]);
   expect(summary!.jobs.map((j) => j.status)).toEqual(["succeeded"]);
 });
+
+test("a run on Trawler is paid with Trawler's key whether or not the workspace has one, recorded as Trawler-paid, and a refusal of that key names Trawler", async () => {
+  const TRAWLER_KEY = "sk-or-v1-" + "t".repeat(64);
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-paid-by-us', 'P', 'paid-by-us', now())`.execute(t.db);
+  const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "ida", name: "Ida", brief: "b" }], goals: [{ id: "g", instruction: "x" }] });
+  const project = await withOrg(t.db, "org-paid-by-us", (tx) => createProject(tx, "org-paid-by-us", config, keys));
+  const run = await withOrg(t.db, "org-paid-by-us", (tx) => startRun(tx, "org-paid-by-us", project, keys, { budgetUsd: 1, agentModel: "m/agent", judgeModel: "m/agent", maxSteps: 10, replaySteps: 10, createdBy: "u", provider: "openrouter", paidBy: "trawler" }));
+  const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "3" } }), deps)).json();
+  expect(job.runId).toBe(run.id);
+  const call = (trawlerKey?: string) =>
+    handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${job.token}`, "content-type": "application/json" }, body: JSON.stringify({ model: "m/agent", messages: [{ role: "user", content: "hi" }] }) }), { db: t.db, keys, openRouterUrl: openRouterBase, trawlerKey, retryBaseMs: 1 });
+  const error = async (res: Response) => ((await res.json()) as { error: unknown }).error;
+
+  seen.length = 0;
+  const unpaid = await call();
+  expect(unpaid.status).toBe(402);
+  expect(await error(unpaid)).toEqual({ code: 402, message: "Trawler cannot pay for model calls on this server" });
+  expect(seen).toHaveLength(0);
+
+  replies = [textReply("ok")];
+  expect((await call(TRAWLER_KEY)).status).toBe(200);
+  await withOrg(t.db, "org-paid-by-us", (tx) => setModelKey(tx, "org-paid-by-us", { provider: "anthropic", key: "sk-ant-api03-" + "w".repeat(80) }, "u", keys));
+  replies = [textReply("ok")];
+  expect((await call(TRAWLER_KEY)).status).toBe(200);
+  expect(seen.map((s) => s.auth)).toEqual([`Bearer ${TRAWLER_KEY}`, `Bearer ${TRAWLER_KEY}`]);
+  expect(seen[0]!.body).toMatchObject({ usage: { include: true }, provider: { data_collection: "deny", allow_fallbacks: true } });
+  const recorded = await sql<{ paid_by: string; cost_usd: string }>`select paid_by, cost_usd from llm_usage where run_id = ${run.id}`.execute(t.db);
+  expect(recorded.rows).toEqual([{ paid_by: "trawler", cost_usd: "0.001000" }, { paid_by: "trawler", cost_usd: "0.001000" }]);
+
+  replies = [upstreamError(401, "User not found.")];
+  const refused = await call(TRAWLER_KEY);
+  expect(await error(refused)).toEqual({ code: 402, message: "the provider refused Trawler's key; this run cannot go on, and Trawler has been told" });
+  replies = [upstreamError(402, "Insufficient credits.")];
+  expect(await error(await call(TRAWLER_KEY))).toEqual({ code: 402, message: "Trawler's model account is out of credits; this run cannot go on, and Trawler has been told" });
+  await sql`update jobs set status = 'succeeded' where id = ${job.jobId}`.execute(t.db);
+  await sql`update runs set status = 'succeeded' where id = ${run.id}`.execute(t.db);
+});

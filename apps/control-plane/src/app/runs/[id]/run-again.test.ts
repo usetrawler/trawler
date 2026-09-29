@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 import type { KeyCheck } from "../../../llm/providers.ts";
 
-type Previous = { project_id: string; status: string; agent_model: string; judge_model: string; budget_usd: string; max_steps: number; replay_steps: number; provider: string; provider_base_url: string | null; prompt_usd_per_mtok: string | null; completion_usd_per_mtok: string | null };
+type Previous = { paid_by?: string; project_id: string; status: string; agent_model: string; judge_model: string; budget_usd: string; max_steps: number; replay_steps: number; provider: string; provider_base_url: string | null; prompt_usd_per_mtok: string | null; completion_usd_per_mtok: string | null };
 const state = vi.hoisted(() => ({
   signedIn: true,
   userId: "user-1",
@@ -139,6 +139,15 @@ test("a clear message when the key is gone, is now from another provider, or poi
   state.previous = { ...state.previous!, provider: "custom", provider_base_url: "https://llm.example.com/v1" };
   state.stored = { provider: "custom", key: "k".repeat(30), baseUrl: "https://other.example.com/v1" };
   expect(await runAgainAction(RUN)).toEqual({ error: "The workspace key now points to another OpenAI-compatible address. Start a run from the plan to choose a model for it." });
+  expect(state.started).toEqual([]);
+});
+
+test("Run again on the run Trawler paid for says why a key is needed now, and names Trawler as the payer when the key is another provider's", async () => {
+  state.previous = { ...state.previous!, paid_by: "trawler" };
+  state.stored = null;
+  expect(await runAgainAction(RUN)).toEqual({ error: "Trawler paid for this workspace's first run. To run it again, start a run from the plan and add a model key there." });
+  state.stored = { provider: "anthropic", key: "sk-ant-" + "k".repeat(40), baseUrl: null };
+  expect(await runAgainAction(RUN)).toEqual({ error: "This run was paid by Trawler on OpenRouter, and the workspace key is now an Anthropic key. Start a run from the plan to choose a model for it." });
   expect(state.started).toEqual([]);
 });
 

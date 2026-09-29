@@ -9,8 +9,8 @@ import { projectExists, ProjectNotFound } from "../../../projects/projects.ts";
 import { freshEndpoint, runCheckRefusal, withinListingLimit, type KeyInput } from "../../../llm/key-input.ts";
 import { checkModelCall, endpointFor, listModels, PREFERRED_MODELS, PROVIDER_LABEL, priceKey, type Endpoint, type Provider } from "../../../llm/providers.ts";
 import { projectRunCount } from "../../../projects/overview.ts";
-import { DEFAULT_RUN } from "../../../runs/models.ts";
-import { NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunRefused, startRun } from "../../../runs/runs.ts";
+import { DEFAULT_RUN, FIRST_RUN_ON_US } from "../../../runs/models.ts";
+import { firstRunOnUsLeft, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunRefused, startRun, type PaidBy } from "../../../runs/runs.ts";
 import { canManageBilling, signedInMember } from "../../../server/auth.ts";
 import { runPath } from "../../../runs/status.ts";
 import { betaRefusal } from "../../../server/beta.ts";
@@ -87,8 +87,9 @@ export async function priceRangeAction(modelId: string): Promise<PriceRange | nu
 
 export async function startRunAction(_previous: StartState, form: FormData): Promise<StartState> {
   const projectId = String(form.get("projectId") ?? "");
-  const modelId = String(form.get("model") ?? "").trim();
-  const budgetUsd = Number(form.get("budget"));
+  const onUs = form.get("onUs") === "1";
+  const modelId = onUs ? FIRST_RUN_ON_US.model : String(form.get("model") ?? "").trim();
+  const budgetUsd = onUs ? FIRST_RUN_ON_US.budgetUsd : Number(form.get("budget"));
   if (!MODEL_ID.test(modelId)) return { error: "Choose a model or type its exact name." };
   if (!Number.isFinite(budgetUsd) || budgetUsd < 0.1 || budgetUsd > 50) return { error: "Set a cap between $0.10 and $50." };
   const member = await signedInMember(await headers());
@@ -102,8 +103,9 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   if (!UUID.test(projectId) || !(await withOrg(getDb(), orgId, (tx) => projectExists(tx, orgId, projectId)))) return { error: "The run could not start. Try again." };
   const without = await withOrg(getDb(), orgId, (tx) => personWithoutAccount(tx, projectId));
   if (without) return { error: new NeedsAccount(without).message };
-  const refused = await withOrg(getDb(), orgId, (tx) => refusalToStart(tx, orgId, projectId));
+  const refused = await withOrg(getDb(), orgId, (tx) => refusalToStart(tx, orgId, projectId, onUs ? "trawler" : "workspace"));
   if (refused) return refusedState(refused);
+  if (onUs) return startOnUs(orgId, projectId, member.userId);
 
   const resolved = await endpointFrom(orgId, { key: String(form.get("apiKey") ?? ""), provider: String(form.get("provider") ?? ""), baseUrl: String(form.get("baseUrl") ?? "") });
   if ("error" in resolved) return { error: resolved.error, ...(resolved.field ? { field: resolved.field } : {}) };
@@ -129,10 +131,7 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   try {
     const run = await withOrg(getDb(), orgId, async (tx) => {
       if (!(await keyStillStored(tx, orgId, endpoint.provider, providerBaseUrl))) throw new KeyGone();
-      return startRun(tx, orgId, projectId, getKeyring(), {
-        budgetUsd, agentModel: modelId, judgeModel: modelId, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: member.userId,
-        provider: endpoint.provider, providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap,
-      });
+      return startRun(tx, orgId, projectId, getKeyring(), runOptions(modelId, budgetUsd, member.userId, endpoint.provider, providerBaseUrl, price, "workspace"));
     });
     runNumber = run.number;
   } catch (err) {
@@ -145,6 +144,27 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
     if (err instanceof RunRefused) return { ...refusedState(err), ...(keyHint ? { keyHint } : {}) };
     if (!(err instanceof ProjectNotFound)) await logError("run could not start", { orgId, projectId, err }, scrubberWith([endpoint.key]));
     return { error: "The run could not start. Try again.", ...(keyHint ? { keyHint } : {}) };
+  }
+  redirect(runPath(runNumber));
+}
+
+const runOptions = (model: string, budgetUsd: number, createdBy: string, provider: Provider, providerBaseUrl: string | null, price: Price | null, paidBy: PaidBy) => ({
+  budgetUsd, agentModel: model, judgeModel: model, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy,
+  provider, providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap, paidBy,
+});
+
+async function startOnUs(orgId: string, projectId: string, userId: string): Promise<StartState> {
+  if (!readEnv().setup) return { error: "Trawler cannot pay for runs on this server. Add a model key to start." };
+  if (!(await withOrg(getDb(), orgId, (tx) => firstRunOnUsLeft(tx, orgId)))) return { error: "This workspace has used its first run on Trawler. Reload the page to add a model key." };
+  const price = await priceFor("openrouter", FIRST_RUN_ON_US.model, readEnv().openRouterUrl);
+  let runNumber: number;
+  try {
+    const run = await withOrg(getDb(), orgId, (tx) => startRun(tx, orgId, projectId, getKeyring(), runOptions(FIRST_RUN_ON_US.model, FIRST_RUN_ON_US.budgetUsd, userId, "openrouter", null, price, "trawler")));
+    runNumber = run.number;
+  } catch (err) {
+    if (err instanceof NeedsAccount || err instanceof RunRefused) return err instanceof RunRefused ? refusedState(err) : { error: err.message };
+    if (!(err instanceof ProjectNotFound)) await logError("run on Trawler could not start", { orgId, projectId, err });
+    return { error: "The run could not start. Try again." };
   }
   redirect(runPath(runNumber));
 }

@@ -49,3 +49,35 @@ test("a refusal known when the page opens is said above the form, with the live 
   expect(html).toContain(">Open Run 0007</a>");
   expect(html.match(/<button type="submit"[^>]*>/)?.[0]).not.toMatch(/\sdisabled=""/);
 });
+
+test("while the first run on Trawler is left, Start offers it without key or model fields, says Trawler pays and what after, and even a member who cannot add a key may start it", () => {
+  const price = { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 };
+  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: false, authorisedBefore: false, firstRunOnUs: { price } }));
+  const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  expect(html).toContain('<input type="hidden" name="onUs" value="1"/>');
+  expect(text).toContain("Your first run is on Trawler.");
+  expect(text).toContain("Trawler pays for the model: DeepSeek V4.1 Flash, up to $1.00, for up to 4 people. No key needed. After this run, runs are paid with your own model key.");
+  expect(text).toContain("Hard cap $1.00, paid by Trawler.");
+  expect(text).toMatch(/Estimated run \$\d+\.\d\d–\$\d+\.\d\d/);
+  expect(html).not.toContain('name="apiKey"');
+  expect(html).not.toContain('name="model"');
+  expect(html).not.toContain('name="budget"');
+  expect(html).not.toContain("Ask an owner or admin");
+  expect(html).not.toMatch(/<button type="submit" disabled=""/);
+  expect(html).not.toContain("Pay with your own model key instead");
+});
+
+test("an owner can pay with their own key instead of the first run on Trawler, and a saved key is named", () => {
+  const offer = { price: null };
+  const owner = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme", personas: 2, keyHint: null, canManageKey: true, authorisedBefore: true, firstRunOnUs: offer }));
+  expect(owner).toContain("Pay with your own model key instead");
+  const saved = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme", personas: 2, keyHint: { provider: "openrouter", hint: "…a1b2", baseUrl: null }, canManageKey: false, authorisedBefore: true, firstRunOnUs: offer }));
+  expect(saved).toContain("Pay with your OpenRouter key …a1b2 instead");
+});
+
+test("a plan with more people than the first run on Trawler takes is started with a key, and Start says why", () => {
+  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme", personas: 5, keyHint: null, canManageKey: true, authorisedBefore: true, firstRunOnUs: { price: null } }));
+  expect(html).not.toContain('name="onUs"');
+  expect(html).toContain('name="apiKey"');
+  expect(html.replace(/<[^>]+>/g, "")).toContain("The first run on Trawler takes up to 4 people, and this plan has 5. Remove people from the plan to use it, or pay with your own model key.");
+});

@@ -5,7 +5,7 @@ import { MAX_GOALS_PER_PERSONA, MAX_PERSONAS, turnsOf, type Goal, type Persona }
 import type { KeyHint } from "../../../credentials/credentials.ts";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { addAccountAction, removeAccountAction, savePlanAction, type AccountView } from "./plan-actions.ts";
-import { StartRun, type StartRefusal } from "./start-run.tsx";
+import { StartRun, type FirstRunOnUs, type StartRefusal } from "./start-run.tsx";
 
 const field = "w-full min-w-0 border border-dashed border-line/60 bg-transparent px-2 py-1 outline-none hover:border-line focus:border-solid focus:border-ink focus:bg-paper";
 
@@ -174,8 +174,8 @@ function planProblem(personas: PlanPerson[], goals: Goal[]): string | null {
   return null;
 }
 
-export function PlanWorkspace({ projectId, projectName, initialPersonas, initialGoals, initialAccounts, keyHint, canManageKey, authorisedBefore, startRefusal }: {
-  projectId: string; projectName: string; initialPersonas: PlanPerson[]; initialGoals: Goal[]; initialAccounts: AccountView[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; startRefusal?: StartRefusal;
+export function PlanWorkspace({ projectId, projectName, initialPersonas, initialGoals, initialAccounts, keyHint, canManageKey, authorisedBefore, firstRunOnUs, startRefusal }: {
+  projectId: string; projectName: string; initialPersonas: PlanPerson[]; initialGoals: Goal[]; initialAccounts: AccountView[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; firstRunOnUs?: FirstRunOnUs | null; startRefusal?: StartRefusal;
 }) {
   const [saved, setSaved] = useState({ personas: initialPersonas, goals: initialGoals });
   const [personas, setPersonas] = useState(initialPersonas);
@@ -311,7 +311,7 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
 
       {personas.length > 1 && <OrderOfPlay personas={personas} goals={goals} onMove={moveGoal} />}
 
-      <StartRun projectId={projectId} projectName={projectName} personas={saved.personas.length} goalsPerTurn={turnsOf(saved).map((t) => t.goalIds.length)} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} refusal={startRefusal} onStarting={setStarting} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : undefined)} />
+      <StartRun projectId={projectId} projectName={projectName} personas={saved.personas.length} goalsPerTurn={turnsOf(saved).map((t) => t.goalIds.length)} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} firstRunOnUs={firstRunOnUs} refusal={startRefusal} onStarting={setStarting} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : undefined)} />
     </div>
   );
 }

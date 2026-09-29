@@ -76,7 +76,7 @@ export async function runAgainAction(_previous: RunAgainState, form: FormData): 
   const found = await withOrg(getDb(), orgId, async (tx) => ({
     previous: await tx
       .selectFrom("runs")
-      .select(["project_id", "status", "agent_model", "judge_model", "budget_usd", "provider", "provider_base_url", "prompt_usd_per_mtok", "completion_usd_per_mtok"])
+      .select(["project_id", "status", "agent_model", "judge_model", "budget_usd", "provider", "provider_base_url", "prompt_usd_per_mtok", "completion_usd_per_mtok", "paid_by"])
       .where("id", "=", runId)
       .where("org_id", "=", orgId)
       .executeTakeFirst(),
@@ -89,9 +89,10 @@ export async function runAgainAction(_previous: RunAgainState, form: FormData): 
   if (isLive(previous.status)) return { error: "This run is still going. Run it again once it has finished." };
   const refused = await withOrg(getDb(), orgId, (tx) => refusalToStart(tx, orgId, previous.project_id));
   if (refused) return refusedState(refused);
-  if (!stored) return { error: "The workspace has no model key any more. An owner or admin can add one in Settings." };
+  const onUs = previous.paid_by === "trawler";
+  if (!stored) return { error: onUs ? "Trawler paid for this workspace's first run. To run it again, start a run from the plan and add a model key there." : "The workspace has no model key any more. An owner or admin can add one in Settings." };
   const provider = previous.provider as Provider;
-  if (stored.provider !== provider) return { error: `This run was paid with ${keyName(provider)}, and the workspace key is now ${keyName(stored.provider)}. Start a run from the plan to choose a model for it.` };
+  if (stored.provider !== provider) return { error: `This run was paid ${onUs ? "by Trawler on OpenRouter" : `with ${keyName(provider)}`}, and the workspace key is now ${keyName(stored.provider)}. Start a run from the plan to choose a model for it.` };
   if (provider === "custom" && stored.baseUrl !== previous.provider_base_url) return { error: "The workspace key now points to another OpenAI-compatible address. Start a run from the plan to choose a model for it." };
 
   const tooOften = runCheckRefusal(member);

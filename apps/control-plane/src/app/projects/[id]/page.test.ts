@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   runs: 0, counted: [] as Array<[string, string]>, tenants: [] as string[], shells: [] as string[], planned: [] as Array<Record<string, unknown>>,
   runState: { paused: false, liveRun: null } as { paused: boolean; liveRun: { id: string; number: number } | null },
   refusal: null as Error | null,
+  platformKey: true, onUsLeft: true, refusalFor: [] as unknown[],
 }));
 const ID = vi.hoisted(() => "0f8fad5b-d9cb-469f-a165-70867728950e");
 
@@ -38,10 +39,13 @@ vi.mock("../../../projects/overview.ts", async (original) => ({
   hostOf: (await original<typeof import("../../../projects/overview.ts")>()).hostOf,
   projectRunCount: async (_tx: unknown, orgId: string, id: string) => { state.counted.push([orgId, id]); return state.runs; },
 }));
+vi.mock("../../../server/env.ts", () => ({ readEnv: () => ({ openRouterUrl: "https://openrouter.test/api/v1", ...(state.platformKey ? { setup: { apiKey: "sk-or-v1-" + "p".repeat(40), model: "m" } } : {}) }) }));
+vi.mock("../../../llm/prices.ts", () => ({ priceFor: async (provider: string, model: string) => (provider === "openrouter" && model === "deepseek/deepseek-v4.1-flash" ? { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } : null) }));
 vi.mock("../../../runs/runs.ts", async (original) => ({
   RunInProgress: (await original<typeof import("../../../runs/runs.ts")>()).RunInProgress,
+  firstRunOnUsLeft: async () => state.onUsLeft,
   projectRunState: async () => state.runState,
-  refusalToStart: async () => state.refusal,
+  refusalToStart: async (_tx: unknown, _org: string, _id: string, paidBy: unknown) => { state.refusalFor.push(paidBy); return state.refusal; },
 }));
 vi.mock("./plan-workspace.tsx", () => ({ PlanWorkspace: (props: Record<string, unknown>) => { state.planned.push(props); return null; } }));
 
@@ -57,6 +61,20 @@ beforeEach(() => {
   state.planned = [];
   state.runState = { paused: false, liveRun: null };
   state.refusal = null;
+  state.platformKey = true;
+  state.onUsLeft = true;
+  state.refusalFor = [];
+});
+
+test("the Start panel offers the first run on Trawler, priced, while the workspace has not used it and this server can pay; refusals are judged for the run it offers", async () => {
+  await render();
+  state.onUsLeft = false;
+  await render();
+  state.onUsLeft = true;
+  state.platformKey = false;
+  await render();
+  expect(state.planned.map((props) => props.firstRunOnUs)).toEqual([{ price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } }, null, null]);
+  expect(state.refusalFor).toEqual(["trawler", "workspace", "workspace"]);
 });
 
 test("a visitor who is not signed in, or no longer belongs to any workspace, is sent to sign in before anything is read", async () => {

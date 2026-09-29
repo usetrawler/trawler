@@ -7,7 +7,7 @@ import { updatedSinceOpened } from "../../../components/updated-since-opened.ts"
 import { detectProvider, PROVIDER_LABEL, type Provider } from "../../../llm/provider-kinds.ts";
 import type { KeyInput } from "../../../llm/key-input.ts";
 import type { Price, PriceRange } from "../../../llm/prices.ts";
-import { DEFAULT_RUN, estimateUsd, STEPS } from "../../../runs/models.ts";
+import { DEFAULT_RUN, estimateUsd, FIRST_RUN_ON_US, STEPS } from "../../../runs/models.ts";
 import { runPath, runTitle } from "../../../runs/status.ts";
 import { modelsForKeyAction, priceRangeAction, startRunAction, type ModelList, type StartState } from "./actions.ts";
 
@@ -79,8 +79,28 @@ function Submit({ blocked, pending, noticed }: { blocked?: string; pending: bool
   );
 }
 
-export function StartRun({ projectId, projectName, personas, goalsPerTurn = Array.from({ length: personas }, () => 1), keyHint: savedHint, canManageKey, authorisedBefore, blocked, refusal, onStarting }: {
-  projectId: string; projectName: string; personas: number; goalsPerTurn?: number[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; blocked?: string; refusal?: StartRefusal; onStarting?: (starting: boolean) => void;
+export interface FirstRunOnUs {
+  price: Price | null;
+}
+
+function OnUs({ price, goalsPerTurn, personas }: { price: Price | null; goalsPerTurn: number[]; personas: number }) {
+  const estimate = price ? estimateUsd(price, goalsPerTurn) : null;
+  return (
+    <>
+      <input type="hidden" name="onUs" value="1" />
+      <div className="flex flex-col gap-1 border-l-2 border-action pl-3">
+        <p className="text-sm">Your first run is on Trawler.</p>
+        <p className="text-sm text-muted">Trawler pays for the model: {FIRST_RUN_ON_US.modelName}, up to {usd(FIRST_RUN_ON_US.budgetUsd)}, for up to {FIRST_RUN_ON_US.maxPeople} people. No key needed. After this run, runs are paid with your own model key.</p>
+      </div>
+      <Estimate price={price} range={null} goalsPerTurn={goalsPerTurn} personas={personas} modelChosen />
+      <p className="text-sm text-muted">Hard cap {usd(FIRST_RUN_ON_US.budgetUsd)}, paid by Trawler. The run stops once it reaches it; findings so far are kept.</p>
+      {estimate && estimate.high > FIRST_RUN_ON_US.budgetUsd && <p className="text-sm text-warn">The cap is below the estimate, so the run may stop before everyone finishes.</p>}
+    </>
+  );
+}
+
+export function StartRun({ projectId, projectName, personas, goalsPerTurn = Array.from({ length: personas }, () => 1), keyHint: savedHint, canManageKey, authorisedBefore, firstRunOnUs, blocked, refusal, onStarting }: {
+  projectId: string; projectName: string; personas: number; goalsPerTurn?: number[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; firstRunOnUs?: FirstRunOnUs | null; blocked?: string; refusal?: StartRefusal; onStarting?: (starting: boolean) => void;
 }) {
   const [state, action, pending] = useActionState<StartState, FormData>(startTheRun, {});
   const keyHint = state.keyHint ?? savedHint;
@@ -94,14 +114,18 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
   const [ranged, setRanged] = useState<{ modelId: string; range: PriceRange | null } | null>(null);
   const [cap, setCap] = useState(DEFAULT_RUN.budgetUsd);
   const [authorised, setAuthorised] = useState(false);
+  const [payingOwn, setPayingOwn] = useState(false);
+  const tooManyForUs = Boolean(firstRunOnUs) && personas > FIRST_RUN_ON_US.maxPeople;
+  const onUs = firstRunOnUs && !tooManyForUs && !payingOwn ? firstRunOnUs : null;
   const backToReplace = useRef(false);
 
   const typingKey = !keyHint || replacingKey;
   const detected = apiKey.trim() ? detectProvider(apiKey) : null;
   const provider: Provider | null = typingKey ? (apiKey.trim().length >= 20 ? chosenProvider ?? detected ?? "custom" : null) : keyHint!.provider;
-  const noKey = !keyHint && !canManageKey ? "Ask an owner or admin of this workspace to add a model key." : undefined;
+  const noKey = !onUs && !keyHint && !canManageKey ? "Ask an owner or admin of this workspace to add a model key." : undefined;
 
   useEffect(() => {
+    if (onUs) return;
     if (typingKey && (!provider || (provider === "custom" && !/^https:\/\/.+/.test(baseUrl)))) {
       setList(null);
       return;
@@ -119,7 +143,7 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [typingKey, apiKey, provider, baseUrl]);
+  }, [onUs, typingKey, apiKey, provider, baseUrl]);
   useEffect(() => onStarting?.(pending), [pending, onStarting]);
 
   const price = list?.ok ? list.models.find((m) => m.id === modelId)?.price ?? null : null;
@@ -158,44 +182,63 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
       <p className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Start · <span className="text-ink">{projectName}</span></p>
       {notice && <p id="start-notice" className="border-l-2 border-warn pl-3 text-sm">{notice.message}<OpenRun run={notice.activeRun} /></p>}
 
-      {!typingKey ? (
-        <p className="text-sm">
-          <span className="text-muted">Pays with your {PROVIDER_LABEL[keyHint!.provider]} key </span>
-          <span className="font-mono">{keyHint!.hint}</span>
-          {canManageKey && <button type="button" ref={(replace) => { if (replace && backToReplace.current) { backToReplace.current = false; replace.focus(); } }} onClick={() => setReplacingKey(true)} className="ml-3 text-muted underline underline-offset-4 hover:text-ink">Replace</button>}
-        </p>
-      ) : noKey ? null : (
-        <KeyFields
-          apiKey={apiKey} onKey={setApiKey} detected={detected} chosen={chosenProvider} onChoose={setChosenProvider}
-          provider={provider} baseUrl={baseUrl} onBaseUrl={setBaseUrl} required={!keyHint} autoFocus={Boolean(keyHint)}
-          errorId={state.error && state.field === "key" ? "start-error" : undefined} baseUrlErrorId={state.error && state.field === "baseUrl" ? "start-error" : undefined}
-          aside={keyHint && <button type="button" onClick={() => { backToReplace.current = true; setReplacingKey(false); setApiKey(""); }} className="h-12 px-3 text-sm text-muted hover:text-ink">Keep {keyHint.hint}</button>}
-        />
-      )}
-
-      {(provider || !typingKey) && (
-        <label className="flex flex-col gap-2">
-          <span className="text-sm text-muted">Model{label ? ` from ${label}` : ""}. Pick one, or type the exact name of any model your key can use.</span>
-          <input name="model" list="model-options" required value={modelId} onChange={(e) => setModelId(e.target.value)} placeholder={loading ? "Loading models…" : "model name"} autoComplete="off" spellCheck={false} className={field} />
-          <datalist id="model-options">{list?.ok && list.models.map((m) => <option key={m.id} value={m.id} />)}</datalist>
-          {list && !list.ok && <span className="text-sm text-warn">{list.error}</span>}
-          {modelId && list?.ok && (
-            <span className="text-sm text-muted">
-              {price ? priceText(range?.low ?? price, range?.high ?? price) : "Price unknown for this model."}
-            </span>
+      {onUs ? (
+        <>
+          <OnUs price={onUs.price} goalsPerTurn={goalsPerTurn} personas={personas} />
+          {(keyHint || canManageKey) && (
+            <p className="text-sm">
+              <button type="button" onClick={() => setPayingOwn(true)} className="text-muted underline underline-offset-4 hover:text-ink">{keyHint ? `Pay with your ${PROVIDER_LABEL[keyHint.provider]} key ${keyHint.hint} instead` : "Pay with your own model key instead"}</button>
+            </p>
           )}
-        </label>
-      )}
-
-      <Estimate price={price} range={range} goalsPerTurn={goalsPerTurn} personas={personas} modelChosen={Boolean(modelId)} />
-      {estimate || !modelId ? (
-        <label className="flex flex-col gap-2">
-          <span className="text-sm text-muted">Hard cap (USD). The run stops once it reaches it, and the last call can take it slightly past; findings so far are kept.</span>
-          <input name="budget" type="number" min={0.1} max={50} step={0.1} value={cap} onChange={(e) => setCap(Number(e.target.value))} className={`${field} w-40`} />
-          {estimate && cap > 0 && cap < estimate.high && <span className="text-sm text-warn">The cap is below the estimate, so the run may stop before everyone finishes.</span>}
-        </label>
+        </>
       ) : (
-        <input type="hidden" name="budget" value={DEFAULT_RUN.budgetUsd} />
+        <>
+          {tooManyForUs && <p className="text-sm text-muted">The first run on Trawler takes up to {FIRST_RUN_ON_US.maxPeople} people, and this plan has {personas}. Remove people from the plan to use it, or pay with your own model key.</p>}
+          {payingOwn && (
+            <p className="text-sm">
+              <button type="button" onClick={() => setPayingOwn(false)} className="text-muted underline underline-offset-4 hover:text-ink">Use the first run on Trawler instead</button>
+            </p>
+          )}
+          {!typingKey ? (
+            <p className="text-sm">
+              <span className="text-muted">Pays with your {PROVIDER_LABEL[keyHint!.provider]} key </span>
+              <span className="font-mono">{keyHint!.hint}</span>
+              {canManageKey && <button type="button" ref={(replace) => { if (replace && backToReplace.current) { backToReplace.current = false; replace.focus(); } }} onClick={() => setReplacingKey(true)} className="ml-3 text-muted underline underline-offset-4 hover:text-ink">Replace</button>}
+            </p>
+          ) : noKey ? null : (
+            <KeyFields
+              apiKey={apiKey} onKey={setApiKey} detected={detected} chosen={chosenProvider} onChoose={setChosenProvider}
+              provider={provider} baseUrl={baseUrl} onBaseUrl={setBaseUrl} required={!keyHint} autoFocus={Boolean(keyHint)}
+              errorId={state.error && state.field === "key" ? "start-error" : undefined} baseUrlErrorId={state.error && state.field === "baseUrl" ? "start-error" : undefined}
+              aside={keyHint && <button type="button" onClick={() => { backToReplace.current = true; setReplacingKey(false); setApiKey(""); }} className="h-12 px-3 text-sm text-muted hover:text-ink">Keep {keyHint.hint}</button>}
+            />
+          )}
+
+          {(provider || !typingKey) && (
+            <label className="flex flex-col gap-2">
+              <span className="text-sm text-muted">Model{label ? ` from ${label}` : ""}. Pick one, or type the exact name of any model your key can use.</span>
+              <input name="model" list="model-options" required value={modelId} onChange={(e) => setModelId(e.target.value)} placeholder={loading ? "Loading models…" : "model name"} autoComplete="off" spellCheck={false} className={field} />
+              <datalist id="model-options">{list?.ok && list.models.map((m) => <option key={m.id} value={m.id} />)}</datalist>
+              {list && !list.ok && <span className="text-sm text-warn">{list.error}</span>}
+              {modelId && list?.ok && (
+                <span className="text-sm text-muted">
+                  {price ? priceText(range?.low ?? price, range?.high ?? price) : "Price unknown for this model."}
+                </span>
+              )}
+            </label>
+          )}
+
+          <Estimate price={price} range={range} goalsPerTurn={goalsPerTurn} personas={personas} modelChosen={Boolean(modelId)} />
+          {estimate || !modelId ? (
+            <label className="flex flex-col gap-2">
+              <span className="text-sm text-muted">Hard cap (USD). The run stops once it reaches it, and the last call can take it slightly past; findings so far are kept.</span>
+              <input name="budget" type="number" min={0.1} max={50} step={0.1} value={cap} onChange={(e) => setCap(Number(e.target.value))} className={`${field} w-40`} />
+              {estimate && cap > 0 && cap < estimate.high && <span className="text-sm text-warn">The cap is below the estimate, so the run may stop before everyone finishes.</span>}
+            </label>
+          ) : (
+            <input type="hidden" name="budget" value={DEFAULT_RUN.budgetUsd} />
+          )}
+        </>
       )}
       {authorisedBefore ? (
         <p className="text-sm text-muted">Confirmed when this product&apos;s first run started: it may be tested, and it is not a production system with real people&apos;s data.</p>

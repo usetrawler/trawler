@@ -5,7 +5,7 @@ const react = vi.hoisted(() => ({ state: {} as Record<string, unknown>, answered
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
   useActionState: () => [react.state, () => {}, false],
-  useState: (initial: unknown) => [react.calls++ === 10 && react.answeredUnder !== undefined ? react.answeredUnder : initial, vi.fn()],
+  useState: (initial: unknown) => [react.calls++ === 11 && react.answeredUnder !== undefined ? react.answeredUnder : initial, vi.fn()],
   useRef: (initial: unknown) => ({ current: initial }),
   useEffect: () => {},
 }));
