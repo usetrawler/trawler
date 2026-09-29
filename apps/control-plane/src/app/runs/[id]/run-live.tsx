@@ -193,11 +193,12 @@ function Section<T extends ReportFinding & { reason?: string }>({ title, hint, i
 }
 
 function spentOf(run: RunSummary, live: boolean) {
+  const payer = run.paidBy === "trawler" ? " · paid by Trawler" : "";
   if (run.tokenCap) {
     const cap = `${(run.tokenCap / 1_000_000).toFixed(1)}M`;
-    return { title: live ? "Tokens so far" : "Tokens", value: `${(run.tokensUsed / 1_000_000).toFixed(2)}M`, of: `${live ? `of ${cap} cap` : `cap was ${cap}`} · price unknown`, share: Math.min(100, (run.tokensUsed / run.tokenCap) * 100) };
+    return { title: live ? "Tokens so far" : "Tokens", value: `${(run.tokensUsed / 1_000_000).toFixed(2)}M`, of: `${live ? `of ${cap} cap` : `cap was ${cap}`} · price unknown${payer}`, share: Math.min(100, (run.tokensUsed / run.tokenCap) * 100) };
   }
-  return { title: live ? "Live cost" : "Cost", value: usd(run.costUsd), of: live ? `of ${usd(run.budgetUsd)} cap` : `cap was ${usd(run.budgetUsd)}`, share: Math.min(100, run.budgetUsd > 0 ? (run.costUsd / run.budgetUsd) * 100 : 0) };
+  return { title: live ? "Live cost" : "Cost", value: usd(run.costUsd), of: `${live ? `of ${usd(run.budgetUsd)} cap` : `cap was ${usd(run.budgetUsd)}`}${payer}`, share: Math.min(100, run.budgetUsd > 0 ? (run.costUsd / run.budgetUsd) * 100 : 0) };
 }
 
 function Outcome({ run, view }: { run: RunSummary; view: View }) {

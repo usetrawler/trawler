@@ -21,6 +21,7 @@ export async function monthSpent(tx: Tx, orgId: string): Promise<number> {
     .selectFrom("llm_usage")
     .select(sql<string>`coalesce(sum(cost_usd), 0)`.as("spent"))
     .where("org_id", "=", orgId)
+    .where("paid_by", "=", "workspace")
     .where("created_at", ">=", sql<Date>`date_trunc('month', now(), 'UTC')`)
     .executeTakeFirstOrThrow();
   return Number(row.spent);

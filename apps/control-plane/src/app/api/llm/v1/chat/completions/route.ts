@@ -5,5 +5,6 @@ import { readEnv } from "../../../../../../server/env.ts";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request): Promise<Response> {
-  return handleChatCompletions(request, { db: getDb(), keys: getKeyring(), openRouterUrl: readEnv().openRouterUrl });
+  const env = readEnv();
+  return handleChatCompletions(request, { db: getDb(), keys: getKeyring(), openRouterUrl: env.openRouterUrl, trawlerKey: env.setup?.apiKey });
 }

@@ -11,7 +11,7 @@ import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
 import { budgetLeft, monthlyBudget, RUN_TIME_LIMIT_HOURS, runsHalted } from "./limits.ts";
 import { turnSteps } from "./models.ts";
-import { ACCOUNT_REFUSED, affordableOutputTokens, capSpent, endRun, signUpSeedContext, type CancelReason, type ConfigSnapshot } from "./runs.ts";
+import { ACCOUNT_REFUSED, affordableOutputTokens, capSpent, endRun, giveBackUnusedFirstRun, signUpSeedContext, type CancelReason, type ConfigSnapshot, type PaidBy } from "./runs.ts";
 
 const LEASE_MINUTES = 10;
 const ACTIVE = ["queued", "running"];
@@ -289,7 +289,7 @@ const lockedRun = (tx: Tx, runId: string) =>
   tx
     .selectFrom("runs as r")
     .innerJoin("projects as p", "p.id", "r.project_id")
-    .select(["r.org_id", "r.status", "r.cost_usd", "r.budget_usd", "r.token_cap", "r.tokens_used", "r.completion_usd_per_mtok", sql<boolean>`p.paused_at is not null`.as("paused"), sql<boolean>`coalesce(r.started_at <= now() - make_interval(hours => ${RUN_TIME_LIMIT_HOURS}), false)`.as("over_time")])
+    .select(["r.org_id", "r.paid_by", "r.status", "r.cost_usd", "r.budget_usd", "r.token_cap", "r.tokens_used", "r.completion_usd_per_mtok", sql<boolean>`p.paused_at is not null`.as("paused"), sql<boolean>`coalesce(r.started_at <= now() - make_interval(hours => ${RUN_TIME_LIMIT_HOURS}), false)`.as("over_time")])
     .where("r.id", "=", runId)
     .forUpdate(["r"])
     .executeTakeFirstOrThrow();
@@ -297,7 +297,8 @@ const lockedRun = (tx: Tx, runId: string) =>
 type LockedRun = Awaited<ReturnType<typeof lockedRun>>;
 type RunEnd = { status: "stopped_budget" } | { status: "cancelled"; reason: CancelReason };
 
-async function spentWorkspaceBudget(tx: Tx, run: { org_id: string; completion_usd_per_mtok: string | null }): Promise<boolean> {
+async function spentWorkspaceBudget(tx: Tx, run: { org_id: string; paid_by: string; completion_usd_per_mtok: string | null }): Promise<boolean> {
+  if (run.paid_by === "trawler") return false;
   const left = budgetLeft(await monthlyBudget(tx, run.org_id));
   return left <= 0 || affordableOutputTokens(left, run.completion_usd_per_mtok === null ? null : Number(run.completion_usd_per_mtok)) < 1;
 }
@@ -387,6 +388,8 @@ export async function ingestEvents(db: Database, token: string, events: RunEvent
 
 export interface LlmCall {
   orgId: string;
+  paidBy: PaidBy;
+  firstOnUs: boolean;
   runId: string;
   jobId: string;
   models: string[];
@@ -410,12 +413,14 @@ export async function llmCallFor(db: Database, token: string): Promise<LlmCall> 
       const stop = await limitStop(tx, job.run_id);
       if (stop) return { refused: stop !== "inactive" && stop.status === "stopped_budget" ? "the run has spent its budget" : "the run is no longer active" };
     }
-    const run = await tx.selectFrom("runs").select(["status", "cost_usd", "budget_usd", "agent_model", "judge_model", "provider", "provider_base_url", "prompt_usd_per_mtok", "completion_usd_per_mtok", "token_cap", "tokens_used"]).where("id", "=", job.run_id).executeTakeFirstOrThrow();
-    const remainingUsd = Math.min(Number(run.budget_usd) - Number(run.cost_usd), budgetLeft(await monthlyBudget(tx, job.org_id)));
+    const run = await tx.selectFrom("runs").select(["status", "cost_usd", "budget_usd", "agent_model", "judge_model", "provider", "provider_base_url", "prompt_usd_per_mtok", "completion_usd_per_mtok", "token_cap", "tokens_used", "paid_by"]).where("id", "=", job.run_id).executeTakeFirstOrThrow();
+    const workspaceLeft = run.paid_by === "trawler" ? Infinity : budgetLeft(await monthlyBudget(tx, job.org_id));
+    const remainingUsd = Math.min(Number(run.budget_usd) - Number(run.cost_usd), workspaceLeft);
     const remainingTokens = run.token_cap === null ? null : Number(run.token_cap) - Number(run.tokens_used);
     if (remainingUsd <= 0 || (remainingTokens !== null && remainingTokens <= 0)) return { refused: "the run has spent its budget" };
+    const firstOnUs = run.paid_by === "trawler" && !!(await tx.updateTable("first_runs_on_us").set({ model_called_at: sql<Date>`now()` }).where("run_id", "=", job.run_id).where("model_called_at", "is", null).returning("run_id").executeTakeFirst());
     await tx.updateTable("jobs").set({ lease_until: sql<Date>`now() + make_interval(mins => ${LEASE_MINUTES})` }).where("id", "=", job.id).execute();
-    return { orgId: job.org_id, runId: job.run_id, jobId: job.id, models: [...new Set([run.agent_model, run.judge_model])], provider: run.provider as Provider, providerBaseUrl: run.provider_base_url,
+    return { orgId: job.org_id, paidBy: run.paid_by as PaidBy, firstOnUs, runId: job.run_id, jobId: job.id, models: [...new Set([run.agent_model, run.judge_model])], provider: run.provider as Provider, providerBaseUrl: run.provider_base_url,
       price: run.prompt_usd_per_mtok === null || run.completion_usd_per_mtok === null ? null : { promptUsdPerMtok: Number(run.prompt_usd_per_mtok), completionUsdPerMtok: Number(run.completion_usd_per_mtok) },
       remainingUsd, remainingTokens };
   });
@@ -423,12 +428,25 @@ export async function llmCallFor(db: Database, token: string): Promise<LlmCall> 
   return outcome;
 }
 
+export async function forgetUnpaidFirstCall(db: Database, runId: string): Promise<void> {
+  await asSystem(db, async (tx) => {
+    const run = await tx.selectFrom("runs").select("status").where("id", "=", runId).forUpdate().executeTakeFirstOrThrow();
+    await tx
+      .updateTable("first_runs_on_us")
+      .set({ model_called_at: null })
+      .where("run_id", "=", runId)
+      .where(({ not, exists, selectFrom }) => not(exists(selectFrom("llm_usage").select("id").where("run_id", "=", runId))))
+      .execute();
+    if (!ACTIVE.includes(run.status)) await giveBackUnusedFirstRun(tx, runId);
+  });
+}
+
 export async function recordLlmUsage(db: Database, call: LlmCall, usage: { model: string; inputTokens: number; outputTokens: number; costUsd: number }): Promise<void> {
   await asSystem(db, async (tx) => {
     await tx.selectFrom("jobs").select("id").where("id", "=", call.jobId).forUpdate().executeTakeFirstOrThrow();
     await tx.selectFrom("runs").select("id").where("id", "=", call.runId).forUpdate().executeTakeFirstOrThrow();
     await tx.insertInto("llm_usage").values({
-      org_id: call.orgId, run_id: call.runId, job_id: call.jobId, model: usage.model.slice(0, 200),
+      org_id: call.orgId, run_id: call.runId, job_id: call.jobId, model: usage.model.slice(0, 200), paid_by: call.paidBy,
       input_tokens: Math.max(0, Math.round(usage.inputTokens)), output_tokens: Math.max(0, Math.round(usage.outputTokens)), cost_usd: Math.max(0, usage.costUsd).toFixed(6),
     }).execute();
     await addCost(tx, call.runId, call.jobId, usage.costUsd);
@@ -463,6 +481,7 @@ export async function completeJob(db: Database, token: string, input: JobResult,
     if (refused) {
       await tx.updateTable("runs").set({ status: "cancelled", cancel_reason: "account_refused", finished_at: new Date(), sign_up_seed: null }).where("id", "=", job.run_id).where("status", "in", ACTIVE).execute();
       await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date() }).where("run_id", "=", job.run_id).where("status", "=", "queued").execute();
+      await giveBackUnusedFirstRun(tx, job.run_id);
       return;
     }
     if (job.kind === "replay" && result.observation) {
@@ -492,5 +511,6 @@ async function planNext(tx: Tx, job: { run_id: string; org_id: string; kind: str
     const roles = await tx.selectFrom("jobs").select("status").where("run_id", "=", job.run_id).where("kind", "=", "role_session").execute();
     const allFailed = roles.length > 0 && roles.every((r) => r.status === "failed");
     await tx.updateTable("runs").set({ status: allFailed ? "failed" : "succeeded", finished_at: new Date() }).where("id", "=", job.run_id).where("status", "in", ACTIVE).execute();
+    await giveBackUnusedFirstRun(tx, job.run_id);
   }
 }

@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 type Member = { userId: string; email: string; orgId: string; orgName: string; role: string };
-const state = vi.hoisted(() => ({ without: null as string | null, startRefusal: null as Error | null, startFails: null as Error | null, logged: [] as string[], member: null as Member | null, tenants: [] as string[], projectInWorkspace: true, keyChecks: 0, keysSaved: 0, keyStillStored: true, runsStarted: 0, stillAsked: [] as unknown[][], startedIn: [] as unknown[], revalidated: [] as string[], check: { ok: true } as Record<string, unknown>, stored: true }));
+const state = vi.hoisted(() => ({ without: null as string | null, startRefusal: null as Error | null, startFails: null as Error | null, logged: [] as string[], member: null as Member | null, tenants: [] as string[], projectInWorkspace: true, keyChecks: 0, keysSaved: 0, keyStillStored: true, runsStarted: 0, stillAsked: [] as unknown[][], startedIn: [] as unknown[], revalidated: [] as string[], check: { ok: true } as Record<string, unknown>, stored: true, platformKey: false, onUsLeft: true, startOptions: [] as Record<string, unknown>[] }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({ redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); } }));
@@ -17,7 +17,7 @@ vi.mock("../../../server/log.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../server/log.ts")>()),
   logError: async (message: string) => void state.logged.push(message),
 }));
-vi.mock("../../../server/env.ts", () => ({ readEnv: () => ({ openRouterUrl: "https://openrouter.test/api/v1" }) }));
+vi.mock("../../../server/env.ts", () => ({ readEnv: () => ({ openRouterUrl: "https://openrouter.test/api/v1", ...(state.platformKey ? { setup: { apiKey: "sk-or-v1-" + "p".repeat(40), model: "m" } } : {}) }) }));
 vi.mock("../../../projects/projects.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../projects/projects.ts")>()),
   projectExists: async () => state.projectInWorkspace,
@@ -41,7 +41,8 @@ vi.mock("../../../runs/runs.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../runs/runs.ts")>()),
   personWithoutAccount: async () => state.without,
   refusalToStart: async () => state.startRefusal ?? null,
-  startRun: async (tx: unknown) => { if (state.startFails) throw state.startFails; state.startedIn.push(tx); state.runsStarted++; return { id: "run-1", number: 1 }; },
+  firstRunOnUsLeft: async () => state.onUsLeft,
+  startRun: async (tx: unknown, _org: string, _project: string, _keys: unknown, options: Record<string, unknown>) => { if (state.startFails) throw state.startFails; state.startedIn.push(tx); state.startOptions.push(options); state.runsStarted++; return { id: "run-1", number: 1 }; },
 }));
 
 const { modelsForKeyAction, startRunAction } = await import("./actions.ts");
@@ -70,6 +71,42 @@ beforeEach(() => {
   state.startRefusal = null;
   state.startFails = null;
   state.logged = [];
+  state.platformKey = false;
+  state.onUsLeft = true;
+  state.startOptions = [];
+});
+
+test("the first run on Trawler starts without a key, on the fixed model and cap whatever the form says, paid by Trawler", async () => {
+  state.platformKey = true;
+  state.stored = false;
+  const asThePanelSendsIt = startForm({ onUs: "1" });
+  asThePanelSendsIt.delete("model");
+  asThePanelSendsIt.delete("budget");
+  await expect(startRunAction({}, asThePanelSendsIt)).rejects.toMatchObject({ to: "/runs/0001" });
+  await expect(startRunAction({}, startForm({ onUs: "1", model: "openai/gpt-5-pro", budget: "50" }))).rejects.toMatchObject({ to: "/runs/0001" });
+  expect(state.keyChecks).toBe(0);
+  expect(state.keysSaved).toBe(0);
+  const onTrawler = expect.objectContaining({ agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash", budgetUsd: 1, provider: "openrouter", providerBaseUrl: null, paidBy: "trawler", createdBy: "member-1" });
+  expect(state.startOptions).toEqual([onTrawler, onTrawler]);
+});
+
+test("the first run on Trawler is refused plainly when this server has no platform key, or the workspace has used it, and nothing starts", async () => {
+  state.stored = false;
+  expect(await startRunAction({}, startForm({ onUs: "1" }))).toEqual({ error: "Trawler cannot pay for runs on this server. Add a model key to start." });
+  state.platformKey = true;
+  state.onUsLeft = false;
+  expect(await startRunAction({}, startForm({ onUs: "1" }))).toEqual({ error: "This workspace has used its first run on Trawler. Add a model key to start more runs." });
+  const { FirstRunOnUsUsed } = await vi.importActual<typeof import("../../../runs/runs.ts")>("../../../runs/runs.ts");
+  state.onUsLeft = true;
+  state.startFails = new FirstRunOnUsUsed();
+  expect(await startRunAction({}, startForm({ onUs: "1" }))).toEqual({ error: "This workspace has used its first run on Trawler. Add a model key to start more runs.", refused: true });
+  expect(state.runsStarted).toBe(0);
+  expect(state.logged).toEqual([]);
+});
+
+test("a run started with a key is paid by the workspace", async () => {
+  await expect(startRunAction({}, startForm())).rejects.toMatchObject({ to: "/runs/0001" });
+  expect(state.startOptions).toEqual([expect.objectContaining({ paidBy: "workspace", budgetUsd: 2 })]);
 });
 
 test("a refusal that arrives while the run starts, such as a pause at that moment, is shown as it is and not logged", async () => {

@@ -16,7 +16,7 @@ vi.mock("react", async (original) => ({
   useEffect: (effect: () => void | (() => void)) => { react.effects.push(effect); },
   useRef: (initial: unknown) => ({ current: initial }),
 }));
-const actions = vi.hoisted(() => ({ startRunAction: vi.fn(), modelsForKeyAction: vi.fn() }));
+const actions = vi.hoisted(() => ({ startRunAction: vi.fn(), modelsForKeyAction: vi.fn(), priceRangeAction: vi.fn() }));
 vi.mock("./actions.ts", () => actions);
 
 const { StartRun, modelsForKey, startTheRun } = await import("./start-run.tsx");
@@ -38,6 +38,7 @@ beforeEach(() => {
   Object.assign(react, { served: [], effects: [], setters: [] });
   actions.startRunAction.mockReset();
   actions.modelsForKeyAction.mockReset();
+  actions.priceRangeAction.mockReset();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -99,4 +100,18 @@ test("a model list asks about the key as typed, the server's answer is passed on
   const failure = new TypeError("Failed to fetch");
   actions.modelsForKeyAction.mockRejectedValue(failure);
   await expect(modelsForKey({})).rejects.toBe(failure);
+});
+
+test("the first run on Trawler reads its model's price for the estimate, and lists no models with the saved key it does not use", async () => {
+  const range = { low: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }, high: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } };
+  actions.priceRangeAction.mockResolvedValue(range);
+  react.effects = [];
+  react.setters = [];
+  StartRun({ projectId: "p1", projectName: "Acme", personas: 2, keyHint, canManageKey: true, authorisedBefore: true, firstRunOnUs: true });
+  const setRanged = react.setters[7]!;
+  for (const effect of react.effects) effect();
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(actions.modelsForKeyAction).not.toHaveBeenCalled();
+  expect(actions.priceRangeAction).toHaveBeenCalledWith("deepseek/deepseek-v4.1-flash");
+  expect(setRanged).toHaveBeenCalledWith({ modelId: "deepseek/deepseek-v4.1-flash", range });
 });

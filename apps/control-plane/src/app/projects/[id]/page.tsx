@@ -8,10 +8,12 @@ import { PlanWorkspace } from "./plan-workspace.tsx";
 import { modelKeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
 import { projectRunCount } from "../../../projects/overview.ts";
-import { projectRunState, refusalToStart, RunInProgress } from "../../../runs/runs.ts";
+import { FIRST_RUN_ON_US } from "../../../runs/models.ts";
+import { firstRunOnUsLeft, projectRunState, refusalToStart, RunInProgress } from "../../../runs/runs.ts";
 import { projectForEditing } from "../../../projects/projects.ts";
 import { canManageBilling, signedInMember } from "../../../server/auth.ts";
 import { getDb } from "../../../server/db.ts";
+import { readEnv } from "../../../server/env.ts";
 import { shellFor } from "../../../server/shell.ts";
 import { projectPageTitle } from "../../../server/titles.ts";
 
@@ -30,10 +32,13 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   if (!member) redirect("/sign-in");
   const { orgId } = member;
   if (!UUID.test(id)) notFound();
-  const [project, keyHint, runs, runState, refusal] = await withOrg(getDb(), orgId, (tx) =>
-    Promise.all([projectForEditing(tx, orgId, id), modelKeyHint(tx, orgId), projectRunCount(tx, orgId, id), projectRunState(tx, orgId, id), refusalToStart(tx, orgId, id)]),
+  const env = readEnv();
+  const [project, keyHint, runs, runState, onUsLeft] = await withOrg(getDb(), orgId, (tx) =>
+    Promise.all([projectForEditing(tx, orgId, id), modelKeyHint(tx, orgId), projectRunCount(tx, orgId, id), projectRunState(tx, orgId, id), env.setup ? firstRunOnUsLeft(tx, orgId) : false]),
   );
   if (!project || !runState) notFound();
+  const offeredOnUs = onUsLeft && project.personas.length <= FIRST_RUN_ON_US.maxPeople;
+  const refusal = await withOrg(getDb(), orgId, (tx) => refusalToStart(tx, orgId, id, offeredOnUs ? "trawler" : "workspace"));
   const shell = await shellFor(member);
   return (
     <AppShell shell={shell} current={{ project: id }} wide>
@@ -56,6 +61,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           keyHint={keyHint}
           canManageKey={canManageBilling(member)}
           authorisedBefore={runs > 0}
+          firstRunOnUs={onUsLeft}
           startRefusal={refusal ? { message: refusal.message, ...(refusal instanceof RunInProgress ? { activeRun: refusal.run } : {}) } : undefined}
         />
       </div>

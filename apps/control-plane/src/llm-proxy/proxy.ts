@@ -6,7 +6,7 @@ import type { Keyring } from "../lib/secrets.ts";
 import { bearer, readBody } from "../runner-api/handlers.ts";
 import type { Price } from "../llm/prices.ts";
 import { chatFetchFor, chatHeaders, endpointFor, LONGEST_EXPLANATION_READ, providerError, saysTheKeyIsInvalid, type Endpoint, type ProviderError } from "../llm/providers.ts";
-import { InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage, type LlmCall } from "../runs/queue.ts";
+import { forgetUnpaidFirstCall, InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage, type LlmCall } from "../runs/queue.ts";
 import { affordableOutputTokens } from "../runs/runs.ts";
 import { logError, scrubberWith } from "../server/log.ts";
 import { FetchRefused } from "../setup/safe-fetch.ts";
@@ -15,6 +15,7 @@ export interface ProxyDeps {
   db: Database;
   keys: Keyring;
   openRouterUrl: string;
+  trawlerKey?: string;
   fetch?: typeof fetch;
   retryBaseMs?: number;
   attempts?: number;
@@ -26,6 +27,7 @@ const UPSTREAM_TIMEOUT_MS = 180_000;
 const FORWARDED = ["model", "messages", "tools", "tool_choice", "parallel_tool_calls", "temperature", "top_p", "seed", "stop", "frequency_penalty", "presence_penalty", "response_format"] as const;
 const OPENROUTER_ONLY = ["top_k", "reasoning", "include_reasoning"] as const;
 const inFlight = new Set<string>();
+const MAY_HAVE_BEEN_CHARGED = new Set([200, 422, 499, 504]);
 
 const failure = (status: number, message: string, type?: string) => Response.json({ error: { code: status, message, ...(type ? { type } : {}) } }, { status, headers: { "cache-control": "no-store" } });
 const jobStopped = (message: string) => failure(402, message, JOB_STOPPED);
@@ -34,6 +36,19 @@ const unusable = (message: string) => failure(422, message, ANSWER_UNUSABLE);
 class UpstreamTimeout extends Error {}
 
 const KEY_REFUSED = "the provider refused the workspace key; an owner or admin can replace it in Settings";
+const TRAWLER_KEY_REFUSED = "the provider refused Trawler's key; this run cannot go on, and Trawler has been told";
+const TRAWLER_OUT_OF_CREDITS = "Trawler's model account is out of credits; this run cannot go on, and Trawler has been told";
+
+async function endpointOf(deps: ProxyDeps, call: LlmCall): Promise<Endpoint | Response> {
+  if (call.paidBy === "trawler") {
+    if (!deps.trawlerKey) return failure(402, "Trawler cannot pay for model calls on this server");
+    return endpointFor("openrouter", deps.trawlerKey, { openRouterUrl: deps.openRouterUrl });
+  }
+  const stored = await asSystem(deps.db, (tx) => modelKey(tx, call.orgId, deps.keys));
+  if (!stored) return failure(402, "the workspace has no model key");
+  if (stored.provider !== call.provider || (call.provider === "custom" && stored.baseUrl !== call.providerBaseUrl)) return failure(402, "the workspace key changed to another provider or endpoint; start a new run");
+  return endpointFor(stored.provider, stored.key, { openRouterUrl: deps.openRouterUrl, customUrl: stored.baseUrl });
+}
 const refusedTheContent = (error: ProviderError | undefined) =>
   !!error && (Array.isArray(error.metadata?.reasons) || typeof error.metadata?.flagged_input === "string" || (typeof error.message === "string" && /moderat|flagged|guardrail/i.test(error.message)));
 
@@ -100,7 +115,11 @@ export async function handleChatCompletions(req: Request, deps: ProxyDeps): Prom
   if (inFlight.has(call.jobId)) return failure(429, "one model call at a time per job");
   inFlight.add(call.jobId);
   try {
-    return await proxied(req, deps, call);
+    const res = await proxied(req, deps, call);
+    if (call.firstOnUs && !MAY_HAVE_BEEN_CHARGED.has(res.status)) {
+      await forgetUnpaidFirstCall(deps.db, call.runId).catch((err) => logError("the first run on Trawler could not be given back after an unpaid call", { orgId: call.orgId, runId: call.runId, err }));
+    }
+    return res;
   } finally {
     inFlight.delete(call.jobId);
   }
@@ -114,15 +133,13 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
   const request = body as Record<string, unknown>;
   if (request.stream !== undefined && request.stream !== false) return failure(400, "streaming is not supported");
   if (typeof request.model !== "string" || !call.models.includes(request.model)) return failure(400, `this job may only use ${call.models.join(" or ")}`);
-  const stored = await asSystem(deps.db, (tx) => modelKey(tx, call.orgId, deps.keys));
-  if (!stored) return failure(402, "the workspace has no model key");
-  if (stored.provider !== call.provider || (call.provider === "custom" && stored.baseUrl !== call.providerBaseUrl)) return failure(402, "the workspace key changed to another provider or endpoint; start a new run");
-  const endpoint = endpointFor(stored.provider, stored.key, { openRouterUrl: deps.openRouterUrl, customUrl: stored.baseUrl });
+  const endpoint = await endpointOf(deps, call);
+  if (endpoint instanceof Response) return endpoint;
   const price = call.price;
   const maxTokens = outputAllowance(price, request.max_tokens ?? request.max_completion_tokens, call);
   if (maxTokens < 1) return jobStopped("the run has spent its budget");
 
-  const openRouter = stored.provider === "openrouter";
+  const openRouter = endpoint.provider === "openrouter";
   const fields = openRouter ? [...FORWARDED, ...OPENROUTER_ONLY] : FORWARDED;
   const payload = Object.fromEntries(fields.filter((field) => field in request).map((field) => [field, request[field]]));
   const extras = openRouter ? { usage: { include: true }, provider: { data_collection: "deny", allow_fallbacks: true } } : {};
@@ -142,7 +159,11 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
     if (err instanceof FetchRefused && err.reason === "too_long" && err.status !== undefined) return failure(502, "the provider's answer was too large");
     return failure(502, "the provider could not be reached");
   }
-  if (upstream.status === 402) return failure(402, "the provider account behind the workspace key is out of credits");
+  if (upstream.status === 402) {
+    if (call.paidBy !== "trawler") return failure(402, "the provider account behind the workspace key is out of credits");
+    await logError("Trawler's model account is out of credits", { orgId: call.orgId, runId: call.runId });
+    return failure(402, TRAWLER_OUT_OF_CREDITS);
+  }
   let text: string;
   try {
     text = await upstream.text();
@@ -159,7 +180,11 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
     parsed = null;
   }
   const error = providerError(parsed);
-  if (upstream.status === 401 || saysTheKeyIsInvalid(upstream.status, error) || (upstream.status === 403 && !refusedTheContent(error))) return failure(402, KEY_REFUSED);
+  if (upstream.status === 401 || saysTheKeyIsInvalid(upstream.status, error) || (upstream.status === 403 && !refusedTheContent(error))) {
+    if (call.paidBy !== "trawler") return failure(402, KEY_REFUSED);
+    await logError("the provider refused Trawler's model key", { orgId: call.orgId, runId: call.runId, status: upstream.status });
+    return failure(402, TRAWLER_KEY_REFUSED);
+  }
   if (!parsed || typeof parsed !== "object") {
     if (!upstream.ok) return failure(upstream.status, "the provider sent an unreadable answer");
     await chargeTheUnreadAnswer();
@@ -171,7 +196,7 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
       ? `the provider answered ${upstream.status}`
       : explanation.length > LONGEST_EXPLANATION_READ
         ? `the provider answered ${upstream.status}; its explanation was too long to show`
-        : scrubberWith([stored.key]).scrub(explanation).slice(0, 300);
+        : scrubberWith([endpoint.key]).scrub(explanation).slice(0, 300);
     return failure(upstream.ok ? 502 : upstream.status, message);
   }
   const usage = parsed.usage ?? {};

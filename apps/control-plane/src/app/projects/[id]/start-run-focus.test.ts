@@ -33,6 +33,13 @@ const draw = (options: { replacing?: boolean; hint?: typeof keyHint | null } = {
   react.states = options.replacing === undefined ? [] : [options.replacing];
   return nodes(StartRun({ projectId: "p1", projectName: "Acme Invoices", personas: 2, keyHint: options.hint === undefined ? keyHint : options.hint, canManageKey: true, authorisedBefore: true }) as ReactElement);
 };
+const offer = true;
+const drawOffer = (payingOwn: boolean, hint: typeof keyHint | null = null) => {
+  react.stateAt = 0;
+  react.refAt = 0;
+  react.states = [false, "", null, "", null, false, "", null, 2, false, payingOwn];
+  return nodes(StartRun({ projectId: "p1", projectName: "Acme Invoices", personas: 2, keyHint: hint, canManageKey: true, authorisedBefore: true, firstRunOnUs: offer }) as ReactElement);
+};
 const keyFields = (tree: Node[]) => tree.find((n) => n.type === KeyFields)?.props;
 const button = (tree: Node[], text: RegExp) => tree.find((n) => n.type === "button" && text.test([n.props?.children].flat().join("")))?.props;
 
@@ -70,4 +77,34 @@ test("a refusal about the key or the base URL is tied to that field, and the mes
   react.state = { error: "Set a cap between $0.10 and $50." };
   tree = draw({ replacing: true });
   expect(keyFields(tree)).toMatchObject({ errorId: undefined, baseUrlErrorId: undefined });
+});
+
+test("paying with one's own key swaps the first run on Trawler for the key form, the way back restores it, and focus follows to the button that undoes the switch", () => {
+  const focus = vi.fn();
+  const attach = (props: Record<string, unknown>) => (props.ref as (el: { focus: () => void } | null) => void)({ focus });
+  const offered = drawOffer(false);
+  const offersOnUs = (tree: Node[]) => tree.some((n) => typeof n.type === "function" && n.type.name === "OnUs");
+  expect(offersOnUs(offered)).toBe(true);
+  const submit = (tree: Node[]) => tree.find((n) => typeof n.type === "function" && n.type.name === "Submit")?.props;
+  expect(submit(offered)?.checksKey).toBe(false);
+  expect(keyFields(offered)).toBeUndefined();
+  const payOwn = button(offered, /^Pay with your own model key instead$/)!;
+  attach(payOwn);
+  expect(focus).not.toHaveBeenCalled();
+  (payOwn.onClick as () => void)();
+  expect(react.setters[10]).toHaveBeenCalledWith(true);
+
+  const own = drawOffer(true);
+  expect(offersOnUs(own)).toBe(false);
+  expect(submit(own)?.checksKey).toBe(true);
+  expect(keyFields(own)).toBeDefined();
+  const back = button(own, /^Use the first run on Trawler instead$/)!;
+  attach(back);
+  expect(focus).toHaveBeenCalledOnce();
+  (back.onClick as () => void)();
+  expect(react.setters[10]).toHaveBeenCalledWith(false);
+  attach(button(drawOffer(false), /^Pay with your own model key instead$/)!);
+  expect(focus).toHaveBeenCalledTimes(2);
+  attach(button(drawOffer(false), /^Pay with your own model key instead$/)!);
+  expect(focus).toHaveBeenCalledTimes(2);
 });
