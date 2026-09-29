@@ -346,6 +346,7 @@ test("a timed-out call is answered 504 after one attempt whichever fetch timed o
   expect(await attempts(() => new DOMException("The operation was aborted due to timeout", "TimeoutError"))).toEqual({ status: 504, message: "the provider did not answer in time", tried: 1 });
   expect(await attempts(() => new FetchRefused("private", "the address is not allowed"))).toEqual({ status: 502, message: "the provider could not be reached", tried: 1 });
   expect(await attempts(() => new FetchRefused("status", "HTTP 700"))).toEqual({ status: 502, message: "the provider could not be reached", tried: 1 });
+  expect(await attempts(() => new FetchRefused("too_long", "the answer is too large"))).toEqual({ status: 502, message: "the provider's answer was too large", tried: 1 });
   expect(await attempts(() => Object.assign(new Error("The operation was aborted"), { name: "AbortError" }))).toEqual({ status: 502, message: "the provider could not be reached", tried: 3 });
   expect(await attempts(() => new TypeError("fetch failed"))).toEqual({ status: 502, message: "the provider could not be reached", tried: 3 });
 

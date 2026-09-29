@@ -114,7 +114,8 @@ export async function safeFetchText(raw: string, options: { blocked?: BlockList;
 
 const MAX_RESPONSE_BYTES = 16_000_000;
 
-export function guardedFetch(options: { allowLoopback?: boolean } = {}): typeof fetch {
+export function guardedFetch(options: { allowLoopback?: boolean; maxResponseBytes?: number } = {}): typeof fetch {
+  const maxResponseBytes = options.maxResponseBytes ?? MAX_RESPONSE_BYTES;
   const blocked = options.allowLoopback ? blockedAddresses({ allowLoopback: true }) : DEFAULT_BLOCKED;
   return (async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = checkUrl(String(input instanceof Request ? input.url : input));
@@ -131,11 +132,12 @@ export function guardedFetch(options: { allowLoopback?: boolean } = {}): typeof 
           res.destroy();
           return reject(new FetchRefused("status", `HTTP ${status}`));
         }
+        if (Number(res.headers["content-length"]) > maxResponseBytes) return res.destroy(new FetchRefused("too_long", "the answer is too large"));
         const chunks: Buffer[] = [];
         let size = 0;
         res.on("data", (chunk: Buffer) => {
           size += chunk.length;
-          if (size > MAX_RESPONSE_BYTES) return res.destroy(new FetchRefused("too_long", "the answer is too large"));
+          if (size > maxResponseBytes) return res.destroy(new FetchRefused("too_long", "the answer is too large"));
           chunks.push(chunk);
         });
         res.on("end", () => {

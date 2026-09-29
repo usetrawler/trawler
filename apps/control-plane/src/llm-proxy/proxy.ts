@@ -5,7 +5,7 @@ import { modelKey } from "../credentials/credentials.ts";
 import type { Keyring } from "../lib/secrets.ts";
 import { bearer, readBody } from "../runner-api/handlers.ts";
 import type { Price } from "../llm/prices.ts";
-import { chatHeaders, endpointFor, fetchFor, LONGEST_EXPLANATION_READ, type Endpoint } from "../llm/providers.ts";
+import { chatFetchFor, chatHeaders, endpointFor, LONGEST_EXPLANATION_READ, type Endpoint } from "../llm/providers.ts";
 import { InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage, type LlmCall } from "../runs/queue.ts";
 import { logError, scrubberWith } from "../server/log.ts";
 import { FetchRefused } from "../setup/safe-fetch.ts";
@@ -38,7 +38,7 @@ async function forward(deps: ProxyDeps, endpoint: Endpoint, payload: unknown, si
   let last: Response | Error = new Error("no attempt made");
   for (let i = 0; i < attempts; i++) {
     try {
-      const res = await fetchFor(endpoint, deps.fetch ?? fetch)(`${endpoint.baseUrl}/chat/completions`, {
+      const res = await chatFetchFor(endpoint, deps.fetch ?? fetch)(`${endpoint.baseUrl}/chat/completions`, {
         method: "POST",
         headers: chatHeaders(endpoint),
         body: JSON.stringify(payload),
@@ -126,6 +126,7 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
   } catch (err) {
     if (err instanceof UpstreamTimeout) return failure(504, "the provider did not answer in time");
     if (req.signal.aborted) return failure(499, "the runner hung up");
+    if (err instanceof FetchRefused && err.reason === "too_long") return failure(502, "the provider's answer was too large");
     return failure(502, "the provider could not be reached");
   }
   if (upstream.status === 401 || upstream.status === 403) return failure(402, "the provider refused the workspace key; an owner or admin can replace it in Settings");
