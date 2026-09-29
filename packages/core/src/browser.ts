@@ -539,9 +539,10 @@ export async function openBrowser(opts: {
     const modalState = (dialog: Dialog) => `### Modal state\n- ${dialogLine(dialog)}: can be handled by browser_handle_dialog`;
     context.on("page", (page) => {
       page.on("dialog", (dialog) => {
+        if (page !== actingPage()) return void dialog.dismiss().catch(() => {});
         dialogs.add(dialog);
         openDialogs.set(dialog, page);
-        if (page === actingPage()) for (const notify of onNextDialog) notify(dialog);
+        for (const notify of onNextDialog) notify(dialog);
       });
       page.on("dialogclosed", (dialog) => openDialogs.delete(dialog));
       page.on("close", () => {
@@ -591,11 +592,9 @@ export async function openBrowser(opts: {
       return withFieldValuesMasked(live.scrub(opts.scrubber.scrub(result)), heldInFields);
     };
     const focusCheck = async () => {
-      const held = await liveFilled();
-      for (const page of context.pages()) {
-        if (await focusIsOnSecretIn(page.mainFrame(), held, holdsSecret).catch(() => true)) return true;
-      }
-      return false;
+      const page = actingPage();
+      if (!page) return false;
+      return focusIsOnSecretIn(page.mainFrame(), await liveFilled(), holdsSecret).catch(() => true);
     };
     const focusIsOnSecret = async () => {
       const verdict = await Promise.race([focusCheck(), new Promise<"slow">((r) => setTimeout(() => r("slow"), FOCUS_CHECK_MS))]);
