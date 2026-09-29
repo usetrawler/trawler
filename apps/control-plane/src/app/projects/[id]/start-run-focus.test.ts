@@ -85,6 +85,8 @@ test("paying with one's own key swaps the first run on Trawler for the key form,
   const offered = drawOffer(false);
   const offersOnUs = (tree: Node[]) => tree.some((n) => typeof n.type === "function" && n.type.name === "OnUs");
   expect(offersOnUs(offered)).toBe(true);
+  const submit = (tree: Node[]) => tree.find((n) => typeof n.type === "function" && n.type.name === "Submit")?.props;
+  expect(submit(offered)?.checksKey).toBe(false);
   expect(keyFields(offered)).toBeUndefined();
   const payOwn = button(offered, /^Pay with your own model key instead$/)!;
   attach(payOwn);
@@ -94,6 +96,7 @@ test("paying with one's own key swaps the first run on Trawler for the key form,
 
   const own = drawOffer(true);
   expect(offersOnUs(own)).toBe(false);
+  expect(submit(own)?.checksKey).toBe(true);
   expect(keyFields(own)).toBeDefined();
   const back = button(own, /^Use the first run on Trawler instead$/)!;
   attach(back);
