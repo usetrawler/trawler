@@ -8,6 +8,7 @@ import { PlanWorkspace } from "./plan-workspace.tsx";
 import { modelKeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
 import { projectRunCount } from "../../../projects/overview.ts";
+import { projectRunState, refusalToStart, RunInProgress } from "../../../runs/runs.ts";
 import { projectForEditing } from "../../../projects/projects.ts";
 import { canManageBilling, signedInMember } from "../../../server/auth.ts";
 import { getDb } from "../../../server/db.ts";
@@ -29,12 +30,14 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   if (!member) redirect("/sign-in");
   const { orgId } = member;
   if (!UUID.test(id)) notFound();
-  const [project, keyHint, runs] = await withOrg(getDb(), orgId, (tx) => Promise.all([projectForEditing(tx, orgId, id), modelKeyHint(tx, orgId), projectRunCount(tx, orgId, id)]));
-  if (!project) notFound();
+  const [project, keyHint, runs, runState, refusal] = await withOrg(getDb(), orgId, (tx) =>
+    Promise.all([projectForEditing(tx, orgId, id), modelKeyHint(tx, orgId), projectRunCount(tx, orgId, id), projectRunState(tx, orgId, id), refusalToStart(tx, orgId, id)]),
+  );
+  if (!project || !runState) notFound();
   const shell = await shellFor(member);
   return (
     <AppShell shell={shell} current={{ project: id }} wide>
-      <ProjectHead project={{ id: project.id, name: project.name, targetUrl: project.target_url }} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="plan" runs={runs} />
+      <ProjectHead project={{ id: project.id, name: project.name, targetUrl: project.target_url }} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="plan" runs={runs} runState={runState} />
       <div className="flex max-w-3xl flex-col gap-10">
         <div className="flex flex-col gap-3">
           <p className="text-lg text-muted">{project.description}</p>
@@ -53,6 +56,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           keyHint={keyHint}
           canManageKey={canManageBilling(member)}
           authorisedBefore={runs > 0}
+          startRefusal={refusal ? { message: refusal.message, ...(refusal instanceof RunInProgress ? { activeRun: refusal.run } : {}) } : undefined}
         />
       </div>
     </AppShell>

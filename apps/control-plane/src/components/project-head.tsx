@@ -1,7 +1,9 @@
 import { hostOf } from "../projects/overview.ts";
+import type { ProjectRunState } from "../runs/runs.ts";
 import { PageHead, PrimaryLink } from "./page-head.tsx";
+import { PauseRuns } from "./pause-runs.tsx";
 
-export function ProjectHead({ project, address, tab, runs }: { project: { id: string; name: string; targetUrl: string }; address?: string; tab: "plan" | "runs"; runs: number }) {
+export function ProjectHead({ project, address, tab, runs, runState }: { project: { id: string; name: string; targetUrl: string }; address?: string; tab: "plan" | "runs"; runs: number; runState: ProjectRunState }) {
   const tabs = [
     { key: "plan", href: `/projects/${project.id}`, label: "Plan" },
     { key: "runs", href: `/projects/${project.id}/runs`, label: "Runs", count: runs },
@@ -11,7 +13,12 @@ export function ProjectHead({ project, address, tab, runs }: { project: { id: st
       <PageHead
         eyebrow={<>Project · <a href={project.targetUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-ink">{address ?? hostOf(project.targetUrl)}<span aria-hidden> ↗</span><span className="sr-only normal-case"> (opens in a new tab)</span></a></>}
         title={project.name}
-        action={<PrimaryLink href={`/projects/${project.id}#start`}>New run</PrimaryLink>}
+        action={
+          <div className="flex flex-wrap items-end gap-3 md:justify-end">
+            <PauseRuns projectId={project.id} paused={runState.paused} liveRun={runState.liveRun} />
+            {!runState.paused && <PrimaryLink href={`/projects/${project.id}#start`}>New run</PrimaryLink>}
+          </div>
+        }
       />
       <nav aria-label="Project">
         <ul className="-mt-4 flex gap-6 border-b border-line">

@@ -66,6 +66,17 @@ export async function activeRunOf(tx: Tx, projectId: string): Promise<{ id: stri
   return (await tx.selectFrom("runs").select(["id", "number"]).where("project_id", "=", projectId).where("status", "in", ["queued", "running"]).executeTakeFirst()) ?? null;
 }
 
+export interface ProjectRunState {
+  paused: boolean;
+  liveRun: { id: string; number: number } | null;
+}
+
+export async function projectRunState(tx: Tx, orgId: string, projectId: string): Promise<ProjectRunState | null> {
+  const project = await tx.selectFrom("projects").select("paused_at").where("id", "=", projectId).where("org_id", "=", orgId).executeTakeFirst();
+  if (!project) return null;
+  return { paused: project.paused_at !== null, liveRun: await activeRunOf(tx, projectId) };
+}
+
 export async function refusalToStart(tx: Tx, orgId: string, projectId: string): Promise<RunRefused | null> {
   const active = await activeRunOf(tx, projectId);
   return active ? new RunInProgress(active) : refusalToRun(tx, orgId, projectId);

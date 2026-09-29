@@ -8,6 +8,7 @@ import { detectProvider, PROVIDER_LABEL, type Provider } from "../../../llm/prov
 import type { KeyInput } from "../../../llm/key-input.ts";
 import type { Price, PriceRange } from "../../../llm/prices.ts";
 import { DEFAULT_RUN, estimateUsd, STEPS } from "../../../runs/models.ts";
+import { runTitle } from "../../../runs/status.ts";
 import { modelsForKeyAction, priceRangeAction, startRunAction, type ModelList, type StartState } from "./actions.ts";
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
@@ -59,6 +60,15 @@ export function Estimate({ price, range, goalsPerTurn, personas, modelChosen }: 
   );
 }
 
+export interface StartRefusal {
+  message: string;
+  activeRun?: { id: string; number: number };
+}
+
+function OpenRun({ run }: { run?: { id: string; number: number } }) {
+  return run ? <> <a href={`/runs/${run.id}`} className="underline underline-offset-4 hover:text-ink">Open {runTitle(run.number)}</a></> : null;
+}
+
 function Submit({ blocked, pending }: { blocked?: string; pending: boolean }) {
   return (
     <button type="submit" disabled={pending || Boolean(blocked)} aria-describedby={blocked ? "start-blocked" : undefined} className="flex h-12 items-center justify-between gap-6 bg-action px-5 font-mono text-sm tracking-[0.12em] text-[#17191c] uppercase transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50">
@@ -68,8 +78,8 @@ function Submit({ blocked, pending }: { blocked?: string; pending: boolean }) {
   );
 }
 
-export function StartRun({ projectId, projectName, personas, goalsPerTurn = Array.from({ length: personas }, () => 1), keyHint: savedHint, canManageKey, authorisedBefore, blocked, onStarting }: {
-  projectId: string; projectName: string; personas: number; goalsPerTurn?: number[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; blocked?: string; onStarting?: (starting: boolean) => void;
+export function StartRun({ projectId, projectName, personas, goalsPerTurn = Array.from({ length: personas }, () => 1), keyHint: savedHint, canManageKey, authorisedBefore, blocked, refusal, onStarting }: {
+  projectId: string; projectName: string; personas: number; goalsPerTurn?: number[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; blocked?: string; refusal?: StartRefusal; onStarting?: (starting: boolean) => void;
 }) {
   const [state, action, pending] = useActionState<StartState, FormData>(startTheRun, {});
   const keyHint = state.keyHint ?? savedHint;
@@ -141,6 +151,7 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
       className="flex flex-col gap-5 border border-line bg-panel p-5">
       <input type="hidden" name="projectId" value={projectId} />
       <p className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Start · <span className="text-ink">{projectName}</span></p>
+      {refusal && !state.error && <p className="border-l-2 border-warn pl-3 text-sm">{refusal.message}<OpenRun run={refusal.activeRun} /></p>}
 
       {!typingKey ? (
         <p className="text-sm">
@@ -189,7 +200,7 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
           <span>I am authorised to test this product. It is not a production system with real people&apos;s data.</span>
         </label>
       )}
-      {state.error && <p role="alert" id="start-error" className="border-l-2 border-bad pl-3 text-sm text-bad">{state.error}</p>}
+      {state.error && <p role="alert" id="start-error" className="border-l-2 border-bad pl-3 text-sm text-bad">{state.error}<OpenRun run={state.activeRun} /></p>}
       <div className="flex flex-wrap items-center justify-end gap-3">
         {(blocked ?? noKey) && <p id="start-blocked" className="text-sm text-muted">{blocked ?? noKey}</p>}
         <Submit blocked={blocked ?? noKey} pending={pending} />

@@ -42,3 +42,10 @@ test("the cap's hint says the last call can take a run slightly past it, as the 
   const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: true, authorisedBefore: true }));
   expect(html).toContain("Hard cap (USD). The run stops once it reaches it, and the last call can take it slightly past; findings so far are kept.");
 });
+
+test("a refusal known when the page opens is said above the form, with the live run to open, and Start still asks again", () => {
+  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: true, authorisedBefore: true, refusal: { message: "Run 0007 is still going on this project. Wait for it to finish or stop it, then start again.", activeRun: { id: "live-run", number: 7 } } }));
+  expect(html).toContain('Run 0007 is still going on this project. Wait for it to finish or stop it, then start again. <a href="/runs/live-run"');
+  expect(html).toContain(">Open Run 0007</a>");
+  expect(html.match(/<button type="submit"[^>]*>/)?.[0]).not.toMatch(/\sdisabled=""/);
+});

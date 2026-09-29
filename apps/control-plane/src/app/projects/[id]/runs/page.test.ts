@@ -25,6 +25,7 @@ vi.mock("../../../../server/shell.ts", () => ({
     return { user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [{ id: ID, name: "Acme", address: "app.acme.test" }], runs: 60 } };
   },
 }));
+vi.mock("../../../../runs/runs.ts", () => ({ projectRunState: async () => (state.found ? { paused: false, liveRun: null } : null) }));
 vi.mock("../../../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
 vi.mock("../../../../projects/overview.ts", async (original) => ({
   hostOf: (await original<typeof import("../../../../projects/overview.ts")>()).hostOf,

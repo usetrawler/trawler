@@ -5,6 +5,8 @@ type Member = { userId: string; name: string; email: string; orgId: string; orgN
 const state = vi.hoisted(() => ({
   member: null as { userId: string; name: string; email: string; orgId: string; orgName: string; role: string } | null,
   runs: 0, counted: [] as Array<[string, string]>, tenants: [] as string[], shells: [] as string[], planned: [] as Array<Record<string, unknown>>,
+  runState: { paused: false, liveRun: null } as { paused: boolean; liveRun: { id: string; number: number } | null },
+  refusal: null as Error | null,
 }));
 const ID = vi.hoisted(() => "0f8fad5b-d9cb-469f-a165-70867728950e");
 
@@ -36,6 +38,11 @@ vi.mock("../../../projects/overview.ts", async (original) => ({
   hostOf: (await original<typeof import("../../../projects/overview.ts")>()).hostOf,
   projectRunCount: async (_tx: unknown, orgId: string, id: string) => { state.counted.push([orgId, id]); return state.runs; },
 }));
+vi.mock("../../../runs/runs.ts", async (original) => ({
+  RunInProgress: (await original<typeof import("../../../runs/runs.ts")>()).RunInProgress,
+  projectRunState: async () => state.runState,
+  refusalToStart: async () => state.refusal,
+}));
 vi.mock("./plan-workspace.tsx", () => ({ PlanWorkspace: (props: Record<string, unknown>) => { state.planned.push(props); return null; } }));
 
 const { default: ProjectPage } = await import("./page.tsx");
@@ -48,6 +55,8 @@ beforeEach(() => {
   state.tenants = [];
   state.shells = [];
   state.planned = [];
+  state.runState = { paused: false, liveRun: null };
+  state.refusal = null;
 });
 
 test("a visitor who is not signed in, or no longer belongs to any workspace, is sent to sign in before anything is read", async () => {
