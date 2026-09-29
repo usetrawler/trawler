@@ -18,10 +18,18 @@ export function PauseRuns({ projectId, paused, liveRun }: { projectId: string; p
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const backToPause = useRef(false);
+  const switched = useRef(false);
+  const focusAfterSwitch = (button: HTMLButtonElement | null) => {
+    if (button && switched.current) {
+      switched.current = false;
+      button.focus();
+    }
+  };
 
   const run = (action: (projectId: string) => Promise<PauseState>, then: string) =>
     startTransition(async () => {
       const outcome = await call(action, projectId, then);
+      switched.current = !outcome.error;
       setError(outcome.error ?? null);
       setConfirming(false);
     });
@@ -34,7 +42,7 @@ export function PauseRuns({ projectId, paused, liveRun }: { projectId: string; p
       {paused ? (
         <div className="flex flex-wrap items-center gap-3">
           <p className="font-mono text-xs tracking-[0.1em] text-warn uppercase">Runs paused</p>
-          <button type="button" aria-disabled={pending || undefined} onClick={(e) => { guard(e); if (!pending) run(resumeRunsAction, "Reload the page to resume runs."); }} className={secondary}>
+          <button type="button" ref={focusAfterSwitch} aria-disabled={pending || undefined} onClick={(e) => { guard(e); if (!pending) run(resumeRunsAction, "Reload the page to resume runs."); }} className={secondary}>
             {pending ? "Resuming…" : "Resume runs"}
           </button>
         </div>
@@ -49,7 +57,7 @@ export function PauseRuns({ projectId, paused, liveRun }: { projectId: string; p
           </div>
         </div>
       ) : (
-        <button type="button" ref={(button) => { if (button && backToPause.current) { backToPause.current = false; button.focus(); } }} aria-disabled={pending || undefined} onClick={(e) => { guard(e); if (pending) return; if (liveRun) setConfirming(true); else run(pauseRunsAction, "Reload the page to pause runs."); }} className={secondary}>
+        <button type="button" ref={(button) => { focusAfterSwitch(button); if (button && backToPause.current) { backToPause.current = false; button.focus(); } }} aria-disabled={pending || undefined} onClick={(e) => { guard(e); if (pending) return; if (liveRun) setConfirming(true); else run(pauseRunsAction, "Reload the page to pause runs."); }} className={secondary}>
           {pending ? "Pausing…" : "Pause runs"}
         </button>
       )}

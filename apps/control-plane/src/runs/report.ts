@@ -137,8 +137,8 @@ const STOPPED_BECAUSE: Record<CancelReason, string> = {
   stopped: "This run was stopped.",
   key_removed: "Stopped when the model key was removed.",
   account_refused: "Stopped when the product refused a test account.",
-  time_limit: `Stopped after ${RUN_TIME_LIMIT_HOURS} hours, the longest a run may take. What it found until then is kept.`,
-  workspace_budget: "Stopped when the workspace reached its monthly budget. What it found until then is kept.",
+  time_limit: `Stopped after ${RUN_TIME_LIMIT_HOURS} hours, the longest a run may take.`,
+  workspace_budget: "Stopped when the workspace reached its monthly budget.",
   paused: "Stopped when runs on this project were paused.",
   halted: "Stopped because Trawler paused hosted runs.",
 };

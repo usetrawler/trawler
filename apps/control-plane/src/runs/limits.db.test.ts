@@ -108,7 +108,7 @@ describe("the run time limit", () => {
     expect({ status: summary.status, cancelReason: summary.cancelReason }).toEqual({ status: "cancelled", cancelReason: "time_limit" });
     expect(summary.findings.map((f) => f.title)).toEqual(["Broken save"]);
     expect(summary.jobs.map((j) => j.status)).toEqual(["succeeded", "cancelled"]);
-    expect(runView(summary).headline).toBe("Stopped after 3 hours, the longest a run may take. What it found until then is kept.");
+    expect(runView(summary).headline).toBe("Stopped after 3 hours, the longest a run may take.");
     expect(await claimJob(t.db, keys)).toBeNull();
   });
 
@@ -169,7 +169,7 @@ describe("the monthly workspace budget", () => {
     seq = 0;
     expect(await ingestEvents(t.db, job.token, [ev({ type: "note", jobId: job.jobId, text: "x" })])).toEqual({ cancel: true });
     const summary = (await withOrg(t.db, w.org, (tx) => runSummary(tx, w.org, run.id)))!;
-    expect(runView(summary).headline).toBe("Stopped when the workspace reached its monthly budget. What it found until then is kept.");
+    expect(runView(summary).headline).toBe("Stopped when the workspace reached its monthly budget.");
   });
 
   test("a spent budget refuses a new run and says how much went where; raising it lets the run start", async () => {

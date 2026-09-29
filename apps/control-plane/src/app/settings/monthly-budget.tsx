@@ -1,6 +1,6 @@
 "use client";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { field } from "../../components/key-fields.tsx";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { removeMonthlyBudgetAction, setMonthlyBudgetAction, type BudgetState } from "./actions.ts";
@@ -49,22 +49,30 @@ function BudgetForm({ limitUsd }: { limitUsd: number | null }) {
   const [state, action, pending] = useActionState<BudgetState, FormData>(setMonthlyBudget, {});
   const [removed, remove, removing] = useActionState<BudgetState, FormData>(removeMonthlyBudget, {});
   const [value, setValue] = useState(limitUsd === null ? "" : limitUsd.toFixed(2));
-  const [edited, setEdited] = useState(false);
-  useEffect(() => setEdited(false), [state]);
+  const [said, setSaid] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (removed.removed) setValue("");
+    setSaid(state.saved ? "Saved." : "");
+    setError(state.error ?? null);
+  }, [state]);
+  useEffect(() => {
+    setSaid(removed.removed ? "Removed." : "");
+    setError(removed.error ?? null);
+    if (!removed.removed) return;
+    setValue("");
+    input.current?.focus();
   }, [removed]);
   const busy = pending || removing;
-  const failed = Boolean(state.error ?? removed.error) && !busy;
-  const said = state.saved && !pending && !edited ? "Saved." : removed.removed && !removing && limitUsd === null ? "Removed." : "";
+  const failed = Boolean(error) && !busy;
   return (
     <div className="flex flex-col gap-3">
       <form action={action} className="flex flex-col gap-3">
         <label className="flex flex-col gap-2">
           <span className="text-sm text-muted">Budget a month, in USD, from $1 to $100,000.</span>
           <input
-            name="monthly" type="number" inputMode="decimal" min={1} max={100000} step={0.01} value={value} placeholder="No budget"
-            onChange={(e) => { setValue(e.target.value); setEdited(true); }}
+            ref={input} name="monthly" type="number" inputMode="decimal" min={1} max={100000} step={0.01} value={value} placeholder="No budget"
+            onChange={(e) => { setValue(e.target.value); setSaid(""); }}
             aria-invalid={failed || undefined} aria-describedby={failed ? "budget-error" : undefined} className={`${field} w-48`}
           />
         </label>
@@ -73,10 +81,10 @@ function BudgetForm({ limitUsd }: { limitUsd: number | null }) {
           {limitUsd !== null && (
             <button type="submit" formAction={remove} formNoValidate aria-disabled={busy || undefined} onClick={(e) => { if (busy) e.preventDefault(); }} className={button}>{removing ? "Removing…" : "Remove budget"}</button>
           )}
-          <span role="status" className="text-sm text-ok">{said}</span>
+          <span role="status" className="text-sm text-ok">{busy ? "" : said}</span>
         </div>
       </form>
-      {failed && <p id="budget-error" role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{state.error ?? removed.error}</p>}
+      {failed && <p id="budget-error" role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
     </div>
   );
 }
