@@ -8,6 +8,7 @@ import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
 import { loadProjectConfig, ProjectNotFound } from "../projects/projects.ts";
 import { budgetLeft, budgetSpentMessage, HALTED, monthlyBudget, PAUSED, projectPaused, runsHalted, type MonthlyBudget } from "./limits.ts";
+import { FIRST_RUN_ON_US } from "./models.ts";
 import { gaveNoVerdict } from "./report.ts";
 import { runTitle } from "./status.ts";
 
@@ -22,7 +23,10 @@ export interface StartRunOptions {
   providerBaseUrl?: string | null;
   price?: Price | null;
   tokenCap?: number | null;
+  paidBy?: PaidBy;
 }
+
+export type PaidBy = "workspace" | "trawler";
 
 export function withoutSecrets(config: ProjectConfig) {
   return {
@@ -62,6 +66,30 @@ export class WorkspaceBudgetSpent extends RunRefused {
   }
 }
 
+export class FirstRunOnUsUsed extends RunRefused {
+  constructor() {
+    super("This workspace has used its first run on Trawler. Add a model key to start more runs.");
+  }
+}
+
+export class TooManyForFirstRun extends RunRefused {
+  constructor(readonly people: number) {
+    super(`The first run on Trawler takes up to ${FIRST_RUN_ON_US.maxPeople} people, and this plan has ${people}. Remove people from the plan, or pay with your own model key.`);
+  }
+}
+
+export async function firstRunOnUsLeft(tx: Tx, orgId: string): Promise<boolean> {
+  return !(await tx.selectFrom("first_runs_on_us").select("org_id").where("org_id", "=", orgId).executeTakeFirst());
+}
+
+export async function giveBackUnusedFirstRun(tx: Tx, runId: string): Promise<void> {
+  await tx
+    .deleteFrom("first_runs_on_us")
+    .where("run_id", "=", runId)
+    .where(({ not, exists, selectFrom }) => not(exists(selectFrom("llm_usage").select("id").where("run_id", "=", runId))))
+    .execute();
+}
+
 export async function activeRunOf(tx: Tx, projectId: string): Promise<{ id: string; number: number } | null> {
   return (await tx.selectFrom("runs").select(["id", "number"]).where("project_id", "=", projectId).where("status", "in", ["queued", "running"]).executeTakeFirst()) ?? null;
 }
@@ -77,14 +105,15 @@ export async function projectRunState(tx: Tx, orgId: string, projectId: string):
   return { paused: project.paused_at !== null, liveRun: await activeRunOf(tx, projectId) };
 }
 
-export async function refusalToStart(tx: Tx, orgId: string, projectId: string): Promise<RunRefused | null> {
+export async function refusalToStart(tx: Tx, orgId: string, projectId: string, paidBy: PaidBy = "workspace"): Promise<RunRefused | null> {
   const active = await activeRunOf(tx, projectId);
-  return active ? new RunInProgress(active) : refusalToRun(tx, orgId, projectId);
+  return active ? new RunInProgress(active) : refusalToRun(tx, orgId, projectId, paidBy);
 }
 
-async function refusalToRun(tx: Tx, orgId: string, projectId: string): Promise<RunRefused | null> {
+async function refusalToRun(tx: Tx, orgId: string, projectId: string, paidBy: PaidBy): Promise<RunRefused | null> {
   if (runsHalted()) return new RunRefused(HALTED);
   if (await projectPaused(tx, projectId)) return new RunRefused(PAUSED);
+  if (paidBy === "trawler") return null;
   const budget = await monthlyBudget(tx, orgId);
   if (budget && budgetLeft(budget) < 0.01) return new WorkspaceBudgetSpent(budget);
   return null;
@@ -95,8 +124,10 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
   const config = await loadProjectConfig(tx, orgId, projectId, keys);
   const without = await personWithoutAccount(tx, projectId);
   if (without) throw new NeedsAccount(without);
+  const paidBy = options.paidBy ?? "workspace";
+  if (paidBy === "trawler" && config.personas.length > FIRST_RUN_ON_US.maxPeople) throw new TooManyForFirstRun(config.personas.length);
   await sql`select pg_advisory_xact_lock(hashtextextended(${`runs:${orgId}`}, 0))`.execute(tx);
-  const refused = await refusalToStart(tx, orgId, projectId);
+  const refused = await refusalToStart(tx, orgId, projectId, paidBy);
   if (refused) throw refused;
   const { next } = await tx.selectFrom("runs").select(sql<number>`coalesce(max(number), 0) + 1`.as("next")).where("org_id", "=", orgId).executeTakeFirstOrThrow();
   const run = await tx
@@ -107,9 +138,14 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
       max_steps: options.maxSteps, replay_steps: options.replaySteps, created_by: options.createdBy,
       provider: options.provider ?? "openrouter", provider_base_url: options.providerBaseUrl ?? null, token_cap: options.tokenCap ? String(options.tokenCap) : null,
       prompt_usd_per_mtok: options.price ? options.price.promptUsdPerMtok.toFixed(6) : null, completion_usd_per_mtok: options.price ? options.price.completionUsdPerMtok.toFixed(6) : null,
+      paid_by: paidBy,
     })
     .returning(["id", "number"])
     .executeTakeFirstOrThrow();
+  if (paidBy === "trawler") {
+    const claimed = await tx.insertInto("first_runs_on_us").values({ org_id: orgId, run_id: run.id }).onConflict((oc) => oc.column("org_id").doNothing()).returning("org_id").executeTakeFirst();
+    if (!claimed) throw new FirstRunOnUsUsed();
+  }
   await tx.updateTable("runs").set({ sign_up_seed: keys.encrypt(randomBytes(24).toString("base64url"), signUpSeedContext(orgId, run.id)) }).where("id", "=", run.id).execute();
   const accounts = [...new Set(config.personas.flatMap((p) => (p.accountRef ? [p.accountRef] : [])))];
   if (accounts.length) {
@@ -132,6 +168,7 @@ export const ACCOUNT_REFUSED = "The product refused the username and password of
 export async function endRun(tx: Tx, runId: string, end: { status: "stopped_budget" } | { status: "cancelled"; reason: CancelReason }): Promise<void> {
   await tx.updateTable("runs").set({ status: end.status, cancel_reason: end.status === "cancelled" ? end.reason : null, finished_at: new Date(), sign_up_seed: null }).where("id", "=", runId).execute();
   await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date() }).where("run_id", "=", runId).where("status", "=", "queued").execute();
+  await giveBackUnusedFirstRun(tx, runId);
 }
 
 export async function cancelRun(tx: Tx, orgId: string, runId: string, reason: CancelReason): Promise<boolean> {
@@ -143,7 +180,14 @@ export async function cancelRun(tx: Tx, orgId: string, runId: string, reason: Ca
 }
 
 export async function cancelLiveRuns(tx: Tx, orgId: string, reason: CancelReason): Promise<number> {
-  const live = await tx.selectFrom("runs").select("id").where("org_id", "=", orgId).where("status", "in", ["queued", "running"]).forUpdate().execute();
+  const live = await tx
+    .selectFrom("runs")
+    .select("id")
+    .where("org_id", "=", orgId)
+    .where("status", "in", ["queued", "running"])
+    .$if(reason === "key_removed", (q) => q.where("paid_by", "=", "workspace"))
+    .forUpdate()
+    .execute();
   let cancelled = 0;
   for (const run of live) if (await cancelRun(tx, orgId, run.id, reason)) cancelled++;
   return cancelled;
@@ -185,7 +229,7 @@ export class CannotJudgeAgain extends Error {}
 export async function judgeAgain(tx: Tx, orgId: string, runId: string, findingKey: string, requestedBy: string, keys: Keyring): Promise<void> {
   const run = await tx
     .selectFrom("runs")
-    .select(["status", "project_id", "cost_usd", "budget_usd", "token_cap", "tokens_used", "completion_usd_per_mtok", "provider", "provider_base_url"])
+    .select(["status", "project_id", "cost_usd", "budget_usd", "token_cap", "tokens_used", "completion_usd_per_mtok", "provider", "provider_base_url", "paid_by"])
     .where("id", "=", runId)
     .where("org_id", "=", orgId)
     .forUpdate()
@@ -194,7 +238,7 @@ export async function judgeAgain(tx: Tx, orgId: string, runId: string, findingKe
   if (run.status === "queued" || run.status === "running") throw new CannotJudgeAgain("The run is still going. You can judge it again once it has finished.");
   if (runsHalted()) throw new CannotJudgeAgain("Trawler has paused hosted runs for now, so nothing can be judged again. Try again later.");
   if (await projectPaused(tx, run.project_id)) throw new CannotJudgeAgain("Runs on this project are paused. Resume them on the project's page, then judge it again.");
-  const budget = await monthlyBudget(tx, orgId);
+  const budget = run.paid_by === "trawler" ? null : await monthlyBudget(tx, orgId);
   const left = budgetLeft(budget);
   if (budget && (left <= 0 || affordableOutputTokens(left, run.completion_usd_per_mtok === null ? null : Number(run.completion_usd_per_mtok)) < 1)) throw new CannotJudgeAgain(budgetSpentMessage(budget));
   const latest = await tx
@@ -209,8 +253,8 @@ export async function judgeAgain(tx: Tx, orgId: string, runId: string, findingKe
   const finding = await tx.selectFrom("findings").select("verdict").where("run_id", "=", runId).where("key", "=", findingKey).executeTakeFirst();
   if (!latest || !finding || !gaveNoVerdict(latest, finding.verdict)) throw new CannotJudgeAgain("Only a defect whose judge gave no verdict can be judged again.");
   if (capSpent(run)) throw new CannotJudgeAgain("This run has spent its cap, so it cannot be judged again.");
-  const stored = await modelKey(tx, orgId, keys);
-  if (!stored || stored.provider !== run.provider || (run.provider === "custom" && stored.baseUrl !== run.provider_base_url)) {
+  const stored = run.paid_by === "trawler" ? null : await modelKey(tx, orgId, keys);
+  if (run.paid_by !== "trawler" && (!stored || stored.provider !== run.provider || (run.provider === "custom" && stored.baseUrl !== run.provider_base_url))) {
     throw new CannotJudgeAgain("The workspace model key was removed or changed since this run, so this run's model cannot be called. Start a new run instead.");
   }
   const { next } = await tx.selectFrom("jobs").select(sql<number>`coalesce(max(position), -1) + 1`.as("next")).where("run_id", "=", runId).executeTakeFirstOrThrow();
@@ -226,7 +270,7 @@ export async function runIdByNumber(tx: Tx, orgId: string, number: number): Prom
 export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const run = await tx
     .selectFrom("runs")
-    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason"])
+    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason", "paid_by"])
     .where("id", "=", runId)
     .where("org_id", "=", orgId)
     .executeTakeFirst();
@@ -263,7 +307,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   return {
     id: run.id, number: run.number, status: run.status, cancelReason: run.cancel_reason as CancelReason | null, projectId: run.project_id,
     costUsd: Number(run.cost_usd), budgetUsd: Number(run.budget_usd), completionUsdPerMtok: run.completion_usd_per_mtok === null ? null : Number(run.completion_usd_per_mtok), agentModel: run.agent_model, judgeModel: run.judge_model,
-    provider: run.provider, tokenCap: run.token_cap === null ? null : Number(run.token_cap), tokensUsed: Number(run.tokens_used),
+    provider: run.provider, paidBy: run.paid_by as PaidBy, tokenCap: run.token_cap === null ? null : Number(run.token_cap), tokensUsed: Number(run.tokens_used),
     createdAt: run.created_at, startedAt: run.started_at, finishedAt: run.finished_at,
     jobs,
     findings: findings.map((f) => ({

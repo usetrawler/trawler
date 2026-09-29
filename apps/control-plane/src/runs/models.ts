@@ -3,6 +3,7 @@ import type { Price } from "../llm/prices.ts";
 export const TOKEN_PROFILE = { step: { input: 13_500, output: 200 }, judge: { input: 6_000, output: 150 } };
 export const STEPS = { base: 10, perGoal: 20, typicalPerGoal: 12, typicalReplay: 15 };
 export const DEFAULT_RUN = { maxSteps: 120, replaySteps: 30, budgetUsd: 2, tokenCap: 3_000_000 };
+export const FIRST_RUN_ON_US = { model: "deepseek/deepseek-v4.1-flash", modelName: "DeepSeek V4.1 Flash", budgetUsd: 1, maxPeople: 4 };
 
 export const turnSteps = (goals: number, ceiling: number = DEFAULT_RUN.maxSteps) => Math.min(ceiling, STEPS.base + STEPS.perGoal * Math.max(1, goals));
 

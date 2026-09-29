@@ -88,6 +88,12 @@ export interface Findings {
   verdict: string | null;
 }
 
+export interface FirstRunsOnUs {
+  org_id: string;
+  run_id: string;
+  used_at: Generated<Timestamp>;
+}
+
 export interface GoalOutcomes {
   goal: string;
   note: Generated<string>;
@@ -149,6 +155,7 @@ export interface LlmUsage {
   model: string;
   org_id: string;
   output_tokens: number;
+  paid_by: Generated<string>;
   run_id: string;
 }
 
@@ -235,6 +242,7 @@ export interface Runs {
   max_steps: number;
   number: number;
   org_id: string;
+  paid_by: Generated<string>;
   project_id: string;
   prompt_usd_per_mtok: Numeric | null;
   provider: Generated<string>;
@@ -336,6 +344,7 @@ export interface DB {
   artifacts: Artifacts;
   credentials: Credentials;
   findings: Findings;
+  first_runs_on_us: FirstRunsOnUs;
   goal_outcomes: GoalOutcomes;
   goals: Goals;
   invitation: Invitation;
