@@ -31,6 +31,11 @@ const jobStopped = (message: string) => failure(402, message, JOB_STOPPED);
 
 class UpstreamTimeout extends Error {}
 
+const KEY_REFUSED = "the provider refused the workspace key; an owner or admin can replace it in Settings";
+type UpstreamError = { message?: unknown; metadata?: { reasons?: unknown; flagged_input?: unknown } };
+const refusedTheContent = (error: UpstreamError | undefined) =>
+  !!error && (Array.isArray(error.metadata?.reasons) || typeof error.metadata?.flagged_input === "string" || (typeof error.message === "string" && /moderat|flagged|guardrail/i.test(error.message)));
+
 const timedOut = (err: unknown) => err instanceof Error && (err.name === "TimeoutError" || (err.name === "AbortError" && err.cause instanceof Error && err.cause.name === "TimeoutError"));
 
 async function forward(deps: ProxyDeps, endpoint: Endpoint, payload: unknown, signal: AbortSignal): Promise<Response> {
@@ -129,7 +134,6 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
     if (err instanceof FetchRefused && err.reason === "too_long") return failure(502, "the provider's answer was too large");
     return failure(502, "the provider could not be reached");
   }
-  if (upstream.status === 401 || upstream.status === 403) return failure(402, "the provider refused the workspace key; an owner or admin can replace it in Settings");
   if (upstream.status === 402) return failure(402, "the provider account behind the workspace key is out of credits");
   let text: string;
   try {
@@ -139,12 +143,13 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
     if (timedOut(err)) return failure(504, "the provider did not answer in time");
     return failure(502, "the provider could not be reached");
   }
-  let parsed: { usage?: Usage; model?: unknown; error?: { message?: unknown } };
+  let parsed: { usage?: Usage; model?: unknown; error?: UpstreamError } | null;
   try {
     parsed = JSON.parse(text);
   } catch {
-    return failure(upstream.ok ? 502 : upstream.status, "the provider sent an unreadable answer");
+    parsed = null;
   }
+  if (upstream.status === 401 || (upstream.status === 403 && !refusedTheContent(parsed?.error))) return failure(402, KEY_REFUSED);
   if (!parsed || typeof parsed !== "object") return failure(upstream.ok ? 502 : upstream.status, "the provider sent an unreadable answer");
   if (!upstream.ok || parsed.error) {
     const explanation = parsed.error?.message;

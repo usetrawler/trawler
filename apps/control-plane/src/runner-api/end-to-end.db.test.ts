@@ -359,6 +359,34 @@ test("a timed-out call is answered 504 after one attempt whichever fetch timed o
   expect(await cutOff(new TypeError("terminated"))).toEqual({ status: 502, message: "the provider could not be reached" });
 });
 
+test("a 403 for flagged or blocked input passes the provider's reason on, while a 403 about permissions, an unreadable one and any 401 still mean a refused key", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-q', 'Q', 'q', now())`.execute(t.db);
+  await withOrg(t.db, "org-q", (tx) => setModelKey(tx, "org-q", { provider: "openrouter", key: ORG_KEY }, "u", keys));
+  const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "qi", name: "Qi", brief: "b" }], goals: [{ id: "g", instruction: "x" }] });
+  const project = await withOrg(t.db, "org-q", (tx) => createProject(tx, "org-q", config, keys));
+  const run = await withOrg(t.db, "org-q", (tx) => startRun(tx, "org-q", project, keys, { budgetUsd: 5, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 10, replaySteps: 10, createdBy: "u", price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } }));
+  const job = await (await handleClaim(new Request(`${base}/api/runner/claim`, { method: "POST", headers: { authorization: `Bearer ${runnerToken}`, "x-trawler-protocol": "3" } }), deps)).json();
+  expect(job.runId).toBe(run.id);
+  const answer = async (status: number, body: unknown) => {
+    const upstream: typeof fetch = async () => new Response(typeof body === "string" ? body : JSON.stringify(body), { status });
+    const res = await handleChatCompletions(new Request(`${base}/api/llm/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${job.token}`, "content-type": "application/json" }, body: JSON.stringify({ model: "m/agent", messages: [{ role: "user", content: "hi" }] }) }), { db: t.db, keys, openRouterUrl: openRouterBase, fetch: upstream, retryBaseMs: 1 });
+    return { status: res.status, error: ((await res.json()) as { error: unknown }).error };
+  };
+  const moderated = { error: { code: 403, message: "openai/gpt-5 requires moderation on OpenRouter. Your input was flagged for \"violence\".", metadata: { reasons: ["violence"], flagged_input: "Delete the whole account and...", provider_name: "OpenAI", model_slug: "openai/gpt-5" } } };
+  expect(await answer(403, moderated)).toEqual({ status: 403, error: { code: 403, message: "openai/gpt-5 requires moderation on OpenRouter. Your input was flagged for \"violence\"." } });
+  expect(await answer(403, { error: { code: 403, message: "Request blocked by your organization's guardrail." } })).toEqual({ status: 403, error: { code: 403, message: "Request blocked by your organization's guardrail." } });
+  expect(await answer(403, { error: { code: 403, message: "Request rejected.", metadata: { reasons: ["self-harm"], flagged_input: "..." } } })).toEqual({ status: 403, error: { code: 403, message: "Request rejected." } });
+  expect(await answer(403, { error: { code: 403, message: "Request rejected.", metadata: { flagged_input: "..." } } })).toEqual({ status: 403, error: { code: 403, message: "Request rejected." } });
+  expect(await answer(403, { error: { code: 403, message: `Input flagged; key ${ORG_KEY} was used.`, metadata: { reasons: ["hate"] } } })).toEqual({ status: 403, error: { code: 403, message: "Input flagged; key ••• was used." } });
+
+  const keyRefused = { status: 402, error: { code: 402, message: "the provider refused the workspace key; an owner or admin can replace it in Settings" } };
+  expect(await answer(403, { type: "error", error: { type: "permission_error", message: "Your API key does not have permission to use the specified resource." } })).toEqual(keyRefused);
+  expect(await answer(403, "<html>Forbidden</html>")).toEqual(keyRefused);
+  expect(await answer(403, [{ error: { code: 403, message: "Permission denied: Consumer has been suspended.", status: "PERMISSION_DENIED" } }])).toEqual(keyRefused);
+  expect(await answer(401, { error: { code: 401, message: "Input flagged by moderation." } })).toEqual(keyRefused);
+  expect(await answer(401, "")).toEqual(keyRefused);
+});
+
 test("a session interrupted by a runner shutdown goes back to the queue with its partial work forgotten, and the next runner finishes the run", async () => {
   await sql`insert into organization (id, name, slug, "createdAt") values ('org-s', 'S', 's', now())`.execute(t.db);
   await withOrg(t.db, "org-s", (tx) => setModelKey(tx, "org-s", { provider: "openrouter", key: ORG_KEY }, "u", keys));
