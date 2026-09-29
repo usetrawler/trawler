@@ -67,7 +67,7 @@ test("the runs, the counts and the next page reach the list", async () => {
   state.runs = [run];
   state.olderThan = 12;
   const html = renderToStaticMarkup(await open({ show: "attention", before: "40" }));
-  expect(html).toContain('href="/runs/r12"');
+  expect(html).toContain('href="/runs/0012"');
   expect(html).toMatch(/>All <span[^>]*>60<\/span>.*>Completed <span[^>]*>48<\/span>.*>Needs attention <span[^>]*>11<\/span>/);
   expect(html).toContain('<a href="/runs?show=attention&amp;before=12"');
   expect(html).toMatch(/<a href="\/runs\?show=attention"[^>]*>Newest runs<\/a>/);

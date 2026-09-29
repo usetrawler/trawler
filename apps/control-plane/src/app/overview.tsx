@@ -4,7 +4,7 @@ import { PageHead, PrimaryLink } from "../components/page-head.tsx";
 import { RunTable } from "../components/run-table.tsx";
 import { hostOf, type ProjectLine, type RunLine } from "../projects/overview.ts";
 import { isLive } from "../runs/report.ts";
-import { runStatusLabel, runStatusTone } from "../runs/status.ts";
+import { runPath, runStatusLabel, runStatusTone } from "../runs/status.ts";
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -59,7 +59,7 @@ function ProjectHero({ project }: { project: ProjectLine }) {
         <p className="mt-1.5 flex items-center gap-2 text-2xl font-bold">{run && run.confirmed > 0 && <span aria-hidden className="h-2.5 w-2.5 bg-action" />}{run && !run.unchecked ? run.confirmed : <span aria-hidden>—</span>}</p>
         <p className="text-[11px] text-muted">{!run ? "nothing reported yet" : run.unchecked ? "not checked: every replay failed" : run.confirmed === 1 ? "defect in the last run" : "defects in the last run"}</p>
       </div>
-      <a href={run ? `/runs/${run.id}` : `/projects/${project.id}`} className="flex min-w-0 items-center justify-center p-5 text-center hover:bg-soft">
+      <a href={run ? runPath(run.number) : `/projects/${project.id}`} className="flex min-w-0 items-center justify-center p-5 text-center hover:bg-soft">
         {follow}<span className="sr-only"> for {project.name}{project.site && ` (${project.site})`}</span><span aria-hidden>&nbsp;→</span>
       </a>
     </article>

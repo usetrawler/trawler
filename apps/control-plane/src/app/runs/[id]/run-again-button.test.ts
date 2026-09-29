@@ -79,7 +79,7 @@ test("a request that fails on the way, or a server that fails, reads as an inlin
 test("the redirect to the new run is passed on to the framework, never turned into a message", async () => {
   const leaving = (() => {
     try {
-      redirect("/runs/new-run");
+      redirect("/runs/0013");
     } catch (err) {
       return err;
     }
@@ -96,5 +96,5 @@ test("a page left open across an update is told to reload, since trying again ca
 test("a refusal because another run of the project is going links to that run", () => {
   react.state = { error: "Run 0012 is still going on this project. Wait for it to finish or stop it, then start again.", activeRun: { id: "live-run", number: 12 } };
   const link = nodes(RunAgainError({ again: useRunAgain() })).find((node) => node.type === "a")!;
-  expect(link.props).toMatchObject({ href: "/runs/live-run", children: ["Open ", "Run 0012"] });
+  expect(link.props).toMatchObject({ href: "/runs/0012", children: ["Open ", "Run 0012"] });
 });

@@ -12,6 +12,7 @@ import { projectRunCount } from "../../../projects/overview.ts";
 import { DEFAULT_RUN } from "../../../runs/models.ts";
 import { NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunRefused, startRun } from "../../../runs/runs.ts";
 import { canManageBilling, signedInMember } from "../../../server/auth.ts";
+import { runPath } from "../../../runs/status.ts";
 import { betaRefusal } from "../../../server/beta.ts";
 import { getDb, getKeyring } from "../../../server/db.ts";
 import { readEnv } from "../../../server/env.ts";
@@ -123,7 +124,7 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
     revalidatePath(`/projects/${projectId}`);
   }
   const price = await priceFor(endpoint.provider, modelId, readEnv().openRouterUrl);
-  let runId: string;
+  let runNumber: number;
   const providerBaseUrl = endpoint.provider === "custom" ? endpoint.baseUrl : null;
   try {
     const run = await withOrg(getDb(), orgId, async (tx) => {
@@ -133,7 +134,7 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
         provider: endpoint.provider, providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap,
       });
     });
-    runId = run.id;
+    runNumber = run.number;
   } catch (err) {
     const keyHint = await withOrg(getDb(), orgId, (tx) => modelKeyHint(tx, orgId));
     if (err instanceof KeyGone) {
@@ -145,5 +146,5 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
     if (!(err instanceof ProjectNotFound)) await logError("run could not start", { orgId, projectId, err }, scrubberWith([endpoint.key]));
     return { error: "The run could not start. Try again.", ...(keyHint ? { keyHint } : {}) };
   }
-  redirect(`/runs/${runId}`);
+  redirect(runPath(runNumber));
 }

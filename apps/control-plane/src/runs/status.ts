@@ -6,4 +6,8 @@ export const runStatusLabel = (status: string) => STATUS_LABEL[status] ?? status
 
 export const runStatusTone = (status: string) => STATUS_TONE[status] ?? "";
 
-export const runTitle = (number: number) => `Run ${String(number).padStart(4, "0")}`;
+const paddedNumber = (number: number) => String(number).padStart(4, "0");
+
+export const runTitle = (number: number) => `Run ${paddedNumber(number)}`;
+
+export const runPath = (number: number) => `/runs/${paddedNumber(number)}`;

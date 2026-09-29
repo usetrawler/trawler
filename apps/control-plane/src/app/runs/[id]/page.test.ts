@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({ access: { signedIn: false } as unknown, asked:
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({
   redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); },
+  permanentRedirect: (to: string) => { throw Object.assign(new Error(`permanent redirect to ${to}`), { permanentlyTo: to }); },
   notFound: () => { throw Object.assign(new Error("not found"), { notFound: true }); },
 }));
 vi.mock("../../../server/runs.ts", () => ({ runFor: async (headers: Headers, id: string) => { state.asked.push([headers.get("cookie"), id]); return state.access; } }));
@@ -21,7 +22,7 @@ vi.mock("./run-live.tsx", () => ({ RunLive: () => null }));
 
 const { default: RunPage } = await import("./page.tsx");
 const ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
-const open = () => RunPage({ params: Promise.resolve({ id: ID }) });
+const open = (id = "0017") => RunPage({ params: Promise.resolve({ id }) });
 const member: Member = { userId: "u1", name: "Ana Lopez", email: "ana@acme.test", orgId: "org-1", orgName: "Acme workspace", role: "member" };
 
 beforeEach(() => {
@@ -32,7 +33,7 @@ beforeEach(() => {
 
 test("a visitor who is not signed in, or no longer belongs to the workspace, is sent to sign in", async () => {
   await expect(open()).rejects.toMatchObject({ to: "/sign-in" });
-  expect(state.asked).toEqual([["session=ana", ID]]);
+  expect(state.asked).toEqual([["session=ana", "0017"]]);
   expect(state.shells).toEqual([]);
 });
 
@@ -64,4 +65,14 @@ test("a run's page takes the shell's full width, as the mockup's report does", a
   state.access = { signedIn: true, member, run: { id: ID, projectId: "p1", number: 17 } };
   const html = renderToStaticMarkup(await open());
   expect(html).toMatch(/<div class="w-full"><nav aria-label="Breadcrumb"/);
+});
+
+test("a run asked for by its id or by its number without the padding moves for good to its padded number, and a number the workspace does not have is not found", async () => {
+  state.access = { signedIn: true, member, run: { id: ID, projectId: "p1", number: 17 } };
+  await expect(open(ID)).rejects.toMatchObject({ permanentlyTo: "/runs/0017" });
+  await expect(open("17")).rejects.toMatchObject({ permanentlyTo: "/runs/0017" });
+  expect(state.asked).toEqual([["session=ana", ID], ["session=ana", "17"]]);
+  state.access = { signedIn: true, member, run: null };
+  await expect(open("0018")).rejects.toMatchObject({ notFound: true });
+  expect(state.shells).toEqual([]);
 });

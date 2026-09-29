@@ -11,6 +11,7 @@ import { DEFAULT_RUN } from "../../../runs/models.ts";
 import { isLive } from "../../../runs/report.ts";
 import { cancelRun, CannotJudgeAgain, judgeAgain, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunNotFound, RunRefused, startRun } from "../../../runs/runs.ts";
 import { signedInMember } from "../../../server/auth.ts";
+import { runPath } from "../../../runs/status.ts";
 import { betaRefusal } from "../../../server/beta.ts";
 import { getDb, getKeyring } from "../../../server/db.ts";
 import { readEnv } from "../../../server/env.ts";
@@ -108,7 +109,7 @@ export async function runAgainAction(_previous: RunAgainState, form: FormData): 
 
   const price = (await priceFor(endpoint.provider, previous.agent_model, readEnv().openRouterUrl)) ?? pricedBefore(previous);
   const providerBaseUrl = endpoint.provider === "custom" ? endpoint.baseUrl : null;
-  let started: string;
+  let started: number;
   try {
     const run = await withOrg(getDb(), orgId, async (tx) => {
       if (!(await keyStillStored(tx, orgId, endpoint.provider, providerBaseUrl))) throw new KeyGone();
@@ -118,7 +119,7 @@ export async function runAgainAction(_previous: RunAgainState, form: FormData): 
         provider: endpoint.provider, providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap,
       });
     });
-    started = run.id;
+    started = run.number;
   } catch (err) {
     if (err instanceof KeyGone) return { error: "The workspace's model key was removed or changed while the run was starting. Check the key and run it again." };
     if (err instanceof NeedsAccount) return { error: `${err.message} Choose one on the plan, then run it again.` };
@@ -126,5 +127,5 @@ export async function runAgainAction(_previous: RunAgainState, form: FormData): 
     await logError("run could not start again", { orgId, runId, err }, scrubberWith([endpoint.key]));
     return { error: "The run could not start. Try again." };
   }
-  redirect(`/runs/${started}`);
+  redirect(runPath(started));
 }

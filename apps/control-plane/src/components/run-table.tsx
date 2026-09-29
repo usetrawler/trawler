@@ -1,5 +1,5 @@
 import type { RunLine } from "../projects/overview.ts";
-import { runStatusLabel, runStatusTone } from "../runs/status.ts";
+import { runPath, runStatusLabel, runStatusTone } from "../runs/status.ts";
 import { LocalTime } from "./local-time.tsx";
 
 const cost = (r: RunLine) => (r.tokenCap !== null ? { value: `${(r.tokensUsed / 1_000_000).toFixed(2)}M`, label: "tokens" } : { value: `$${r.costUsd.toFixed(2)}`, label: "cost" });
@@ -16,7 +16,7 @@ export function RunTable({ runs, compact = false, project = true }: { runs: RunL
         const when = <LocalTime iso={r.createdAt.toISOString()} />;
         return (
           <li key={r.id} className="border-b border-line last:border-b-0">
-            <a href={`/runs/${r.id}`} className={`grid min-h-[72px] items-center gap-3 bg-panel p-3 text-ink hover:bg-[color-mix(in_srgb,var(--action)_5%,var(--panel))] ${columns} max-wide:grid-cols-[50px_minmax(140px,1fr)_95px_65px_15px] max-md:grid-cols-[44px_minmax(0,1fr)_16px]`}>
+            <a href={runPath(r.number)} className={`grid min-h-[72px] items-center gap-3 bg-panel p-3 text-ink hover:bg-[color-mix(in_srgb,var(--action)_5%,var(--panel))] ${columns} max-wide:grid-cols-[50px_minmax(140px,1fr)_95px_65px_15px] max-md:grid-cols-[44px_minmax(0,1fr)_16px]`}>
               <span className="font-mono text-[10px] text-muted">#{String(r.number).padStart(4, "0")}</span>
               <span className="min-w-0">
                 {project ? (

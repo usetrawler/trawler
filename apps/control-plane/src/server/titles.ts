@@ -6,6 +6,7 @@ import { projectHead, runHead } from "../projects/overview.ts";
 import { runTitle } from "../runs/status.ts";
 import { signedInMember } from "./auth.ts";
 import { getDb } from "./db.ts";
+import { runIdFor } from "./runs.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -21,8 +22,9 @@ export async function projectPageTitle(requestHeaders: Headers, projectId: strin
 export async function runPageTitle(requestHeaders: Headers, runId: string): Promise<Metadata> {
   const member = await signedInMember(requestHeaders);
   if (!member) return {};
-  if (!UUID.test(runId)) notFound();
-  const run = await withOrg(getDb(), member.orgId, (tx) => runHead(tx, member.orgId, runId));
+  const id = await runIdFor(member.orgId, runId);
+  if (!id) notFound();
+  const run = await withOrg(getDb(), member.orgId, (tx) => runHead(tx, member.orgId, id));
   if (!run) notFound();
   return { title: `${runTitle(run.number)} · ${run.projectName}` };
 }

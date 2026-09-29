@@ -6,7 +6,7 @@ import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { runView } from "../runs/report.ts";
-import { runSummary, startRun } from "../runs/runs.ts";
+import { runIdByNumber, runSummary, startRun } from "../runs/runs.ts";
 import { projectHead, projectRunCount, runCounts, runHead, workspaceNav, workspaceProjects, workspaceRuns } from "./overview.ts";
 import { createProject, replacePlan } from "./projects.ts";
 
@@ -272,4 +272,13 @@ test("a run with no defects, or a defect whose replay has not failed, is not mar
   await asSystem(t.db, (tx) => tx.insertInto("jobs").values({ org_id: org, run_id: pending.id, kind: "replay", position: 100, finding_key: "ana:f0", status: "succeeded" }).execute());
   const runs = (await withOrg(t.db, org, (tx) => workspaceRuns(tx, org, { projectId: plain }))).runs;
   expect(runs.map((r) => [r.id, r.unchecked])).toEqual([[pending.id, false], [none.id, false]]);
+});
+
+test("a run number reaches only the workspace's own run with that number, never another workspace's", async () => {
+  expect(await withOrg(t.db, "org-b", (tx) => runIdByNumber(tx, "org-b", theirs.number))).toBe(theirs.id);
+  expect(await withOrg(t.db, "org-a", (tx) => runIdByNumber(tx, "org-a", latest.number))).toBe(latest.id);
+  expect(await withOrg(t.db, "org-a", (tx) => runIdByNumber(tx, "org-a", theirs.number))).not.toBe(theirs.id);
+  expect(await withOrg(t.db, "org-b", (tx) => runIdByNumber(tx, "org-a", latest.number))).toBeNull();
+  expect(await asSystem(t.db, (tx) => runIdByNumber(tx, "org-b", latest.number))).not.toBe(latest.id);
+  expect(await withOrg(t.db, "org-a", (tx) => runIdByNumber(tx, "org-a", 9999))).toBeNull();
 });

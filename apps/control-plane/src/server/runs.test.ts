@@ -6,7 +6,10 @@ const state = vi.hoisted(() => ({ member: null as Member | null, tenants: [] as 
 vi.mock("./auth.ts", () => ({ signedInMember: async (headers: Headers) => (headers.get("cookie") === "session=ana" ? state.member : null) }));
 vi.mock("./db.ts", () => ({ getDb: () => ({}) }));
 vi.mock("../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
-vi.mock("../runs/runs.ts", () => ({ runSummary: async (_tx: unknown, orgId: string, id: string) => ({ id, orgId }) }));
+vi.mock("../runs/runs.ts", () => ({
+  runSummary: async (_tx: unknown, orgId: string, id: string) => ({ id, orgId }),
+  runIdByNumber: async (_tx: unknown, orgId: string, number: number) => (orgId === "org-2" && number === 17 ? "run-17-of-org-2" : null),
+}));
 
 const { runFor } = await import("./runs.ts");
 const RUN = "0f8fad5b-d9cb-469f-a165-70867728950e";
@@ -27,4 +30,14 @@ test("a run is read in the workspace the membership check returns, for the reque
   expect(await runFor(request(), RUN)).toEqual({ signedIn: true, member: state.member, run: { id: RUN, orgId: "org-2" } });
   expect(await runFor(new Headers(), RUN)).toEqual({ signedIn: false });
   expect(state.tenants).toEqual(["org-2"]);
+});
+
+test("a run is found by its number in the member's own workspace, padded or not, and nothing else reads as a run", async () => {
+  state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-2", orgName: "Acme", role: "member" };
+  expect(await runFor(request(), "0017")).toEqual({ signedIn: true, member: state.member, run: { id: "run-17-of-org-2", orgId: "org-2" } });
+  expect(await runFor(request(), "17")).toMatchObject({ run: { id: "run-17-of-org-2" } });
+  expect(await runFor(request(), "0018")).toEqual({ signedIn: true, member: state.member, run: null });
+  state.tenants = [];
+  for (const ref of ["0", "0000", "17a", "-17", "1234567890", "run-17"]) expect(await runFor(request(), ref)).toEqual({ signedIn: true, member: state.member, run: null });
+  expect(state.tenants).toEqual([]);
 });

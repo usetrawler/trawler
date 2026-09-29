@@ -13,7 +13,7 @@ const rows = (html: string) => html.match(/<li[^>]*>.*?<\/li>/g) ?? [];
 
 test("each row opens its run and shows its number, project, date, status, confirmed defects, goals and cost", () => {
   const [row] = rows(render([line()]));
-  expect(row).toContain('href="/runs/r1"');
+  expect(row).toContain('href="/runs/0017"');
   expect(row).toContain(">#0017</span>");
   expect(row).toContain(">Acme Invoices</strong>");
   expect(row).toContain('<time dateTime="2026-09-25T12:32:00.000Z">2026-09-25 12:32 UTC</time>');
@@ -55,7 +55,7 @@ test("inside one project the date leads each row instead of the project's name",
 
 test("the rows keep the order they are given in, newest first from the query", () => {
   const html = render([line({ id: "new", number: 18 }), line({ id: "old", number: 17 })]);
-  expect(rows(html).map((row) => row.match(/href="\/runs\/([^"]*)"/)?.[1])).toEqual(["new", "old"]);
+  expect(rows(html).map((row) => row.match(/href="\/runs\/([^"]*)"/)?.[1])).toEqual(["0018", "0017"]);
 });
 
 test("a run whose every replay failed shows no count of confirmed defects, but that they were not checked", () => {

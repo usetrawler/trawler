@@ -218,6 +218,11 @@ export async function judgeAgain(tx: Tx, orgId: string, runId: string, findingKe
   await tx.updateTable("findings").set({ verdict: null, updated_at: new Date() }).where("run_id", "=", runId).where("key", "=", findingKey).execute();
 }
 
+export async function runIdByNumber(tx: Tx, orgId: string, number: number): Promise<string | null> {
+  const run = await tx.selectFrom("runs").select("id").where("org_id", "=", orgId).where("number", "=", number).executeTakeFirst();
+  return run?.id ?? null;
+}
+
 export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const run = await tx
     .selectFrom("runs")

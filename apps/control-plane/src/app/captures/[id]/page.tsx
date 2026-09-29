@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { screenCapture } from "../../../artifacts/artifacts.ts";
 import { AppShell } from "../../../components/app-shell.tsx";
 import { findingAnchor } from "../../../runs/finding-anchor.ts";
-import { runTitle } from "../../../runs/status.ts";
+import { runPath, runTitle } from "../../../runs/status.ts";
 import { signedInMember } from "../../../server/auth.ts";
 import { getDb } from "../../../server/db.ts";
 import { shellFor } from "../../../server/shell.ts";
@@ -26,7 +26,7 @@ export default async function CapturePage({ params }: { params: Promise<{ id: st
   const shell = await shellFor(member);
   const project = shell.workspace.projects.find((p) => p.id === capture.projectId);
   const title = capture.findingTitle ?? "Screen capture";
-  const run = `/runs/${capture.runId}${capture.findingKey ? `#${findingAnchor(capture.findingKey)}` : ""}`;
+  const run = `${runPath(capture.runNumber)}${capture.findingKey ? `#${findingAnchor(capture.findingKey)}` : ""}`;
   return (
     <AppShell shell={shell} current={{ project: capture.projectId }} parent wide>
       <nav aria-label="Breadcrumb" className="mb-[34px]">
