@@ -14,7 +14,10 @@ import { cancelRun, CannotJudgeAgain, judgeAgain, pauseProject, refusalToStart, 
 
 const t = await testDb();
 afterAll(() => t.drop());
-afterEach(() => vi.unstubAllEnvs());
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  await clearQueue();
+});
 const keys = new Keyring(randomBytes(32));
 const config = ProjectConfigSchema.parse({
   name: "Acme", targetUrl: "https://app.acme.test/",
@@ -54,6 +57,28 @@ async function clearQueue() {
 }
 
 beforeAll(clearQueue);
+
+const utcMonth = async () => (await sql<{ month: string }>`select to_char(now() at time zone 'UTC', 'FMMonth') as month`.execute(t.db)).rows[0]!.month;
+
+async function runWithFailedJudge(w: Awaited<ReturnType<typeof workspace>>) {
+  const run = await w.start();
+  const ana = await claimFor(run.id);
+  seq = 0;
+  await ingestEvents(t.db, ana.token, [ev({ type: "finding", jobId: ana.jobId, finding: defect })]);
+  await completeJob(t.db, ana.token, { usage: usage(0), stoppedBy: "finish" });
+  await completeJob(t.db, (await claimFor(run.id)).token, { usage: usage(0), stoppedBy: "finish" });
+  await completeJob(t.db, (await claimFor(run.id)).token, { usage: usage(0), stoppedBy: "report", observation: { completed: true, observed: "500", blockedAt: null } });
+  await completeJob(t.db, (await claimFor(run.id)).token, { usage: usage(0), stoppedBy: "error", error: "No output generated." });
+  expect(await statusOf(w.org, run.id)).toEqual({ status: "succeeded", cancelReason: null });
+  return run;
+}
+
+const judgeAgainOf = (w: { org: string }, runId: string) => withOrg(t.db, w.org, (tx) => judgeAgain(tx, w.org, runId, "ana:f1", "u2", keys));
+const refusedWith = async (attempt: Promise<unknown>) => {
+  const err = await attempt.then(() => null, (e: unknown) => e);
+  expect(err).toBeInstanceOf(CannotJudgeAgain);
+  return (err as Error).message;
+};
 
 describe("one active run per project", () => {
   test("a second start on a project with a live run names that run, and starts once it has ended", async () => {
@@ -183,8 +208,7 @@ describe("the monthly workspace budget", () => {
     await withOrg(t.db, w.org, (tx) => setMonthlyBudget(tx, w.org, 1, "u1"));
     const refused = await w.start().then(() => null, (e: unknown) => e);
     expect(refused).toBeInstanceOf(WorkspaceBudgetSpent);
-    const month = new Date().toLocaleString("en-GB", { month: "long", timeZone: "UTC" });
-    expect((refused as Error).message).toBe(`This workspace has spent its $1.00 monthly budget: $1.25 since ${month} 1. An owner or admin can raise it in Settings.`);
+    expect((refused as Error).message).toBe(`This workspace has spent its $1.00 monthly budget: $1.25 since ${await utcMonth()} 1 (UTC). An owner or admin can raise it in Settings.`);
 
     await withOrg(t.db, w.org, (tx) => setMonthlyBudget(tx, w.org, 5, "u2"));
     expect(await withOrg(t.db, w.org, (tx) => monthlyBudget(tx, w.org))).toEqual({ limitUsd: 5, spentUsd: 1.25 });
@@ -207,9 +231,30 @@ describe("the monthly workspace budget", () => {
     expect(await withOrg(t.db, w.org, (tx) => monthlyBudget(tx, w.org))).toBeNull();
     await withOrg(t.db, w.org, (tx) => setMonthlyBudget(tx, w.org, 10, "u1"));
     expect(await withOrg(t.db, w.org, (tx) => monthlyBudget(tx, w.org))).toEqual({ limitUsd: 10, spentUsd: 0.4 });
+    expect(await asSystem(t.db, (tx) => monthlyBudget(tx, w.org))).toEqual({ limitUsd: 10, spentUsd: 0.4 });
+    await withOrg(t.db, w.org, (tx) => setMonthlyBudget(tx, w.org, 1, "u1"));
+    expect((await llmCallFor(t.db, job.token)).remainingUsd).toBeCloseTo(0.6, 6);
     await withOrg(t.db, w.org, (tx) => removeMonthlyBudget(tx, w.org));
     expect(await withOrg(t.db, w.org, (tx) => monthlyBudget(tx, w.org))).toBeNull();
     await clearQueue();
+  });
+
+  test("a spend equal to the budget refuses a start, and a remainder too small for one output token stops the run", async () => {
+    const w = await workspace();
+    await withOrg(t.db, w.org, (tx) => setMonthlyBudget(tx, w.org, 1, "u1"));
+    const run = await w.start();
+    const job = await claimFor(run.id);
+    await recordLlmUsage(t.db, await llmCallFor(t.db, job.token), { model: "m/agent", inputTokens: 1, outputTokens: 1, costUsd: 0.9999995 });
+    expect(await statusOf(w.org, run.id)).toEqual({ status: "cancelled", cancelReason: "workspace_budget" });
+
+    const exact = await workspace();
+    await withOrg(t.db, exact.org, (tx) => setMonthlyBudget(tx, exact.org, 1, "u1"));
+    const first = await exact.start();
+    const firstJob = await claimFor(first.id);
+    await recordLlmUsage(t.db, await llmCallFor(t.db, firstJob.token), { model: "m/agent", inputTokens: 1, outputTokens: 1, costUsd: 0.5 });
+    await recordLlmUsage(t.db, await llmCallFor(t.db, firstJob.token), { model: "m/agent", inputTokens: 1, outputTokens: 1, costUsd: 0.5 });
+    expect(await withOrg(t.db, exact.org, (tx) => monthlyBudget(tx, exact.org))).toEqual({ limitUsd: 1, spentUsd: 1 });
+    await expect(exact.start()).rejects.toBeInstanceOf(WorkspaceBudgetSpent);
   });
 
   test("the database keeps a budget between $1 and $100,000, one per workspace, hidden from other workspaces", async () => {
@@ -231,7 +276,9 @@ describe("pausing a project", () => {
     const job = await claimFor(run.id);
     const elsewhere = await withOrg(t.db, w.org, (tx) => startRun(tx, w.org, other, keys, options));
 
-    expect(await withOrg(t.db, w.org, (tx) => pauseProject(tx, w.org, w.project, "u2"))).toBe(1);
+    expect(await withOrg(t.db, w.org, (tx) => pauseProject(tx, w.org, w.project, "u2"))).toEqual({ unconfirmed: { id: run.id, number: run.number } });
+    expect(await statusOf(w.org, run.id)).toEqual({ status: "running", cancelReason: null });
+    expect(await withOrg(t.db, w.org, (tx) => pauseProject(tx, w.org, w.project, "u2", run.id))).toEqual({ stopped: { id: run.id, number: run.number } });
     expect(await statusOf(w.org, run.id)).toEqual({ status: "cancelled", cancelReason: "paused" });
     expect(await statusOf(w.org, elsewhere.id)).toEqual({ status: "queued", cancelReason: null });
     seq = 0;
@@ -241,8 +288,8 @@ describe("pausing a project", () => {
 
     const refused = await w.start().then(() => null, (e: unknown) => e);
     expect(refused).toBeInstanceOf(RunRefused);
-    expect((refused as Error).message).toBe("Runs on this project are paused. Resume them at the top of the project, then start again.");
-    expect(await withOrg(t.db, w.org, (tx) => pauseProject(tx, w.org, w.project, "u3"))).toBe(0);
+    expect((refused as Error).message).toBe("Runs on this project are paused. Resume them on the project's page, then start again.");
+    expect(await withOrg(t.db, w.org, (tx) => pauseProject(tx, w.org, w.project, "u3"))).toEqual({ stopped: null });
     const paused = await t.db.selectFrom("projects").select(["paused_by"]).where("id", "=", w.project).executeTakeFirstOrThrow();
     expect(paused.paused_by).toBe("u2");
 
@@ -253,22 +300,29 @@ describe("pausing a project", () => {
 
   test("a queued judge again of a paused project waits, and runs once the project is resumed", async () => {
     const w = await workspace();
-    const run = await w.start();
-    const ana = await claimFor(run.id);
-    seq = 0;
-    await ingestEvents(t.db, ana.token, [ev({ type: "finding", jobId: ana.jobId, finding: defect })]);
-    await completeJob(t.db, ana.token, { usage: usage(0), stoppedBy: "finish" });
-    await completeJob(t.db, (await claimFor(run.id)).token, { usage: usage(0), stoppedBy: "finish" });
-    await completeJob(t.db, (await claimFor(run.id)).token, { usage: usage(0), stoppedBy: "report", observation: { completed: true, observed: "500", blockedAt: null } });
-    await completeJob(t.db, (await claimFor(run.id)).token, { usage: usage(0), stoppedBy: "error", error: "No output generated." });
-    await withOrg(t.db, w.org, (tx) => judgeAgain(tx, w.org, run.id, "ana:f1", "u2", keys));
-
+    const run = await runWithFailedJudge(w);
+    await judgeAgainOf(w, run.id);
     await withOrg(t.db, w.org, (tx) => pauseProject(tx, w.org, w.project, "u2"));
     expect(await claimJob(t.db, keys)).toBeNull();
-    await expect(withOrg(t.db, w.org, (tx) => judgeAgain(tx, w.org, run.id, "ana:f1", "u2", keys))).rejects.toThrow(CannotJudgeAgain);
     await withOrg(t.db, w.org, (tx) => resumeProject(tx, w.org, w.project));
     expect(await claimJob(t.db, keys)).toMatchObject({ kind: "judge", runId: run.id });
-    await clearQueue();
+  });
+
+  test("a judge again is refused while the project is paused, with why", async () => {
+    const w = await workspace();
+    const run = await runWithFailedJudge(w);
+    await withOrg(t.db, w.org, (tx) => pauseProject(tx, w.org, w.project, "u2"));
+    expect(await refusedWith(judgeAgainOf(w, run.id))).toBe("Runs on this project are paused. Resume them on the project's page, then judge it again.");
+  });
+
+  test("a project paused behind the run's back stops it on its next events round-trip", async () => {
+    const w = await workspace();
+    const run = await w.start();
+    const job = await claimFor(run.id);
+    await sql`update projects set paused_at = now(), paused_by = 'u9' where id = ${w.project}`.execute(t.db);
+    seq = 0;
+    expect(await ingestEvents(t.db, job.token, [ev({ type: "note", jobId: job.jobId, text: "x" })])).toEqual({ cancel: true });
+    expect(await statusOf(w.org, run.id)).toEqual({ status: "cancelled", cancelReason: "paused" });
   });
 
   test("another workspace cannot pause or resume the project", async () => {
@@ -292,6 +346,7 @@ describe("the global kill switch", () => {
     seq = 0;
     expect(await ingestEvents(t.db, job.token, [ev({ type: "note", jobId: job.jobId, text: "x" })])).toEqual({ cancel: true });
     expect(await statusOf(w.org, run.id)).toEqual({ status: "cancelled", cancelReason: "halted" });
+    expect(runView((await withOrg(t.db, w.org, (tx) => runSummary(tx, w.org, run.id)))!).headline).toBe("Stopped because Trawler paused hosted runs.");
     expect(await claimJob(t.db, keys)).toBeNull();
     const refused = await w.start().then(() => null, (e: unknown) => e);
     expect((refused as Error).message).toBe("Trawler has paused hosted runs for now. Try again later, or run it on your own machine with the local runner.");
@@ -311,5 +366,62 @@ describe("the global kill switch", () => {
     vi.stubEnv("TRAWLER_HALT_RUNS", "true");
     await expect(llmCallFor(t.db, job.token)).rejects.toThrow(LlmRefused);
     expect(await statusOf(w.org, run.id)).toEqual({ status: "cancelled", cancelReason: "halted" });
+  });
+});
+
+describe("a judge again and the limits", () => {
+  test("a run finished hours ago is judged again: the time limit is for the run, not for judging it again", async () => {
+    const w = await workspace();
+    const run = await runWithFailedJudge(w);
+    await sql`update runs set started_at = now() - interval '5 hours', finished_at = now() - interval '4 hours' where id = ${run.id}`.execute(t.db);
+    await judgeAgainOf(w, run.id);
+    const judge = await claimFor(run.id);
+    expect(judge.kind).toBe("judge");
+    await expect(llmCallFor(t.db, judge.token)).resolves.toMatchObject({ runId: run.id });
+    seq = 0;
+    expect(await ingestEvents(t.db, judge.token, [ev({ type: "note", jobId: judge.jobId, text: "x" })])).toEqual({ cancel: false });
+    expect(await stopRunsPastLimits(t.db)).toBe(0);
+  });
+
+  const stoppers = {
+    "the project is paused": (w: { project: string }) => sql`update projects set paused_at = now(), paused_by = 'u9' where id = ${w.project}`.execute(t.db).then(() => undefined),
+    "hosted runs are halted": async () => void vi.stubEnv("TRAWLER_HALT_RUNS", "1"),
+    "the workspace's budget is spent": async (w: { org: string }) => {
+      await withOrg(t.db, w.org, (tx) => setMonthlyBudget(tx, w.org, 1, "u1"));
+      await sql`insert into llm_usage (org_id, run_id, job_id, model, input_tokens, output_tokens, cost_usd)
+        select org_id, run_id, id, 'm/agent', 1, 1, 1 from jobs where org_id = ${w.org} limit 1`.execute(t.db);
+    },
+  };
+  for (const [when, stop] of Object.entries(stoppers)) {
+    test(`a judge again that is going stops when ${when}`, async () => {
+      const w = await workspace();
+      const run = await runWithFailedJudge(w);
+      await judgeAgainOf(w, run.id);
+      const judge = await claimFor(run.id);
+      await stop(w);
+      seq = 0;
+      expect(await ingestEvents(t.db, judge.token, [ev({ type: "note", jobId: judge.jobId, text: "x" })])).toEqual({ cancel: true });
+      await expect(llmCallFor(t.db, judge.token)).rejects.toThrow(LlmRefused);
+    });
+  }
+
+  test("a judge again is refused while hosted runs are halted or the budget is spent, and a queued one is not handed out while halted", async () => {
+    const w = await workspace();
+    const run = await runWithFailedJudge(w);
+    await judgeAgainOf(w, run.id);
+    vi.stubEnv("TRAWLER_HALT_RUNS", "1");
+    expect(await claimJob(t.db, keys)).toBeNull();
+    vi.stubEnv("TRAWLER_HALT_RUNS", "0");
+    await clearQueue();
+
+    const other = await workspace();
+    const second = await runWithFailedJudge(other);
+    vi.stubEnv("TRAWLER_HALT_RUNS", "1");
+    expect(await refusedWith(judgeAgainOf(other, second.id))).toBe("Trawler has paused hosted runs for now, so nothing can be judged again. Try again later.");
+    vi.stubEnv("TRAWLER_HALT_RUNS", "0");
+    await withOrg(t.db, other.org, (tx) => setMonthlyBudget(tx, other.org, 1, "u1"));
+    await sql`insert into llm_usage (org_id, run_id, job_id, model, input_tokens, output_tokens, cost_usd)
+      select org_id, run_id, id, 'm/agent', 1, 1, 2 from jobs where run_id = ${second.id} limit 1`.execute(t.db);
+    expect(await refusedWith(judgeAgainOf(other, second.id))).toBe(`This workspace has spent its $1.00 monthly budget: $2.00 since ${await utcMonth()} 1 (UTC). An owner or admin can raise it in Settings.`);
   });
 });

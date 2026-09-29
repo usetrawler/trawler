@@ -1,3 +1,4 @@
+LOCK TABLE runs IN SHARE ROW EXCLUSIVE MODE;
 CREATE TEMPORARY TABLE extra_active_runs ON COMMIT DROP AS
 SELECT id FROM (
   SELECT id, row_number() OVER (PARTITION BY project_id ORDER BY created_at, id) AS n
@@ -24,4 +25,4 @@ CREATE TABLE workspace_budgets (
 );
 CALL make_tenant_table('workspace_budgets');
 
-CREATE INDEX llm_usage_org_month_idx ON llm_usage (org_id, created_at);
+CREATE INDEX llm_usage_org_month_idx ON llm_usage (org_id, created_at) INCLUDE (cost_usd);

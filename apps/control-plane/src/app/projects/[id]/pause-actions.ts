@@ -10,30 +10,43 @@ import { logError } from "../../../server/log.ts";
 
 export interface PauseState {
   error?: string;
-  stopped?: number;
+  stopped?: { id: string; number: number } | null;
+  liveRun?: { id: string; number: number };
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-async function onProject(projectId: string, change: (orgId: string, userId: string) => Promise<number | void>, failure: string): Promise<PauseState> {
+async function onProject(projectId: string, change: (orgId: string, userId: string) => Promise<PauseState>, failure: string, refused: string): Promise<PauseState> {
   const member = await signedInMember(await headers());
   if (!member) return { error: "Sign in again." };
   if (!UUID.test(projectId)) return { error: "This project was not found." };
   try {
-    const stopped = await change(member.orgId, member.userId);
-    revalidatePath("/", "layout");
-    return typeof stopped === "number" ? { stopped } : {};
+    const outcome = await change(member.orgId, member.userId);
+    if (!outcome.liveRun) revalidatePath("/", "layout");
+    return outcome;
   } catch (err) {
     if (err instanceof ProjectNotFound) return { error: "This project was not found." };
     await logError(failure, { orgId: member.orgId, projectId, err });
-    return { error: "That did not work. Try again." };
+    return { error: refused };
   }
 }
 
-export async function pauseRunsAction(projectId: string): Promise<PauseState> {
-  return onProject(projectId, (orgId, userId) => withOrg(getDb(), orgId, (tx) => pauseProject(tx, orgId, projectId, userId)), "runs could not be paused");
+export async function pauseRunsAction(projectId: string, confirmedRunId: string | null): Promise<PauseState> {
+  const confirmed = typeof confirmedRunId === "string" && UUID.test(confirmedRunId) ? confirmedRunId : null;
+  return onProject(
+    projectId,
+    async (orgId, userId) => {
+      const outcome = await withOrg(getDb(), orgId, (tx) => pauseProject(tx, orgId, projectId, userId, confirmed));
+      return "unconfirmed" in outcome ? { liveRun: outcome.unconfirmed } : { stopped: outcome.stopped };
+    },
+    "runs could not be paused",
+    "Runs could not be paused. Try again.",
+  );
 }
 
 export async function resumeRunsAction(projectId: string): Promise<PauseState> {
-  return onProject(projectId, (orgId) => withOrg(getDb(), orgId, (tx) => resumeProject(tx, orgId, projectId)), "runs could not be resumed");
+  return onProject(projectId, async (orgId) => {
+    await withOrg(getDb(), orgId, (tx) => resumeProject(tx, orgId, projectId));
+    return {};
+  }, "runs could not be resumed", "Runs could not be resumed. Try again.");
 }

@@ -22,9 +22,10 @@ export interface StartState {
   field?: "key" | "baseUrl";
   keyHint?: KeyHint;
   activeRun?: { id: string; number: number };
+  refused?: boolean;
 }
 
-const refusedState = (refused: RunRefused): StartState => ({ error: refused.message, ...(refused instanceof RunInProgress ? { activeRun: refused.run } : {}) });
+const refusedState = (refused: RunRefused): StartState => ({ error: refused.message, refused: true, ...(refused instanceof RunInProgress ? { activeRun: refused.run } : {}) });
 
 export interface ModelOption {
   id: string;

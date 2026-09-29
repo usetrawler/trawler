@@ -103,3 +103,19 @@ test("the Start panel is told whether the project has had a run, so the authoris
   await render();
   expect(state.planned.map((props) => props.authorisedBefore)).toEqual([false, true]);
 });
+
+test("the Start panel is told what refuses a start right now, with the live run to open", async () => {
+  const { RunInProgress } = await vi.importActual<typeof import("../../../runs/runs.ts")>("../../../runs/runs.ts");
+  state.refusal = new RunInProgress({ id: "live-run", number: 7 });
+  await render();
+  expect(state.planned[0]!.startRefusal).toEqual({ message: "Run 0007 is still going on this project. Wait for it to finish or stop it, then start again.", activeRun: { id: "live-run", number: 7 } });
+  state.planned = [];
+  state.refusal = null;
+  await render();
+  expect(state.planned[0]!.startRefusal).toBeUndefined();
+});
+
+test("a project whose run state cannot be read is not found", async () => {
+  state.runState = null as unknown as typeof state.runState;
+  await expect(render()).rejects.toMatchObject({ notFound: true });
+});

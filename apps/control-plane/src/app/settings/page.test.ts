@@ -76,7 +76,7 @@ test("settings name who added the key among this workspace's members, and mark S
 });
 
 test("the page is headed like the app's other pages", async () => {
-  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("Settings Workspace, members and model key. The name, the people in it, the model key every run of this workspace uses, and what runs may spend in a month.");
+  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("Settings Workspace, members, model key and budget. The name, the people in it, the model key every run of this workspace uses, and what runs may spend in a month.");
 });
 
 test("a key added by someone who is no longer in this workspace says so, and a workspace without a key looks nobody up", async () => {

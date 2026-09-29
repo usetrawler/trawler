@@ -776,51 +776,53 @@ export async function openBrowser(opts: {
 
     return {
       tools,
-      async fillField(ref, text, kind) {
-        const failure = (result: McpResult) => {
-          const detail = opts.scrubber.scrub(textOf(result));
-          return `failed: ${kind === "password" && text.length < MIN_SECRET_LENGTH ? detail.split("\nCall log:")[0]! : detail}`;
-        };
-        if (kind === "password") {
-          const mark = randomUUID();
-          const raw = (await evaluate(
-            { element: "credential field", target: ref, function: `(el) => ({ type: el instanceof HTMLInputElement ? el.type : null, maxLength: el instanceof HTMLInputElement ? el.maxLength : null, origin: location.origin, marked: el instanceof HTMLInputElement && el.type === "password" && (el.setAttribute("${SECRET_MARK}", "${mark}"), true) })` },
-            internalCall,
-          )) as McpResult;
-          if (raw?.isError) return `failed: ${opts.scrubber.scrub(textOf(raw))}`;
-          const probe = evaluatedValue(raw) as { type?: unknown; maxLength?: unknown; origin?: unknown } | undefined;
-          if (typeof probe?.origin !== "string" || !isAllowed(probe.origin)) return "failed: the page is not an allowed origin, so the password was not typed";
-          if (probe.type !== "password") return "failed: the target is not a password field, so the password was not typed";
-          const limit = typeof probe.maxLength === "number" && probe.maxLength >= 0 ? probe.maxLength : undefined;
-          if (limit !== undefined && limit < text.length && limit < MIN_SECRET_LENGTH) return `failed: the field takes at most ${limit} characters, ${text.length < MIN_SECRET_LENGTH ? "fewer than the password has" : "too few to keep a password hidden"}, so nothing was typed`;
-          if (limit !== undefined && limit < text.length) keepSecret(text.slice(0, limit));
-          const field = await findMarked(mark);
-          if (!field) return "failed: the password field could not be found again, so the password was not typed";
-          valuesBeforeTyping.set(field, await within(field.inputValue({ timeout: HANDLE_READ_MS }).catch(() => ""), HANDLE_READ_MS, ""));
-          filled = [...filled, field].slice(-MAX_HELD_FIELDS);
-        }
-        const out = await paced(async () => (await type({ target: ref, element: kind === "password" ? "password field" : "username field", text }, internalCall)) as McpResult);
-        if (kind === "password") {
-          if (text.length >= MIN_SECRET_LENGTH) typedSecrets.add(text);
-          typedPasswords.add(text);
-          const held = filled.at(-1);
-          if (held) {
-            const kept = await within(held.inputValue({ timeout: FOCUS_CHECK_MS }).catch(() => null), FOCUS_CHECK_MS, text);
-            if (kept === null) return out?.isError ? failure(out) : "failed: the page moved on before the field could be checked, so it is not known what the field kept";
-            const shortened = kept !== text && kept.length > 0 && keptFrom(kept, text);
-            if (shortened && kept.length >= MIN_SECRET_LENGTH) {
-              keepSecret(kept);
-            } else if (shortened) {
-              await type({ target: ref, element: "password field", text: "" }, internalCall);
-              const left = await within(held.inputValue({ timeout: HANDLE_READ_MS }).catch(() => null), HANDLE_READ_MS, null);
-              return left === "" ? "failed: the field kept too little of the password to hide it, so it was cleared" : "failed: the field kept too little of the password to hide it, and it could not be cleared";
-            } else if (!kept && !out?.isError) {
-              return "failed: the field did not keep the password";
+      fillField(ref, text, kind) {
+        return paced(async () => {
+          const failure = (result: McpResult) => {
+            const detail = opts.scrubber.scrub(textOf(result));
+            return `failed: ${kind === "password" && text.length < MIN_SECRET_LENGTH ? detail.split("\nCall log:")[0]! : detail}`;
+          };
+          if (kind === "password") {
+            const mark = randomUUID();
+            const raw = (await evaluate(
+              { element: "credential field", target: ref, function: `(el) => ({ type: el instanceof HTMLInputElement ? el.type : null, maxLength: el instanceof HTMLInputElement ? el.maxLength : null, origin: location.origin, marked: el instanceof HTMLInputElement && el.type === "password" && (el.setAttribute("${SECRET_MARK}", "${mark}"), true) })` },
+              internalCall,
+            )) as McpResult;
+            if (raw?.isError) return `failed: ${opts.scrubber.scrub(textOf(raw))}`;
+            const probe = evaluatedValue(raw) as { type?: unknown; maxLength?: unknown; origin?: unknown } | undefined;
+            if (typeof probe?.origin !== "string" || !isAllowed(probe.origin)) return "failed: the page is not an allowed origin, so the password was not typed";
+            if (probe.type !== "password") return "failed: the target is not a password field, so the password was not typed";
+            const limit = typeof probe.maxLength === "number" && probe.maxLength >= 0 ? probe.maxLength : undefined;
+            if (limit !== undefined && limit < text.length && limit < MIN_SECRET_LENGTH) return `failed: the field takes at most ${limit} characters, ${text.length < MIN_SECRET_LENGTH ? "fewer than the password has" : "too few to keep a password hidden"}, so nothing was typed`;
+            if (limit !== undefined && limit < text.length) keepSecret(text.slice(0, limit));
+            const field = await findMarked(mark);
+            if (!field) return "failed: the password field could not be found again, so the password was not typed";
+            valuesBeforeTyping.set(field, await within(field.inputValue({ timeout: HANDLE_READ_MS }).catch(() => ""), HANDLE_READ_MS, ""));
+            filled = [...filled, field].slice(-MAX_HELD_FIELDS);
+          }
+          const out = (await type({ target: ref, element: kind === "password" ? "password field" : "username field", text }, internalCall)) as McpResult;
+          if (kind === "password") {
+            if (text.length >= MIN_SECRET_LENGTH) typedSecrets.add(text);
+            typedPasswords.add(text);
+            const held = filled.at(-1);
+            if (held) {
+              const kept = await within(held.inputValue({ timeout: FOCUS_CHECK_MS }).catch(() => null), FOCUS_CHECK_MS, text);
+              if (kept === null) return out?.isError ? failure(out) : "failed: the page moved on before the field could be checked, so it is not known what the field kept";
+              const shortened = kept !== text && kept.length > 0 && keptFrom(kept, text);
+              if (shortened && kept.length >= MIN_SECRET_LENGTH) {
+                keepSecret(kept);
+              } else if (shortened) {
+                await type({ target: ref, element: "password field", text: "" }, internalCall);
+                const left = await within(held.inputValue({ timeout: HANDLE_READ_MS }).catch(() => null), HANDLE_READ_MS, null);
+                return left === "" ? "failed: the field kept too little of the password to hide it, so it was cleared" : "failed: the field kept too little of the password to hide it, and it could not be cleared";
+              } else if (!kept && !out?.isError) {
+                return "failed: the field did not keep the password";
+              }
             }
           }
-        }
-        if (out?.isError) return failure(out);
-        return kind === "password" ? "typed the password" : "typed the username";
+          if (out?.isError) return failure(out);
+          return kind === "password" ? "typed the password" : "typed the username";
+        });
       },
       async screenshot() {
         const page = context.pages()[0];

@@ -34,7 +34,7 @@ export default async function SettingsPage() {
     <AppShell shell={await shellFor(member)} current="settings">
       <PageHead
         eyebrow="Settings"
-        title="Workspace, members and model key."
+        title="Workspace, members, model key and budget."
         subtitle="The name, the people in it, the model key every run of this workspace uses, and what runs may spend in a month."
       />
       <div className="flex flex-col gap-8">

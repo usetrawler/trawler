@@ -7,7 +7,7 @@ export const MONTHLY_BUDGET_RANGE = { min: 1, max: 100_000 };
 export const runsHalted = (env: Record<string, string | undefined> = process.env) => /^(1|true|yes|on)$/i.test(env.TRAWLER_HALT_RUNS?.trim() ?? "");
 
 export const HALTED = "Trawler has paused hosted runs for now. Try again later, or run it on your own machine with the local runner.";
-export const PAUSED = "Runs on this project are paused. Resume them at the top of the project, then start again.";
+export const PAUSED = "Runs on this project are paused. Resume them on the project's page, then start again.";
 
 export const usd = (n: number) => `$${n.toFixed(2)}`;
 
@@ -36,7 +36,7 @@ export const budgetLeft = (budget: MonthlyBudget | null) => (budget ? budget.lim
 
 export function budgetSpentMessage(budget: MonthlyBudget, now: Date = new Date()): string {
   const month = now.toLocaleString("en-GB", { month: "long", timeZone: "UTC" });
-  return `This workspace has spent its ${usd(budget.limitUsd)} monthly budget: ${usd(budget.spentUsd)} since ${month} 1. An owner or admin can raise it in Settings.`;
+  return `This workspace has spent its ${usd(budget.limitUsd)} monthly budget: ${usd(budget.spentUsd)} since ${month} 1 (UTC). An owner or admin can raise it in Settings.`;
 }
 
 export async function setMonthlyBudget(tx: Tx, orgId: string, monthlyUsd: number, setBy: string): Promise<void> {

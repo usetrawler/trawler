@@ -38,7 +38,8 @@ export function MonthlyBudget({ limitUsd, spentUsd, month, canManage }: { limitU
       <p className="text-sm text-muted">
         {limitUsd === null
           ? "No budget is set, so only each run's own cap limits what runs spend."
-          : "When the workspace reaches it, the run that is going stops and new runs are refused until the next month or a higher budget. What a stopped run found is kept."}
+          : "When the workspace reaches it, the runs that are going stop and new runs are refused until the next month or a higher budget. What a stopped run found is kept."}
+        {" "}Calls to a model with no known price cost nothing here, so they do not count; such runs stop at their token cap instead.
       </p>
       {canManage ? <BudgetForm limitUsd={limitUsd} /> : <p className="text-sm text-muted">Only an owner or admin of this workspace can change the budget.</p>}
     </section>
@@ -50,30 +51,31 @@ function BudgetForm({ limitUsd }: { limitUsd: number | null }) {
   const [removed, remove, removing] = useActionState<BudgetState, FormData>(removeMonthlyBudget, {});
   const [value, setValue] = useState(limitUsd === null ? "" : limitUsd.toFixed(2));
   const [said, setSaid] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ text: string; from: "save" | "remove" } | null>(null);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
     setSaid(state.saved ? "Saved." : "");
-    setError(state.error ?? null);
+    setError(state.error ? { text: state.error, from: "save" } : null);
   }, [state]);
   useEffect(() => {
     setSaid(removed.removed ? "Removed." : "");
-    setError(removed.error ?? null);
+    setError(removed.error ? { text: removed.error, from: "remove" } : null);
     if (!removed.removed) return;
     setValue("");
     input.current?.focus();
   }, [removed]);
   const busy = pending || removing;
   const failed = Boolean(error) && !busy;
+  const badValue = failed && error?.from === "save";
   return (
     <div className="flex flex-col gap-3">
-      <form action={action} className="flex flex-col gap-3">
+      <form action={action} noValidate className="flex flex-col gap-3">
         <label className="flex flex-col gap-2">
-          <span className="text-sm text-muted">Budget a month, in USD, from $1 to $100,000.</span>
+          <span className="text-sm text-muted">The most the workspace&apos;s runs may spend in a month, in USD, from $1 to $100,000.</span>
           <input
             ref={input} name="monthly" type="number" inputMode="decimal" min={1} max={100000} step={0.01} value={value} placeholder="No budget"
             onChange={(e) => { setValue(e.target.value); setSaid(""); }}
-            aria-invalid={failed || undefined} aria-describedby={failed ? "budget-error" : undefined} className={`${field} w-48`}
+            aria-invalid={badValue || undefined} aria-describedby={badValue ? "budget-error" : undefined} className={`${field} w-48`}
           />
         </label>
         <div className="flex flex-wrap items-center gap-3">
@@ -84,7 +86,7 @@ function BudgetForm({ limitUsd }: { limitUsd: number | null }) {
           <span role="status" className="text-sm text-ok">{busy ? "" : said}</span>
         </div>
       </form>
-      {failed && <p id="budget-error" role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
+      {failed && <p id="budget-error" role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error?.text}</p>}
     </div>
   );
 }

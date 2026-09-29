@@ -11,7 +11,7 @@ import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
 import { budgetLeft, monthlyBudget, RUN_TIME_LIMIT_HOURS, runsHalted } from "./limits.ts";
 import { turnSteps } from "./models.ts";
-import { ACCOUNT_REFUSED, capSpent, endRun, signUpSeedContext, type CancelReason, type ConfigSnapshot } from "./runs.ts";
+import { ACCOUNT_REFUSED, affordableOutputTokens, capSpent, endRun, signUpSeedContext, type CancelReason, type ConfigSnapshot } from "./runs.ts";
 
 const LEASE_MINUTES = 10;
 const ACTIVE = ["queued", "running"];
@@ -297,15 +297,16 @@ const lockedRun = (tx: Tx, runId: string) =>
 type LockedRun = Awaited<ReturnType<typeof lockedRun>>;
 type RunEnd = { status: "stopped_budget" } | { status: "cancelled"; reason: CancelReason };
 
-async function spentWorkspaceBudget(tx: Tx, orgId: string): Promise<boolean> {
-  return budgetLeft(await monthlyBudget(tx, orgId)) <= 0;
+async function spentWorkspaceBudget(tx: Tx, run: { org_id: string; completion_usd_per_mtok: string | null }): Promise<boolean> {
+  const left = budgetLeft(await monthlyBudget(tx, run.org_id));
+  return left <= 0 || affordableOutputTokens(left, run.completion_usd_per_mtok === null ? null : Number(run.completion_usd_per_mtok)) < 1;
 }
 
 async function limitReached(tx: Tx, run: LockedRun): Promise<RunEnd | null> {
   if (runsHalted()) return { status: "cancelled", reason: "halted" };
   if (run.paused) return { status: "cancelled", reason: "paused" };
   if (capSpent(run)) return { status: "stopped_budget" };
-  if (await spentWorkspaceBudget(tx, run.org_id)) return { status: "cancelled", reason: "workspace_budget" };
+  if (await spentWorkspaceBudget(tx, run)) return { status: "cancelled", reason: "workspace_budget" };
   if (run.over_time) return { status: "cancelled", reason: "time_limit" };
   return null;
 }
@@ -324,17 +325,24 @@ async function stopIfOverLimits(tx: Tx, runId: string): Promise<boolean> {
 
 async function judgeAgainStopped(tx: Tx, runId: string): Promise<boolean> {
   const run = await lockedRun(tx, runId);
-  return runsHalted() || run.paused || capSpent(run) || (await spentWorkspaceBudget(tx, run.org_id));
+  return runsHalted() || run.paused || capSpent(run) || (await spentWorkspaceBudget(tx, run));
 }
 
 export async function stopRunsPastLimits(db: Database): Promise<number> {
-  return asSystem(db, async (tx) => {
+  const due = await asSystem(db, (tx) => {
     const live = tx.selectFrom("runs").select("id").where("status", "in", ACTIVE);
-    const due = await (runsHalted() ? live : live.where(sql<boolean>`started_at <= now() - make_interval(hours => ${RUN_TIME_LIMIT_HOURS})`)).forUpdate().skipLocked().execute();
-    let stopped = 0;
-    for (const run of due) if (await stopIfOverLimits(tx, run.id)) stopped++;
-    return stopped;
+    return (runsHalted() ? live : live.where(sql<boolean>`started_at <= now() - make_interval(hours => ${RUN_TIME_LIMIT_HOURS})`)).execute();
   });
+  let stopped = 0;
+  for (const run of due) {
+    try {
+      const stop = await asSystem(db, (tx) => limitStop(tx, run.id));
+      if (stop !== null && stop !== "inactive") stopped++;
+    } catch (err) {
+      await logError("a run past its limits could not be stopped", { runId: run.id, err });
+    }
+  }
+  return stopped;
 }
 
 export async function ingestEvents(db: Database, token: string, events: RunEvent[], expectedJobId?: string): Promise<{ cancel: boolean }> {

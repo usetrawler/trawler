@@ -149,14 +149,15 @@ export async function cancelLiveRuns(tx: Tx, orgId: string, reason: CancelReason
   return cancelled;
 }
 
-export async function pauseProject(tx: Tx, orgId: string, projectId: string, userId: string): Promise<number> {
-  const project = await tx.selectFrom("projects").select("paused_at").where("id", "=", projectId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
+export type PauseOutcome = { stopped: { id: string; number: number } | null } | { unconfirmed: { id: string; number: number } };
+
+export async function pauseProject(tx: Tx, orgId: string, projectId: string, userId: string, confirmedRunId: string | null = null): Promise<PauseOutcome> {
+  const project = await tx.selectFrom("projects").select("paused_at").where("id", "=", projectId).where("org_id", "=", orgId).forNoKeyUpdate().executeTakeFirst();
   if (!project) throw new ProjectNotFound();
+  const live = await activeRunOf(tx, projectId);
+  if (live && live.id !== confirmedRunId) return { unconfirmed: live };
   if (project.paused_at === null) await tx.updateTable("projects").set({ paused_at: new Date(), paused_by: userId }).where("id", "=", projectId).execute();
-  const live = await tx.selectFrom("runs").select("id").where("project_id", "=", projectId).where("org_id", "=", orgId).where("status", "in", ["queued", "running"]).execute();
-  let stopped = 0;
-  for (const run of live) if (await cancelRun(tx, orgId, run.id, "paused")) stopped++;
-  return stopped;
+  return { stopped: live && (await cancelRun(tx, orgId, live.id, "paused")) ? live : null };
 }
 
 export async function resumeProject(tx: Tx, orgId: string, projectId: string): Promise<void> {
@@ -191,8 +192,10 @@ export async function judgeAgain(tx: Tx, orgId: string, runId: string, findingKe
     .executeTakeFirst();
   if (!run) throw new CannotJudgeAgain("This run was not found.");
   if (run.status === "queued" || run.status === "running") throw new CannotJudgeAgain("The run is still going. You can judge it again once it has finished.");
-  const refused = await refusalToRun(tx, orgId, run.project_id);
-  if (refused) throw new CannotJudgeAgain(refused.message);
+  if (runsHalted()) throw new CannotJudgeAgain("Trawler has paused hosted runs for now, so nothing can be judged again. Try again later.");
+  if (await projectPaused(tx, run.project_id)) throw new CannotJudgeAgain("Runs on this project are paused. Resume them on the project's page, then judge it again.");
+  const budget = await monthlyBudget(tx, orgId);
+  if (budget && budgetLeft(budget) <= 0) throw new CannotJudgeAgain(budgetSpentMessage(budget));
   const latest = await tx
     .selectFrom("jobs")
     .select(["status", "stopped_by", sql<boolean>`requested_by is not null`.as("requested")])

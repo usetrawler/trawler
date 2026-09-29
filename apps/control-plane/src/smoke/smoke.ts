@@ -7,7 +7,7 @@ import type { Keyring } from "../lib/secrets.ts";
 import { createProject } from "../projects/projects.ts";
 import { bearer, sameSecret } from "../runner-api/handlers.ts";
 import { isLive } from "../runs/report.ts";
-import { cancelRun, runSummary, startRun } from "../runs/runs.ts";
+import { cancelRun, RunRefused, runSummary, startRun } from "../runs/runs.ts";
 
 export const SMOKE_ORG = "trawler-smoke";
 const SMOKE_ORG_SLUG = "trawler_smoke";
@@ -48,14 +48,20 @@ export async function handleSmokeStart(req: Request, deps: SmokeDeps): Promise<R
     await sql`set local role trawler_auth`.execute(tx);
     await tx.insertInto("organization").values({ id: SMOKE_ORG, name: "Release smoke check", slug: SMOKE_ORG_SLUG, createdAt: new Date() }).onConflict((oc) => oc.column("id").doNothing()).execute();
   });
-  const runId = await withOrg(deps.db, SMOKE_ORG, async (tx) => {
-    const leftOver = await tx.selectFrom("runs").select("id").where("org_id", "=", SMOKE_ORG).where("status", "in", ["queued", "running"]).execute();
-    for (const run of leftOver) await cancelRun(tx, SMOKE_ORG, run.id, "stopped");
-    await setModelKey(tx, SMOKE_ORG, { provider: "openrouter", key: modelKey }, "smoke", deps.keys);
-    const projectId = await createProject(tx, SMOKE_ORG, SMOKE_PROJECT, deps.keys);
-    const run = await startRun(tx, SMOKE_ORG, projectId, deps.keys, { ...SMOKE_RUN, agentModel: deps.model, judgeModel: deps.model, createdBy: "smoke", provider: "openrouter" });
-    return run.id;
-  });
+  let runId: string;
+  try {
+    runId = await withOrg(deps.db, SMOKE_ORG, async (tx) => {
+      const leftOver = await tx.selectFrom("runs").select("id").where("org_id", "=", SMOKE_ORG).where("status", "in", ["queued", "running"]).execute();
+      for (const run of leftOver) await cancelRun(tx, SMOKE_ORG, run.id, "stopped");
+      await setModelKey(tx, SMOKE_ORG, { provider: "openrouter", key: modelKey }, "smoke", deps.keys);
+      const projectId = await createProject(tx, SMOKE_ORG, SMOKE_PROJECT, deps.keys);
+      const run = await startRun(tx, SMOKE_ORG, projectId, deps.keys, { ...SMOKE_RUN, agentModel: deps.model, judgeModel: deps.model, createdBy: "smoke", provider: "openrouter" });
+      return run.id;
+    });
+  } catch (err) {
+    if (err instanceof RunRefused) return json({ error: err.message }, 503);
+    throw err;
+  }
   return json({ runId }, 201);
 }
 

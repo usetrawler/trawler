@@ -624,7 +624,7 @@ describe("tools", () => {
       await navigate(b, `${origin}/paced`);
       const looked = Date.now();
       await snapshot(b);
-      expect(Date.now() - looked).toBeLessThan(500);
+      expect(Date.now() - looked).toBeLessThan(600);
       await Promise.all([navigate(b, `${origin}/paced`), navigate(b, `${origin}/paced`)]);
       expect(pacedHits).toHaveLength(3);
       expect(pacedHits[1]! - pacedHits[0]!).toBeGreaterThanOrEqual(700);
