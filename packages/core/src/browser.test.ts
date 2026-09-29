@@ -20,6 +20,7 @@ let foreignOrigin = "";
 const seen: Record<string, IncomingMessage["headers"]> = {};
 const foreignHits: string[] = [];
 const signups: Array<{ email: string | null; password: string | null; confirm: string | null }> = [];
+const pacedHits: number[] = [];
 
 const MOTIONS: Record<string, string> = {
   keyframes: `echo.className = "fly"`,
@@ -75,6 +76,9 @@ beforeAll(async () => {
       res.end(`<!doctype html><html><body>${body}</body></html>`);
     };
     switch (req.url) {
+      case "/paced":
+        pacedHits.push(Date.now());
+        return html(`<p>Paced</p>`);
       case "/":
         return html(`<h1>Login</h1><img src="https://blocked.example/pixel.png"><img src="https://blocked.example/other.png"><input aria-label="Email" type="text"><input aria-label="Password" type="password"><p>Welcome back</p><a href="/two">Next page</a>`);
       case "/two":
@@ -563,7 +567,7 @@ async function withBrowser(fn: (b: Browser, blocked: string[], dir: string) => P
   const scrubber = new SecretScrubber();
   scrubber.add(PASSWORD);
   const dir = mkdtempSync(join(tmpdir(), "trw-"));
-  const browser = await openBrowser({ allowedOrigins: [origin], outputDir: dir, scrubber, onBlocked: (u) => blocked.push(u), ...extra });
+  const browser = await openBrowser({ allowedOrigins: [origin], outputDir: dir, scrubber, onBlocked: (u) => blocked.push(u), actionGapMs: 0, ...extra });
   try {
     await fn(browser, blocked, dir);
   } finally {
@@ -612,6 +616,20 @@ describe("tools", () => {
       expect(snap).toContain("Your password is •••");
       expect(snap).not.toContain(PASSWORD);
     });
+  }, 60_000);
+
+  test("the product sees a person's actions at least the gap apart, even two sent at once, while a snapshot waits for nothing", async () => {
+    await withBrowser(async (b) => {
+      pacedHits.length = 0;
+      await navigate(b, `${origin}/paced`);
+      const looked = Date.now();
+      await snapshot(b);
+      expect(Date.now() - looked).toBeLessThan(600);
+      await Promise.all([navigate(b, `${origin}/paced`), navigate(b, `${origin}/paced`)]);
+      expect(pacedHits).toHaveLength(3);
+      expect(pacedHits[1]! - pacedHits[0]!).toBeGreaterThanOrEqual(700);
+      expect(pacedHits[2]! - pacedHits[1]!).toBeGreaterThanOrEqual(700);
+    }, { actionGapMs: 700 });
   }, 60_000);
 
   test("actions return the page, not a snapshot file link", async () => {
@@ -1326,7 +1344,7 @@ describe("robustness", () => {
   test("once the browser is gone, tools throw instead of returning errors forever", async () => {
     const scrubber = new SecretScrubber();
     const dir = mkdtempSync(join(tmpdir(), "trw-"));
-    const b = await openBrowser({ allowedOrigins: [origin], outputDir: dir, scrubber, onBlocked: () => {} });
+    const b = await openBrowser({ allowedOrigins: [origin], outputDir: dir, scrubber, onBlocked: () => {}, actionGapMs: 0 });
     try {
       await navigate(b, origin);
       await b.close();
@@ -1338,7 +1356,7 @@ describe("robustness", () => {
 
   test("closing with a dialog still open is quick, and leaves no Chromium running", async () => {
     const dir = mkdtempSync(join(tmpdir(), "trw-"));
-    const b = await openBrowser({ allowedOrigins: [origin], outputDir: dir, scrubber: new SecretScrubber(), onBlocked: () => {} });
+    const b = await openBrowser({ allowedOrigins: [origin], outputDir: dir, scrubber: new SecretScrubber(), onBlocked: () => {}, actionGapMs: 0 });
     try {
       await navigate(b, `${origin}/dialog`);
       const clicked = JSON.stringify(await b.tools.browser_click!.execute!({ target: refOf(await snapshot(b), "Delete"), element: "Delete" }, ctx));
@@ -1354,7 +1372,7 @@ describe("robustness", () => {
 
   test("closing still ends Chromium when dismissing one dialog opens another", async () => {
     const dir = mkdtempSync(join(tmpdir(), "trw-"));
-    const b = await openBrowser({ allowedOrigins: [origin], outputDir: dir, scrubber: new SecretScrubber(), onBlocked: () => {} });
+    const b = await openBrowser({ allowedOrigins: [origin], outputDir: dir, scrubber: new SecretScrubber(), onBlocked: () => {}, actionGapMs: 0 });
     try {
       await navigate(b, `${origin}/dialog-chain`);
       await b.tools.browser_click!.execute!({ target: refOf(await snapshot(b), "Delete"), element: "Delete" }, ctx);

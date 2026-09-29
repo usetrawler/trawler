@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
   live: 0,
   tenants: [] as string[],
   revalidated: [] as unknown[][],
+  budgets: [] as unknown[][],
 }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
@@ -41,6 +42,11 @@ vi.mock("../../credentials/credentials.ts", async (original) => ({
   removeModelKey: async (tx: unknown, orgId: string, addedAt?: Date) => { state.removed.push({ orgId, tx, addedAt }); return state.removeMatches; },
   modelKeyHint: async () => (state.keyRemains ? { provider: "openrouter", hint: "…zzzz", baseUrl: null } : null),
 }));
+vi.mock("../../runs/limits.ts", async (original) => ({
+  ...(await original<typeof import("../../runs/limits.ts")>()),
+  setMonthlyBudget: async (_tx: unknown, orgId: string, usd: number, userId: string) => void state.budgets.push(["set", orgId, usd, userId]),
+  removeMonthlyBudget: async (_tx: unknown, orgId: string) => void state.budgets.push(["removed", orgId]),
+}));
 vi.mock("../../runs/runs.ts", () => ({ cancelLiveRuns: async (tx: unknown, orgId: string, reason: string) => { state.cancelled.push({ orgId, tx, reason }); return state.live; } }));
 vi.mock("../../llm/providers.ts", async (original) => ({
   ...(await original<typeof import("../../llm/providers.ts")>()),
@@ -50,7 +56,7 @@ vi.mock("../../llm/providers.ts", async (original) => ({
   },
 }));
 
-const { removeModelKeyAction, renameWorkspaceAction, replaceModelKeyAction } = await import("./actions.ts");
+const { removeModelKeyAction, removeMonthlyBudgetAction, renameWorkspaceAction, replaceModelKeyAction, setMonthlyBudgetAction } = await import("./actions.ts");
 const { withinListingLimit } = await import("../../llm/key-input.ts");
 const ADDED_AT = "2026-09-26T10:21:33.123Z";
 const EVERY_PAGE = [["/", "layout"]];
@@ -65,7 +71,26 @@ const form = (fields: Record<string, string>) => {
 const OWNERS_AND_ADMINS = "Only an owner or admin of this workspace can change its settings.";
 
 beforeEach(() => {
-  Object.assign(state, { member: owner, renamed: [], renameFails: null, checked: [], check: { ok: true, checked: true }, saved: [], removed: [], removeMatches: true, keyRemains: true, cancelled: [], live: 0, tenants: [], revalidated: [] });
+  Object.assign(state, { member: owner, renamed: [], renameFails: null, checked: [], check: { ok: true, checked: true }, saved: [], removed: [], removeMatches: true, keyRemains: true, cancelled: [], live: 0, tenants: [], revalidated: [], budgets: [] });
+});
+
+test("an owner or admin sets the workspace's monthly budget in dollars and cents, or removes it, and every page shows it", async () => {
+  expect(await setMonthlyBudgetAction({}, form({ monthly: "49.5" }))).toEqual({ saved: true });
+  state.member = { ...owner, role: "admin" };
+  expect(await setMonthlyBudgetAction({}, form({ monthly: " 100000 " }))).toEqual({ saved: true });
+  expect(await removeMonthlyBudgetAction({})).toEqual({ removed: true });
+  expect(state.budgets).toEqual([["set", "org-1", 49.5, "user-1"], ["set", "org-1", 100000, "user-1"], ["removed", "org-1"]]);
+  expect(state.revalidated).toEqual([...EVERY_PAGE, ...EVERY_PAGE, ...EVERY_PAGE]);
+});
+
+test("a budget outside $1 to $100,000, with more than cents, or not a number is refused with the rule, and a member changes none", async () => {
+  for (const monthly of ["0.99", "100000.01", "12.345", "-5", "ten", "", "1e3"]) {
+    expect(await setMonthlyBudgetAction({}, form({ monthly }))).toEqual({ error: "Set a monthly budget between $1 and $100,000." });
+  }
+  state.member = { ...owner, role: "member" };
+  expect(await setMonthlyBudgetAction({}, form({ monthly: "20" }))).toEqual({ error: OWNERS_AND_ADMINS });
+  expect(await removeMonthlyBudgetAction({})).toEqual({ error: OWNERS_AND_ADMINS });
+  expect(state.budgets).toEqual([]);
 });
 
 test("a member of this workspace who is neither owner nor admin renames nothing, and replaces or removes no key", async () => {

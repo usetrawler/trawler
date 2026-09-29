@@ -22,6 +22,8 @@ export const BROWSER_TOOLS = [
   "browser_file_upload",
 ] as const;
 
+export const MIN_ACTION_GAP_MS = 1000;
+const UNPACED = new Set(["browser_snapshot", "browser_wait_for"]);
 const FILE_PARAMETERS = ["filename", "paths"];
 const SECRET_MARK = "data-trawler-secret";
 const EDITS_FIELDS = new Set(["browser_type", "browser_select_option"]);
@@ -439,6 +441,7 @@ export async function openBrowser(opts: {
   survivesSignals?: boolean;
   maskCheckMs?: number;
   filledReadMs?: number;
+  actionGapMs?: number;
 }): Promise<Browser> {
   const allowed = new Set(opts.allowedOrigins.map((o) => new URL(o).origin));
   const isAllowed = (url: string) => {
@@ -507,6 +510,23 @@ export async function openBrowser(opts: {
     const fieldState = `(el) => (${fieldStateOf.toString()})(el, ${JSON.stringify(SECRET_MARK)})`;
     const refused = (text: string) => ({ content: [{ type: "text", text: `### Error\n${text}` }], isError: true });
     const probe = async (args: Record<string, unknown>) => evaluatedValue((await evaluate(args, internalCall)) as McpResult);
+
+    const actionGapMs = opts.actionGapMs ?? MIN_ACTION_GAP_MS;
+    let lastActionAt = -Infinity;
+    let actions: Promise<unknown> = Promise.resolve();
+    const paced = <T>(act: () => Promise<T>): Promise<T> => {
+      const turn = actions.then(async () => {
+        const wait = lastActionAt + actionGapMs - Date.now();
+        if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+        try {
+          return await act();
+        } finally {
+          lastActionAt = Date.now();
+        }
+      });
+      actions = turn.catch(() => undefined);
+      return turn;
+    };
 
     const typedSecrets = new Set<string>();
     const typedPasswords = new Set<string>();
@@ -705,101 +725,104 @@ export async function openBrowser(opts: {
       const t = all[name];
       if (!t?.execute) throw new Error(`Playwright MCP no longer provides ${name}`);
       const execute = t.execute;
+      const run: NonNullable<Tool["execute"]> = async (input, options) => {
+        if (disconnected) throw new Error("the browser has closed");
+        const safeInput = Object.fromEntries(Object.entries(input as Record<string, unknown>).filter(([k]) => !FILE_PARAMETERS.includes(k)));
+        if (name === "browser_press_key" && !KEYS_SAFE_ON_SECRETS.has(String(safeInput.key)) && (await focusIsOnSecret())) {
+          return refused("Keys cannot be pressed while a password field has focus. Click somewhere else first.");
+        }
+        if (EDITS_FIELDS.has(name) && typeof safeInput.target === "string") {
+          const field = (await probe({ element: "field", target: safeInput.target, function: fieldState })) as Partial<FieldState> | undefined;
+          if (field?.marked === true || (typeof field?.value === "string" && holdsSecret(field.value))) return refused("Password fields can only be filled with sign_in or type_own_password.");
+        }
+        if (name === "browser_navigate") {
+          const url = typeof safeInput.url === "string" ? safeInput.url : "";
+          if (!/^https?:\/\//i.test(url) || !isAllowed(url)) {
+            return { content: [{ type: "text", text: `### Error\nOnly http(s) addresses on the allowed origins can be opened: ${[...allowed].join(", ")}` }], isError: true };
+          }
+        }
+        const waiting = name === "browser_handle_dialog" ? undefined : dialogOnActingPage();
+        if (waiting) {
+          return scrubWithFilledValues({ content: [{ type: "text", text: `### Error\nError: Tool "${name}" does not handle the modal state.\n${modalState(waiting)}` }], isError: true });
+        }
+        blockedNavigation = null;
+        const dialogsBefore = dialogsOpened;
+        const untilADialog = async () => {
+          const running = Promise.resolve(execute(safeInput, options)) as Promise<McpResult>;
+          running.catch(() => {});
+          let notify: ((dialog: Dialog) => void) | undefined;
+          const heldByDialog = new Promise<McpResult>((resolve) => {
+            notify = (dialog) => setTimeout(() => resolve({ content: [{ type: "text", text: modalState(dialog) }] }), DIALOG_GRACE_MS);
+            onNextDialog.add(notify);
+          });
+          return Promise.race([running, heldByDialog]).finally(() => onNextDialog.delete(notify!));
+        };
+        let result = await untilADialog();
+        if (name === "browser_navigate" && result?.isError && INTERRUPTED.test(textOf(result)) && !dialogOnActingPage()) result = await untilADialog();
+        if (result?.isError && CLOSED.test(textOf(result))) throw new Error("the browser has closed");
+        if (name === "browser_handle_dialog" && !result?.isError && dialogsOpened === dialogsBefore) dialogOpen = false;
+        if (!result?.isError && !textOf(result).trim()) result.content = [{ type: "text", text: "Done. Call browser_snapshot to see the page." }];
+        result.content = result.content?.map((part) => (typeof part.text === "string" ? { ...part, text: part.text.replace(SILENT_LEAVE_PROMPT, `[${LEAVE_PROMPT}]`) } : part));
+        if (blockedNavigation) {
+          result.content = [...(result.content ?? []), { type: "text", text: `### Blocked\n${blockedNavigation} is outside the allowed origins, so the browser did not open it. Go back or navigate to an allowed page.` }];
+        }
+        return scrubWithFilledValues(result);
+      };
       tools[name] = {
         ...withoutFileParameters(t),
-        execute: async (input, options) => {
-          if (disconnected) throw new Error("the browser has closed");
-          const safeInput = Object.fromEntries(Object.entries(input as Record<string, unknown>).filter(([k]) => !FILE_PARAMETERS.includes(k)));
-          if (name === "browser_press_key" && !KEYS_SAFE_ON_SECRETS.has(String(safeInput.key)) && (await focusIsOnSecret())) {
-            return refused("Keys cannot be pressed while a password field has focus. Click somewhere else first.");
-          }
-          if (EDITS_FIELDS.has(name) && typeof safeInput.target === "string") {
-            const field = (await probe({ element: "field", target: safeInput.target, function: fieldState })) as Partial<FieldState> | undefined;
-            if (field?.marked === true || (typeof field?.value === "string" && holdsSecret(field.value))) return refused("Password fields can only be filled with sign_in or type_own_password.");
-          }
-          if (name === "browser_navigate") {
-            const url = typeof safeInput.url === "string" ? safeInput.url : "";
-            if (!/^https?:\/\//i.test(url) || !isAllowed(url)) {
-              return { content: [{ type: "text", text: `### Error\nOnly http(s) addresses on the allowed origins can be opened: ${[...allowed].join(", ")}` }], isError: true };
-            }
-          }
-          const waiting = name === "browser_handle_dialog" ? undefined : dialogOnActingPage();
-          if (waiting) {
-            return scrubWithFilledValues({ content: [{ type: "text", text: `### Error\nError: Tool "${name}" does not handle the modal state.\n${modalState(waiting)}` }], isError: true });
-          }
-          blockedNavigation = null;
-          const dialogsBefore = dialogsOpened;
-          const untilADialog = async () => {
-            const running = Promise.resolve(execute(safeInput, options)) as Promise<McpResult>;
-            running.catch(() => {});
-            let notify: ((dialog: Dialog) => void) | undefined;
-            const heldByDialog = new Promise<McpResult>((resolve) => {
-              notify = (dialog) => setTimeout(() => resolve({ content: [{ type: "text", text: modalState(dialog) }] }), DIALOG_GRACE_MS);
-              onNextDialog.add(notify);
-            });
-            return Promise.race([running, heldByDialog]).finally(() => onNextDialog.delete(notify!));
-          };
-          let result = await untilADialog();
-          if (name === "browser_navigate" && result?.isError && INTERRUPTED.test(textOf(result)) && !dialogOnActingPage()) result = await untilADialog();
-          if (result?.isError && CLOSED.test(textOf(result))) throw new Error("the browser has closed");
-          if (name === "browser_handle_dialog" && !result?.isError && dialogsOpened === dialogsBefore) dialogOpen = false;
-          if (!result?.isError && !textOf(result).trim()) result.content = [{ type: "text", text: "Done. Call browser_snapshot to see the page." }];
-          result.content = result.content?.map((part) => (typeof part.text === "string" ? { ...part, text: part.text.replace(SILENT_LEAVE_PROMPT, `[${LEAVE_PROMPT}]`) } : part));
-          if (blockedNavigation) {
-            result.content = [...(result.content ?? []), { type: "text", text: `### Blocked\n${blockedNavigation} is outside the allowed origins, so the browser did not open it. Go back or navigate to an allowed page.` }];
-          }
-          return scrubWithFilledValues(result);
-        },
+        execute: (input, options) => (UNPACED.has(name) ? run(input, options) : paced(() => run(input, options))),
       };
     }
 
     return {
       tools,
-      async fillField(ref, text, kind) {
-        const failure = (result: McpResult) => {
-          const detail = opts.scrubber.scrub(textOf(result));
-          return `failed: ${kind === "password" && text.length < MIN_SECRET_LENGTH ? detail.split("\nCall log:")[0]! : detail}`;
-        };
-        if (kind === "password") {
-          const mark = randomUUID();
-          const raw = (await evaluate(
-            { element: "credential field", target: ref, function: `(el) => ({ type: el instanceof HTMLInputElement ? el.type : null, maxLength: el instanceof HTMLInputElement ? el.maxLength : null, origin: location.origin, marked: el instanceof HTMLInputElement && el.type === "password" && (el.setAttribute("${SECRET_MARK}", "${mark}"), true) })` },
-            internalCall,
-          )) as McpResult;
-          if (raw?.isError) return `failed: ${opts.scrubber.scrub(textOf(raw))}`;
-          const probe = evaluatedValue(raw) as { type?: unknown; maxLength?: unknown; origin?: unknown } | undefined;
-          if (typeof probe?.origin !== "string" || !isAllowed(probe.origin)) return "failed: the page is not an allowed origin, so the password was not typed";
-          if (probe.type !== "password") return "failed: the target is not a password field, so the password was not typed";
-          const limit = typeof probe.maxLength === "number" && probe.maxLength >= 0 ? probe.maxLength : undefined;
-          if (limit !== undefined && limit < text.length && limit < MIN_SECRET_LENGTH) return `failed: the field takes at most ${limit} characters, ${text.length < MIN_SECRET_LENGTH ? "fewer than the password has" : "too few to keep a password hidden"}, so nothing was typed`;
-          if (limit !== undefined && limit < text.length) keepSecret(text.slice(0, limit));
-          const field = await findMarked(mark);
-          if (!field) return "failed: the password field could not be found again, so the password was not typed";
-          valuesBeforeTyping.set(field, await within(field.inputValue({ timeout: HANDLE_READ_MS }).catch(() => ""), HANDLE_READ_MS, ""));
-          filled = [...filled, field].slice(-MAX_HELD_FIELDS);
-        }
-        const out = (await type({ target: ref, element: kind === "password" ? "password field" : "username field", text }, internalCall)) as McpResult;
-        if (kind === "password") {
-          if (text.length >= MIN_SECRET_LENGTH) typedSecrets.add(text);
-          typedPasswords.add(text);
-          const held = filled.at(-1);
-          if (held) {
-            const kept = await within(held.inputValue({ timeout: FOCUS_CHECK_MS }).catch(() => null), FOCUS_CHECK_MS, text);
-            if (kept === null) return out?.isError ? failure(out) : "failed: the page moved on before the field could be checked, so it is not known what the field kept";
-            const shortened = kept !== text && kept.length > 0 && keptFrom(kept, text);
-            if (shortened && kept.length >= MIN_SECRET_LENGTH) {
-              keepSecret(kept);
-            } else if (shortened) {
-              await type({ target: ref, element: "password field", text: "" }, internalCall);
-              const left = await within(held.inputValue({ timeout: HANDLE_READ_MS }).catch(() => null), HANDLE_READ_MS, null);
-              return left === "" ? "failed: the field kept too little of the password to hide it, so it was cleared" : "failed: the field kept too little of the password to hide it, and it could not be cleared";
-            } else if (!kept && !out?.isError) {
-              return "failed: the field did not keep the password";
+      fillField(ref, text, kind) {
+        return paced(async () => {
+          const failure = (result: McpResult) => {
+            const detail = opts.scrubber.scrub(textOf(result));
+            return `failed: ${kind === "password" && text.length < MIN_SECRET_LENGTH ? detail.split("\nCall log:")[0]! : detail}`;
+          };
+          if (kind === "password") {
+            const mark = randomUUID();
+            const raw = (await evaluate(
+              { element: "credential field", target: ref, function: `(el) => ({ type: el instanceof HTMLInputElement ? el.type : null, maxLength: el instanceof HTMLInputElement ? el.maxLength : null, origin: location.origin, marked: el instanceof HTMLInputElement && el.type === "password" && (el.setAttribute("${SECRET_MARK}", "${mark}"), true) })` },
+              internalCall,
+            )) as McpResult;
+            if (raw?.isError) return `failed: ${opts.scrubber.scrub(textOf(raw))}`;
+            const probe = evaluatedValue(raw) as { type?: unknown; maxLength?: unknown; origin?: unknown } | undefined;
+            if (typeof probe?.origin !== "string" || !isAllowed(probe.origin)) return "failed: the page is not an allowed origin, so the password was not typed";
+            if (probe.type !== "password") return "failed: the target is not a password field, so the password was not typed";
+            const limit = typeof probe.maxLength === "number" && probe.maxLength >= 0 ? probe.maxLength : undefined;
+            if (limit !== undefined && limit < text.length && limit < MIN_SECRET_LENGTH) return `failed: the field takes at most ${limit} characters, ${text.length < MIN_SECRET_LENGTH ? "fewer than the password has" : "too few to keep a password hidden"}, so nothing was typed`;
+            if (limit !== undefined && limit < text.length) keepSecret(text.slice(0, limit));
+            const field = await findMarked(mark);
+            if (!field) return "failed: the password field could not be found again, so the password was not typed";
+            valuesBeforeTyping.set(field, await within(field.inputValue({ timeout: HANDLE_READ_MS }).catch(() => ""), HANDLE_READ_MS, ""));
+            filled = [...filled, field].slice(-MAX_HELD_FIELDS);
+          }
+          const out = (await type({ target: ref, element: kind === "password" ? "password field" : "username field", text }, internalCall)) as McpResult;
+          if (kind === "password") {
+            if (text.length >= MIN_SECRET_LENGTH) typedSecrets.add(text);
+            typedPasswords.add(text);
+            const held = filled.at(-1);
+            if (held) {
+              const kept = await within(held.inputValue({ timeout: FOCUS_CHECK_MS }).catch(() => null), FOCUS_CHECK_MS, text);
+              if (kept === null) return out?.isError ? failure(out) : "failed: the page moved on before the field could be checked, so it is not known what the field kept";
+              const shortened = kept !== text && kept.length > 0 && keptFrom(kept, text);
+              if (shortened && kept.length >= MIN_SECRET_LENGTH) {
+                keepSecret(kept);
+              } else if (shortened) {
+                await type({ target: ref, element: "password field", text: "" }, internalCall);
+                const left = await within(held.inputValue({ timeout: HANDLE_READ_MS }).catch(() => null), HANDLE_READ_MS, null);
+                return left === "" ? "failed: the field kept too little of the password to hide it, so it was cleared" : "failed: the field kept too little of the password to hide it, and it could not be cleared";
+              } else if (!kept && !out?.isError) {
+                return "failed: the field did not keep the password";
+              }
             }
           }
-        }
-        if (out?.isError) return failure(out);
-        return kind === "password" ? "typed the password" : "typed the username";
+          if (out?.isError) return failure(out);
+          return kind === "password" ? "typed the password" : "typed the username";
+        });
       },
       async screenshot() {
         const page = context.pages()[0];

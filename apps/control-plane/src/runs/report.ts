@@ -1,4 +1,5 @@
 import { goalsFor } from "@usetrawler/protocol";
+import { RUN_TIME_LIMIT_HOURS } from "./limits.ts";
 import { ACCOUNT_REFUSED, outOfBudget, type CancelReason, type RunSummary } from "./runs.ts";
 
 export type StageState = "waiting" | "active" | "done" | "skipped";
@@ -132,6 +133,16 @@ export function runView(s: RunSummary) {
   return { live, rejudging, refreshes, stages, personas, report, goalsReached, goalsTotal, headline: headline(s, report.confirmed.length, defects.length, replaysAllFailed) };
 }
 
+const STOPPED_BECAUSE: Record<CancelReason, string> = {
+  stopped: "This run was stopped.",
+  key_removed: "Stopped when the model key was removed.",
+  account_refused: "Stopped when the product refused a test account.",
+  time_limit: `Stopped after ${RUN_TIME_LIMIT_HOURS} hours, the longest a run may take.`,
+  workspace_budget: "Stopped when the workspace reached its monthly budget.",
+  paused: "Stopped when runs on this project were paused.",
+  halted: "Stopped because Trawler paused hosted runs.",
+};
+
 function headline(s: RunSummary, confirmed: number, defects: number, replaysAllFailed: boolean): string {
   const { status, cancelReason } = s;
   const checks = s.jobs.filter((j) => j.kind === "account_check");
@@ -141,7 +152,7 @@ function headline(s: RunSummary, confirmed: number, defects: number, replaysAllF
     const refused = checks.findLast((j) => j.status === "failed" && j.error?.startsWith(ACCOUNT_REFUSED))?.error?.trim() ?? "The product refused a test account";
     return `${/[.!?]$/.test(refused) ? refused : `${refused}.`} Check that account on the plan and run again.`;
   }
-  if (status === "cancelled") return cancelReason === "key_removed" ? "Stopped when the model key was removed." : "This run was stopped.";
+  if (status === "cancelled") return STOPPED_BECAUSE[cancelReason ?? "stopped"];
   if (status === "failed") return "This run could not finish.";
   const prefix = status === "stopped_budget" ? "Stopped at the cap. " : "";
   if (confirmed > 0) return `${prefix}${confirmed} ${confirmed === 1 ? "defect" : "defects"} confirmed by replay.`;

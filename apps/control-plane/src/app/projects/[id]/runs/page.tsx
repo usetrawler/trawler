@@ -5,6 +5,7 @@ import { AppShell } from "../../../../components/app-shell.tsx";
 import { ProjectHead } from "../../../../components/project-head.tsx";
 import { withOrg } from "../../../../db/tenancy.ts";
 import { projectHead, runCounts, workspaceRuns } from "../../../../projects/overview.ts";
+import { projectRunState } from "../../../../runs/runs.ts";
 import { signedInMember } from "../../../../server/auth.ts";
 import { getDb } from "../../../../server/db.ts";
 import { shellFor } from "../../../../server/shell.ts";
@@ -29,17 +30,18 @@ export default async function ProjectRunsPage({ params, searchParams }: { params
   if (!UUID.test(id)) notFound();
   const found = await withOrg(getDb(), orgId, async (tx) => {
     const project = await projectHead(tx, orgId, id);
-    if (!project) return null;
+    const runState = await projectRunState(tx, orgId, id);
+    if (!project || !runState) return null;
     const [history, counts] = await Promise.all([workspaceRuns(tx, orgId, { projectId: id, show, before }), runCounts(tx, orgId, id)]);
-    return { project, history, counts };
+    return { project, runState, history, counts };
   });
   if (!found) notFound();
-  const { project, history, counts } = found;
+  const { project, runState, history, counts } = found;
   const shell = await shellFor(member);
   return (
     <AppShell shell={shell} current={{ project: id }} parent wide>
       <RunsView
-        head={<ProjectHead project={project} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="runs" runs={counts.all} />}
+        head={<ProjectHead project={project} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="runs" runs={counts.all} runState={runState} />}
         basePath={`/projects/${id}/runs`}
         show={show} counts={counts} runs={history.runs} olderThan={history.olderThan} paged={before !== undefined} scope="project"
       />

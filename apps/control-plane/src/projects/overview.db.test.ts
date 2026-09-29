@@ -82,7 +82,7 @@ beforeAll(async () => {
   latest = await seedRun("org-a", acme, hoursAgo(6), { status: "succeeded", cost: 0.35 }, [
     { kind: "defect", verdict: "confirmed" }, { kind: "defect", verdict: "confirmed" }, { kind: "friction", verdict: null },
   ], 4, 2);
-  live = await seedRun("org-a", beta, hoursAgo(2), { status: "running", cost: 0.02 }, [], 0, 0);
+  live = await seedRun("org-a", acme, hoursAgo(2), { status: "running", cost: 0.02 }, [], 0, 0);
   waiting = await seedRun("org-a", beta, hoursAgo(1.5), { status: "queued", cost: 0 }, [], 0, 0);
   theirs = await seedRun("org-b", foreign, hoursAgo(1), { status: "succeeded", cost: 1 }, [{ kind: "defect", verdict: "confirmed" }], 6, 0);
 });
@@ -93,8 +93,8 @@ test("the home page lists every project of the workspace, the most recently acti
   expect(projects[3]).toEqual({ id: empty, name: "Empty", targetUrl: "https://empty.acme.test/", site: null, lastRun: null });
   expect(projects[2]).toMatchObject({ id: acme, targetUrl: "https://app.acme.test/" });
   expect(projects[2]!.lastRun).toEqual({
-    id: latest.id, number: latest.number, status: "succeeded", createdAt: expect.any(Date),
-    costUsd: 0.35, tokenCap: null, tokensUsed: 0, confirmed: 2, unchecked: false, goalsReached: 4, goalsTotal: 6, projectId: acme, projectName: "Acme", projectSite: null,
+    id: live.id, number: live.number, status: "running", createdAt: expect.any(Date),
+    costUsd: 0.02, tokenCap: null, tokensUsed: 0, confirmed: 0, unchecked: false, goalsReached: 0, goalsTotal: 6, projectId: acme, projectName: "Acme", projectSite: null,
   });
   expect(projects[1]!.lastRun).toMatchObject({ id: waiting.id, status: "queued", projectName: "Beta" });
 });
@@ -144,8 +144,8 @@ test("the history pages through every run, also inside a filter", async () => {
 
 test("a project's runs are the same history narrowed to that project, with the project's own counts", async () => {
   const history = await withOrg(t.db, "org-a", (tx) => workspaceRuns(tx, "org-a", { projectId: beta }));
-  expect(history.runs.map((r) => r.id)).toEqual([waiting.id, live.id, cancelled.id]);
-  expect(await withOrg(t.db, "org-a", (tx) => runCounts(tx, "org-a", beta))).toEqual({ all: 3, completed: 0, attention: 1 });
+  expect(history.runs.map((r) => r.id)).toEqual([waiting.id, cancelled.id]);
+  expect(await withOrg(t.db, "org-a", (tx) => runCounts(tx, "org-a", beta))).toEqual({ all: 2, completed: 0, attention: 1 });
   const attention = await withOrg(t.db, "org-a", (tx) => workspaceRuns(tx, "org-a", { projectId: acme, show: "attention" }));
   expect(attention.runs.map((r) => r.id)).toEqual([capped.id, failed.id]);
   expect(await withOrg(t.db, "org-a", (tx) => projectHead(tx, "org-a", beta))).toEqual({ id: beta, name: "Beta", targetUrl: "https://beta.acme.test/" });
@@ -241,11 +241,11 @@ test("each query keeps to the workspace it names even where row-level security w
   expect(await asSystem(t.db, (tx) => runCounts(tx, "org-b"))).toEqual({ all: 1, completed: 1, attention: 0 });
   expect(await asSystem(t.db, (tx) => workspaceNav(tx, "org-b"))).toEqual({ projects: [{ id: foreign, name: "Acme", address: "app.globex.test" }], runs: 1 });
   const acmeRuns = (await asSystem(t.db, (tx) => workspaceRuns(tx, "org-a", { projectId: acme }))).runs;
-  expect(acmeRuns.map((r) => r.projectSite)).toEqual([null, null, null]);
+  expect(acmeRuns.map((r) => r.projectSite)).toEqual([null, null, null, null]);
 });
 
 test("the plan page counts the project's runs", async () => {
-  expect(await withOrg(t.db, "org-a", (tx) => projectRunCount(tx, "org-a", acme))).toBe(3);
+  expect(await withOrg(t.db, "org-a", (tx) => projectRunCount(tx, "org-a", acme))).toBe(4);
   expect(await withOrg(t.db, "org-a", (tx) => projectRunCount(tx, "org-a", empty))).toBe(0);
 });
 

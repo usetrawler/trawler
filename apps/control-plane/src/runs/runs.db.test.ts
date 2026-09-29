@@ -44,13 +44,24 @@ async function claimPastChecks() {
   return job;
 }
 
-async function drain() {
+async function claimAndFinishAll() {
   while (true) {
     const job = await claimPastChecks();
     if (!job) return;
     seq = 0;
     await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "finish" });
   }
+}
+
+async function drain() {
+  while (true) {
+    const job = await claimPastChecks();
+    if (!job) break;
+    seq = 0;
+    await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "finish" });
+  }
+  await sql`update jobs set status = 'cancelled', token_hash = null, lease_until = null, finished_at = now() where status in ('queued', 'leased') and run_id in (select id from runs where status in ('queued', 'running'))`.execute(t.db);
+  await sql`update runs set status = 'cancelled', cancel_reason = 'stopped', finished_at = now(), sign_up_seed = null where status in ('queued', 'running')`.execute(t.db);
 }
 
 describe("a whole run", () => {
@@ -167,12 +178,13 @@ describe("safety", () => {
     const org = "org-live";
     await sql`insert into organization (id, name, slug, "createdAt") values (${org}, ${org}, ${org}, now())`.execute(t.db);
     const own = await withOrg(t.db, org, (tx) => createProject(tx, org, config, keys));
+    const second = await withOrg(t.db, org, (tx) => createProject(tx, org, config, keys));
     const finished = await withOrg(t.db, org, (tx) => startRun(tx, org, own, keys, options));
-    await drain();
+    await claimAndFinishAll();
     const going = await withOrg(t.db, org, (tx) => startRun(tx, org, own, keys, options));
     const claimed = (await claimPastChecks())!;
     expect(claimed.runId).toBe(going.id);
-    const waiting = await withOrg(t.db, org, (tx) => startRun(tx, org, own, keys, options));
+    const waiting = await withOrg(t.db, org, (tx) => startRun(tx, org, second, keys, options));
     const elsewhere = await withOrg(t.db, "org-b", (tx) => startRun(tx, "org-b", other, keys, options));
     const status = async (orgId: string, id: string) => {
       const run = (await withOrg(t.db, orgId, (tx) => runSummary(tx, orgId, id)))!;

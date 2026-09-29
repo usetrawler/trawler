@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   userId: "user-1",
   without: null as string | null,
   refusal: null as string | null,
+  startRefusal: null as Error | null,
   previous: undefined as Previous | undefined,
   stored: null as null | { provider: string; key: string; baseUrl: string | null },
   checks: {} as Record<string, KeyCheck>,
@@ -53,7 +54,10 @@ vi.mock("../../../llm/providers.ts", async (original) => ({
   ...(await original<typeof import("../../../llm/providers.ts")>()),
   checkModelCall: async (_endpoint: unknown, model: string) => { state.checked.push(model); return state.checks[model] ?? { ok: true }; },
 }));
-vi.mock("../../../runs/runs.ts", () => ({
+vi.mock("../../../runs/runs.ts", async (importOriginal) => ({
+  RunRefused: (await importOriginal<typeof import("../../../runs/runs.ts")>()).RunRefused,
+  RunInProgress: (await importOriginal<typeof import("../../../runs/runs.ts")>()).RunInProgress,
+  refusalToStart: async () => state.startRefusal ?? null,
   cancelRun: async () => {},
   judgeAgain: async () => {},
   CannotJudgeAgain: class extends Error {},
@@ -77,7 +81,7 @@ const runAgainAction = (runId: string) => {
 
 beforeEach(() => {
   Object.assign(state, {
-    signedIn: true, userId: "user-1", without: null, refusal: null, checks: {}, checked: [], price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }, started: [], asked: [], keyHeld: true, held: [], startFails: null, logged: [],
+    signedIn: true, userId: "user-1", without: null, refusal: null, startRefusal: null, checks: {}, checked: [], price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }, started: [], asked: [], keyHeld: true, held: [], startFails: null, logged: [],
     previous: { project_id: "project-1", status: "succeeded", agent_model: "deepseek/deepseek-v4.1-flash", judge_model: "deepseek/deepseek-v4.1-flash", budget_usd: "3.5000", max_steps: 60, replay_steps: 20, provider: "openrouter", provider_base_url: null, prompt_usd_per_mtok: null, completion_usd_per_mtok: null },
     stored: { provider: "openrouter", key: "sk-or-v1-" + "k".repeat(40), baseUrl: null },
   });
@@ -101,6 +105,21 @@ test("Run again refuses before paying for a model check while a signing-in perso
   expect(await runAgainAction(RUN)).toEqual({ error: "Maya needs a test account to sign in. Choose one on the plan, then run it again." });
   expect(state.checked).toEqual([]);
   expect(state.started).toEqual([]);
+});
+
+test("Run again refuses before paying for a model check while the project has another live run, and names that run", async () => {
+  const { RunInProgress } = await vi.importActual<typeof import("../../../runs/runs.ts")>("../../../runs/runs.ts");
+  state.startRefusal = new RunInProgress({ id: "live-run", number: 12 });
+  expect(await runAgainAction(RUN)).toEqual({ error: "Run 0012 is still going on this project. Wait for it to finish or stop it, then start again.", activeRun: { id: "live-run", number: 12 } });
+  expect(state.checked).toEqual([]);
+  expect(state.started).toEqual([]);
+});
+
+test("a refusal that arrives while the run starts, such as a pause at that moment, is shown as it is", async () => {
+  const { RunRefused } = await vi.importActual<typeof import("../../../runs/runs.ts")>("../../../runs/runs.ts");
+  state.startFails = new RunRefused("Runs on this project are paused. Resume them at the top of the project, then start again.");
+  expect(await runAgainAction(RUN)).toEqual({ error: "Runs on this project are paused. Resume them at the top of the project, then start again." });
+  expect(state.logged).toEqual([]);
 });
 
 test("a run on a model without a known price runs again under the token cap, and a separate judge model is checked too", async () => {

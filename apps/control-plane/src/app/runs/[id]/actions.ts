@@ -9,7 +9,7 @@ import { runCheckRefusal } from "../../../llm/key-input.ts";
 import { checkModelCall, endpointFor, PROVIDER_LABEL, type Provider } from "../../../llm/providers.ts";
 import { DEFAULT_RUN } from "../../../runs/models.ts";
 import { isLive } from "../../../runs/report.ts";
-import { cancelRun, CannotJudgeAgain, judgeAgain, NeedsAccount, personWithoutAccount, RunNotFound, startRun } from "../../../runs/runs.ts";
+import { cancelRun, CannotJudgeAgain, judgeAgain, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunNotFound, RunRefused, startRun } from "../../../runs/runs.ts";
 import { signedInMember } from "../../../server/auth.ts";
 import { betaRefusal } from "../../../server/beta.ts";
 import { getDb, getKeyring } from "../../../server/db.ts";
@@ -52,7 +52,10 @@ class KeyGone extends Error {}
 
 export interface RunAgainState {
   error?: string;
+  activeRun?: { id: string; number: number };
 }
+
+const refusedState = (refused: RunRefused): RunAgainState => ({ error: refused.message, ...(refused instanceof RunInProgress ? { activeRun: refused.run } : {}) });
 
 const pricedBefore = (run: { prompt_usd_per_mtok: string | null; completion_usd_per_mtok: string | null }): Price | null =>
   run.prompt_usd_per_mtok !== null && run.completion_usd_per_mtok !== null ? { promptUsdPerMtok: Number(run.prompt_usd_per_mtok), completionUsdPerMtok: Number(run.completion_usd_per_mtok) } : null;
@@ -83,6 +86,8 @@ export async function runAgainAction(_previous: RunAgainState, form: FormData): 
   if (without) return { error: `${new NeedsAccount(without).message} Choose one on the plan, then run it again.` };
   if (!previous) return { error: "This run was not found." };
   if (isLive(previous.status)) return { error: "This run is still going. Run it again once it has finished." };
+  const refused = await withOrg(getDb(), orgId, (tx) => refusalToStart(tx, orgId, previous.project_id));
+  if (refused) return refusedState(refused);
   if (!stored) return { error: "The workspace has no model key any more. An owner or admin can add one in Settings." };
   const provider = previous.provider as Provider;
   if (stored.provider !== provider) return { error: `This run was paid with ${keyName(provider)}, and the workspace key is now ${keyName(stored.provider)}. Start a run from the plan to choose a model for it.` };
@@ -117,6 +122,7 @@ export async function runAgainAction(_previous: RunAgainState, form: FormData): 
   } catch (err) {
     if (err instanceof KeyGone) return { error: "The workspace's model key was removed or changed while the run was starting. Check the key and run it again." };
     if (err instanceof NeedsAccount) return { error: `${err.message} Choose one on the plan, then run it again.` };
+    if (err instanceof RunRefused) return refusedState(err);
     await logError("run could not start again", { orgId, runId, err }, scrubberWith([endpoint.key]));
     return { error: "The run could not start. Try again." };
   }

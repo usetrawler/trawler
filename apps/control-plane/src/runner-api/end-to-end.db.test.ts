@@ -178,18 +178,17 @@ test("a key the provider starts refusing mid-run fails each session with the pro
   ]);
 });
 
-test("a run left with less than one output token of its cap is stopped at the cap, not refused call by call until it reads Complete", async () => {
+test("a run left with less than one output token of its cap is stopped at the cap when a runner asks for its next job, not refused call by call until it reads Complete", async () => {
   const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "mia", name: "Mia", brief: "b" }, { id: "raj", name: "Raj", brief: "b" }], goals: [{ id: "g", instruction: "Look around." }] });
   const project = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
   const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { budgetUsd: 0.01, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 10, replaySteps: 10, createdBy: "u", price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } }));
   await sql`update runs set cost_usd = budget_usd - 0.000001 where id = ${run.id}`.execute(t.db);
   seen.length = 0;
-  expect(await workOnce(worker())).toBe("done");
+  expect(await workOnce(worker())).toBe("idle");
   expect(seen).toHaveLength(0);
   const summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
   expect(summary).toMatchObject({ status: "stopped_budget" });
-  expect(summary!.jobs.map((j) => [j.persona_key, j.status])).toEqual([["mia", "succeeded"], ["raj", "cancelled"]]);
-  expect(summary!.jobs[0]).toMatchObject({ stopped_by: "budget" });
+  expect(summary!.jobs.map((j) => [j.persona_key, j.status])).toEqual([["mia", "cancelled"], ["raj", "cancelled"]]);
 });
 
 test("a run whose cost only the proxy can see is stopped at the cap by the proxy, and the session ends as stopped by the budget", async () => {

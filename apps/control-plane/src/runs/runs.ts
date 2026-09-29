@@ -6,8 +6,10 @@ import type { Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
 import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
-import { loadProjectConfig } from "../projects/projects.ts";
+import { loadProjectConfig, ProjectNotFound } from "../projects/projects.ts";
+import { budgetLeft, budgetSpentMessage, HALTED, monthlyBudget, PAUSED, projectPaused, runsHalted, type MonthlyBudget } from "./limits.ts";
 import { gaveNoVerdict } from "./report.ts";
+import { runTitle } from "./status.ts";
 
 export interface StartRunOptions {
   budgetUsd: number;
@@ -46,12 +48,56 @@ export async function personWithoutAccount(tx: Tx, projectId: string): Promise<s
   return person?.name ?? null;
 }
 
+export class RunRefused extends Error {}
+
+export class RunInProgress extends RunRefused {
+  constructor(readonly run: { id: string; number: number }) {
+    super(`${runTitle(run.number)} is still going on this project. Wait for it to finish or stop it, then start again.`);
+  }
+}
+
+export class WorkspaceBudgetSpent extends RunRefused {
+  constructor(readonly budget: MonthlyBudget) {
+    super(budgetSpentMessage(budget));
+  }
+}
+
+export async function activeRunOf(tx: Tx, projectId: string): Promise<{ id: string; number: number } | null> {
+  return (await tx.selectFrom("runs").select(["id", "number"]).where("project_id", "=", projectId).where("status", "in", ["queued", "running"]).executeTakeFirst()) ?? null;
+}
+
+export interface ProjectRunState {
+  paused: boolean;
+  liveRun: { id: string; number: number } | null;
+}
+
+export async function projectRunState(tx: Tx, orgId: string, projectId: string): Promise<ProjectRunState | null> {
+  const project = await tx.selectFrom("projects").select("paused_at").where("id", "=", projectId).where("org_id", "=", orgId).executeTakeFirst();
+  if (!project) return null;
+  return { paused: project.paused_at !== null, liveRun: await activeRunOf(tx, projectId) };
+}
+
+export async function refusalToStart(tx: Tx, orgId: string, projectId: string): Promise<RunRefused | null> {
+  const active = await activeRunOf(tx, projectId);
+  return active ? new RunInProgress(active) : refusalToRun(tx, orgId, projectId);
+}
+
+async function refusalToRun(tx: Tx, orgId: string, projectId: string): Promise<RunRefused | null> {
+  if (runsHalted()) return new RunRefused(HALTED);
+  if (await projectPaused(tx, projectId)) return new RunRefused(PAUSED);
+  const budget = await monthlyBudget(tx, orgId);
+  if (budget && budgetLeft(budget) < 0.01) return new WorkspaceBudgetSpent(budget);
+  return null;
+}
+
 export async function startRun(tx: Tx, orgId: string, projectId: string, keys: Keyring, options: StartRunOptions): Promise<{ id: string; number: number }> {
   await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forShare().execute();
   const config = await loadProjectConfig(tx, orgId, projectId, keys);
   const without = await personWithoutAccount(tx, projectId);
   if (without) throw new NeedsAccount(without);
   await sql`select pg_advisory_xact_lock(hashtextextended(${`runs:${orgId}`}, 0))`.execute(tx);
+  const refused = await refusalToStart(tx, orgId, projectId);
+  if (refused) throw refused;
   const { next } = await tx.selectFrom("runs").select(sql<number>`coalesce(max(number), 0) + 1`.as("next")).where("org_id", "=", orgId).executeTakeFirstOrThrow();
   const run = await tx
     .insertInto("runs")
@@ -79,16 +125,20 @@ export class RunNotFound extends Error {
   }
 }
 
-export type CancelReason = "stopped" | "key_removed" | "account_refused";
+export type CancelReason = "stopped" | "key_removed" | "account_refused" | "time_limit" | "workspace_budget" | "paused" | "halted";
 
 export const ACCOUNT_REFUSED = "The product refused the username and password of";
+
+export async function endRun(tx: Tx, runId: string, end: { status: "stopped_budget" } | { status: "cancelled"; reason: CancelReason }): Promise<void> {
+  await tx.updateTable("runs").set({ status: end.status, cancel_reason: end.status === "cancelled" ? end.reason : null, finished_at: new Date(), sign_up_seed: null }).where("id", "=", runId).execute();
+  await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date() }).where("run_id", "=", runId).where("status", "=", "queued").execute();
+}
 
 export async function cancelRun(tx: Tx, orgId: string, runId: string, reason: CancelReason): Promise<boolean> {
   const run = await tx.selectFrom("runs").select("status").where("id", "=", runId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
   if (!run) throw new RunNotFound();
   if (run.status !== "queued" && run.status !== "running") return false;
-  await tx.updateTable("runs").set({ status: "cancelled", cancel_reason: reason, finished_at: new Date(), sign_up_seed: null }).where("id", "=", runId).execute();
-  await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date() }).where("run_id", "=", runId).where("status", "=", "queued").execute();
+  await endRun(tx, runId, { status: "cancelled", reason });
   return true;
 }
 
@@ -97,6 +147,22 @@ export async function cancelLiveRuns(tx: Tx, orgId: string, reason: CancelReason
   let cancelled = 0;
   for (const run of live) if (await cancelRun(tx, orgId, run.id, reason)) cancelled++;
   return cancelled;
+}
+
+export type PauseOutcome = { stopped: { id: string; number: number } | null } | { unconfirmed: { id: string; number: number } };
+
+export async function pauseProject(tx: Tx, orgId: string, projectId: string, userId: string, confirmedRunId: string | null = null): Promise<PauseOutcome> {
+  const project = await tx.selectFrom("projects").select("paused_at").where("id", "=", projectId).where("org_id", "=", orgId).forNoKeyUpdate().executeTakeFirst();
+  if (!project) throw new ProjectNotFound();
+  const live = await activeRunOf(tx, projectId);
+  if (live && live.id !== confirmedRunId) return { unconfirmed: live };
+  if (project.paused_at === null) await tx.updateTable("projects").set({ paused_at: new Date(), paused_by: userId }).where("id", "=", projectId).execute();
+  return { stopped: live && (await cancelRun(tx, orgId, live.id, "paused")) ? live : null };
+}
+
+export async function resumeProject(tx: Tx, orgId: string, projectId: string): Promise<void> {
+  const resumed = await tx.updateTable("projects").set({ paused_at: null, paused_by: null }).where("id", "=", projectId).where("org_id", "=", orgId).executeTakeFirst();
+  if (!resumed.numUpdatedRows) throw new ProjectNotFound();
 }
 
 export const affordableOutputTokens = (leftUsd: number, completionUsdPerMtok: number | null) =>
@@ -119,13 +185,18 @@ export class CannotJudgeAgain extends Error {}
 export async function judgeAgain(tx: Tx, orgId: string, runId: string, findingKey: string, requestedBy: string, keys: Keyring): Promise<void> {
   const run = await tx
     .selectFrom("runs")
-    .select(["status", "cost_usd", "budget_usd", "token_cap", "tokens_used", "completion_usd_per_mtok", "provider", "provider_base_url"])
+    .select(["status", "project_id", "cost_usd", "budget_usd", "token_cap", "tokens_used", "completion_usd_per_mtok", "provider", "provider_base_url"])
     .where("id", "=", runId)
     .where("org_id", "=", orgId)
     .forUpdate()
     .executeTakeFirst();
   if (!run) throw new CannotJudgeAgain("This run was not found.");
   if (run.status === "queued" || run.status === "running") throw new CannotJudgeAgain("The run is still going. You can judge it again once it has finished.");
+  if (runsHalted()) throw new CannotJudgeAgain("Trawler has paused hosted runs for now, so nothing can be judged again. Try again later.");
+  if (await projectPaused(tx, run.project_id)) throw new CannotJudgeAgain("Runs on this project are paused. Resume them on the project's page, then judge it again.");
+  const budget = await monthlyBudget(tx, orgId);
+  const left = budgetLeft(budget);
+  if (budget && (left <= 0 || affordableOutputTokens(left, run.completion_usd_per_mtok === null ? null : Number(run.completion_usd_per_mtok)) < 1)) throw new CannotJudgeAgain(budgetSpentMessage(budget));
   const latest = await tx
     .selectFrom("jobs")
     .select(["status", "stopped_by", sql<boolean>`requested_by is not null`.as("requested")])

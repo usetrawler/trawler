@@ -10,7 +10,7 @@ import { freshEndpoint, runCheckRefusal, withinListingLimit, type KeyInput } fro
 import { checkModelCall, endpointFor, listModels, PREFERRED_MODELS, PROVIDER_LABEL, priceKey, type Endpoint, type Provider } from "../../../llm/providers.ts";
 import { projectRunCount } from "../../../projects/overview.ts";
 import { DEFAULT_RUN } from "../../../runs/models.ts";
-import { NeedsAccount, personWithoutAccount, startRun } from "../../../runs/runs.ts";
+import { NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunRefused, startRun } from "../../../runs/runs.ts";
 import { canManageBilling, signedInMember } from "../../../server/auth.ts";
 import { betaRefusal } from "../../../server/beta.ts";
 import { getDb, getKeyring } from "../../../server/db.ts";
@@ -21,7 +21,11 @@ export interface StartState {
   error?: string;
   field?: "key" | "baseUrl";
   keyHint?: KeyHint;
+  activeRun?: { id: string; number: number };
+  refused?: boolean;
 }
+
+const refusedState = (refused: RunRefused): StartState => ({ error: refused.message, refused: true, ...(refused instanceof RunInProgress ? { activeRun: refused.run } : {}) });
 
 export interface ModelOption {
   id: string;
@@ -97,6 +101,8 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   if (!UUID.test(projectId) || !(await withOrg(getDb(), orgId, (tx) => projectExists(tx, orgId, projectId)))) return { error: "The run could not start. Try again." };
   const without = await withOrg(getDb(), orgId, (tx) => personWithoutAccount(tx, projectId));
   if (without) return { error: new NeedsAccount(without).message };
+  const refused = await withOrg(getDb(), orgId, (tx) => refusalToStart(tx, orgId, projectId));
+  if (refused) return refusedState(refused);
 
   const resolved = await endpointFrom(orgId, { key: String(form.get("apiKey") ?? ""), provider: String(form.get("provider") ?? ""), baseUrl: String(form.get("baseUrl") ?? "") });
   if ("error" in resolved) return { error: resolved.error, ...(resolved.field ? { field: resolved.field } : {}) };
@@ -135,6 +141,7 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
       return { error: "The workspace's model key was removed or changed while the run was starting. Check the key and start again.", ...(keyHint ? { keyHint } : {}) };
     }
     if (err instanceof NeedsAccount) return { error: err.message, ...(keyHint ? { keyHint } : {}) };
+    if (err instanceof RunRefused) return { ...refusedState(err), ...(keyHint ? { keyHint } : {}) };
     if (!(err instanceof ProjectNotFound)) await logError("run could not start", { orgId, projectId, err }, scrubberWith([endpoint.key]));
     return { error: "The run could not start. Try again.", ...(keyHint ? { keyHint } : {}) };
   }

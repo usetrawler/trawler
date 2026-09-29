@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { sql } from "kysely";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import { ProjectConfigSchema } from "@usetrawler/protocol";
 import { modelKey } from "../credentials/credentials.ts";
 import { withOrg } from "../db/tenancy.ts";
@@ -117,4 +117,13 @@ test("never reports a run of another workspace, or a run that does not exist", a
   expect((await status(run.id)).status).toBe(404);
   expect((await status("22222222-2222-4222-8222-222222222222")).status).toBe(404);
   expect((await status("not-a-uuid")).status).toBe(404);
+});
+
+afterEach(() => vi.unstubAllEnvs());
+
+test("while hosted runs are halted, starting answers 503 with why instead of failing", async () => {
+  vi.stubEnv("TRAWLER_HALT_RUNS", "1");
+  const res = await start();
+  expect(res.status).toBe(503);
+  expect(await res.json()).toEqual({ error: "Trawler has paused hosted runs for now. Try again later, or run it on your own machine with the local runner." });
 });

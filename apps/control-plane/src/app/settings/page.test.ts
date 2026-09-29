@@ -11,6 +11,8 @@ const state = vi.hoisted(() => ({
   people: [] as Array<{ id: string; userId: string; role: string; joinedAt: Date; name: string; email: string }>,
   invited: [] as Array<{ id: string; email: string; role: string; expiresAt: Date; addressHasWorkspace: boolean }>,
   actionResult: null as null | Record<string, unknown>,
+  budget: null as null | { limitUsd: number; spentUsd: number },
+  spent: 0,
 }));
 
 vi.mock("react", async (original) => ({
@@ -40,7 +42,9 @@ vi.mock("../../server/db.ts", () => ({ getDb: () => ({}) }));
 vi.mock("../../server/env.ts", () => ({ readEnv: () => ({ baseURL: "https://app.usetrawler.test" }) }));
 vi.mock("../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
 vi.mock("../../credentials/credentials.ts", () => ({ modelKeyDetails: async () => state.key }));
+vi.mock("../../runs/limits.ts", () => ({ monthlyBudget: async () => state.budget, monthSpent: async () => state.spent }));
 vi.mock("./actions.ts", () => ({
+  setMonthlyBudgetAction: async () => ({}), removeMonthlyBudgetAction: async () => ({}),
   renameWorkspaceAction: async () => ({}), replaceModelKeyAction: async () => ({}), removeModelKeyAction: async () => ({}),
   inviteMemberAction: async () => ({}), revokeInvitationAction: async () => ({}), removeMemberAction: async () => ({}), changeRoleAction: async () => ({}),
 }));
@@ -52,7 +56,7 @@ const addedAt = new Date("2026-09-25T18:50:00.000Z");
 
 beforeEach(() => {
   Object.assign(state, {
-    member: owner, key: null, members: { "org-1/user-2": "lee@acme.test" }, lookedUp: [], tenants: [], listed: [], actionResult: null,
+    member: owner, key: null, members: { "org-1/user-2": "lee@acme.test" }, lookedUp: [], tenants: [], listed: [], actionResult: null, budget: null, spent: 0,
     people: [
       { id: "m-1", userId: "user-1", role: "owner", joinedAt: new Date("2026-09-20T10:00:00Z"), name: "Ana", email: "ana@acme.test" },
       { id: "m-2", userId: "user-2", role: "member", joinedAt: new Date("2026-09-21T10:00:00Z"), name: "Lee", email: "lee@acme.test" },
@@ -72,7 +76,7 @@ test("settings name who added the key among this workspace's members, and mark S
 });
 
 test("the page is headed like the app's other pages", async () => {
-  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("Settings Workspace, members and model key. The name, the people in it, and the model key every run of this workspace uses.");
+  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("Settings Workspace, members, model key and budget. The name, the people in it, the model key every run of this workspace uses, and what runs may spend in a month.");
 });
 
 test("a key added by someone who is no longer in this workspace says so, and a workspace without a key looks nobody up", async () => {
@@ -111,4 +115,22 @@ test("the members of this workspace and its invitations are listed, marking you,
   expect(html.indexOf('id="members-heading"')).toBeLessThan(html.indexOf('id="key-heading"'));
   state.actionResult = { invited: "new@acme.test" };
   expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("Invited new@acme.test. Ask them to sign in at app.usetrawler.test with this address; no email is sent.");
+});
+
+test("the monthly budget shows this month's spend to everyone, and only an owner or admin can change it", async () => {
+  state.budget = { limitUsd: 50, spentUsd: 12.4 };
+  state.spent = 12.4;
+  const month = new Date().toLocaleString("en-GB", { month: "long", timeZone: "UTC" });
+  const ownerView = text(renderToStaticMarkup(await SettingsPage()));
+  expect(ownerView).toContain(`Monthly budget Spent on runs since ${month} 1 (UTC): $12.40 of $50.00`);
+  expect(ownerView).toContain("Save budget");
+  expect(ownerView).toContain("Remove budget");
+  expect(renderToStaticMarkup(await SettingsPage()).match(/<input[^>]*name="monthly"[^>]*>/)?.[0]).toMatch(/type="number"[^>]*value="50.00"/);
+  state.member = { ...owner, role: "member" };
+  const memberView = text(renderToStaticMarkup(await SettingsPage()));
+  expect(memberView).toContain("$12.40 of $50.00");
+  expect(memberView).toContain("Only an owner or admin of this workspace can change the budget.");
+  expect(memberView).not.toContain("Save budget");
+  state.budget = null;
+  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("No budget is set, so only each run's own cap limits what runs spend.".replace("'", "&#x27;"));
 });

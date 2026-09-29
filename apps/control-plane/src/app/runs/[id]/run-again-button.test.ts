@@ -1,6 +1,6 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
-const react = vi.hoisted(() => ({ state: {} as { error?: string }, pending: false, action: () => {}, served: [] as unknown[] }));
+const react = vi.hoisted(() => ({ state: {} as { error?: string; activeRun?: { id: string; number: number } }, pending: false, action: () => {}, served: [] as unknown[] }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
   useActionState: (serve: unknown) => { react.served.push(serve); return [react.state, react.action, react.pending]; },
@@ -91,4 +91,10 @@ test("the redirect to the new run is passed on to the framework, never turned in
 test("a page left open across an update is told to reload, since trying again cannot work until then", async () => {
   actions.runAgainAction.mockRejectedValue(new UnrecognizedActionError("Server action not found."));
   expect(await runAgain({}, form())).toEqual({ error: "Trawler has been updated since this page opened. Reload the page to run it again." });
+});
+
+test("a refusal because another run of the project is going links to that run", () => {
+  react.state = { error: "Run 0012 is still going on this project. Wait for it to finish or stop it, then start again.", activeRun: { id: "live-run", number: 12 } };
+  const link = nodes(RunAgainError({ again: useRunAgain() })).find((node) => node.type === "a")!;
+  expect(link.props).toMatchObject({ href: "/runs/live-run", children: ["Open ", "Run 0012"] });
 });

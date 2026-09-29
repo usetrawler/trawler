@@ -8,6 +8,7 @@ import { modelKeyHint, removeModelKey, setModelKey } from "../../credentials/cre
 import { withOrg } from "../../db/tenancy.ts";
 import { freshEndpoint, withinListingLimit } from "../../llm/key-input.ts";
 import { checkKey, PROVIDER_LABEL } from "../../llm/providers.ts";
+import { MONTHLY_BUDGET_RANGE, removeMonthlyBudget, setMonthlyBudget } from "../../runs/limits.ts";
 import { cancelLiveRuns } from "../../runs/runs.ts";
 import { canManageBilling, getAuth, signedInMember, type Member } from "../../server/auth.ts";
 import { getDb, getKeyring } from "../../server/db.ts";
@@ -85,6 +86,33 @@ export async function removeModelKeyAction(_previous: SettingsState, form: FormD
   revalidatePath("/", "layout");
   if ("stoppedRuns" in outcome) return { saved: true, stoppedRuns: outcome.stoppedRuns };
   return "changed" in outcome ? { error: KEY_CHANGED } : { saved: true, stoppedRuns: 0, alreadyRemoved: true };
+}
+
+export interface BudgetState {
+  error?: string;
+  saved?: boolean;
+  removed?: boolean;
+}
+
+const BUDGET_RULE = `Set a monthly budget between $${MONTHLY_BUDGET_RANGE.min} and $${MONTHLY_BUDGET_RANGE.max.toLocaleString("en-US")}.`;
+
+export async function setMonthlyBudgetAction(_previous: BudgetState, form: FormData): Promise<BudgetState> {
+  const member = await manager();
+  if ("error" in member) return member;
+  const typed = String(form.get("monthly") ?? "").trim();
+  const monthly = Math.round(Number(typed) * 100) / 100;
+  if (!/^\d+(\.\d{1,2})?$/.test(typed) || monthly < MONTHLY_BUDGET_RANGE.min || monthly > MONTHLY_BUDGET_RANGE.max) return { error: BUDGET_RULE };
+  await withOrg(getDb(), member.orgId, (tx) => setMonthlyBudget(tx, member.orgId, monthly, member.userId));
+  revalidatePath("/", "layout");
+  return { saved: true };
+}
+
+export async function removeMonthlyBudgetAction(_previous: BudgetState): Promise<BudgetState> {
+  const member = await manager();
+  if ("error" in member) return member;
+  await withOrg(getDb(), member.orgId, (tx) => removeMonthlyBudget(tx, member.orgId));
+  revalidatePath("/", "layout");
+  return { removed: true };
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
