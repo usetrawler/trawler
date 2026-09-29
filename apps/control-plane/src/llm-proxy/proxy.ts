@@ -29,7 +29,7 @@ const inFlight = new Set<string>();
 
 const failure = (status: number, message: string, type?: string) => Response.json({ error: { code: status, message, ...(type ? { type } : {}) } }, { status, headers: { "cache-control": "no-store" } });
 const jobStopped = (message: string) => failure(402, message, JOB_STOPPED);
-const unusable = (message: string) => failure(502, message, ANSWER_UNUSABLE);
+const unusable = (message: string) => failure(422, message, ANSWER_UNUSABLE);
 
 class UpstreamTimeout extends Error {}
 
@@ -135,10 +135,11 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
   } catch (err) {
     if (err instanceof UpstreamTimeout) return failure(504, "the provider did not answer in time");
     if (req.signal.aborted) return failure(499, "the runner hung up");
-    if (err instanceof FetchRefused && err.reason === "too_long") {
+    if (err instanceof FetchRefused && err.reason === "too_long" && err.status !== undefined && err.status >= 200 && err.status < 300) {
       await chargeTheUnreadAnswer();
       return unusable("the provider's answer was too large");
     }
+    if (err instanceof FetchRefused && err.reason === "too_long") return failure(502, "the provider's answer was too large");
     return failure(502, "the provider could not be reached");
   }
   if (upstream.status === 402) return failure(402, "the provider account behind the workspace key is out of credits");

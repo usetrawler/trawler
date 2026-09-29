@@ -204,7 +204,7 @@ test("a 402 without a readable body is not taken for the budget", async () => {
 });
 
 test("an answer the proxy could not use is not asked for again, since it would be refused the same way, while a provider that could not be reached still is", async () => {
-  const answer = (type?: string) => () => new Response(JSON.stringify({ error: { code: 502, message: "the provider's answer was too large", ...(type ? { type } : {}) } }), { status: 502, headers: { "content-type": "application/json", "retry-after-ms": "1" } });
+  const answer = (type?: string) => () => new Response(JSON.stringify({ error: { code: type ? 422 : 502, message: "the provider's answer was too large", ...(type ? { type } : {}) } }), { status: type ? 422 : 502, headers: { "content-type": "application/json", "retry-after-ms": "1" } });
   const calls = async (reply: () => Response) => {
     let made = 0;
     const model = createModel({ modelId: "m", apiKey: "k", baseURL: "https://cp.test/api/llm/v1", fetch: async () => { made++; return reply(); } });

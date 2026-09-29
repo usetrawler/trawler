@@ -294,10 +294,11 @@ test("the proxy bounds a call by what is left of the cap, prices calls OpenRoute
   expect(await (await call()).json()).toEqual({ error: { code: 400, message: "the provider answered 400; its explanation was too long to show" } });
   expect(scrubberWith).not.toHaveBeenCalled();
 
-  const unreadable: Array<[number, { body?: unknown; raw?: string }, number]> = [[200, { body: null }, 502], [400, { body: null }, 400], [404, { body: 123 }, 404], [200, { raw: "not json" }, 502], [400, { raw: "not json" }, 400]];
+  const unreadable: Array<[number, { body?: unknown; raw?: string }, number]> = [[200, { body: null }, 422], [400, { body: null }, 400], [404, { body: 123 }, 404], [200, { raw: "not json" }, 422], [400, { raw: "not json" }, 400]];
   for (const [status, reply, code] of unreadable) {
     replies = [{ status, ...reply }];
-    expect(await (await call()).json()).toEqual({ error: { code, message: "the provider sent an unreadable answer" } });
+    expect(await (await call()).json()).toEqual({ error: { code, message: "the provider sent an unreadable answer", ...(code === 422 ? { type: "answer_unusable" } : {}) } });
+    await sql`update runs set cost_usd = 0, status = 'running', finished_at = null where id = ${run.id}`.execute(t.db);
   }
   replies = [{ status: 404, body: { error: { message: ["x"] } } }];
   vi.mocked(scrubberWith).mockClear();
@@ -422,11 +423,14 @@ test("an answer the provider gave but the proxy could not pass on is charged to 
   const guessed = (charged: number) => charged >= fullOutput && charged < fullOutput + 0.0001;
 
   const unreadable = await call(async () => new Response("<html>ok</html>", { status: 200 }));
-  expect(unreadable).toMatchObject({ status: 502, error: { code: 502, message: "the provider sent an unreadable answer", type: "answer_unusable" } });
+  expect(unreadable).toMatchObject({ status: 422, error: { code: 422, message: "the provider sent an unreadable answer", type: "answer_unusable" } });
   expect(guessed(unreadable.charged)).toBe(true);
-  const tooLarge = await call(async () => { throw new FetchRefused("too_long", "the answer is too large"); });
-  expect(tooLarge).toMatchObject({ status: 502, error: { code: 502, message: "the provider's answer was too large", type: "answer_unusable" } });
+  const tooLarge = await call(async () => { throw new FetchRefused("too_long", "the answer is too large", 200); });
+  expect(tooLarge).toMatchObject({ status: 422, error: { code: 422, message: "the provider's answer was too large", type: "answer_unusable" } });
   expect(guessed(tooLarge.charged)).toBe(true);
+  expect(await call(async () => { throw new FetchRefused("too_long", "the answer is too large", 500); })).toEqual({ status: 502, error: { code: 502, message: "the provider's answer was too large" }, charged: 0 });
+  expect(await call(async () => { throw new FetchRefused("too_long", "the address is too long"); })).toEqual({ status: 502, error: { code: 502, message: "the provider's answer was too large" }, charged: 0 });
+  expect(await call(async () => new Response(new ReadableStream({ start: (controller) => controller.error(new TypeError("terminated")) }), { status: 503 }))).toEqual({ status: 502, error: { code: 502, message: "the provider could not be reached" }, charged: 0 });
   const cutOff = await call(async () => new Response(new ReadableStream({ start: (controller) => controller.error(new TypeError("terminated")) }), { status: 200 }));
   expect(cutOff).toMatchObject({ status: 502, error: { code: 502, message: "the provider could not be reached" } });
   expect(cutOff.error).not.toHaveProperty("type");
@@ -434,6 +438,11 @@ test("an answer the provider gave but the proxy could not pass on is charged to 
 
   expect(await call(async () => new Response("<html>Service Unavailable</html>", { status: 503 }))).toEqual({ status: 503, error: { code: 503, message: "the provider sent an unreadable answer" }, charged: 0 });
   expect(await call(async () => { throw new TypeError("fetch failed"); })).toEqual({ status: 502, error: { code: 502, message: "the provider could not be reached" }, charged: 0 });
+
+  await sql`update runs set cost_usd = budget_usd - 0.01 where id = ${run.id}`.execute(t.db);
+  expect(await call(async () => new Response("<html>ok</html>", { status: 200 }))).toMatchObject({ status: 422, error: { type: "answer_unusable" } });
+  expect((await withOrg(t.db, "org-u", (tx) => runSummary(tx, "org-u", run.id)))!.status).toBe("stopped_budget");
+  expect(await call(async () => new Response("{}", { status: 200 }))).toMatchObject({ status: 402, error: { type: "job_stopped" } });
 });
 
 test("a session interrupted by a runner shutdown goes back to the queue with its partial work forgotten, and the next runner finishes the run", async () => {
