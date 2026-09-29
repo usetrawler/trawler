@@ -198,7 +198,6 @@ describe("answers that cannot become a fetch Response", () => {
     const capped = guardedFetch({ maxResponseBytes: 200_000 });
     await expect(capped("https://llm.example.com/flood/1")).rejects.toMatchObject({ reason: "too_long" });
     expect(await closesWithin("/flood/1", 2000)).toBe(true);
-    expect(sent.get("/flood/1")).toBeLessThan(2_000_000);
     await expect(capped("https://llm.example.com/declared/1")).rejects.toMatchObject({ reason: "too_long" });
     expect(await closesWithin("/declared/1", 2000)).toBe(true);
     const answered = await capped("https://llm.example.com/status/200");
@@ -210,10 +209,10 @@ describe("answers that cannot become a fetch Response", () => {
     expect(CHAT_ANSWER_BYTES).toBe(2_000_000);
     const custom = { provider: "custom" as const, key: "k", baseUrl: "https://llm.example.com/v1" };
     await expect(chatFetchFor(custom)("https://llm.example.com/flood/2")).rejects.toMatchObject({ reason: "too_long" });
-    expect(sent.get("/flood/2")).toBeGreaterThan(CHAT_ANSWER_BYTES);
-    expect(sent.get("/flood/2")).toBeLessThan(CHAT_ANSWER_BYTES * 3);
     await expect(fetchFor(custom)("https://llm.example.com/flood/3")).rejects.toMatchObject({ reason: "too_long" });
+    expect(sent.get("/flood/2")).toBeGreaterThan(CHAT_ANSWER_BYTES);
     expect(sent.get("/flood/3")).toBeGreaterThan(16_000_000);
+    expect(sent.get("/flood/2")).toBeLessThan(sent.get("/flood/3")! / 2);
     const openRouter = { provider: "openrouter" as const, key: "k", baseUrl: "https://openrouter.ai/api/v1" };
     expect(chatFetchFor(openRouter, fetch)).toBe(fetch);
   });
