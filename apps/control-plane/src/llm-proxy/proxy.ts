@@ -5,7 +5,7 @@ import { modelKey } from "../credentials/credentials.ts";
 import type { Keyring } from "../lib/secrets.ts";
 import { bearer, readBody } from "../runner-api/handlers.ts";
 import type { Price } from "../llm/prices.ts";
-import { chatFetchFor, chatHeaders, endpointFor, LONGEST_EXPLANATION_READ, type Endpoint } from "../llm/providers.ts";
+import { chatFetchFor, chatHeaders, endpointFor, LONGEST_EXPLANATION_READ, providerError, saysTheKeyIsInvalid, type Endpoint, type ProviderError } from "../llm/providers.ts";
 import { InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage, type LlmCall } from "../runs/queue.ts";
 import { logError, scrubberWith } from "../server/log.ts";
 import { FetchRefused } from "../setup/safe-fetch.ts";
@@ -32,8 +32,7 @@ const jobStopped = (message: string) => failure(402, message, JOB_STOPPED);
 class UpstreamTimeout extends Error {}
 
 const KEY_REFUSED = "the provider refused the workspace key; an owner or admin can replace it in Settings";
-type UpstreamError = { message?: unknown; metadata?: { reasons?: unknown; flagged_input?: unknown } };
-const refusedTheContent = (error: UpstreamError | undefined) =>
+const refusedTheContent = (error: ProviderError | undefined) =>
   !!error && (Array.isArray(error.metadata?.reasons) || typeof error.metadata?.flagged_input === "string" || (typeof error.message === "string" && /moderat|flagged|guardrail/i.test(error.message)));
 
 const timedOut = (err: unknown) => err instanceof Error && (err.name === "TimeoutError" || (err.name === "AbortError" && err.cause instanceof Error && err.cause.name === "TimeoutError"));
@@ -143,16 +142,17 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
     if (timedOut(err)) return failure(504, "the provider did not answer in time");
     return failure(502, "the provider could not be reached");
   }
-  let parsed: { usage?: Usage; model?: unknown; error?: UpstreamError } | null;
+  let parsed: { usage?: Usage; model?: unknown } | null;
   try {
     parsed = JSON.parse(text);
   } catch {
     parsed = null;
   }
-  if (upstream.status === 401 || (upstream.status === 403 && !refusedTheContent(parsed?.error))) return failure(402, KEY_REFUSED);
+  const error = providerError(parsed);
+  if (upstream.status === 401 || saysTheKeyIsInvalid(upstream.status, error) || (upstream.status === 403 && !refusedTheContent(error))) return failure(402, KEY_REFUSED);
   if (!parsed || typeof parsed !== "object") return failure(upstream.ok ? 502 : upstream.status, "the provider sent an unreadable answer");
-  if (!upstream.ok || parsed.error) {
-    const explanation = parsed.error?.message;
+  if (!upstream.ok || error) {
+    const explanation = error?.message;
     const message = typeof explanation !== "string"
       ? `the provider answered ${upstream.status}`
       : explanation.length > LONGEST_EXPLANATION_READ

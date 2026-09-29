@@ -60,8 +60,12 @@ test("models are listed with the key, and a start check tells a bad key from a b
   expect(await listModels(google, fake(200, { data: [{ id: "models/gemini-3.5-flash" }] }))).toEqual(["gemini-3.5-flash"]);
   expect(await checkModelCall(google, "gemini-3.5-flash", fake(200, {}))).toEqual({ ok: true });
   expect(JSON.parse(seen.at(-1)!.body!)).toMatchObject({ model: "gemini-3.5-flash", max_tokens: 5 });
-  expect(await checkModelCall(google, "x", fake(401, { error: { message: "API key not valid" } }))).toEqual({ ok: false, reason: "key", detail: "API key not valid" });
-  expect(await checkModelCall(google, "x", fake(404, { error: { message: "model not found" } }))).toMatchObject({ ok: false, reason: "model" });
+  expect(await checkModelCall(google, "x", fake(400, [{ error: { code: 400, message: "Please pass a valid API key", status: "INVALID_ARGUMENT" } }]))).toEqual({ ok: false, reason: "key", detail: "Please pass a valid API key" });
+  expect(await checkModelCall(google, "x", fake(400, [{ error: { code: 400, message: "API key expired. Please renew the API key.", status: "INVALID_ARGUMENT", details: [{ reason: "API_KEY_INVALID" }] } }]))).toMatchObject({ ok: false, reason: "key" });
+  expect(await checkModelCall(google, "x", fake(400, [{ error: { code: 400, message: "Key rejected.", status: "INVALID_ARGUMENT", details: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "API_KEY_INVALID" }] } }]))).toMatchObject({ ok: false, reason: "key" });
+  expect(await checkModelCall(google, "x", fake(404, [{ error: { code: 404, message: "models/x is not found for API version v1beta", status: "NOT_FOUND" } }]))).toEqual({ ok: false, reason: "model", detail: "models/x is not found for API version v1beta" });
+  expect(await checkModelCall(google, "x", fake(400, [{ error: { code: 400, message: "Invalid value at 'max_tokens'", status: "INVALID_ARGUMENT" } }]))).toMatchObject({ ok: false, reason: "model" });
+  expect(await checkModelCall(google, "x", fake(404, { error: { message: "model not found" } }))).toMatchObject({ ok: false, reason: "model", detail: "model not found" });
   expect(await checkModelCall(google, "x", fake(503, {}))).toMatchObject({ ok: false, reason: "unavailable" });
 });
 
