@@ -141,13 +141,16 @@ describe("answers that cannot become a fetch Response", () => {
       if (path.startsWith("/flood/")) {
         const chunk = "x".repeat(64_000);
         socket.write("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\n\r\n");
+        const frame = `${chunk.length.toString(16)}\r\n${chunk}\r\n`;
         sent.set(path, 0);
-        const pump = setInterval(() => {
-          if (socket.destroyed) return;
-          socket.write(`${chunk.length.toString(16)}\r\n${chunk}\r\n`);
-          sent.set(path, sent.get(path)! + chunk.length);
-        }, 2);
-        return socket.on("close", () => clearInterval(pump));
+        const pump = () => {
+          while (!socket.destroyed) {
+            sent.set(path, sent.get(path)! + chunk.length);
+            if (!socket.write(frame)) return;
+          }
+        };
+        socket.on("drain", pump);
+        return pump();
       }
       if (path.startsWith("/declared/")) return socket.write("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 50000000\r\n\r\n{");
       if (path.startsWith("/endless/")) {
@@ -207,10 +210,10 @@ describe("answers that cannot become a fetch Response", () => {
     expect(CHAT_ANSWER_BYTES).toBe(2_000_000);
     const custom = { provider: "custom" as const, key: "k", baseUrl: "https://llm.example.com/v1" };
     await expect(chatFetchFor(custom)("https://llm.example.com/flood/2")).rejects.toMatchObject({ reason: "too_long" });
-    expect(sent.get("/flood/2")).toBeGreaterThan(CHAT_ANSWER_BYTES - 64_000);
+    expect(sent.get("/flood/2")).toBeGreaterThan(CHAT_ANSWER_BYTES);
     expect(sent.get("/flood/2")).toBeLessThan(CHAT_ANSWER_BYTES * 3);
     await expect(fetchFor(custom)("https://llm.example.com/flood/3")).rejects.toMatchObject({ reason: "too_long" });
-    expect(sent.get("/flood/3")).toBeGreaterThan(16_000_000 - 64_000);
+    expect(sent.get("/flood/3")).toBeGreaterThan(16_000_000);
     const openRouter = { provider: "openrouter" as const, key: "k", baseUrl: "https://openrouter.ai/api/v1" };
     expect(chatFetchFor(openRouter, fetch)).toBe(fetch);
   });
