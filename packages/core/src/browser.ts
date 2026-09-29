@@ -539,7 +539,7 @@ export async function openBrowser(opts: {
     const modalState = (dialog: Dialog) => `### Modal state\n- ${dialogLine(dialog)}: can be handled by browser_handle_dialog`;
     context.on("page", (page) => {
       page.on("dialog", (dialog) => {
-        if (page !== actingPage()) return void dialog.dismiss().catch(() => {});
+        if (page !== actingPage()) return void (dialog.type() === "beforeunload" ? dialog.accept() : dialog.dismiss()).catch(() => {});
         dialogs.add(dialog);
         openDialogs.set(dialog, page);
         for (const notify of onNextDialog) notify(dialog);
