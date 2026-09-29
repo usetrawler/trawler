@@ -94,6 +94,7 @@ export type ProviderError = { message?: unknown; status?: unknown; details?: unk
 export function providerError(body: unknown): ProviderError | undefined {
   const first: unknown = Array.isArray(body) ? body[0] : body;
   const error = first && typeof first === "object" ? (first as { error?: unknown }).error : undefined;
+  if (typeof error === "string" && error) return { message: error };
   return error && typeof error === "object" ? (error as ProviderError) : undefined;
 }
 

@@ -385,6 +385,7 @@ test("a 403 for flagged or blocked input passes the provider's reason on, while 
   expect(await answer(403, [{ error: { code: 403, message: "Permission denied: Consumer has been suspended.", status: "PERMISSION_DENIED" } }])).toEqual(keyRefused);
   expect(await answer(400, [{ error: { code: 400, message: "Please pass a valid API key", status: "INVALID_ARGUMENT" } }])).toEqual(keyRefused);
   expect(await answer(400, [{ error: { code: 400, message: "Invalid value at 'max_tokens'", status: "INVALID_ARGUMENT" } }])).toEqual({ status: 400, error: { code: 400, message: "Invalid value at 'max_tokens'" } });
+  expect(await answer(200, { error: "model overloaded" })).toEqual({ status: 502, error: { code: 502, message: "model overloaded" } });
   expect(await answer(401, { error: { code: 401, message: "Input flagged by moderation." } })).toEqual(keyRefused);
   expect(await answer(401, "")).toEqual(keyRefused);
 });

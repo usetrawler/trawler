@@ -66,6 +66,8 @@ test("models are listed with the key, and a start check tells a bad key from a b
   expect(await checkModelCall(google, "x", fake(404, [{ error: { code: 404, message: "models/x is not found for API version v1beta", status: "NOT_FOUND" } }]))).toEqual({ ok: false, reason: "model", detail: "models/x is not found for API version v1beta" });
   expect(await checkModelCall(google, "x", fake(400, [{ error: { code: 400, message: "Invalid value at 'max_tokens'", status: "INVALID_ARGUMENT" } }]))).toMatchObject({ ok: false, reason: "model" });
   expect(await checkModelCall(google, "x", fake(404, { error: { message: "model not found" } }))).toMatchObject({ ok: false, reason: "model", detail: "model not found" });
+  expect(await checkModelCall(google, "x", fake(400, { error: { message: "Invalid 'api key' parameter" } }))).toMatchObject({ ok: false, reason: "model" });
+  expect(await checkModelCall(google, "x", fake(400, { error: "model overloaded" }))).toEqual({ ok: false, reason: "model", detail: "model overloaded" });
   expect(await checkModelCall(google, "x", fake(503, {}))).toMatchObject({ ok: false, reason: "unavailable" });
 });
 
