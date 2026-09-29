@@ -64,10 +64,10 @@ test("a run stopped while someone was still exploring settles instead of looking
   expect(view.stages.map((s) => s.state)).toEqual(["done", "skipped", "skipped", "done"]);
 });
 
-test("a finished run keeps refreshing while a session or judge is still out, so a person who reports after the run stopped shows how they really ended", () => {
+test("a finished run keeps refreshing while a session or judge is still out, or a judge asked for again waits, so a person who reports after the run stopped shows how they really ended; a job nobody will take stops it", () => {
   const stopped = (last: string) => runView(summary({ status: "stopped_budget", jobs: [job("role_session", "succeeded", { persona_key: "ana" }), job("role_session", last, { persona_key: "lee" })] }));
   expect(stopped("leased").refreshes).toBe(true);
-  expect(stopped("queued").refreshes).toBe(true);
+  expect(stopped("queued").refreshes).toBe(false);
   const reported = stopped("succeeded");
   expect(reported.refreshes).toBe(false);
   expect(reported.personas.map((p) => p.state)).toEqual(["finished", "finished"]);

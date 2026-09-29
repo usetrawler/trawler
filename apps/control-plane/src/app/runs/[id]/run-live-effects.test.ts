@@ -97,10 +97,10 @@ test("a finished run is not fetched again", async () => {
 });
 
 test("a run stopped while a session is still out keeps being fetched, so that person's real ending shows without a reload", async () => {
-  const lee = { id: "job-lee", kind: "role_session", status: "leased", persona_key: "lee", finding_key: null, requested: false, stopped_by: null, error: null, created_at: new Date(), started_at: new Date(), finished_at: null } as unknown as RunSummary["jobs"][number];
+  const ana = { id: "job-ana", kind: "role_session", status: "leased", persona_key: "ana", finding_key: null, usage: null, requested: false, stopped_by: null, error: null } as RunSummary["jobs"][number];
   const fetched = vi.fn(async () => new Response(JSON.stringify(data("stopped_budget"))));
   vi.stubGlobal("fetch", fetched);
-  RunLive({ initial: data("stopped_budget", { jobs: [lee] }) });
+  RunLive({ initial: data("stopped_budget", { jobs: [ana] }) });
   const stop = react.effects[0]!() as () => void;
   await vi.advanceTimersByTimeAsync(2000);
   expect(fetched).toHaveBeenCalledOnce();

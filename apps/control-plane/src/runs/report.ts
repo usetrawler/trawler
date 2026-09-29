@@ -128,7 +128,7 @@ export function runView(s: RunSummary) {
   const goalsReached = s.goals.filter((g) => g.status === "reached").length;
   const goalsTotal = s.personas.reduce((sum, p) => sum + goalsFor(s.goalTexts, p.id).length, 0);
   const replaysAllFailed = defects.length > 0 && defects.every((f) => failedReplay(f));
-  const refreshes = live || rejudging || s.jobs.some((j) => OPEN.has(j.status));
+  const refreshes = live || s.jobs.some((j) => j.status === "leased" || (j.status === "queued" && j.requested));
   return { live, rejudging, refreshes, stages, personas, report, goalsReached, goalsTotal, headline: headline(s, report.confirmed.length, defects.length, replaysAllFailed) };
 }
 
