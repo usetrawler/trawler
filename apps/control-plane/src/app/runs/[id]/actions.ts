@@ -5,6 +5,7 @@ import { keyStillStored, modelKey } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
 import { priceFor, type Price } from "../../../llm/prices.ts";
 import { providerArticle } from "../../../llm/provider-kinds.ts";
+import { runCheckRefusal } from "../../../llm/key-input.ts";
 import { checkModelCall, endpointFor, PROVIDER_LABEL, type Provider } from "../../../llm/providers.ts";
 import { DEFAULT_RUN } from "../../../runs/models.ts";
 import { isLive } from "../../../runs/report.ts";
@@ -87,6 +88,8 @@ export async function runAgainAction(_previous: RunAgainState, form: FormData): 
   if (stored.provider !== provider) return { error: `This run was paid with ${keyName(provider)}, and the workspace key is now ${keyName(stored.provider)}. Start a run from the plan to choose a model for it.` };
   if (provider === "custom" && stored.baseUrl !== previous.provider_base_url) return { error: "The workspace key now points to another OpenAI-compatible address. Start a run from the plan to choose a model for it." };
 
+  const tooOften = runCheckRefusal(member);
+  if (tooOften) return { error: tooOften };
   const endpoint = endpointFor(stored.provider, stored.key, { openRouterUrl: readEnv().openRouterUrl, customUrl: stored.baseUrl });
   const label = PROVIDER_LABEL[endpoint.provider];
   for (const model of new Set([previous.agent_model, previous.judge_model])) {

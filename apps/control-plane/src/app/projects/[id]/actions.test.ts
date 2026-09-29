@@ -133,3 +133,22 @@ test("Start refuses before checking the key while a signing-in person has no acc
   expect(state.keysSaved).toBe(0);
   state.without = null;
 });
+
+test("key checks for new runs are limited to 30 per person and 60 per workspace in 10 minutes, and a refusal before the check does not count", async () => {
+  const busy = (userId: string, orgId: string) => ({ userId, email: `${userId}@acme.test`, orgId, orgName: "Acme", role: "owner" });
+  state.member = busy("busy-1", "org-busy");
+  for (let i = 0; i < 40; i++) expect(await startRunAction({}, startForm({ budget: "0" }))).toEqual({ error: "Set a cap between $0.10 and $50." });
+  state.check = { ok: false, reason: "model" };
+  for (let i = 0; i < 30; i++) expect(await startRunAction({}, startForm())).toEqual({ error: "This key cannot use deepseek/deepseek-v4.1-flash. Pick another model." });
+  expect(await startRunAction({}, startForm())).toEqual({ error: "You have checked the model key too often in the last 10 minutes. Try again in 10 minutes." });
+  expect(state.keyChecks).toBe(30);
+
+  state.member = busy("busy-2", "org-busy");
+  for (let i = 0; i < 30; i++) await startRunAction({}, startForm());
+  expect(state.keyChecks).toBe(60);
+  state.member = busy("busy-3", "org-busy");
+  expect(await startRunAction({}, startForm())).toEqual({ error: "This workspace's model key was checked too often in the last 10 minutes. Try again in 10 minutes." });
+  state.member = busy("quiet-1", "org-quiet");
+  expect(await startRunAction({}, startForm())).toEqual({ error: "This key cannot use deepseek/deepseek-v4.1-flash. Pick another model." });
+  expect(state.keyChecks).toBe(61);
+});

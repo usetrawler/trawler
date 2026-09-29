@@ -4,6 +4,7 @@ import type { KeyCheck } from "../../../llm/providers.ts";
 type Previous = { project_id: string; status: string; agent_model: string; judge_model: string; budget_usd: string; max_steps: number; replay_steps: number; provider: string; provider_base_url: string | null; prompt_usd_per_mtok: string | null; completion_usd_per_mtok: string | null };
 const state = vi.hoisted(() => ({
   signedIn: true,
+  userId: "user-1",
   without: null as string | null,
   refusal: null as string | null,
   previous: undefined as Previous | undefined,
@@ -22,7 +23,7 @@ const state = vi.hoisted(() => ({
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 vi.mock("next/navigation", () => ({ redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); } }));
 vi.mock("../../../server/auth.ts", () => ({
-  signedInMember: async () => (state.signedIn ? { userId: "user-1", name: "Ana", email: "ana@acme.test", orgId: "org-1", orgName: "Acme", role: "owner" } : null),
+  signedInMember: async () => (state.signedIn ? { userId: state.userId, name: "Ana", email: "ana@acme.test", orgId: "org-1", orgName: "Acme", role: "owner" } : null),
 }));
 vi.mock("../../../server/log.ts", async (original) => ({
   ...(await original<typeof import("../../../server/log.ts")>()),
@@ -76,7 +77,7 @@ const runAgainAction = (runId: string) => {
 
 beforeEach(() => {
   Object.assign(state, {
-    signedIn: true, without: null, refusal: null, checks: {}, checked: [], price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }, started: [], asked: [], keyHeld: true, held: [], startFails: null, logged: [],
+    signedIn: true, userId: "user-1", without: null, refusal: null, checks: {}, checked: [], price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }, started: [], asked: [], keyHeld: true, held: [], startFails: null, logged: [],
     previous: { project_id: "project-1", status: "succeeded", agent_model: "deepseek/deepseek-v4.1-flash", judge_model: "deepseek/deepseek-v4.1-flash", budget_usd: "3.5000", max_steps: 60, replay_steps: 20, provider: "openrouter", provider_base_url: null, prompt_usd_per_mtok: null, completion_usd_per_mtok: null },
     stored: { provider: "openrouter", key: "sk-or-v1-" + "k".repeat(40), baseUrl: null },
   });
@@ -189,4 +190,13 @@ test("a price known now wins over the one the previous run was held to", async (
   state.previous = { ...state.previous!, prompt_usd_per_mtok: "9.000000", completion_usd_per_mtok: "9.000000" };
   await expect(runAgainAction(RUN)).rejects.toMatchObject({ to: "/runs/new-run" });
   expect(state.started[0]).toMatchObject({ options: { price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 } } });
+});
+
+test("Run again shares the Start panel's limit on key checks, and refuses past it before calling the provider", async () => {
+  const { runCheckRefusal } = await import("../../../llm/key-input.ts");
+  state.userId = "user-again";
+  for (let i = 0; i < 30; i++) runCheckRefusal({ userId: "user-again", orgId: "org-elsewhere" });
+  expect(await runAgainAction(RUN)).toEqual({ error: "You have checked the model key too often in the last 10 minutes. Try again in 10 minutes." });
+  expect(state.checked).toEqual([]);
+  expect(state.started).toEqual([]);
 });

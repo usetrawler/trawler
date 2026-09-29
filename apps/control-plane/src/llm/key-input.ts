@@ -25,9 +25,28 @@ const LISTINGS_PER_WINDOW = 30;
 const LISTING_WINDOW_MS = 10 * 60 * 1000;
 const listings = new Map<string, number[]>();
 
+const recentIn = (bucket: string, now: number) => (listings.get(bucket) ?? []).filter((t) => now - t < LISTING_WINDOW_MS);
+
 export function withinListingLimit(userId: string, now = Date.now()): boolean {
-  const recent = (listings.get(userId) ?? []).filter((t) => now - t < LISTING_WINDOW_MS);
+  const recent = recentIn(userId, now);
   if (recent.length >= LISTINGS_PER_WINDOW) return false;
   listings.set(userId, [...recent, now]);
   return true;
+}
+
+const RUN_CHECKS_PER_WORKSPACE = 2 * LISTINGS_PER_WINDOW;
+
+function freeIn(recent: number[], now: number): string {
+  const minutes = Math.max(1, Math.ceil((recent[0]! + LISTING_WINDOW_MS - now) / 60_000));
+  return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+}
+
+export function runCheckRefusal(member: { userId: string; orgId: string }, now = Date.now()): string | null {
+  const person = recentIn(`run-check:${member.userId}`, now);
+  const workspace = recentIn(`run-check-org:${member.orgId}`, now);
+  if (person.length >= LISTINGS_PER_WINDOW) return `You have checked the model key too often in the last 10 minutes. Try again in ${freeIn(person, now)}.`;
+  if (workspace.length >= RUN_CHECKS_PER_WORKSPACE) return `This workspace's model key was checked too often in the last 10 minutes. Try again in ${freeIn(workspace, now)}.`;
+  listings.set(`run-check:${member.userId}`, [...person, now]);
+  listings.set(`run-check-org:${member.orgId}`, [...workspace, now]);
+  return null;
 }
