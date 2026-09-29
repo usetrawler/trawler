@@ -531,8 +531,6 @@ export async function openBrowser(opts: {
     const typedSecrets = new Set<string>();
     const typedPasswords = new Set<string>();
     const holdsSecret = (value: string) => [...typedSecrets].some((secret) => value.includes(secret));
-    let dialogOpen = false;
-    let dialogsOpened = 0;
     const dialogs = new Set<Dialog>();
     const onNextDialog = new Set<(dialog: Dialog) => void>();
     const openDialogs = new Map<Dialog, Page>();
@@ -541,8 +539,6 @@ export async function openBrowser(opts: {
     const modalState = (dialog: Dialog) => `### Modal state\n- ${dialogLine(dialog)}: can be handled by browser_handle_dialog`;
     context.on("page", (page) => {
       page.on("dialog", (dialog) => {
-        dialogOpen = true;
-        dialogsOpened++;
         dialogs.add(dialog);
         openDialogs.set(dialog, page);
         if (page === actingPage()) for (const notify of onNextDialog) notify(dialog);
@@ -550,9 +546,6 @@ export async function openBrowser(opts: {
       page.on("dialogclosed", (dialog) => openDialogs.delete(dialog));
       page.on("close", () => {
         for (const [dialog, on] of openDialogs) if (on === page) openDialogs.delete(dialog);
-      });
-      page.on("framenavigated", (frame) => {
-        if (frame === page.mainFrame()) dialogOpen = false;
       });
     });
     let filled: ElementHandle[] = [];
@@ -574,7 +567,7 @@ export async function openBrowser(opts: {
       let longFormsLive = 0;
       const heldInFields = new Set(typedPasswords);
       const fields = await liveFilled();
-      if (dialogOpen && fields.length > 0) return refused(WITHHELD_FOR_DIALOG) as T;
+      if (dialogOnActingPage() && fields.length > 0) return refused(WITHHELD_FOR_DIALOG) as T;
       const values = await within(Promise.all(fields.map(readValue)), opts.filledReadMs ?? FILLED_READ_MS, null);
       if (values === null || values.includes(null)) return refused(WITHHELD_UNREAD) as T;
       for (const [i, h] of fields.entries()) {
@@ -607,7 +600,7 @@ export async function openBrowser(opts: {
     const focusIsOnSecret = async () => {
       const verdict = await Promise.race([focusCheck(), new Promise<"slow">((r) => setTimeout(() => r("slow"), FOCUS_CHECK_MS))]);
       if (verdict !== "slow") return verdict;
-      return !dialogOpen;
+      return !dialogOnActingPage();
     };
     const secretsOnPage = async () => {
       const filledValues = [];
@@ -746,7 +739,6 @@ export async function openBrowser(opts: {
           return scrubWithFilledValues({ content: [{ type: "text", text: `### Error\nError: Tool "${name}" does not handle the modal state.\n${modalState(waiting)}` }], isError: true });
         }
         blockedNavigation = null;
-        const dialogsBefore = dialogsOpened;
         const untilADialog = async () => {
           const running = Promise.resolve(execute(safeInput, options)) as Promise<McpResult>;
           running.catch(() => {});
@@ -760,7 +752,6 @@ export async function openBrowser(opts: {
         let result = await untilADialog();
         if (name === "browser_navigate" && result?.isError && INTERRUPTED.test(textOf(result)) && !dialogOnActingPage()) result = await untilADialog();
         if (result?.isError && CLOSED.test(textOf(result))) throw new Error("the browser has closed");
-        if (name === "browser_handle_dialog" && !result?.isError && dialogsOpened === dialogsBefore) dialogOpen = false;
         if (!result?.isError && !textOf(result).trim()) result.content = [{ type: "text", text: "Done. Call browser_snapshot to see the page." }];
         result.content = result.content?.map((part) => (typeof part.text === "string" ? { ...part, text: part.text.replace(SILENT_LEAVE_PROMPT, `[${LEAVE_PROMPT}]`) } : part));
         if (blockedNavigation) {
@@ -826,7 +817,7 @@ export async function openBrowser(opts: {
       },
       async screenshot() {
         const page = context.pages()[0];
-        if (!page || disconnected || dialogOpen || page.url() === "about:blank") return null;
+        if (!page || disconnected || dialogOnActingPage() || page.url() === "about:blank") return null;
         let timer: NodeJS.Timeout | undefined;
         const shot = await Promise.race([capture(page).catch(() => null), new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), 2 * SCREENSHOT_MS)))]);
         clearTimeout(timer);
