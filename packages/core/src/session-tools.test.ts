@@ -36,8 +36,18 @@ describe("submit_finding", () => {
     expect((long.events[0] as { finding: { quote: string } }).finding.quote).toHaveLength(300);
   });
 
-  test("a page address keeps its path and harmless query, and loses its fragment, credentials and the values of anything that looks like a secret", () => {
-    expect(findingUrl("https://ana:pw@app.acme.test/reset?step=2&token=abc&Session_ID=s1&api_key=k&code=c&next=%2Fhome#access_token=xyz")).toBe("https://app.acme.test/reset?step=2&token=%E2%80%A2%E2%80%A2%E2%80%A2&Session_ID=%E2%80%A2%E2%80%A2%E2%80%A2&api_key=%E2%80%A2%E2%80%A2%E2%80%A2&code=%E2%80%A2%E2%80%A2%E2%80%A2&next=%2Fhome");
+  test("a page address keeps its path and harmless query as the browser had them, and loses its fragment, credentials and anything that looks like a secret", () => {
+    const M = "%E2%80%A2%E2%80%A2%E2%80%A2";
+    expect(findingUrl("https://ana:pw@app.acme.test/reset?step=2&token=abc&Session_ID=s1&api_key=k&code=c&q=a%20b~#access_token=xyz")).toBe(`https://app.acme.test/reset?step=2&token=${M}&Session_ID=${M}&api_key=${M}&code=${M}&q=a%20b~`);
+    expect(findingUrl("https://a.test/p?sid=1&PHPSESSID=2&pwd=3&hmac=4&hash=5&X-Amz-Signature=6&accessToken=7")).toBe(`https://a.test/p?sid=${M}&PHPSESSID=${M}&pwd=${M}&hmac=${M}&hash=${M}&X-Amz-Signature=${M}&accessToken=${M}`);
+    expect(findingUrl("https://a.test/search?keyword=fern&author=ana&zipcode=10115&design=x")).toBe("https://a.test/search?keyword=fern&author=ana&zipcode=10115&design=x");
+    expect(findingUrl("https://a.test/login?next=%2Finvite%2Faccept%3Ftoken%3Dabc123secret")).toBe(`https://a.test/login?next=${encodeURIComponent(`/invite/accept?token=${M}`)}`);
+    expect(findingUrl("https://a.test/sso?returnTo=https%3A%2F%2Fa.test%2Fback%3Fcode%3Dxyz%23frag")).toBe(`https://a.test/sso?returnTo=${encodeURIComponent(`https://a.test/back?code=${M}`)}`);
+    expect(findingUrl("https://a.test/reset-password/9f8e7d6c5b4a39281706f5e4d3c2b1a0")).toBe(`https://a.test/reset-password/${M}`);
+    expect(findingUrl("https://a.test/accept-invite/abcdefgh/done")).toBe(`https://a.test/accept-invite/${M}/done`);
+    expect(findingUrl("https://a.test/app;jsessionid=ABC123/cart")).toBe("https://a.test/app/cart");
+    expect(findingUrl("https://a.test/invoices/0f8fad5b-d9cb-469f-a165-70867728950e/edit")).toBe("https://a.test/invoices/0f8fad5b-d9cb-469f-a165-70867728950e/edit");
+    expect(findingUrl("https://a.test/login/callback")).toBe("https://a.test/login/callback");
     expect(findingUrl("about:blank")).toBeUndefined();
     expect(findingUrl("data:text/html,hi")).toBeUndefined();
     expect(findingUrl(null)).toBeUndefined();

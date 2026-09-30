@@ -187,7 +187,7 @@ export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused 
                   <p className="break-words"><span className="text-muted">Reported as: </span>{other.title}</p>
                   {other.page && <p className="break-words"><span className="text-muted">Page: </span><span className="font-mono text-[13px]">{other.page}</span></p>}
                   <p className="break-words"><span className="text-muted">What they saw: </span>{other.observed}</p>
-                  {other.quote && <p className="break-words italic"><span className="not-italic text-muted">In their words: </span>“{other.quote}”</p>}
+                  {other.quote && <p className="break-words italic"><span className="not-italic text-muted">In {other.personaName}&apos;s words: </span>“{other.quote}”</p>}
                   <p className="text-muted">Steps</p>
                   <ol className="list-decimal pl-5 break-words">{other.reproduction.map((step, i) => <li key={i}>{step}</li>)}</ol>
                   <FindingScreenshots title={other.title} screenshots={other.screenshots} onOpen={address} />

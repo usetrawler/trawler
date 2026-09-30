@@ -246,3 +246,16 @@ test("a finding shows the page it was reported on and the person's own words, an
   expect(second).not.toContain("Page:");
   expect(second).not.toContain("words");
 });
+
+test("a defect others reported too shows each report's page and words, under the name of who said them", () => {
+  const html = render(summary({
+    ...finished,
+    findings: [
+      finding("ana:f1", "ana", { title: "Saving an invoice fails", verdict: "confirmed" }),
+      finding("lee:f1", "lee", { title: "Save does nothing", sameAs: "ana:f1", url: "https://app.acme.test/invoices/7", quote: "Nothing happened when I saved." }),
+    ],
+  }));
+  const row = text(html.split("<li ").slice(1)[0]!);
+  expect(row).toContain("Page: /invoices/7");
+  expect(row).toContain("In Lee Park's words: “Nothing happened when I saved.”");
+});

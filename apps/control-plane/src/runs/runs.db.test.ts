@@ -65,6 +65,7 @@ async function drain() {
 }
 
 describe("a whole run", () => {
+
   test("roles, then a replay and a judge per defect, then the run finishes", async () => {
     await drain();
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
@@ -991,6 +992,20 @@ describe("steps per turn", () => {
     const legacy = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", planned, keys, { ...options, maxSteps: 60 }));
     await sql`update runs set sign_up_seed = null where id = ${legacy.id}`.execute(t.db);
     expect((await claimPastChecks())!.maxSteps).toBe(60);
+    await drain();
+  });
+});
+
+describe("a finding sent again", () => {
+  test("a finding its job sends again keeps the page and words of the latest report", async () => {
+    await drain();
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const first = (await claimPastChecks())!;
+    seq = 0;
+    await ingestEvents(t.db, first.token, [ev({ type: "finding", jobId: first.jobId, finding: { ...defect, url: "https://app.acme.test/x?step=1", quote: "First try." } })]);
+    await ingestEvents(t.db, first.token, [ev({ type: "finding", jobId: first.jobId, finding: { ...defect, url: "https://app.acme.test/x?step=2", quote: "Second try." } })]);
+    const stored = (await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.findings[0]!;
+    expect({ url: stored.url, quote: stored.quote }).toEqual({ url: "https://app.acme.test/x?step=2", quote: "Second try." });
     await drain();
   });
 });

@@ -832,7 +832,7 @@ export async function openBrowser(opts: {
         return shot;
       },
       pageUrl() {
-        const page = context.pages()[0];
+        const page = actingPage();
         return !page || disconnected || page.url() === "about:blank" ? null : page.url();
       },
       async close() {

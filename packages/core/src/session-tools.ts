@@ -51,20 +51,61 @@ function lower(value: unknown): unknown {
   return typeof value === "string" ? value.trim().toLowerCase() : value;
 }
 
-const SENSITIVE_PARAM = /token|code|key|secret|pass|sig|auth|session|jwt|otp|nonce|state|ticket|credential/i;
+const SECRET_WORDS = new Set(["token", "code", "key", "apikey", "secret", "pass", "passwd", "password", "pwd", "sig", "signature", "hmac", "hash", "auth", "authorization", "session", "sess", "sessid", "sid", "jsessionid", "phpsessid", "jwt", "otp", "nonce", "state", "ticket", "credential", "credentials", "assertion", "samlresponse"]);
+const SECRET_ROUTE = /reset|invit|accept|verif|confirm|token|magic|activat|unsubscribe|password/i;
+const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MASKED = encodeURIComponent("•••");
+
+function wordsOf(name: string): string[] {
+  return name.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+const secretName = (name: string) => wordsOf(name).some((w) => SECRET_WORDS.has(w) || w.startsWith("aspsessionid"));
+const looksLikeSecret = (segment: string) => segment.length >= 20 && /[a-z]/i.test(segment) && /\d/.test(segment) && /^[\w-]+$/.test(segment) && !UUID_SEGMENT.test(segment);
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value.replace(/\+/g, " "));
+  } catch {
+    return value;
+  }
+}
+
+function maskedQuery(search: string): string {
+  if (!search || search === "?") return "";
+  const parts = search.slice(1).split("&").map((part) => {
+    const at = part.indexOf("=");
+    if (at < 0) return part;
+    const name = part.slice(0, at);
+    const value = part.slice(at + 1);
+    if (secretName(safeDecode(name))) return `${name}=${MASKED}`;
+    const inner = safeDecode(value);
+    if (inner.includes("?") || /^[a-z][a-z0-9+.-]*:\/\//i.test(inner)) return `${name}=${encodeURIComponent(maskedAddress(inner))}`;
+    return part;
+  });
+  return `?${parts.join("&")}`;
+}
+
+function maskedPath(pathname: string): string {
+  const segments = pathname.replace(/;jsessionid=[^/]*/gi, "").split("/");
+  return segments.map((segment, i) => (i > 0 && (looksLikeSecret(segment) || (SECRET_ROUTE.test(segments[i - 1] ?? "") && segment.length >= 8)) ? MASKED : segment)).join("/");
+}
+
+function maskedAddress(address: string): string {
+  const hash = address.indexOf("#");
+  const bare = hash < 0 ? address : address.slice(0, hash);
+  const query = bare.indexOf("?");
+  const head = query < 0 ? bare : bare.slice(0, query);
+  const origin = /^[a-z][a-z0-9+.-]*:\/\/[^/]*/i.exec(head)?.[0] ?? "";
+  return `${origin.replace(/\/\/[^@/]*@/, "//")}${maskedPath(head.slice(origin.length))}${query < 0 ? "" : maskedQuery(bare.slice(query))}`;
+}
 
 export function findingUrl(raw: string | null | undefined): string | undefined {
   if (!raw || !URL.canParse(raw)) return undefined;
   const url = new URL(raw);
   if (!/^https?:$/.test(url.protocol)) return undefined;
-  url.hash = "";
-  url.username = "";
-  url.password = "";
-  for (const name of new Set(url.searchParams.keys())) {
-    if (SENSITIVE_PARAM.test(name)) url.searchParams.set(name, "•••");
-  }
-  const kept = url.toString();
-  return kept.length <= MAX_URL ? kept : `${url.origin}${url.pathname}`.slice(0, MAX_URL);
+  const kept = `${url.origin}${maskedPath(url.pathname)}${maskedQuery(url.search)}`;
+  return kept.length <= MAX_URL ? kept : `${url.origin}${maskedPath(url.pathname)}`.slice(0, MAX_URL);
 }
 
 function oneLine(value: unknown): string | undefined {
@@ -112,7 +153,7 @@ export function sessionTools(opts: {
     }),
     submit_finding: tool({
       description:
-        "Record a defect or a friction the moment you have seen it. kind, goal, title, observed, reproduction and severity are required. kind: defect | friction. severity: low | medium | high. reproduction: the literal actions, one per array item, with no expected or actual result (that goes in observed); a defect needs at least two. quote: optional, one sentence in your own voice about how this felt, as you would say it to a friend.",
+        "Record a defect or a friction the moment you have seen it. kind, goal, title, observed, reproduction and severity are required. kind: defect | friction. severity: low | medium | high. reproduction: the literal actions, one per array item, with no expected or actual result (that goes in observed); a defect needs at least two. quote: one sentence in your own voice about how this felt, as you would say it to a friend; not a repeat of observed, and never a password or code.",
       inputSchema: z.object({
         kind: z.string().nullish(),
         goal: z.string().nullish(),
@@ -127,7 +168,7 @@ export function sessionTools(opts: {
         if (state.page !== "seen") return state.page === "unseen" ? "rejected: you have not looked at the product yet; open it and take a browser_snapshot, then report what it shows" : "rejected: your last browser action failed, so you are not looking at the page any more; take a browser_snapshot and report what it shows";
         const goal = lower(input.goal);
         if (typeof goal !== "string" || !state.goals.has(goal)) return unknownGoal(input.goal);
-        const url = findingUrl(opts.pageUrl?.());
+        const url = findingUrl(opts.pageUrl ? await opts.inBrowser(async () => opts.pageUrl!()) : null);
         const said = oneLine(input.quote);
         const candidate = {
           id: "pending", goal, kind: lower(input.kind), title: input.title, observed: input.observed, reproduction: steps(input.reproduction), severity: lower(input.severity),

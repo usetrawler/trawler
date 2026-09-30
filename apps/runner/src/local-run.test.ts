@@ -18,7 +18,7 @@ const project = ProjectConfigSchema.parse({
   accounts: [{ ref: "acct", username: "a@a.test", password: "hunter22-secret" }],
 });
 
-function fakeBrowsers() {
+function fakeBrowsers(pageUrl: () => string | null = () => null) {
   const opened: string[] = [];
   let closed = 0;
   const open: OpenBrowser = async ({ onBlocked, scrubber }) => {
@@ -27,7 +27,7 @@ function fakeBrowsers() {
       tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => (onBlocked("https://evil.test/?p=hunter22-secret"), "page") }) },
       fillField: async () => "typed",
       screenshot: async () => null,
-      pageUrl: () => null,
+      pageUrl,
       close: async () => void closed++,
     };
   };
@@ -48,12 +48,13 @@ test("roles, then a replay and a judge per defect, each in its own browser", asy
   const judgeModel = scriptedModel([text(JSON.stringify({ verdict: "confirmed" }))]);
   const root = mkdtempSync(join(tmpdir(), "run-"));
   const dir = new RunDir(root);
-  const browsers = fakeBrowsers();
+  const browsers = fakeBrowsers(() => "https://a.test/invoices?step=2&token=abc");
   const summary = await localRun({
     project, agentModel: agent, agentModelId: "a", judgeModel, judgeModelId: "j", budgetUsd: 5, maxSteps: 10, replaySteps: 10,
     emit: (e) => void dir.emit(e), openBrowser: browsers.open,
   });
   expect(summary.roles.map((r) => r.persona)).toEqual(["p1", "p2"]);
+  expect(summary.roles[0]!.findings[0]!.url).toBe("https://a.test/invoices?step=2&token=%E2%80%A2%E2%80%A2%E2%80%A2");
   expect(summary.verdicts).toEqual({ f1: "confirmed" });
   expect(summary.replays.f1).toEqual({ completed: true, observed: "It broke", blockedAt: null });
   expect(summary.jobs.map((j) => j.jobId)).toEqual(["account:acct", "role:p1", "role:p2", "replay:f1", "judge:f1"]);
