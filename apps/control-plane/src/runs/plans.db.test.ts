@@ -6,9 +6,10 @@ import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { createProject } from "../projects/projects.ts";
-import { ProjectLimitReached, workspacePlan, type WorkspacePlanName } from "./plans.ts";
+import type { WorkspacePlanName } from "./plan-limits.ts";
+import { ProjectLimitReached, workspacePlan } from "./plans.ts";
 import { claimJob } from "./queue.ts";
-import { cancelRun, refusalToStart, RunRefused, startRun } from "./runs.ts";
+import { cancelRun, refusalToStart, RunRefused, startRun, TooManyPeople } from "./runs.ts";
 
 const t = await testDb();
 afterAll(() => t.drop());
@@ -131,7 +132,9 @@ describe("people in a run", () => {
     await asSystem(t.db, (tx) => tx.deleteFrom("workspace_plans").where("org_id", "=", w.org).execute());
     await expect(w.startAndStop(four)).resolves.toMatchObject({ number: 1 });
     const message = "The Free plan takes up to 4 people in a run, and this plan has 5. Remove people from the plan, run it on your own machine with the local runner, or write to contact@usetrawler.com about the Team plan.";
-    expect((await withOrg(t.db, w.org, (tx) => refusalToStart(tx, w.org, five)))?.message).toBe(message);
+    const refused = await withOrg(t.db, w.org, (tx) => refusalToStart(tx, w.org, five));
+    expect(refused).toBeInstanceOf(TooManyPeople);
+    expect(refused?.message).toBe(message);
     expect((await refusal(w.start(five)) as Error).message).toBe(message);
 
     const team = await workspace("team");
