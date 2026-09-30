@@ -2,12 +2,13 @@ import { randomBytes } from "node:crypto";
 import { sql } from "kysely";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { scriptedModel, text } from "../../../../packages/core/src/testing.ts";
-import { withOrg } from "../db/tenancy.ts";
+import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { addAccount, loadProjectConfig, projectForEditing, replacePlan } from "../projects/projects.ts";
 import { describeDraft, DraftGone, proposeFromDraft, SETUP_LIMITS, SetupLimited, startDraft, type SetupDeps } from "./propose.ts";
 import { FetchRefused } from "./safe-fetch.ts";
+import { ProjectLimitReached } from "../runs/plans.ts";
 import { SetupModelFailed } from "@usetrawler/core/setup";
 
 const t = await testDb();
@@ -176,4 +177,22 @@ test("the sign-up answer is kept with the draft, and a product nobody can sign u
   const id = await proposeFromDraft(deps(model), { orgId: "org-closed", draftId, description: "d", features: ["Get paid"], signUp: "closed" });
   const editing = await withOrg(t.db, "org-closed", (tx) => projectForEditing(tx, "org-closed", id));
   expect(editing?.personas.map((p) => [p.key, p.signs_in])).toEqual([["ana", true], ["tom", true]]);
+});
+
+test("a Free workspace at its project limit is refused before the page is read or the model is asked, and its project can still be set up again", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-free', 'F', 'f', now())`.execute(t.db);
+  await asSystem(t.db, (tx) => tx.deleteFrom("workspace_plans").where("org_id", "=", "org-free").execute());
+  const model = scriptedModel([text(JSON.stringify(summary)), text(JSON.stringify(people)), text(JSON.stringify(summary)), text(JSON.stringify(people))]);
+  const early = await startDraft(deps(model), { orgId: "org-free", url: "https://app.acme.test/" });
+  const late = await startDraft(deps(model), { orgId: "org-free", url: "https://other.acme.test/" });
+  await describeDraft(deps(model), { orgId: "org-free", draftId: early });
+  await describeDraft(deps(model), { orgId: "org-free", draftId: late });
+  const id = await proposeFromDraft(deps(model), { orgId: "org-free", draftId: early, description: "d", features: ["Get paid"] });
+  const asked = model.doGenerateCalls.length;
+
+  await expect(proposeFromDraft(deps(model), { orgId: "org-free", draftId: late, description: "d", features: ["Get paid"] })).rejects.toBeInstanceOf(ProjectLimitReached);
+  let read = 0;
+  await expect(startDraft(deps(model, async () => (read++, { text: "x", finalUrl: "https://new.acme.test/" })), { orgId: "org-free", url: "https://new.acme.test/" })).rejects.toBeInstanceOf(ProjectLimitReached);
+  expect({ read, asked: model.doGenerateCalls.length }).toEqual({ read: 0, asked });
+  await expect(startDraft(deps(model), { orgId: "org-free", projectId: id })).resolves.toEqual(expect.any(String));
 });

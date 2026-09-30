@@ -13,6 +13,9 @@ const state = vi.hoisted(() => ({
   actionResult: null as null | Record<string, unknown>,
   budget: null as null | { limitUsd: number; spentUsd: number },
   spent: 0,
+  plan: { plan: "free", limits: { projects: 1, runsPerDay: 3, people: 4 } } as { plan: "free" | "team" | "enterprise"; limits: { projects: number; runsPerDay: number; people: number } },
+  projects: 1,
+  today: 0,
 }));
 
 vi.mock("react", async (original) => ({
@@ -43,6 +46,7 @@ vi.mock("../../server/env.ts", () => ({ readEnv: () => ({ baseURL: "https://app.
 vi.mock("../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
 vi.mock("../../credentials/credentials.ts", () => ({ modelKeyDetails: async () => state.key }));
 vi.mock("../../runs/limits.ts", () => ({ monthlyBudget: async () => state.budget, monthSpent: async () => state.spent }));
+vi.mock("../../runs/plans.ts", () => ({ workspacePlan: async () => state.plan, projectsCounted: async () => state.projects, runsToday: async () => state.today }));
 vi.mock("./actions.ts", () => ({
   setMonthlyBudgetAction: async () => ({}), removeMonthlyBudgetAction: async () => ({}),
   renameWorkspaceAction: async () => ({}), replaceModelKeyAction: async () => ({}), removeModelKeyAction: async () => ({}),
@@ -57,6 +61,7 @@ const addedAt = new Date("2026-09-25T18:50:00.000Z");
 beforeEach(() => {
   Object.assign(state, {
     member: owner, key: null, members: { "org-1/user-2": "lee@acme.test" }, lookedUp: [], tenants: [], listed: [], actionResult: null, budget: null, spent: 0,
+    plan: { plan: "free", limits: { projects: 1, runsPerDay: 3, people: 4 } }, projects: 1, today: 0,
     people: [
       { id: "m-1", userId: "user-1", role: "owner", joinedAt: new Date("2026-09-20T10:00:00Z"), name: "Ana", email: "ana@acme.test" },
       { id: "m-2", userId: "user-2", role: "member", joinedAt: new Date("2026-09-21T10:00:00Z"), name: "Lee", email: "lee@acme.test" },
@@ -76,7 +81,7 @@ test("settings name who added the key among this workspace's members, and mark S
 });
 
 test("the page is headed like the app's other pages", async () => {
-  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("Settings Workspace, members, model key and budget. The name, the people in it, the model key every run of this workspace uses, and what runs may spend in a month.");
+  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("Settings Workspace, plan, members, model key and budget. The name, what the plan allows, the people in it, the model key every run of this workspace uses, and what runs may spend in a month.");
 });
 
 test("a key added by someone who is no longer in this workspace says so, and a workspace without a key looks nobody up", async () => {
@@ -133,4 +138,23 @@ test("the monthly budget shows this month's spend to everyone, and only an owner
   expect(memberView).not.toContain("Save budget");
   state.budget = null;
   expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("No budget is set, so only each run's own cap limits what runs spend.".replace("'", "&#x27;"));
+});
+
+test("the plan shows what the workspace has used of its limits, and what to do past them", async () => {
+  state.today = 2;
+  const free = text(renderToStaticMarkup(await SettingsPage()));
+  expect(free).toContain("Plan This workspace is on Free");
+  expect(free).toContain("Projects 1 of 1");
+  expect(free).not.toContain("demo");
+  expect(free).toContain("Hosted runs today (UTC) 2 of 3 Counted when a run starts, including Run again.");
+  expect(free).toContain("People in a run 4");
+  expect(free).toContain("run the product on your own machine with the local runner, or write to contact@usetrawler.com about the Team plan.");
+  state.plan = { plan: "enterprise", limits: { projects: Infinity, runsPerDay: Infinity, people: 12 } };
+  const enterprise = text(renderToStaticMarkup(await SettingsPage()));
+  expect(enterprise).toContain("This workspace is on Enterprise");
+  expect(enterprise).toContain("1, no limit");
+  expect(enterprise).toContain("Trawler sets the plan. Write to contact@usetrawler.com to change it or raise a limit.");
+  const html = renderToStaticMarkup(await SettingsPage());
+  expect(html.indexOf('id="workspace-heading"')).toBeLessThan(html.indexOf('id="plan-heading"'));
+  expect(html.indexOf('id="plan-heading"')).toBeLessThan(html.indexOf('id="members-heading"'));
 });

@@ -127,3 +127,10 @@ test("while hosted runs are halted, starting answers 503 with why instead of fai
   expect(res.status).toBe(503);
   expect(await res.json()).toEqual({ error: "Trawler has paused hosted runs for now. Try again later, or run it on your own machine with the local runner." });
 });
+
+test("release checks are never held by the Free plan's limits, however many run in a day", async () => {
+  expect((await start()).status).toBe(201);
+  await sql`update workspace_plans set plan = 'free' where org_id = ${SMOKE_ORG}`.execute(t.db);
+  for (let i = 0; i < 4; i++) expect((await start()).status).toBe(201);
+  expect((await sql<{ plan: string }>`select plan from workspace_plans where org_id = ${SMOKE_ORG}`.execute(t.db)).rows).toEqual([{ plan: "enterprise" }]);
+});

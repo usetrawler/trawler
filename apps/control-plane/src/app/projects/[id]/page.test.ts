@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   platformKey: true, onUsLeft: true, refusalFor: [] as unknown[], people: 0,
 }));
 const ID = vi.hoisted(() => "0f8fad5b-d9cb-469f-a165-70867728950e");
+const FREE = vi.hoisted(() => ({ plan: "free" as const, limits: { projects: 1, runsPerDay: 3, people: 4 } }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({
@@ -42,10 +43,12 @@ vi.mock("../../../projects/overview.ts", async (original) => ({
 vi.mock("../../../server/env.ts", () => ({ readEnv: () => ({ openRouterUrl: "https://openrouter.test/api/v1", ...(state.platformKey ? { setup: { apiKey: "sk-or-v1-" + "p".repeat(40), model: "m" } } : {}) }) }));
 vi.mock("../../../runs/runs.ts", async (original) => ({
   RunInProgress: (await original<typeof import("../../../runs/runs.ts")>()).RunInProgress,
+  TooManyPeople: (await original<typeof import("../../../runs/runs.ts")>()).TooManyPeople,
   firstRunOnUsLeft: async () => state.onUsLeft,
   projectRunState: async () => state.runState,
   refusalToStart: async (_tx: unknown, _org: string, _id: string, paidBy: unknown) => { state.refusalFor.push(paidBy); return state.refusal; },
 }));
+vi.mock("../../../runs/plans.ts", () => ({ workspacePlan: async () => FREE }));
 vi.mock("./plan-workspace.tsx", () => ({ PlanWorkspace: (props: Record<string, unknown>) => { state.planned.push(props); return null; } }));
 
 const { default: ProjectPage } = await import("./page.tsx");
@@ -143,4 +146,12 @@ test("the Start panel is told what refuses a start right now, with the live run 
 test("a project whose run state cannot be read is not found", async () => {
   state.runState = null as unknown as typeof state.runState;
   await expect(render()).rejects.toMatchObject({ notFound: true });
+});
+
+test("the plan editor gets the workspace's plan, and too many people for it is left to the editor, which sees the plan as it is edited", async () => {
+  const { TooManyPeople } = await import("../../../runs/runs.ts");
+  state.refusal = new TooManyPeople(FREE, 5);
+  renderToStaticMarkup(await ProjectPage({ params: Promise.resolve({ id: ID }) }));
+  expect(state.planned[0]!.workspacePlan).toEqual(FREE);
+  expect(state.planned[0]!.startRefusal).toBeUndefined();
 });

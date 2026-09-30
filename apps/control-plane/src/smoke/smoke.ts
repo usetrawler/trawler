@@ -2,7 +2,7 @@ import { sql } from "kysely";
 import { goalsFor, ProjectConfigSchema } from "@usetrawler/protocol";
 import { setModelKey } from "../credentials/credentials.ts";
 import type { Database } from "../db/index.ts";
-import { withOrg } from "../db/tenancy.ts";
+import { asSystem, withOrg } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
 import { createProject } from "../projects/projects.ts";
 import { bearer, sameSecret } from "../runner-api/handlers.ts";
@@ -48,6 +48,7 @@ export async function handleSmokeStart(req: Request, deps: SmokeDeps): Promise<R
     await sql`set local role trawler_auth`.execute(tx);
     await tx.insertInto("organization").values({ id: SMOKE_ORG, name: "Release smoke check", slug: SMOKE_ORG_SLUG, createdAt: new Date() }).onConflict((oc) => oc.column("id").doNothing()).execute();
   });
+  await asSystem(deps.db, (tx) => tx.insertInto("workspace_plans").values({ org_id: SMOKE_ORG, plan: "enterprise", set_by: "smoke" }).onConflict((oc) => oc.column("org_id").doUpdateSet({ plan: "enterprise" })).execute());
   let runId: string;
   try {
     runId = await withOrg(deps.db, SMOKE_ORG, async (tx) => {

@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
 type Member = { userId: string; name: string; email: string; orgId: string; orgName: string; role: string };
-const state = vi.hoisted(() => ({ member: null as { userId: string; name: string; email: string; orgId: string; orgName: string; role: string } | null, shells: [] as string[] }));
+const state = vi.hoisted(() => ({ member: null as { userId: string; name: string; email: string; orgId: string; orgName: string; role: string } | null, shells: [] as string[], limit: null as null | { plan: { plan: "free" | "team" | "enterprise"; limits: { projects: number; runsPerDay: number; people: number } }; projects: number } }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({ redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); } }));
@@ -15,6 +15,9 @@ vi.mock("../../server/shell.ts", () => ({
     return { user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [], runs: 0 } };
   },
 }));
+vi.mock("../../server/db.ts", () => ({ getDb: () => ({}) }));
+vi.mock("../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, _org: string, work: (tx: unknown) => Promise<unknown>) => work({}) }));
+vi.mock("../../runs/plans.ts", () => ({ projectLimitReached: async () => state.limit }));
 vi.mock("./setup-wizard.tsx", () => ({ SetupWizard: ({ intro }: { intro: unknown }) => intro }));
 
 const { default: NewProjectPage } = await import("./page.tsx");
@@ -22,6 +25,7 @@ const { default: NewProjectPage } = await import("./page.tsx");
 beforeEach(() => {
   state.member = { userId: "u1", name: "Ana", email: "ana@acme.test", orgId: "org-1", orgName: "Acme workspace", role: "member" };
   state.shells = [];
+  state.limit = null;
 });
 
 test("a visitor who is not signed in, or no longer belongs to any workspace, is sent to sign in", async () => {
@@ -47,4 +51,13 @@ test("Sign out sits in the header on a phone and under the nav on wider screens,
   const panel = html.slice(html.indexOf("</nav>"), html.indexOf("<main"));
   expect(panel.match(/>Sign out</g)).toHaveLength(1);
   expect(html.match(/>Sign out</g)).toHaveLength(2);
+});
+
+test("a workspace at its plan's project limit is told so, with what to do, instead of the setup", async () => {
+  state.limit = { plan: { plan: "free", limits: { projects: 1, runsPerDay: 3, people: 4 } }, projects: 2 };
+  const html = renderToStaticMarkup(await NewProjectPage());
+  expect(html).toContain(">This workspace has reached its project limit.</h1>");
+  expect(html).toContain("The Free plan includes 1 project, and this workspace has 2 projects already.");
+  expect(html).toMatch(/<a [^>]*href="\/"[^>]*>Go to your projects<\/a>/);
+  expect(html).not.toContain("What should Trawler use?");
 });

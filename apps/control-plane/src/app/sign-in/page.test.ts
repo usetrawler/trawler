@@ -23,3 +23,12 @@ test("a visitor sees the ways to sign in", async () => {
   state.person = null;
   expect(renderToStaticMarkup(await SignInPage({ searchParams: Promise.resolve({}) }))).toContain("Continue with the development account");
 });
+
+test("signing in links to the terms and the privacy notice on usetrawler.com, each opening in a new tab", async () => {
+  state.person = null;
+  const html = renderToStaticMarkup(await SignInPage({ searchParams: Promise.resolve({}) }));
+  const text = html.replace(/<[^>]+>/g, "");
+  expect(text).toContain("By signing in you accept the Terms ↗ (opens in a new tab) and the Privacy notice ↗ (opens in a new tab).");
+  expect(html).toMatch(/<a href="https:\/\/usetrawler\.com\/terms\/" target="_blank"[^>]*>Terms/);
+  expect(html).toMatch(/<a href="https:\/\/usetrawler\.com\/privacy\/" target="_blank"[^>]*>Privacy notice/);
+});

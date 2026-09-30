@@ -10,6 +10,7 @@ import { logError, writeLog } from "../../server/log.ts";
 import { FetchRefused, safeFetchText, type RefusalReason } from "../../setup/safe-fetch.ts";
 import { describeDraft, DraftGone, proposeFromDraft, SetupLimited, startDraft, type SetupDeps } from "../../setup/propose.ts";
 import { ProjectNotFound } from "../../projects/projects.ts";
+import { ProjectLimitReached } from "../../runs/plans.ts";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 
@@ -36,6 +37,7 @@ function friendly(err: unknown): string {
   if (err instanceof SetupModelFailed) return "Trawler's setup model could not write a plan this time. Try again in a moment.";
   if (err instanceof DraftGone) return "This setup has expired. Start again from the product's address.";
   if (err instanceof ProjectNotFound) return "This project is gone.";
+  if (err instanceof ProjectLimitReached) return err.message;
   return "We could not build a plan for this page. Try again in a moment.";
 }
 
@@ -52,7 +54,7 @@ async function setupFor(): Promise<{ orgId: string; deps: SetupDeps } | { error:
 async function failed(err: unknown, orgId: string, what: string): Promise<{ ok: false; error: string }> {
   if (err instanceof FetchRefused) await writeLog("info", "setup refused the address", { orgId, reason: err.reason });
   else if (err instanceof SetupLimited) await writeLog("info", "setup is rate limited", { orgId });
-  else if (!(err instanceof DraftGone) && !(err instanceof ProjectNotFound)) await logError(what, { orgId, err });
+  else if (!(err instanceof DraftGone) && !(err instanceof ProjectNotFound) && !(err instanceof ProjectLimitReached)) await logError(what, { orgId, err });
   return { ok: false, error: friendly(err) };
 }
 

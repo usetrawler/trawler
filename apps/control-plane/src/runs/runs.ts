@@ -9,6 +9,8 @@ import type { Provider } from "../llm/providers.ts";
 import { loadProjectConfig, ProjectNotFound } from "../projects/projects.ts";
 import { budgetLeft, budgetSpentMessage, HALTED, monthlyBudget, PAUSED, projectPaused, runsHalted, type MonthlyBudget } from "./limits.ts";
 import { FIRST_RUN_ON_US } from "./models.ts";
+import { peopleLimitMessage, runsPerDayMessage, type WorkspacePlan } from "./plan-limits.ts";
+import { runsToday, workspacePlan } from "./plans.ts";
 import { gaveNoVerdict } from "./report.ts";
 import { runTitle } from "./status.ts";
 
@@ -66,6 +68,12 @@ export class WorkspaceBudgetSpent extends RunRefused {
   }
 }
 
+export class TooManyPeople extends RunRefused {
+  constructor(readonly plan: WorkspacePlan, readonly people: number) {
+    super(peopleLimitMessage(plan, people));
+  }
+}
+
 export class FirstRunOnUsUsed extends RunRefused {
   constructor() {
     super("This workspace has used its first run on Trawler. Add a model key to start more runs.");
@@ -110,13 +118,22 @@ export async function refusalToStart(tx: Tx, orgId: string, projectId: string, p
   return active ? new RunInProgress(active) : refusalToRun(tx, orgId, projectId, paidBy);
 }
 
+async function peopleOn(tx: Tx, projectId: string): Promise<number> {
+  const row = await tx.selectFrom("personas").select(sql<string>`count(*)`.as("n")).where("project_id", "=", projectId).executeTakeFirstOrThrow();
+  return Number(row.n);
+}
+
 async function refusalToRun(tx: Tx, orgId: string, projectId: string, paidBy: PaidBy): Promise<RunRefused | null> {
   if (runsHalted()) return new RunRefused(HALTED);
   if (await projectPaused(tx, projectId)) return new RunRefused(PAUSED);
-  if (paidBy === "trawler") return null;
-  const budget = await monthlyBudget(tx, orgId);
-  if (budget && budgetLeft(budget) < 0.01) return new WorkspaceBudgetSpent(budget);
-  return null;
+  const plan = await workspacePlan(tx, orgId);
+  if ((await runsToday(tx, orgId)) >= plan.limits.runsPerDay) return new RunRefused(runsPerDayMessage(plan));
+  if (paidBy === "workspace") {
+    const budget = await monthlyBudget(tx, orgId);
+    if (budget && budgetLeft(budget) < 0.01) return new WorkspaceBudgetSpent(budget);
+  }
+  const people = await peopleOn(tx, projectId);
+  return people > plan.limits.people ? new TooManyPeople(plan, people) : null;
 }
 
 export async function startRun(tx: Tx, orgId: string, projectId: string, keys: Keyring, options: StartRunOptions): Promise<{ id: string; number: number }> {

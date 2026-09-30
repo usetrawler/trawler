@@ -10,6 +10,7 @@ import type { Price, PriceRange } from "../../../llm/prices.ts";
 import { DEFAULT_RUN, estimateUsd, FIRST_RUN_ON_US, STEPS } from "../../../runs/models.ts";
 import { runPath, runTitle } from "../../../runs/status.ts";
 import { modelsForKeyAction, priceRangeAction, startRunAction, type ModelList, type StartState } from "./actions.ts";
+import { LegalLinks } from "../../../components/legal-links.tsx";
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
 const perMillion = (n: number) => `$${n >= 0.1 || n === 0 ? n.toFixed(2) : n.toFixed(3)}`;
@@ -275,6 +276,7 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
           <span>I am authorised to test this product. It is not a production system with real people&apos;s data.</span>
         </label>
       )}
+      <LegalLinks lead="Hosted runs follow" />
       {shownError && <p role="alert" id="start-error" className="border-l-2 border-bad pl-3 text-sm text-bad">{shownError}<OpenRun run={state.activeRun} /></p>}
       <div className="flex flex-wrap items-center justify-end gap-3">
         {(blocked ?? noKey) && <p id="start-blocked" className="text-sm text-muted">{blocked ?? noKey}</p>}

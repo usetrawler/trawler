@@ -3,6 +3,7 @@ import { z } from "zod";
 import { MAX_ACCOUNTS, ProjectConfigSchema, TargetAccountSchema, type Goal, type Persona, type ProjectConfig } from "@usetrawler/protocol";
 import type { Tx } from "../db/tenancy.ts";
 import { last4, type Keyring } from "../lib/secrets.ts";
+import { claimProjectSlot } from "../runs/plans.ts";
 
 const accountContext = (orgId: string, projectId: string, ref: string) => [orgId, "target_account", projectId, ref, "password"];
 const gateContext = (orgId: string, projectId: string, kind: string, name: string) => [orgId, "target_gate", projectId, kind, kind === "basic_auth" ? "password" : name];
@@ -35,15 +36,17 @@ async function insertPlan(tx: Tx, orgId: string, projectId: string, personas: Pe
 const FocusSchema = z.string().trim().max(500).optional();
 const FeaturesSchema = z.array(z.string().trim().min(1).max(300)).max(10).default([]);
 
-export async function createProject(tx: Tx, orgId: string, config: ProjectConfig, keys: Keyring, extra: { focus?: string; features?: string[]; signsIn?: string[] } = {}): Promise<string> {
+export async function createProject(tx: Tx, orgId: string, config: ProjectConfig, keys: Keyring, extra: { focus?: string; features?: string[]; signsIn?: string[]; demo?: boolean } = {}): Promise<string> {
   const valid = ProjectConfigSchema.parse(config);
   const focus = FocusSchema.parse(extra.focus) || null;
   const features = FeaturesSchema.parse(extra.features);
+  const demo = extra.demo ?? false;
+  if (!demo) await claimProjectSlot(tx, orgId);
   const { id } = await tx
     .insertInto("projects")
     .values({
       org_id: orgId, name: valid.name, target_url: valid.targetUrl, docs_url: valid.docsUrl ?? null,
-      description: valid.description, focus, features, allowed_origins: valid.allowedOrigins,
+      description: valid.description, focus, features, allowed_origins: valid.allowedOrigins, demo,
     })
     .returning("id")
     .executeTakeFirstOrThrow();

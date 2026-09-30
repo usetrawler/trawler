@@ -17,8 +17,16 @@ export function databaseUrl(name: string): string {
   return url.toString();
 }
 
-export async function onServer<T>(work: (client: pg.Client) => Promise<T>): Promise<T> {
-  const client = new pg.Client({ connectionString: TEST_SERVER_URL });
+export function onServer<T>(work: (client: pg.Client) => Promise<T>): Promise<T> {
+  return connected(TEST_SERVER_URL, work);
+}
+
+export function onDatabase<T>(name: string, work: (client: pg.Client) => Promise<T>): Promise<T> {
+  return connected(databaseUrl(name), work);
+}
+
+async function connected<T>(url: string, work: (client: pg.Client) => Promise<T>): Promise<T> {
+  const client = new pg.Client({ connectionString: url });
   try {
     await client.connect();
   } catch (err) {
