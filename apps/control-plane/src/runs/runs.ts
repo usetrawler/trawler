@@ -9,6 +9,7 @@ import type { Provider } from "../llm/providers.ts";
 import { loadProjectConfig, ProjectNotFound } from "../projects/projects.ts";
 import { budgetLeft, budgetSpentMessage, HALTED, monthlyBudget, PAUSED, projectPaused, runsHalted, type MonthlyBudget } from "./limits.ts";
 import { FIRST_RUN_ON_US } from "./models.ts";
+import { peopleLimitMessage, runsPerDayMessage, runsToday, workspacePlan } from "./plans.ts";
 import { gaveNoVerdict } from "./report.ts";
 import { runTitle } from "./status.ts";
 
@@ -110,9 +111,18 @@ export async function refusalToStart(tx: Tx, orgId: string, projectId: string, p
   return active ? new RunInProgress(active) : refusalToRun(tx, orgId, projectId, paidBy);
 }
 
+async function peopleOn(tx: Tx, projectId: string): Promise<number> {
+  const row = await tx.selectFrom("personas").select(sql<string>`count(*)`.as("n")).where("project_id", "=", projectId).executeTakeFirstOrThrow();
+  return Number(row.n);
+}
+
 async function refusalToRun(tx: Tx, orgId: string, projectId: string, paidBy: PaidBy): Promise<RunRefused | null> {
   if (runsHalted()) return new RunRefused(HALTED);
   if (await projectPaused(tx, projectId)) return new RunRefused(PAUSED);
+  const plan = await workspacePlan(tx, orgId);
+  if ((await runsToday(tx, orgId)) >= plan.limits.runsPerDay) return new RunRefused(runsPerDayMessage(plan));
+  const people = await peopleOn(tx, projectId);
+  if (people > plan.limits.people) return new RunRefused(peopleLimitMessage(plan, people));
   if (paidBy === "trawler") return null;
   const budget = await monthlyBudget(tx, orgId);
   if (budget && budgetLeft(budget) < 0.01) return new WorkspaceBudgetSpent(budget);

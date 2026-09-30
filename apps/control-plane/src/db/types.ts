@@ -204,6 +204,7 @@ export interface Personas {
 export interface Projects {
   allowed_origins: Generated<string[]>;
   created_at: Generated<Timestamp>;
+  demo: Generated<boolean>;
   description: Generated<string>;
   docs_url: string | null;
   features: Generated<string[]>;
@@ -340,6 +341,14 @@ export interface WorkspaceBudgets {
   set_by: string;
 }
 
+export interface WorkspacePlans {
+  extra_projects: Generated<number>;
+  org_id: string;
+  plan: string;
+  set_at: Generated<Timestamp>;
+  set_by: string;
+}
+
 export interface DB {
   account: Account;
   artifacts: Artifacts;
@@ -366,4 +375,5 @@ export interface DB {
   user: User;
   verification: Verification;
   workspace_budgets: WorkspaceBudgets;
+  workspace_plans: WorkspacePlans;
 }
