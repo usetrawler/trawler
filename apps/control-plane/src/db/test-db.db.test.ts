@@ -27,7 +27,7 @@ test("dropping a test database removes it", async () => {
   expect(rows[0]!.n).toBe(0);
 });
 
-test("dropping a test database waits for a connection that is still closing instead of killing it, which is how a pool's closing clients raised an unhandled error", async () => {
+test("dropping a test database waits for a connection that is still closing instead of killing it", async () => {
   const t = await testDb();
   const closing = new pg.Client({ connectionString: t.url });
   await closing.connect();
@@ -41,3 +41,12 @@ test("dropping a test database waits for a connection that is still closing inst
   expect(errors).toEqual([]);
   expect((await onServer((c) => c.query("SELECT 1 FROM pg_database WHERE datname = $1", [t.name]))).rowCount).toBe(0);
 });
+
+test("a connection left open is named when the database is dropped, instead of failing later as an unhandled error", async () => {
+  const t = await testDb();
+  const leaked = new pg.Client({ connectionString: t.url });
+  await leaked.connect();
+  leaked.on("error", () => {});
+  await expect(t.drop()).rejects.toThrow(new RegExp(`test database ${t.name} still had 1 open connection`));
+  expect((await onServer((c) => c.query("SELECT 1 FROM pg_database WHERE datname = $1", [t.name]))).rowCount).toBe(0);
+}, 15_000);
