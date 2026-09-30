@@ -21,7 +21,7 @@ const needed = {
   DISPLAY: ":99", WAYLAND_DISPLAY: "wayland-0", XAUTHORITY: "/tmp/xvfb-run.1/Xauthority", DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus",
   SystemRoot: "C:\\Windows", SystemDrive: "C:", Path: "C:\\bin", USERPROFILE: "C:\\Users\\ana", LOCALAPPDATA: "C:\\Users\\ana\\AppData\\Local", TEMP: "C:\\Temp",
 };
-const proxies = { HTTPS_PROXY: "http://proxy.corp.test:3128", http_proxy: "http://proxy.corp.test:3128", NO_PROXY: "localhost" };
+const proxies = { HTTPS_PROXY: "http://proxy.corp.test:3128", http_proxy: "http://proxy.corp.test:3128", NO_PROXY: "localhost", auto_proxy: "http://wpad.corp.test/proxy.pac", SOCKS_SERVER: "socks.corp.test:1080" };
 
 test("the browser's environment keeps what Chromium needs, headed or not, on any platform, and nothing else", () => {
   expect(browserEnv({ ...secrets, ...needed, EMPTY: undefined }, { proxied: true })).toEqual(needed);
