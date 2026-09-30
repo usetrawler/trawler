@@ -128,7 +128,7 @@ describe("a whole run", () => {
     expect(await claimPastChecks()).toBeNull();
   });
 
-  async function rolesReport(found: Record<string, Array<typeof defect>>) {
+  async function rolesReport(found: Record<string, ReadonlyArray<Omit<typeof defect, "id" | "title" | "observed" | "reproduction"> & { id: string; title: string; observed: string; reproduction: readonly string[] }>>) {
     await drain();
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
     for (let turn = 0; turn < 2; turn++) {

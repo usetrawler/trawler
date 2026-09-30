@@ -237,7 +237,7 @@ test("a defect judged again takes its new verdict", () => {
     jobs: [judged("failed", modelError), judged("succeeded", { stopped_by: "done", requested: true })],
     findings: [finding("ana:f1", "ana", { ...replayed, verdict: "confirmed" })],
   });
-  expect(view.report.confirmed.map((f) => f.key)).toEqual(["ana:f1"]);
+  expect(view.report.confirmed.map((f) => [f.key, f.severity])).toEqual([["ana:f1", "high"]]);
   expect(view.report.couldNotJudge).toEqual([]);
   expect(view.rejudging).toBe(false);
   expect(view.headline).toBe("1 defect confirmed by replay.");
@@ -318,14 +318,14 @@ test("a replay marked failed that still reported and went to the judge reads as 
   expect(waiting.report.notJudged.map((f) => f.reason)).toEqual(["Waiting for the judge."]);
 });
 
-test("defects that were the same as another count once, under the first report, which carries who else found it and how", () => {
+test("defects that were the same as another count once, under the first report, which carries who else found it and how, and the worst severity any of them gave", () => {
   const shots = { reported: "shot-lee", replayed: null };
   const view = runView(summary({
     status: "succeeded",
     jobs: [job("role_session", "succeeded", { persona_key: "ana" }), job("role_session", "succeeded", { persona_key: "lee" }), job("group", "succeeded"), job("replay", "succeeded"), job("judge", "succeeded")],
     findings: [
-      finding("ana:f1", "ana", { verdict: "confirmed" }),
-      finding("lee:f1", "lee", { sameAs: "ana:f1", title: "Save does nothing", reproduction: ["Open /x", "Press Save"], screenshots: shots }),
+      finding("ana:f1", "ana", { verdict: "confirmed", severity: "low" }),
+      finding("lee:f1", "lee", { sameAs: "ana:f1", severity: "medium", title: "Save does nothing", reproduction: ["Open /x", "Press Save"], screenshots: shots }),
       finding("lee:f2", "lee", { sameAs: "ana:f1", title: "Save ignored" }),
     ],
   }));
@@ -339,8 +339,8 @@ test("defects that were the same as another count once, under the first report, 
   expect(view.personas.map((p) => p.defects)).toEqual([1, 2]);
 });
 
-test("while the defects are being grouped the replay stage is already under way", () => {
+test("while the defects are being grouped the replay stage is already under way, and each defect says so", () => {
   const view = runView(summary({ jobs: [job("role_session", "succeeded", { persona_key: "ana" }), job("role_session", "succeeded", { persona_key: "lee" }), job("group", "leased")], findings: [finding("ana:f1", "ana"), finding("lee:f1", "lee")] }));
   expect(view.stages.map((s) => s.state)).toEqual(["done", "active", "waiting", "waiting"]);
-  expect(view.report.notJudged.map((f) => f.reason)).toEqual(["Waiting for its replay.", "Waiting for its replay."]);
+  expect(view.report.notJudged.map((f) => f.reason)).toEqual(["Checking whether others found the same defect.", "Checking whether others found the same defect."]);
 });

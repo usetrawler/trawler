@@ -75,24 +75,26 @@ test("a confirmed defect is a row with its severity, number, person, title and w
   expect(text(details!)).toContain("What the replay saw: The same 500 page.");
 });
 
-test("a defect several people found is one row naming them all, that opens to how each of the others found it, with their screen capture", () => {
+test("a defect several people found is one row naming each of them once, that opens to how each of the others found it, with their screen capture", () => {
   const html = render(summary({
     ...finished,
     findings: [
       ...finished.findings,
       finding("lee:f1", "lee", { title: "Invoice will not save", goal: "g2", reproduction: ["Open Invoices.", "Press Save twice."], sameAs: "ana:f1", screenshots: { reported: "11111111-1111-4111-8111-111111111111", replayed: null } }),
       finding("ana:f3", "ana", { title: "Save fails again", sameAs: "ana:f1" }),
+      finding("ana:f4", "ana", { title: "Save fails once more", sameAs: "ana:f1" }),
     ],
   }));
   const [row] = rows(html, "Confirmed");
   expect(text(row!)).toContain("01 · Ana, Lee Park Saving an invoice fails");
-  expect(text(row!)).toContain("Also found by 2 more people");
-  expect(text(row!)).toContain("Lee Park , while trying to: Send an invoice. Reported as: Invoice will not save Open Invoices. Press Save twice.");
+  expect(text(row!)).toContain("Ana , while trying to: Get an account.");
+  expect(text(row!)).toContain("Also reported by Lee Park, Ana");
+  expect(text(row!)).toContain("Lee Park , while trying to: Send an invoice. Reported as: Invoice will not save What they saw: o Open Invoices. Press Save twice.");
   expect(row).toContain('href="/captures/11111111-1111-4111-8111-111111111111"');
   expect(text(band(html))).toContain("Verified 1 of 2 reported");
   expect(rows(html, "Confirmed")).toHaveLength(1);
   const [single] = rows(render(finished), "Confirmed");
-  expect(single).not.toContain("Also found by");
+  expect(single).not.toContain("Also reported by");
 });
 
 test("a refuted defect keeps its own section and carries no replayed mark", () => {

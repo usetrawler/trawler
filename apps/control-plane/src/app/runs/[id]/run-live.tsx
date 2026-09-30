@@ -162,7 +162,7 @@ export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused 
           <b aria-hidden className="transition-transform group-open:rotate-90 max-md:hidden">→</b>
         </summary>
         <div className="flex flex-col gap-3 border-t border-line p-[17px] text-sm wrap-anywhere">
-          <p><span className="text-muted">While trying to: </span>{f.goalText}</p>
+          <p>{f.sameReports.length > 0 ? <><strong>{f.personaName}</strong><span className="text-muted">, while trying to: </span></> : <span className="text-muted">While trying to: </span>}{f.goalText}</p>
           <div>
             <p className="mb-1 text-muted">Steps</p>
             <ol className="list-decimal pl-5 break-words">{f.reproduction.map((step, i) => <li key={i}>{step}</li>)}</ol>
@@ -173,11 +173,12 @@ export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused 
           {detail && <p className="break-words"><span className="text-muted">Why it was not judged: </span>{detail}</p>}
           {f.sameReports.length > 0 && (
             <div className="flex flex-col gap-3 border-t border-line pt-3">
-              <p className={`${label} text-muted`}>Also found by {f.sameReports.length} more {f.sameReports.length === 1 ? "person" : "people"}</p>
+              <p className={`${label} text-muted`}>Also reported by {[...new Set(f.sameReports.map((other) => other.personaName))].join(", ")}</p>
               {f.sameReports.map((other) => (
                 <div key={other.key} className="flex flex-col gap-1">
                   <p><strong>{other.personaName}</strong><span className="text-muted">, while trying to: </span>{other.goalText}</p>
                   <p className="break-words"><span className="text-muted">Reported as: </span>{other.title}</p>
+                  <p className="break-words"><span className="text-muted">What they saw: </span>{other.observed}</p>
                   <ol className="list-decimal pl-5 break-words">{other.reproduction.map((step, i) => <li key={i}>{step}</li>)}</ol>
                   <FindingScreenshots title={other.title} screenshots={other.screenshots} onOpen={address} />
                 </div>

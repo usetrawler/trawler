@@ -35,8 +35,9 @@ function replayFailedBecause(job: Job): string {
   return job.stopped_by === "error" && MODEL_FAULT.test(detail) ? `The replay hit a model error: ${detail}` : `The replay failed: ${detail}`;
 }
 
-function notJudgedReason(f: Finding, runLive: boolean, failedReplay: Job | undefined): string {
+function notJudgedReason(f: Finding, runLive: boolean, failedReplay: Job | undefined, grouping: boolean): string {
   if (failedReplay) return replayFailedBecause(failedReplay);
+  if (grouping) return "Checking whether others found the same defect.";
   const replay = f.replay as { completed: boolean; blockedAt: number | null } | null;
   if (replay && !replay.completed && replay.blockedAt === null) return "The fresh agent could not follow the steps far enough to report.";
   if (replay) return runLive ? "Waiting for the judge." : "The run ended before it was judged.";
@@ -59,6 +60,9 @@ function whyNotJudged(job: Job, runStatus: string, cancelReason: CancelReason | 
   if (runStatus === "cancelled" && !job.requested) return cancelReason === "key_removed" ? "The model key was removed before the judge answered." : "The run was stopped before the judge answered.";
   return job.error ? `Stopped: ${job.error}` : "The model call was refused before the judge answered.";
 }
+
+const SEVERITY_RANK: Record<string, number> = { low: 0, medium: 1, high: 2 };
+const worst = (reports: Finding[]) => reports.reduce((top, f) => ((SEVERITY_RANK[f.severity] ?? 0) > (SEVERITY_RANK[top] ?? 0) ? f.severity : top), reports[0]!.severity);
 
 export function runView(s: RunSummary) {
   const live = isLive(s.status);
@@ -110,10 +114,13 @@ export function runView(s: RunSummary) {
 
   const name = new Map(s.personas.map((p) => [p.id, p.name]));
   const reported = (f: Finding) => ({ personaName: name.get(f.personaKey) ?? f.personaKey, goalText: goalText.get(f.goal) ?? f.goal, reproduction: f.reproduction as string[] });
-  const withPersona = (f: Finding) => ({
-    ...f, ...reported(f),
-    sameReports: s.findings.filter((other) => other.sameAs === f.key).map((other) => ({ key: other.key, title: other.title, observed: other.observed, screenshots: other.screenshots, ...reported(other) })),
-  });
+  const withPersona = (f: Finding) => {
+    const same = s.findings.filter((other) => other.sameAs === f.key);
+    return {
+    ...f, ...reported(f), severity: worst([f, ...same]),
+      sameReports: same.map((other) => ({ key: other.key, title: other.title, observed: other.observed, screenshots: other.screenshots, ...reported(other) })),
+    };
+  };
   const capSpent = outOfBudget(s);
   const unsettled = defects.filter((f) => judgingAgain(f) || unjudged(f));
   const settled = defects.filter((f) => !unsettled.includes(f));
@@ -126,7 +133,7 @@ export function runView(s: RunSummary) {
       reason: judgingAgain(f) ? "Judging again…" : whyNotJudged(lastJudge(f)!, s.status, s.cancelReason, capSpent),
       action: (judgingAgain(f) ? "judging" : live ? "after_run" : capSpent ? "cap_spent" : "judge_again") as JudgeAgainState,
     })),
-    notJudged: settled.filter((f) => !f.verdict).map((f) => ({ ...withPersona(f), reason: notJudgedReason(f, live, failedReplay(f)) })),
+    notJudged: settled.filter((f) => !f.verdict).map((f) => ({ ...withPersona(f), reason: notJudgedReason(f, live, failedReplay(f), live && byKind("group").some((j) => OPEN.has(j.status))) })),
     friction: s.findings.filter((f) => f.kind === "friction").map(withPersona),
   };
 
