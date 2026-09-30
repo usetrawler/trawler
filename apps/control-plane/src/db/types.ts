@@ -82,6 +82,7 @@ export interface Findings {
   replay: Json | null;
   reproduction: Json;
   run_id: string;
+  same_as: string | null;
   severity: string;
   title: string;
   updated_at: Generated<Timestamp>;
