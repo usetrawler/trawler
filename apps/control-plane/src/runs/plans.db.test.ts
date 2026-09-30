@@ -7,9 +7,10 @@ import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { createProject } from "../projects/projects.ts";
 import type { WorkspacePlanName } from "./plan-limits.ts";
-import { ProjectLimitReached, workspacePlan } from "./plans.ts";
+import { ProjectLimitReached, runsToday, workspacePlan } from "./plans.ts";
+import { setMonthlyBudget } from "./limits.ts";
 import { claimJob } from "./queue.ts";
-import { cancelRun, refusalToStart, RunRefused, startRun, TooManyPeople } from "./runs.ts";
+import { cancelRun, refusalToStart, RunRefused, startRun, TooManyPeople, WorkspaceBudgetSpent } from "./runs.ts";
 
 const t = await testDb();
 afterAll(() => t.drop());
@@ -53,7 +54,7 @@ describe("projects per workspace", () => {
     await w.create();
     const err = await refusal(w.create());
     expect(err).toBeInstanceOf(ProjectLimitReached);
-    expect((err as Error).message).toBe("The Free plan includes 1 project, and this workspace has 1 project already. Plan new runs on the one you have, test other products on your own machine with the local runner, or write to contact@usetrawler.com about the Team plan.");
+    expect((err as Error).message).toBe("The Free plan includes 1 project, and this workspace has 1 project already. Plan new runs on the project you have, test other products on your own machine with the local runner, or write to contact@usetrawler.com about the Team plan.");
     await expect(w.create(plan(), { demo: true })).resolves.toEqual(expect.any(String));
     const counts = await sql<{ demo: boolean; n: string }>`select demo, count(*) as n from projects where org_id = ${w.org} group by demo order by demo`.execute(t.db);
     expect(counts.rows).toEqual([{ demo: false, n: "1" }, { demo: true, n: "2" }]);
@@ -62,7 +63,7 @@ describe("projects per workspace", () => {
   test("Team keeps three projects plus the ones we add, and Enterprise has no limit", async () => {
     const team = await workspace("team", 1);
     for (let i = 0; i < 4; i++) await team.create();
-    expect((await refusal(team.create()) as Error).message).toBe("The Team plan includes 4 projects, and this workspace has 4 projects already. Plan new runs on the one you have, test other products on your own machine with the local runner, or write to contact@usetrawler.com to raise it.");
+    expect((await refusal(team.create()) as Error).message).toBe("The Team plan includes 4 projects, and this workspace has 4 projects already. Plan new runs on a project you have, test other products on your own machine with the local runner, or write to contact@usetrawler.com to raise it.");
     const enterprise = await workspace("enterprise");
     for (let i = 0; i < 5; i++) await enterprise.create();
   });
@@ -108,6 +109,22 @@ describe("hosted runs a day", () => {
     await expect(w.start(project)).resolves.toMatchObject({ number: 4 });
   });
 
+  test("the day is the UTC day, whatever the database session's time zone", async () => {
+    const w = await workspace("enterprise");
+    const project = await w.create();
+    const before = await w.startAndStop(project);
+    const after = await w.startAndStop(project);
+    await sql`update runs set created_at = date_trunc('day', now(), 'UTC') - interval '1 second' where id = ${before.id}`.execute(t.db);
+    await sql`update runs set created_at = date_trunc('day', now(), 'UTC') + interval '1 second' where id = ${after.id}`.execute(t.db);
+    for (const zone of ["Pacific/Kiritimati", "Pacific/Pago_Pago"]) {
+      const today = await withOrg(t.db, w.org, async (tx) => {
+        await sql`select set_config('timezone', ${zone}, true)`.execute(tx);
+        return runsToday(tx, w.org);
+      });
+      expect({ zone, today }).toEqual({ zone, today: 1 });
+    }
+  });
+
   test("Team starts more than three a day, and another workspace's runs do not count", async () => {
     const free = await workspace();
     const freeProject = await free.create();
@@ -139,7 +156,7 @@ describe("people in a run", () => {
     const five = await w.create(plan(5));
     await asSystem(t.db, (tx) => tx.deleteFrom("workspace_plans").where("org_id", "=", w.org).execute());
     await expect(w.startAndStop(four)).resolves.toMatchObject({ number: 1 });
-    const message = "The Free plan takes up to 4 people in a run, and this plan has 5. Remove people from the plan, run it on your own machine with the local runner, or write to contact@usetrawler.com about the Team plan.";
+    const message = "The Free plan takes up to 4 people in a run, and the plan on this project has 5. Remove people from the plan, run it on your own machine with the local runner, or write to contact@usetrawler.com about the Team plan.";
     const refused = await withOrg(t.db, w.org, (tx) => refusalToStart(tx, w.org, five));
     expect(refused).toBeInstanceOf(TooManyPeople);
     expect(refused?.message).toBe(message);
@@ -147,6 +164,18 @@ describe("people in a run", () => {
 
     const team = await workspace("team");
     await expect(team.start(await team.create(plan(5)))).resolves.toMatchObject({ number: 1 });
+  });
+
+  test("a spent monthly budget is named before too many people, so the page, which leaves people to the plan editor, still shows it", async () => {
+    const w = await workspace("enterprise");
+    const five = await w.create(plan(5));
+    const spent = await w.startAndStop(five);
+    await asSystem(t.db, (tx) => tx.deleteFrom("workspace_plans").where("org_id", "=", w.org).execute());
+    await withOrg(t.db, w.org, (tx) => setMonthlyBudget(tx, w.org, 1, "u1"));
+    await sql`insert into llm_usage (org_id, run_id, job_id, model, input_tokens, output_tokens, cost_usd)
+      select org_id, run_id, id, 'm', 1, 1, 2 from jobs where run_id = ${spent.id} limit 1`.execute(t.db);
+    expect(await withOrg(t.db, w.org, (tx) => refusalToStart(tx, w.org, five))).toBeInstanceOf(WorkspaceBudgetSpent);
+    expect(await withOrg(t.db, w.org, (tx) => refusalToStart(tx, w.org, five, "trawler"))).toBeInstanceOf(TooManyPeople);
   });
 });
 

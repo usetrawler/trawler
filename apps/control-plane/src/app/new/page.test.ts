@@ -56,8 +56,8 @@ test("Sign out sits in the header on a phone and under the nav on wider screens,
 test("a workspace at its plan's project limit is told so, with what to do, instead of the setup", async () => {
   state.limit = { plan: { plan: "free", limits: { projects: 1, runsPerDay: 3, people: 4 } }, projects: 2 };
   const html = renderToStaticMarkup(await NewProjectPage());
-  expect(html).toContain(">This workspace has all its projects.</h1>");
+  expect(html).toContain(">This workspace has reached its project limit.</h1>");
   expect(html).toContain("The Free plan includes 1 project, and this workspace has 2 projects already.");
-  expect(html).toContain('<a href="/"');
+  expect(html).toMatch(/<a [^>]*href="\/"[^>]*>Go to your projects<\/a>/);
   expect(html).not.toContain("What should Trawler use?");
 });

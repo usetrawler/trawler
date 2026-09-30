@@ -27,7 +27,7 @@ const moreOn = (plan: WorkspacePlanName) => (plan === "free" ? `write to ${CONTA
 const counted = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 export function projectLimitMessage({ plan, limits }: WorkspacePlan, projects: number): string {
-  return `The ${PLAN_LABEL[plan]} plan includes ${counted(limits.projects, "project", "projects")}, and this workspace has ${counted(projects, "project", "projects")} already. Plan new runs on the one you have, test other products on your own machine with the local runner, or ${moreOn(plan)}.`;
+  return `The ${PLAN_LABEL[plan]} plan includes ${counted(limits.projects, "project", "projects")}, and this workspace has ${counted(projects, "project", "projects")} already. Plan new runs on ${projects === 1 ? "the project you have" : "a project you have"}, test other products on your own machine with the local runner, or ${moreOn(plan)}.`;
 }
 
 export function runsPerDayMessage({ plan, limits }: WorkspacePlan): string {
@@ -35,5 +35,5 @@ export function runsPerDayMessage({ plan, limits }: WorkspacePlan): string {
 }
 
 export function peopleLimitMessage({ plan, limits }: WorkspacePlan, people: number): string {
-  return `The ${PLAN_LABEL[plan]} plan takes up to ${limits.people} people in a run, and this plan has ${people}. Remove people from the plan, run it on your own machine with the local runner, or ${moreOn(plan)}.`;
+  return `The ${PLAN_LABEL[plan]} plan takes up to ${limits.people} people in a run, and the plan on this project has ${people}. Remove people from the plan, run it on your own machine with the local runner, or ${moreOn(plan)}.`;
 }
