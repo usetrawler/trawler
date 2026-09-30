@@ -427,6 +427,12 @@ function withoutFileParameters(t: Tool): Tool {
   return { ...t, inputSchema: jsonSchema({ ...schema, properties, required: (schema.required ?? []).filter((r) => !FILE_PARAMETERS.includes(r)) }) } as Tool;
 }
 
+const BROWSER_ENV = /^(PATH|HOME|TMPDIR|TMP|TEMP|LANG|LANGUAGE|LC_[A-Z_]+|TZ|XDG_[A-Z_]+|FONTCONFIG_(FILE|PATH)|DISPLAY|WAYLAND_DISPLAY|SYSTEMROOT|WINDIR|USERPROFILE|APPDATA|LOCALAPPDATA|PROGRAMDATA|PROGRAMFILES|PROGRAMFILES\(X86\)|COMSPEC|PATHEXT|NUMBER_OF_PROCESSORS|PROCESSOR_ARCHITECTURE)$/i;
+
+export function browserEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  return Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined && BROWSER_ENV.test(entry[0])));
+}
+
 export async function openBrowser(opts: {
   allowedOrigins: string[];
   httpCredentials?: { username: string; password: string };
@@ -458,7 +464,7 @@ export async function openBrowser(opts: {
   let blockedNavigation: string | null = null;
 
   await registerEngines();
-  const chrome = await chromium.launch({ headless: opts.headless ?? true, proxy: opts.proxy, args: opts.proxy ? ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"] : [], handleSIGTERM: !opts.survivesSignals, handleSIGINT: !opts.survivesSignals, handleSIGHUP: !opts.survivesSignals });
+  const chrome = await chromium.launch({ headless: opts.headless ?? true, env: browserEnv(process.env), proxy: opts.proxy, args: opts.proxy ? ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"] : [], handleSIGTERM: !opts.survivesSignals, handleSIGINT: !opts.survivesSignals, handleSIGHUP: !opts.survivesSignals });
   let disconnected = false;
   chrome.on("disconnected", () => (disconnected = true));
   try {
