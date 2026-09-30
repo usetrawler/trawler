@@ -127,6 +127,108 @@ describe("a whole run", () => {
     await completeJob(t.db, replay.token, { usage: usage(0), stoppedBy: "error", observation: { completed: false, observed: "the replay session wrote no report", blockedAt: null } });
     expect(await claimPastChecks()).toBeNull();
   });
+
+  async function rolesReport(found: Record<string, ReadonlyArray<Omit<typeof defect, "id" | "title" | "observed" | "reproduction"> & { id: string; title: string; observed: string; reproduction: readonly string[] }>>) {
+    await drain();
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    for (let turn = 0; turn < 2; turn++) {
+      const role = (await claimPastChecks())!;
+      seq = 0;
+      const findings = found[role.personaKey!] ?? [];
+      if (findings.length) await ingestEvents(t.db, role.token, findings.map((finding) => ev({ type: "finding", jobId: role.jobId, finding })));
+      await completeJob(t.db, role.token, { usage: usage(0), stoppedBy: "finish" });
+    }
+    return run;
+  }
+
+  const saveBroken = { ana: [defect, { ...defect, id: "f2", title: "Totals are wrong", reproduction: ["Open /y", "Look at the total"] }], lee: [{ ...defect, title: "Save does nothing", observed: "Nothing happened" }] };
+
+  test("once several defects are in, one group job sees them all, and only the first report of each group is replayed; the rest point at it", async () => {
+    const run = await rolesReport(saveBroken);
+    const group = (await claimPastChecks())!;
+    expect(group).toMatchObject({ kind: "group", judgeModel: "m/judge" });
+    expect(group.defects).toEqual([
+      { key: "ana:f1", person: "Ana", goal: "Get in.", title: "Broken save", observed: "500", reproduction: ["Open /x", "Click Save"] },
+      { key: "ana:f2", person: "Ana", goal: "Get in.", title: "Totals are wrong", observed: "500", reproduction: ["Open /y", "Look at the total"] },
+      { key: "lee:f1", person: "Lee", goal: "Get in.", title: "Save does nothing", observed: "Nothing happened", reproduction: ["Open /x", "Click Save"] },
+    ]);
+    await completeJob(t.db, group.token, { usage: usage(0.001), stoppedBy: "done", groups: [["lee:f1", "ana:f1"], ["ana:f2", "made-up"]] });
+
+    const replayed: string[] = [];
+    for (let job = await claimPastChecks(); job; job = await claimPastChecks()) {
+      if (job.kind === "replay") replayed.push(job.finding!.id);
+      await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "report", observation: { completed: true, observed: "Same", blockedAt: null } });
+    }
+    expect(replayed).toEqual(["ana:f1", "ana:f2"]);
+    const summary = (await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!;
+    expect(summary.status).toBe("succeeded");
+    expect(summary.findings.map((f) => [f.key, f.sameAs])).toEqual([["ana:f1", null], ["ana:f2", null], ["lee:f1", "ana:f1"]]);
+  });
+
+  test("a group job that fails or is never answered leaves every defect on its own, and each is replayed", async () => {
+    for (const end of ["failed", "failed with groups", "expired"] as const) {
+      await rolesReport(saveBroken);
+      const group = (await claimPastChecks())!;
+      expect(group.kind).toBe("group");
+      if (end === "failed") await completeJob(t.db, group.token, { usage: usage(0), stoppedBy: "error", error: "the model did not group the defects (2 tries)" });
+      else if (end === "failed with groups") await completeJob(t.db, group.token, { usage: usage(0), stoppedBy: "error", error: "the runner could not report events", groups: [["ana:f1", "ana:f2", "lee:f1"]] });
+      else await sql`update jobs set lease_until = now() - interval '1 minute' where id = ${group.jobId}`.execute(t.db);
+      const replayed: string[] = [];
+      for (let job = await claimPastChecks(); job; job = await claimPastChecks()) {
+        if (job.kind === "replay") replayed.push(job.finding!.id);
+        await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "error", observation: { completed: false, observed: "no report", blockedAt: null } });
+      }
+      expect(replayed).toEqual(["ana:f1", "ana:f2", "lee:f1"]);
+    }
+  });
+
+  test("a group job handed back by a stopping runner is grouped by the next runner", async () => {
+    await rolesReport(saveBroken);
+    const group = (await claimPastChecks())!;
+    await releaseJob(t.db, group);
+    const again = (await claimPastChecks())!;
+    expect(again).toMatchObject({ kind: "group", jobId: group.jobId });
+    await completeJob(t.db, again.token, { usage: usage(0), stoppedBy: "done", groups: [["ana:f1", "lee:f1"]] });
+    expect(await claimPastChecks()).toMatchObject({ kind: "replay", finding: { id: "ana:f1" } });
+  });
+
+  test("when the first report's steps cannot be followed, the next report of its group is replayed in its place and becomes the one shown", async () => {
+    const run = await rolesReport(saveBroken);
+    const group = (await claimPastChecks())!;
+    await completeJob(t.db, group.token, { usage: usage(0), stoppedBy: "done", groups: [["ana:f1", "lee:f1"], ["ana:f2"]] });
+    const lost = { completed: false, observed: "the replay session wrote no report", blockedAt: null };
+    const seen: string[] = [];
+    for (let job = await claimPastChecks(); job; job = await claimPastChecks()) {
+      seen.push(`${job.kind} ${job.finding!.id}`);
+      const followed = job.kind === "replay" && job.finding!.id === "lee:f1";
+      await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: job.kind === "judge" ? "done" : "report", observation: followed ? { completed: true, observed: "Nothing saved", blockedAt: null } : lost });
+    }
+    expect(seen).toEqual(["replay ana:f1", "replay ana:f2", "replay lee:f1", "judge lee:f1"]);
+    const summary = (await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!;
+    expect(summary.findings.map((f) => [f.key, f.sameAs])).toEqual([["ana:f1", "lee:f1"], ["ana:f2", null], ["lee:f1", null]]);
+  });
+
+  test("when no report of a group can be followed, each is replayed once and the run ends; a replay that failed on an error hands over to nobody", async () => {
+    const three = { ...saveBroken, ana: saveBroken.ana.slice(0, 1), priya: [] };
+    const lost = { completed: false, observed: "the replay session wrote no report", blockedAt: null };
+    for (const stoppedBy of ["report", "error"] as const) {
+      const run = await rolesReport({ ...three, lee: [...saveBroken.lee, { ...defect, id: "f2", title: "Save ignored" }] });
+      const group = (await claimPastChecks())!;
+      await completeJob(t.db, group.token, { usage: usage(0), stoppedBy: "done", groups: [["ana:f1", "lee:f1", "lee:f2"]] });
+      const seen: string[] = [];
+      for (let job = await claimPastChecks(); job && seen.length < 10; job = await claimPastChecks()) {
+        seen.push(`${job.kind} ${job.finding!.id}`);
+        await completeJob(t.db, job.token, { usage: usage(0), stoppedBy, observation: lost });
+      }
+      expect(seen).toEqual(stoppedBy === "report" ? ["replay ana:f1", "replay lee:f1", "replay lee:f2"] : ["replay ana:f1"]);
+      expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.status).toBe("succeeded");
+    }
+  });
+
+  test("a single defect goes straight to its replay, with no group job", async () => {
+    await rolesReport({ lee: [defect] });
+    expect(await claimPastChecks()).toMatchObject({ kind: "replay", finding: { id: "lee:f1" } });
+  });
 });
 
 describe("safety", () => {
@@ -670,6 +772,7 @@ describe("screenshots", () => {
     await screenshot(session, run.id, "ana:f1", { at: "2026-09-01T10:04:00Z", discarded: true });
     await completeJob(t.db, session.token, { usage: usage(0), stoppedBy: "finish" });
     await completeJob(t.db, (await claimPastChecks())!.token, { usage: usage(0), stoppedBy: "finish" });
+    await completeJob(t.db, (await claimPastChecks())!.token, { usage: usage(0), stoppedBy: "done", groups: [["ana:f1"], ["ana:f2"]] });
     const replay = (await claimPastChecks())!;
     expect(replay.finding?.id).toBe("ana:f1");
     const replayed = await screenshot(replay, run.id, "ana:f1", { id: "00000000-0000-4000-8000-000000000003", at: "2026-09-01T10:06:00Z" });

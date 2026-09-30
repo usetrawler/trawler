@@ -165,6 +165,10 @@ test("a screen capture opens with its run and finding in its own workspace only,
   expect(await screenCapture(t.db, "org-a", unnamed)).toEqual({ id: unnamed, replay: false, ...place, findingKey: null, findingTitle: null });
   expect(await screenCapture(t.db, "org-b", reported)).toBeNull();
   expect(await screenCapture(t.db, "org-a", "not-a-capture")).toBeNull();
+  await sql`insert into findings (org_id, run_id, job_id, key, persona_key, kind, goal, title, observed, reproduction, severity, same_as)
+    select org_id, run_id, job_id, 'lee:f1', 'lee', kind, goal, 'Save does nothing', observed, reproduction, severity, key from findings where run_id = ${session.runId} and key = 'ana:f1'`.execute(t.db);
+  await sql`update artifacts set finding_key = 'lee:f1' where id = ${unnamed}`.execute(t.db);
+  expect(await screenCapture(t.db, "org-a", unnamed)).toEqual({ id: unnamed, replay: false, ...place, findingTitle: "Save does nothing" });
   await sql`update artifacts set stored_at = null where id = ${reported}`.execute(t.db);
   expect(await screenCapture(t.db, "org-a", reported)).toBeNull();
   await sql`update artifacts set stored_at = now(), discarded_at = now() where id = ${reported}`.execute(t.db);

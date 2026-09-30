@@ -21,7 +21,7 @@ function onlyDefects(finding: Finding, what: string) {
   if (finding.kind !== "defect") throw new RangeError(`only defects are ${what}, ${finding.id} is ${finding.kind}`);
 }
 
-function emitSafely(emit: (e: RunEventInput) => void, e: RunEventInput) {
+export function emitSafely(emit: (e: RunEventInput) => void, e: RunEventInput) {
   try {
     emit(e);
   } catch {
@@ -29,7 +29,7 @@ function emitSafely(emit: (e: RunEventInput) => void, e: RunEventInput) {
   }
 }
 
-const emptyUsage = (model: string): JobUsage => ({ model, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 });
+export const emptyUsage = (model: string): JobUsage => ({ model, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 });
 
 export async function runReplay(opts: {
   model: LanguageModel;

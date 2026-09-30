@@ -1,6 +1,6 @@
 import type { LanguageModel } from "ai";
 import { z } from "zod";
-import { type Browser, Budget, checkAccount, judge, MIN_SECRET_LENGTH, runReplay, runRoleSession, type Screenshot, SecretScrubber } from "@usetrawler/core";
+import { type Browser, Budget, checkAccount, groupDefects, judge, MIN_SECRET_LENGTH, runReplay, runRoleSession, type Screenshot, SecretScrubber } from "@usetrawler/core";
 import {
   JobAssignmentSchema, MAX_EVENTS_PER_BATCH, MAX_URL, PROTOCOL_HEADER, PROTOCOL_VERSION,
   type JobAssignment, type JobCompletion, type JobStopReason, type JobUsage, type ProjectConfig, type RunEvent, type RunEventInput,
@@ -258,6 +258,11 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
       }),
     );
     return { usage, stoppedBy: result.stoppedBy, ...(result.error ? { error: clip(result.error) } : {}) };
+  }
+  if (job.kind === "group") {
+    if (!job.defects) throw new Error("the group job names no defects");
+    const { groups, usage, stoppedBy, error } = await groupDefects({ model: deps.model(job.judgeModel, job.token), modelId: job.judgeModel, defects: job.defects, scrubber, budget, emit: events.emit });
+    return { usage, stoppedBy, ...(groups ? { groups } : {}), ...(error ? { error: clip(error) } : {}) };
   }
   if (!job.finding) throw new Error("the job has no finding");
   const finding = job.finding;

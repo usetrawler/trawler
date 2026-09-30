@@ -246,7 +246,7 @@ test("a run that is gone is not fetched again, even while it is live", async () 
   expect(fetched).not.toHaveBeenCalled();
 });
 
-const finding = { key: "ana:f1", personaKey: "ana", personaName: "Ana", kind: "defect", goal: "g1", goalText: "Get an account.", title: "Saving fails", observed: "A 500 page.", reproduction: ["Open.", "Save."], severity: "high", replay: null, verdict: "confirmed" };
+const finding = { key: "ana:f1", personaKey: "ana", personaName: "Ana", kind: "defect", goal: "g1", goalText: "Get an account.", title: "Saving fails", observed: "A 500 page.", reproduction: ["Open.", "Save."], severity: "high", replay: null, verdict: "confirmed", sameReports: [] };
 
 test("the finding a judge just answered takes the focus, without scrolling the page", () => {
   const focus = vi.fn();

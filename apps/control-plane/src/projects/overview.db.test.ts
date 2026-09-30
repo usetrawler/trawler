@@ -264,6 +264,18 @@ test("a run whose every defect's replay failed before any judge reads as not che
   expect(runView((await withOrg(t.db, org, (tx) => runSummary(tx, org, run.id)))!).headline).toBe("None of the reported defects was confirmed.");
 });
 
+test("a defect grouped under another is never replayed, and does not stop a run whose replays all failed from reading as not checked", async () => {
+  const org = "org-d";
+  const grouped = await project(org, "Grouped", "https://grouped.test/");
+  const run = await seedRun(org, grouped, hoursAgo(2), { status: "succeeded", cost: 0.1 }, [{ kind: "defect", verdict: null }, { kind: "defect", verdict: null }], 0, 0);
+  await asSystem(t.db, async (tx) => {
+    await tx.updateTable("findings").set({ same_as: "ana:f0" }).where("run_id", "=", run.id).where("key", "=", "ana:f1").execute();
+    await tx.insertInto("jobs").values({ org_id: org, run_id: run.id, kind: "replay", position: 100, finding_key: "ana:f0", status: "failed", error: "the provider refused the key" }).execute();
+  });
+  expect((await withOrg(t.db, org, (tx) => workspaceRuns(tx, org, { projectId: grouped }))).runs[0]).toMatchObject({ id: run.id, unchecked: true });
+  expect(runView((await withOrg(t.db, org, (tx) => runSummary(tx, org, run.id)))!).headline).toBe("None of the reported defects could be checked: every replay failed.");
+});
+
 test("a run with no defects, or a defect whose replay has not failed, is not marked unchecked", async () => {
   const org = "org-d";
   const plain = await project(org, "Plain", "https://plain.test/");
