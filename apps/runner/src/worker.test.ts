@@ -87,7 +87,7 @@ const reportsDefect = () => scriptedModel([
 test("a finding's screenshot is uploaded with the job token, as the image it is, before the job completes", async () => {
   const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" }, { uploadDelayMs: 300 });
   await workOnce(deps(url, reportsDefect(), { openBrowser: shooting }));
-  expect(seen.uploads).toEqual([{ url: `/api/jobs/${baseJob.jobId}/artifacts?kind=screenshot&finding=f1`, auth: `Bearer ${token}`, type: "image/png", protocol: "3", bytes: Buffer.from(shot.bytes) }]);
+  expect(seen.uploads).toEqual([{ url: `/api/jobs/${baseJob.jobId}/artifacts?kind=screenshot&finding=f1`, auth: `Bearer ${token}`, type: "image/png", protocol: "4", bytes: Buffer.from(shot.bytes) }]);
   expect(seen.order.slice(0, seen.order.indexOf("complete"))).toContain("artifacts answered");
   expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "finish" })]);
 });
@@ -310,7 +310,7 @@ test("a replay handed back because the runner is stopping takes and uploads no s
 test("with nothing to do, a claim comes back idle", async () => {
   const { url, seen } = await fakeControlPlane(null);
   expect(await workOnce(deps(url, scriptedModel([])))).toBe("idle");
-  expect(seen.headers[0]).toBe("3");
+  expect(seen.headers[0]).toBe("4");
   expect(seen.auth[0]).toBe("Bearer runner-" + "r".repeat(40));
 });
 

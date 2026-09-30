@@ -154,7 +154,7 @@ export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused 
         <summary ref={summary} className="grid cursor-pointer list-none grid-cols-[75px_minmax(0,1fr)_85px_18px] items-start gap-3.5 p-[17px] max-md:grid-cols-1 [&::-webkit-details-marker]:hidden">
           <span className={`inline-flex w-max px-1.5 py-[5px] font-mono text-[10px] text-[#17191c] uppercase ${SEVERITY_TONE[f.severity] ?? "bg-soft"}`}>{f.severity}<span className="sr-only"> severity</span></span>
           <span className="min-w-0">
-            <small className="block font-mono text-[10px] break-words text-muted">{String(n).padStart(2, "0")} · {f.personaName}</small>
+            <small className="block font-mono text-[10px] break-words text-muted">{String(n).padStart(2, "0")} · {[...new Set([f.personaName, ...f.sameReports.map((other) => other.personaName)])].join(", ")}</small>
             <strong className="mt-1 block text-[17px] leading-snug break-words">{f.title}</strong>
             <span className="mt-[5px] line-clamp-2 text-[11px] leading-[1.4] break-words text-muted">{note ?? f.observed}</span>
           </span>
@@ -171,6 +171,19 @@ export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused 
           <p><span className="text-muted">What happened: </span>{f.observed}</p>
           {replay?.observed && <p><span className="text-muted">What the replay saw: </span>{replay.observed}</p>}
           {detail && <p className="break-words"><span className="text-muted">Why it was not judged: </span>{detail}</p>}
+          {f.sameReports.length > 0 && (
+            <div className="flex flex-col gap-3 border-t border-line pt-3">
+              <p className={`${label} text-muted`}>Also found by {f.sameReports.length} more {f.sameReports.length === 1 ? "person" : "people"}</p>
+              {f.sameReports.map((other) => (
+                <div key={other.key} className="flex flex-col gap-1">
+                  <p><strong>{other.personaName}</strong><span className="text-muted">, while trying to: </span>{other.goalText}</p>
+                  <p className="break-words"><span className="text-muted">Reported as: </span>{other.title}</p>
+                  <ol className="list-decimal pl-5 break-words">{other.reproduction.map((step, i) => <li key={i}>{step}</li>)}</ol>
+                  <FindingScreenshots title={other.title} screenshots={other.screenshots} onOpen={address} />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </details>
       {action && <div className="border-t border-line px-[17px] py-3">{action}</div>}

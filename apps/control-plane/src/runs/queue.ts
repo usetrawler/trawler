@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "kysely";
 import { z } from "zod";
-import { FindingSchema, JobUsageSchema, JobStopReasonSchema, ReplayObservationSchema, RunEventSchema, SignInCheckSchema, ACCOUNT_CHECK_STEPS, trimStory, turnsOf, type Finding, type JobStopReason, type JobUsage, type ProjectConfig, type ReplayObservation, type RunEvent, type SignInCheck, type StoryEntry, type Turn } from "@usetrawler/protocol";
+import { DefectGroupsSchema, FindingSchema, JobUsageSchema, MAX_GROUPED_DEFECTS, settleGroups, JobStopReasonSchema, ReplayObservationSchema, RunEventSchema, SignInCheckSchema, ACCOUNT_CHECK_STEPS, trimStory, turnsOf, type DefectToGroup, type Finding, type JobStopReason, type JobUsage, type ProjectConfig, type ReplayObservation, type RunEvent, type SignInCheck, type StoryEntry, type Turn } from "@usetrawler/protocol";
 import type { Database } from "../db/index.ts";
 import { asSystem, type Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -26,7 +26,7 @@ export interface JobAssignment {
   jobId: string;
   runId: string;
   token: string;
-  kind: "account_check" | "role_session" | "replay" | "judge";
+  kind: "account_check" | "role_session" | "group" | "replay" | "judge";
   config: ProjectConfig;
   personaKey?: string;
   goalIds?: string[];
@@ -37,6 +37,7 @@ export interface JobAssignment {
   accountRef?: string;
   finding?: Finding;
   observation?: ReplayObservation;
+  defects?: DefectToGroup[];
   maxSteps: number;
   budgetUsd: number;
   agentModel: string;
@@ -49,6 +50,7 @@ export interface JobResult {
   error?: string;
   observation?: ReplayObservation;
   signIn?: SignInCheck;
+  groups?: string[][];
 }
 
 export class ForeignEvents extends Error {
@@ -160,6 +162,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
       const turn = picked.kind === "role_session" && picked.sign_up_seed ? turnAt(snapshot, picked.position, picked.persona_key) : undefined;
       const story = turn ? await storyBefore(tx, picked.run_id, picked.position, snapshot) : undefined;
       const returning = turn ? turnsOf(snapshot).slice(0, picked.position).some((t) => t.personaId === picked.persona_key) : undefined;
+      const defects = picked.kind === "group" ? await defectsToGroup(tx, picked.run_id, config) : undefined;
       return {
         assignment: {
           jobId: picked.id,
@@ -172,6 +175,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
           accountRef: picked.account_ref ?? (finding ? config.personas.find((p) => p.id === finding.personaKey)?.accountRef : undefined),
           finding: finding?.finding,
           observation: finding?.replay,
+          ...(defects ? { defects } : {}),
           maxSteps: picked.kind === "role_session" ? (turn ? turnSteps(turn.goalIds.length, picked.max_steps) : picked.max_steps) : picked.kind === "account_check" ? Math.min(ACCOUNT_CHECK_STEPS, picked.replay_steps) : picked.replay_steps,
           budgetUsd: Math.max(0, Number(picked.budget_usd) - Number(picked.cost_usd)),
           agentModel: picked.agent_model,
@@ -255,6 +259,20 @@ async function findingFor(tx: Tx, runId: string, key: string) {
     finding: { ...FindingSchema.parse({ id: "stored", kind: row.kind, goal: row.goal, title: row.title, observed: row.observed, reproduction: row.reproduction, severity: row.severity }), id: row.key },
     replay: row.replay ? ReplayObservationSchema.parse(row.replay) : undefined,
   };
+}
+
+const defectsOf = (tx: Tx, runId: string) => tx.selectFrom("findings").where("run_id", "=", runId).where("kind", "=", "defect").orderBy("created_at").orderBy("key");
+
+async function defectsToGroup(tx: Tx, runId: string, config: ProjectConfig): Promise<DefectToGroup[]> {
+  const rows = await defectsOf(tx, runId).select(["key", "persona_key", "goal", "title", "observed", "reproduction"]).execute();
+  return rows.map((row) => ({
+    key: row.key,
+    person: config.personas.find((p) => p.id === row.persona_key)?.name ?? row.persona_key,
+    goal: config.goals.find((g) => g.id === row.goal)?.instruction ?? row.goal,
+    title: row.title,
+    observed: row.observed,
+    reproduction: row.reproduction as string[],
+  }));
 }
 
 async function jobForToken(tx: Tx, token: string, options: { allowExpired?: boolean; expectedJobId?: string } = {}) {
@@ -458,7 +476,7 @@ export async function recordLlmUsage(db: Database, call: LlmCall, usage: { model
 
 const noReport = (o?: ReplayObservation) => !o || (!o.completed && o.blockedAt === null);
 
-const JobResultSchema = z.object({ usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().max(2000).optional(), observation: ReplayObservationSchema.optional(), signIn: SignInCheckSchema.optional() });
+const JobResultSchema = z.object({ usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().max(2000).optional(), observation: ReplayObservationSchema.optional(), signIn: SignInCheckSchema.optional(), groups: DefectGroupsSchema.optional() });
 
 async function refusal(tx: Tx, runId: string, accountRef: string, observed: string): Promise<string> {
   const run = await tx.selectFrom("runs").select("config_snapshot").where("id", "=", runId).executeTakeFirstOrThrow();
@@ -492,17 +510,28 @@ export async function completeJob(db: Database, token: string, input: JobResult,
   });
 }
 
+async function queueReplays(tx: Tx, job: { run_id: string; org_id: string }, next: number, keys: string[]) {
+  if (keys.length) await tx.insertInto("jobs").values(keys.map((key, i) => ({ org_id: job.org_id, run_id: job.run_id, kind: "replay", position: next + i, finding_key: key }))).execute();
+}
+
 async function planNext(tx: Tx, job: { run_id: string; org_id: string; kind: string; finding_key: string | null }, result: JobResult) {
   const { next } = await tx.selectFrom("jobs").select(sql<number>`coalesce(max(position), -1) + 1`.as("next")).where("run_id", "=", job.run_id).executeTakeFirstOrThrow();
   if (job.kind === "role_session") {
     const rolesLeft = await tx.selectFrom("jobs").select("id").where("run_id", "=", job.run_id).where("kind", "=", "role_session").where("status", "in", ["queued", "leased"]).executeTakeFirst();
     if (!rolesLeft) {
       await tx.updateTable("runs").set({ sign_up_seed: null }).where("id", "=", job.run_id).execute();
-      const defects = await tx.selectFrom("findings").select("key").where("run_id", "=", job.run_id).where("kind", "=", "defect").orderBy("created_at").orderBy("key").execute();
-      if (defects.length) {
-        await tx.insertInto("jobs").values(defects.map((d, i) => ({ org_id: job.org_id, run_id: job.run_id, kind: "replay", position: next + i, finding_key: d.key }))).execute();
-      }
+      const defects = await defectsOf(tx, job.run_id).select("key").execute();
+      if (defects.length >= 2 && defects.length <= MAX_GROUPED_DEFECTS) await tx.insertInto("jobs").values({ org_id: job.org_id, run_id: job.run_id, kind: "group", position: next }).execute();
+      else await queueReplays(tx, job, next, defects.map((d) => d.key));
     }
+  } else if (job.kind === "group") {
+    const keys = (await defectsOf(tx, job.run_id).select("key").execute()).map((d) => d.key);
+    const groups = result.groups ? settleGroups(keys, result.groups) : keys.map((key) => [key]);
+    const firstReported = groups.map((group) => group.toSorted((a, b) => keys.indexOf(a) - keys.indexOf(b)));
+    for (const [representative, ...same] of firstReported) {
+      if (same.length) await tx.updateTable("findings").set({ same_as: representative, updated_at: new Date() }).where("run_id", "=", job.run_id).where("key", "in", same).execute();
+    }
+    await queueReplays(tx, job, next, keys.filter((key) => firstReported.some((group) => group[0] === key)));
   } else if (job.kind === "replay" && !noReport(result.observation)) {
     await tx.insertInto("jobs").values({ org_id: job.org_id, run_id: job.run_id, kind: "judge", position: next, finding_key: job.finding_key }).execute();
   }

@@ -70,10 +70,10 @@ export function runView(s: RunSummary) {
   };
   const judgingAgain = (f: Finding) => { const j = lastJudge(f); return !!j && j.requested && OPEN.has(j.status); };
   const unjudged = (f: Finding) => { const j = lastJudge(f); return !!j && gaveNoVerdict(j, f.verdict); };
-  const defects = s.findings.filter((f) => f.kind === "defect");
+  const defects = s.findings.filter((f) => f.kind === "defect" && !f.sameAs);
   const rejudging = defects.some(judgingAgain);
   const use = stage(byKind("role_session"), live);
-  const replay = stage(byKind("replay"), live);
+  const replay = stage([...byKind("group"), ...byKind("replay")], live);
   const judge = rejudging ? "active" : stage(byKind("judge"), live);
   const stages = [
     { label: "Use", detail: useDetail(s.personas.length, byKind("role_session").length), state: use },
@@ -109,7 +109,11 @@ export function runView(s: RunSummary) {
   });
 
   const name = new Map(s.personas.map((p) => [p.id, p.name]));
-  const withPersona = (f: Finding) => ({ ...f, personaName: name.get(f.personaKey) ?? f.personaKey, goalText: goalText.get(f.goal) ?? f.goal, reproduction: f.reproduction as string[] });
+  const reported = (f: Finding) => ({ personaName: name.get(f.personaKey) ?? f.personaKey, goalText: goalText.get(f.goal) ?? f.goal, reproduction: f.reproduction as string[] });
+  const withPersona = (f: Finding) => ({
+    ...f, ...reported(f),
+    sameReports: s.findings.filter((other) => other.sameAs === f.key).map((other) => ({ key: other.key, title: other.title, observed: other.observed, screenshots: other.screenshots, ...reported(other) })),
+  });
   const capSpent = outOfBudget(s);
   const unsettled = defects.filter((f) => judgingAgain(f) || unjudged(f));
   const settled = defects.filter((f) => !unsettled.includes(f));

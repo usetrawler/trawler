@@ -3,13 +3,13 @@ import { JobStopReasonSchema, JobUsageSchema, RunEventSchema } from "./event.ts"
 import { FindingSchema, ReplayObservationSchema } from "./finding.ts";
 import { ProjectConfigSchema } from "./project.ts";
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 export const PROTOCOL_HEADER = "x-trawler-protocol";
 export const MAX_EVENTS_PER_BATCH = 200;
 export const JOB_STOPPED = "job_stopped";
 export const ANSWER_UNUSABLE = "answer_unusable";
 
-export const JobKindSchema = z.enum(["account_check", "role_session", "replay", "judge"]);
+export const JobKindSchema = z.enum(["account_check", "role_session", "group", "replay", "judge"]);
 export type JobKind = z.infer<typeof JobKindSchema>;
 
 export const MAX_STORY = 60;
@@ -37,6 +37,32 @@ export const StoryEntrySchema = z.object({
 });
 export type StoryEntry = z.infer<typeof StoryEntrySchema>;
 
+export const MAX_GROUPED_DEFECTS = 200;
+
+export const DefectToGroupSchema = z.object({
+  key: z.string().min(1).max(200),
+  person: z.string().max(100),
+  goal: z.string().max(1000),
+  title: z.string().max(300),
+  observed: z.string().max(4000),
+  reproduction: z.array(z.string().max(1000)).max(30),
+});
+export type DefectToGroup = z.infer<typeof DefectToGroupSchema>;
+
+export function settleGroups(keys: string[], groups: string[][]): string[][] {
+  const known = new Set(keys);
+  const placed = new Set<string>();
+  const settled: string[][] = [];
+  for (const group of groups) {
+    const members = group.filter((key) => known.has(key) && !placed.has(key) && placed.add(key));
+    if (members.length > 0) settled.push(members);
+  }
+  for (const key of keys) if (!placed.has(key)) settled.push([key]);
+  return settled;
+}
+
+export const DefectGroupsSchema = z.array(z.array(z.string().min(1).max(200)).min(1).max(MAX_GROUPED_DEFECTS)).max(MAX_GROUPED_DEFECTS);
+
 export const JobAssignmentSchema = z.object({
   jobId: z.uuid(),
   runId: z.uuid(),
@@ -52,6 +78,7 @@ export const JobAssignmentSchema = z.object({
   accountRef: z.string().optional(),
   finding: FindingSchema.optional(),
   observation: ReplayObservationSchema.optional(),
+  defects: z.array(DefectToGroupSchema).max(MAX_GROUPED_DEFECTS).optional(),
   maxSteps: z.number().int().positive(),
   budgetUsd: z.number().nonnegative(),
   agentModel: z.string().min(1),
@@ -78,5 +105,6 @@ export const JobCompletionSchema = z.object({
   error: z.string().max(2000).optional(),
   observation: ReplayObservationSchema.optional(),
   signIn: SignInCheckSchema.optional(),
+  groups: DefectGroupsSchema.optional(),
 });
 export type JobCompletion = z.infer<typeof JobCompletionSchema>;
