@@ -128,12 +128,12 @@ async function refusalToRun(tx: Tx, orgId: string, projectId: string, paidBy: Pa
   if (await projectPaused(tx, projectId)) return new RunRefused(PAUSED);
   const plan = await workspacePlan(tx, orgId);
   if ((await runsToday(tx, orgId)) >= plan.limits.runsPerDay) return new RunRefused(runsPerDayMessage(plan));
+  if (paidBy === "workspace") {
+    const budget = await monthlyBudget(tx, orgId);
+    if (budget && budgetLeft(budget) < 0.01) return new WorkspaceBudgetSpent(budget);
+  }
   const people = await peopleOn(tx, projectId);
-  if (people > plan.limits.people) return new TooManyPeople(plan, people);
-  if (paidBy === "trawler") return null;
-  const budget = await monthlyBudget(tx, orgId);
-  if (budget && budgetLeft(budget) < 0.01) return new WorkspaceBudgetSpent(budget);
-  return null;
+  return people > plan.limits.people ? new TooManyPeople(plan, people) : null;
 }
 
 export async function startRun(tx: Tx, orgId: string, projectId: string, keys: Keyring, options: StartRunOptions): Promise<{ id: string; number: number }> {

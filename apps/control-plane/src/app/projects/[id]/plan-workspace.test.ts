@@ -82,7 +82,7 @@ describe("PlanWorkspace", () => {
       projectId: "p1", projectName: "Acme", initialPersonas: people(n), initialGoals: people(n).map((p) => ({ id: `g-${p.id}`, instruction: "Look.", personaId: p.id })),
       initialAccounts: [], keyHint: null, canManageKey: true, authorisedBefore: true, workspacePlan,
     }));
-    expect(at(5)).toMatch(/id="start-blocked"[^>]*>The Free plan takes up to 4 people in a run, and this plan has 5\. Remove people from the plan, run it on your own machine with the local runner, or write to contact@usetrawler\.com about the Team plan\.</);
+    expect(at(5)).toMatch(/id="start-blocked"[^>]*>The Free plan takes up to 4 people in a run, and the plan on this project has 5\. Remove people from the plan, run it on your own machine with the local runner, or write to contact@usetrawler\.com about the Team plan\.</);
     expect(at(4)).not.toContain('id="start-blocked"');
     expect(at(5, { plan: "team", limits: { projects: 3, runsPerDay: 30, people: 12 } })).not.toContain('id="start-blocked"');
   });

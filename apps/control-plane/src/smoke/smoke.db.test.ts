@@ -130,7 +130,7 @@ test("while hosted runs are halted, starting answers 503 with why instead of fai
 
 test("release checks are never held by the Free plan's limits, however many run in a day", async () => {
   expect((await start()).status).toBe(201);
-  await sql`delete from workspace_plans where org_id = ${SMOKE_ORG}`.execute(t.db);
+  await sql`update workspace_plans set plan = 'free' where org_id = ${SMOKE_ORG}`.execute(t.db);
   for (let i = 0; i < 4; i++) expect((await start()).status).toBe(201);
   expect((await sql<{ plan: string }>`select plan from workspace_plans where org_id = ${SMOKE_ORG}`.execute(t.db)).rows).toEqual([{ plan: "enterprise" }]);
 });

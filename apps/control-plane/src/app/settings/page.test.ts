@@ -144,8 +144,9 @@ test("the plan shows what the workspace has used of its limits, and what to do p
   state.today = 2;
   const free = text(renderToStaticMarkup(await SettingsPage()));
   expect(free).toContain("Plan This workspace is on Free");
-  expect(free).toContain("Projects The demo project does not count. 1 of 1");
-  expect(free).toContain("Hosted runs today (UTC) Counted when a run starts, including Run again. 2 of 3");
+  expect(free).toContain("Projects 1 of 1");
+  expect(free).not.toContain("demo");
+  expect(free).toContain("Hosted runs today (UTC) 2 of 3 Counted when a run starts, including Run again.");
   expect(free).toContain("People in a run 4");
   expect(free).toContain("run the product on your own machine with the local runner, or write to contact@usetrawler.com about the Team plan.");
   state.plan = { plan: "enterprise", limits: { projects: Infinity, runsPerDay: Infinity, people: 12 } };
