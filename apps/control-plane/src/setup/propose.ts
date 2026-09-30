@@ -5,6 +5,7 @@ import type { Database } from "../db/index.ts";
 import { asSystem, withOrg } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
 import { createProject, ProjectNotFound, replacePlan } from "../projects/projects.ts";
+import { ProjectLimitReached, projectLimitReached } from "../runs/plans.ts";
 import { FetchRefused } from "./safe-fetch.ts";
 
 const SETUP_BUDGET_USD = 0.25;
@@ -56,6 +57,11 @@ function productOf(draft: { url: string; docs_url: string | null; page: string; 
   return { url: draft.url, ...(draft.docs_url ? { docsUrl: draft.docs_url } : {}), page: draft.page, ...(draft.docs !== null ? { docs: draft.docs } : {}) };
 }
 
+async function refuseAtProjectLimit(deps: SetupDeps, orgId: string): Promise<void> {
+  const reached = await withOrg(deps.db, orgId, (tx) => projectLimitReached(tx, orgId));
+  if (reached) throw new ProjectLimitReached(reached);
+}
+
 export async function startDraft(deps: SetupDeps, input: { orgId: string; url?: string; projectId?: string }): Promise<string> {
   let url = input.url ?? "";
   let docsUrl: string | undefined;
@@ -64,6 +70,8 @@ export async function startDraft(deps: SetupDeps, input: { orgId: string; url?: 
     if (!project) throw new ProjectNotFound();
     url = project.target_url;
     docsUrl = project.docs_url ?? undefined;
+  } else {
+    await refuseAtProjectLimit(deps, input.orgId);
   }
   await claimSetupAttempt(deps.db, input.orgId);
   const productUrl = URL.canParse(url) ? new URL(url).href : url;
@@ -116,6 +124,7 @@ export async function describeDraft(deps: SetupDeps, input: { orgId: string; dra
 
 export async function proposeFromDraft(deps: SetupDeps, input: { orgId: string; draftId: string; description: string; features: string[]; signUp?: SignUp }): Promise<string> {
   const draft = await draftOf(deps, input.orgId, input.draftId);
+  if (!draft.project_id) await refuseAtProjectLimit(deps, input.orgId);
   await claimSetupAttempt(deps.db, input.orgId);
   const product = productOf(draft);
   const { project, signsIn } = await proposePeople({
