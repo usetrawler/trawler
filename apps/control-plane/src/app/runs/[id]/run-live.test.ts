@@ -11,7 +11,7 @@ const { RunLive, outcome, personLine } = await import("./run-live.tsx");
 const job = (kind: string, status: string, extra: Partial<RunSummary["jobs"][number]> = {}) =>
   ({ id: `${kind}-${status}-${Math.random()}`, kind, status, persona_key: null, finding_key: null, usage: null, stopped_by: null, error: null, requested: false, ...extra }) as RunSummary["jobs"][number];
 const finding = (key: string, persona: string, extra: Partial<RunSummary["findings"][number]> = {}) =>
-  ({ key, personaKey: persona, kind: "defect", goal: "g1", title: key, observed: "o", reproduction: ["Open Invoices.", "Save."], severity: "high", replay: null, verdict: null, screenshots: { reported: null, replayed: null }, ...extra }) as RunSummary["findings"][number];
+  ({ key, personaKey: persona, kind: "defect", goal: "g1", title: key, observed: "o", reproduction: ["Open Invoices.", "Save."], severity: "high", replay: null, verdict: null, sameAs: null, screenshots: { reported: null, replayed: null }, ...extra }) as RunSummary["findings"][number];
 const summary = (over: Partial<RunSummary>): RunSummary => ({
   id: "run-1", number: 7, status: "succeeded", cancelReason: null, projectId: "project-1", costUsd: 0.35, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash",
   provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0, createdAt: new Date("2026-09-25T19:40:00Z"), startedAt: new Date("2026-09-25T19:40:05Z"), finishedAt: new Date("2026-09-25T19:59:00Z"),
@@ -73,6 +73,26 @@ test("a confirmed defect is a row with its severity, number, person, title and w
   expect(text(summaryPart!)).toBe("high severity 01 · Ana Saving an invoice fails A 500 page. ✓ Replayed →");
   expect(text(details!)).toContain("Steps Open Invoices. Save.");
   expect(text(details!)).toContain("What the replay saw: The same 500 page.");
+});
+
+test("a defect several people found is one row naming them all, that opens to how each of the others found it, with their screen capture", () => {
+  const html = render(summary({
+    ...finished,
+    findings: [
+      ...finished.findings,
+      finding("lee:f1", "lee", { title: "Invoice will not save", goal: "g2", reproduction: ["Open Invoices.", "Press Save twice."], sameAs: "ana:f1", screenshots: { reported: "11111111-1111-4111-8111-111111111111", replayed: null } }),
+      finding("ana:f3", "ana", { title: "Save fails again", sameAs: "ana:f1" }),
+    ],
+  }));
+  const [row] = rows(html, "Confirmed");
+  expect(text(row!)).toContain("01 · Ana, Lee Park Saving an invoice fails");
+  expect(text(row!)).toContain("Also found by 2 more people");
+  expect(text(row!)).toContain("Lee Park , while trying to: Send an invoice. Reported as: Invoice will not save Open Invoices. Press Save twice.");
+  expect(row).toContain('href="/captures/11111111-1111-4111-8111-111111111111"');
+  expect(text(band(html))).toContain("Verified 1 of 2 reported");
+  expect(rows(html, "Confirmed")).toHaveLength(1);
+  const [single] = rows(render(finished), "Confirmed");
+  expect(single).not.toContain("Also found by");
 });
 
 test("a refuted defect keeps its own section and carries no replayed mark", () => {

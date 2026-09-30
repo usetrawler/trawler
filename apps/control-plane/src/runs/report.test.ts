@@ -5,7 +5,7 @@ import type { RunSummary } from "./runs.ts";
 const job = (kind: string, status: string, extra: Partial<RunSummary["jobs"][number]> = {}) =>
   ({ id: `${kind}-${status}-${Math.random()}`, kind, status, persona_key: null, finding_key: null, usage: null, stopped_by: null, error: null, requested: false, ...extra }) as RunSummary["jobs"][number];
 const finding = (key: string, persona: string, extra: Partial<RunSummary["findings"][number]> = {}) =>
-  ({ key, personaKey: persona, kind: "defect", goal: "g", title: key, observed: "o", reproduction: ["a", "b"], severity: "high", replay: null, verdict: null, ...extra }) as RunSummary["findings"][number];
+  ({ key, personaKey: persona, kind: "defect", goal: "g", title: key, observed: "o", reproduction: ["a", "b"], severity: "high", replay: null, verdict: null, sameAs: null, ...extra }) as RunSummary["findings"][number];
 
 function summary(over: Partial<RunSummary>): RunSummary {
   return {
@@ -316,4 +316,31 @@ test("a replay marked failed that still reported and went to the judge reads as 
   expect(capped.report.notJudged.map((f) => f.reason)).toEqual(["The run ended before it was judged."]);
   const waiting = runView(summary({ jobs: [job("role_session", "succeeded", { persona_key: "ana" }), reported, job("judge", "queued", { finding_key: "ana:f1" })], findings: [finding("ana:f1", "ana", replayed)] }));
   expect(waiting.report.notJudged.map((f) => f.reason)).toEqual(["Waiting for the judge."]);
+});
+
+test("defects that were the same as another count once, under the first report, which carries who else found it and how", () => {
+  const shots = { reported: "shot-lee", replayed: null };
+  const view = runView(summary({
+    status: "succeeded",
+    jobs: [job("role_session", "succeeded", { persona_key: "ana" }), job("role_session", "succeeded", { persona_key: "lee" }), job("group", "succeeded"), job("replay", "succeeded"), job("judge", "succeeded")],
+    findings: [
+      finding("ana:f1", "ana", { verdict: "confirmed" }),
+      finding("lee:f1", "lee", { sameAs: "ana:f1", title: "Save does nothing", reproduction: ["Open /x", "Press Save"], screenshots: shots }),
+      finding("lee:f2", "lee", { sameAs: "ana:f1", title: "Save ignored" }),
+    ],
+  }));
+  expect(view.report.confirmed.map((f) => f.key)).toEqual(["ana:f1"]);
+  expect(view.report.confirmed[0]!.sameReports).toEqual([
+    { key: "lee:f1", title: "Save does nothing", observed: "o", screenshots: shots, personaName: "Lee", goalText: "Get in.", reproduction: ["Open /x", "Press Save"] },
+    expect.objectContaining({ key: "lee:f2", personaName: "Lee" }),
+  ]);
+  expect(view.report.notJudged).toEqual([]);
+  expect(view.headline).toBe("1 defect confirmed by replay.");
+  expect(view.personas.map((p) => p.defects)).toEqual([1, 2]);
+});
+
+test("while the defects are being grouped the replay stage is already under way", () => {
+  const view = runView(summary({ jobs: [job("role_session", "succeeded", { persona_key: "ana" }), job("role_session", "succeeded", { persona_key: "lee" }), job("group", "leased")], findings: [finding("ana:f1", "ana"), finding("lee:f1", "lee")] }));
+  expect(view.stages.map((s) => s.state)).toEqual(["done", "active", "waiting", "waiting"]);
+  expect(view.report.notJudged.map((f) => f.reason)).toEqual(["Waiting for its replay.", "Waiting for its replay."]);
 });

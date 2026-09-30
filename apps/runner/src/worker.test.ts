@@ -384,6 +384,23 @@ test("a judge that gives no verdict completes as an error and reports no verdict
   expect(judged.seen.completions).toEqual([expect.objectContaining({ stoppedBy: "error", error: "the model gave no verdict (2 tries)" })]);
 });
 
+test("a group job groups the run's defects without a browser and completes with the groups; one that cannot completes as an error with none", async () => {
+  const report = (key: string, person: string) => ({ key, person, goal: "Get in.", title: `Save broken for ${person}`, observed: "500", reproduction: ["Open /", "Click Save"] });
+  const defects = [report("ana:f1", "Ana"), report("lee:f1", "Lee")];
+  let opened = 0;
+  const grouped = await fakeControlPlane({ ...baseJob, kind: "group", defects });
+  await workOnce(deps(grouped.url, scriptedModel([toolCall("report_groups", { groups: [["lee:f1", "ana:f1", "ghost"]] })]), { openBrowser: async () => { opened++; throw new Error("no browser for grouping"); } }));
+  expect(opened).toBe(0);
+  expect(grouped.seen.events.map((e) => e.type)).toEqual(["job_started", "job_finished"]);
+  expect(grouped.seen.completions).toEqual([expect.objectContaining({ stoppedBy: "done", groups: [["lee:f1", "ana:f1"]] })]);
+  await new Promise<void>((r) => server!.close(() => r()));
+  server = undefined;
+  const failed = await fakeControlPlane({ ...baseJob, kind: "group", defects });
+  await workOnce(deps(failed.url, scriptedModel([text("no idea"), text("still none")])));
+  expect(failed.seen.completions).toEqual([expect.objectContaining({ stoppedBy: "error", error: "the model did not group the defects (2 tries)" })]);
+  expect(failed.seen.completions[0]).not.toHaveProperty("groups");
+});
+
 test("an account check signs in once and completes with what the product said, never with the password", async () => {
   const accounts = [{ ref: "ana", username: "ana@a.test", password: "correct-horse-battery" }];
   const { url, seen } = await fakeControlPlane({ ...baseJob, config: { ...config, accounts }, kind: "account_check", accountRef: "ana", maxSteps: 12 });
