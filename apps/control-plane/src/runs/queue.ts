@@ -520,7 +520,7 @@ async function queueReplays(tx: Tx, job: { run_id: string; org_id: string }, nex
 }
 
 async function handOverToNextReport(tx: Tx, runId: string, key: string): Promise<string | null> {
-  const successor = await defectsOf(tx, runId).select("key").where("same_as", "=", key).limit(1).executeTakeFirst();
+  const successor = await defectsOf(tx, runId).select("key").where("same_as", "=", key).where("replay", "is", null).limit(1).executeTakeFirst();
   if (!successor) return null;
   const now = new Date();
   await tx.updateTable("findings").set({ same_as: null, updated_at: now }).where("run_id", "=", runId).where("key", "=", successor.key).execute();
@@ -548,7 +548,7 @@ async function planNext(tx: Tx, job: { run_id: string; org_id: string; kind: str
     await queueReplays(tx, job, next, keys.filter((key) => firstReported.some((group) => group[0] === key)));
   } else if (job.kind === "replay" && !noReport(result.observation)) {
     await tx.insertInto("jobs").values({ org_id: job.org_id, run_id: job.run_id, kind: "judge", position: next, finding_key: job.finding_key }).execute();
-  } else if (job.kind === "replay" && result.observation) {
+  } else if (job.kind === "replay" && result.observation && result.stoppedBy !== "error") {
     const successor = await handOverToNextReport(tx, job.run_id, job.finding_key!);
     if (successor) await queueReplays(tx, job, next, [successor]);
   }
