@@ -599,6 +599,14 @@ describe("tools", () => {
     });
   }, 60_000);
 
+  test("names the page the person is on, and none before a page is open", async () => {
+    await withBrowser(async (b) => {
+      expect(b.pageUrl()).toBeNull();
+      await navigate(b, `${origin}/plain?step=2`);
+      expect(b.pageUrl()).toBe(`${origin}/plain?step=2`);
+    });
+  }, 60_000);
+
   test("the snapshot tool cannot write files", async () => {
     await withBrowser(async (b) => {
       const schema = JSON.stringify((b.tools.browser_snapshot!.inputSchema as { jsonSchema: unknown }).jsonSchema);

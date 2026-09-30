@@ -3,6 +3,7 @@ import { z } from "zod";
 export const MAX_NOTE = 4000;
 export const MAX_GOAL_NOTE = 2000;
 export const MAX_URL = 4096;
+export const MAX_QUOTE = 300;
 
 export const FindingSchema = z
   .object({
@@ -13,6 +14,8 @@ export const FindingSchema = z
     observed: z.string().trim().min(1).max(4000),
     reproduction: z.array(z.string().trim().min(1).max(1000)).min(1).max(30),
     severity: z.enum(["low", "medium", "high"]),
+    url: z.string().max(MAX_URL).optional(),
+    quote: z.string().trim().min(1).max(MAX_QUOTE).optional(),
   })
   .refine((f) => f.kind !== "defect" || f.reproduction.length >= 2, {
     message: "a defect needs at least two reproduction steps",

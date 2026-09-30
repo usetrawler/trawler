@@ -18,7 +18,7 @@ const project = ProjectConfigSchema.parse({
   accounts: [{ ref: "acct", username: "a@a.test", password: "hunter22-secret" }],
 });
 
-function fakeBrowsers() {
+function fakeBrowsers(pageUrl: () => string | null = () => null) {
   const opened: string[] = [];
   let closed = 0;
   const open: OpenBrowser = async ({ onBlocked, scrubber }) => {
@@ -27,6 +27,7 @@ function fakeBrowsers() {
       tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => (onBlocked("https://evil.test/?p=hunter22-secret"), "page") }) },
       fillField: async () => "typed",
       screenshot: async () => null,
+      pageUrl,
       close: async () => void closed++,
     };
   };
@@ -47,12 +48,13 @@ test("roles, then a replay and a judge per defect, each in its own browser", asy
   const judgeModel = scriptedModel([text(JSON.stringify({ verdict: "confirmed" }))]);
   const root = mkdtempSync(join(tmpdir(), "run-"));
   const dir = new RunDir(root);
-  const browsers = fakeBrowsers();
+  const browsers = fakeBrowsers(() => "https://a.test/invoices?step=2&token=abc");
   const summary = await localRun({
     project, agentModel: agent, agentModelId: "a", judgeModel, judgeModelId: "j", budgetUsd: 5, maxSteps: 10, replaySteps: 10,
     emit: (e) => void dir.emit(e), openBrowser: browsers.open,
   });
   expect(summary.roles.map((r) => r.persona)).toEqual(["p1", "p2"]);
+  expect(summary.roles[0]!.findings[0]!.url).toBe("https://a.test/invoices?step=2&token=%E2%80%A2%E2%80%A2%E2%80%A2");
   expect(summary.verdicts).toEqual({ f1: "confirmed" });
   expect(summary.replays.f1).toEqual({ completed: true, observed: "It broke", blockedAt: null });
   expect(summary.jobs.map((j) => j.jobId)).toEqual(["account:acct", "role:p1", "role:p2", "replay:f1", "judge:f1"]);
@@ -100,7 +102,7 @@ test("a browser that fails to close does not end the run", async () => {
   const agent = scriptedModel([signedIn, ...finished("p1"), ...finished("p2")]);
   const summary = await localRun({
     project, agentModel: agent, agentModelId: "a", judgeModel: agent, judgeModelId: "a", budgetUsd: 5, maxSteps: 10, replaySteps: 10,
-    emit: () => {}, openBrowser: async () => ({ tools: {}, fillField: async () => "typed", screenshot: async () => null, close: async () => { throw new Error("already gone"); } }),
+    emit: () => {}, openBrowser: async () => ({ tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => { throw new Error("already gone"); } }),
   });
   expect(summary.roles.map((r) => r.stoppedBy)).toEqual(["finish", "finish"]);
 });
@@ -110,7 +112,7 @@ test("a job that throws does not end the run; its role is recorded as an error",
   let n = 0;
   const open: OpenBrowser = async () => {
     if (n++ === 1) throw new Error("browserType.launch: Timeout exceeded with hunter22-secret");
-    return { tools: seeing, fillField: async () => "typed", screenshot: async () => null, close: async () => {} };
+    return { tools: seeing, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => {} };
   };
   const summary = await localRun({
     project, agentModel: agent, agentModelId: "a", judgeModel: agent, judgeModelId: "a", budgetUsd: 5, maxSteps: 10, replaySteps: 10,
@@ -171,7 +173,7 @@ test("failed jobs are recorded as events and replay failures leave a trace", asy
   const open: OpenBrowser = async () => {
     n++;
     if (n === 3 || n === 4) throw new Error("no chromium hunter22-secret");
-    return { tools: seeing, fillField: async () => "typed", screenshot: async () => null, close: async () => {} };
+    return { tools: seeing, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => {} };
   };
   const events: RunEventInput[] = [];
   const summary = await localRun({

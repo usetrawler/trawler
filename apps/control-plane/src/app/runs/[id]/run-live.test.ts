@@ -11,7 +11,7 @@ const { RunLive, outcome, personLine } = await import("./run-live.tsx");
 const job = (kind: string, status: string, extra: Partial<RunSummary["jobs"][number]> = {}) =>
   ({ id: `${kind}-${status}-${Math.random()}`, kind, status, persona_key: null, finding_key: null, usage: null, stopped_by: null, error: null, requested: false, ...extra }) as RunSummary["jobs"][number];
 const finding = (key: string, persona: string, extra: Partial<RunSummary["findings"][number]> = {}) =>
-  ({ key, personaKey: persona, kind: "defect", goal: "g1", title: key, observed: "o", reproduction: ["Open Invoices.", "Save."], severity: "high", replay: null, verdict: null, sameAs: null, screenshots: { reported: null, replayed: null }, ...extra }) as RunSummary["findings"][number];
+  ({ key, personaKey: persona, kind: "defect", goal: "g1", title: key, observed: "o", reproduction: ["Open Invoices.", "Save."], severity: "high", replay: null, verdict: null, sameAs: null, url: null, quote: null, screenshots: { reported: null, replayed: null }, ...extra }) as RunSummary["findings"][number];
 const summary = (over: Partial<RunSummary>): RunSummary => ({
   id: "run-1", number: 7, status: "succeeded", cancelReason: null, projectId: "project-1", costUsd: 0.35, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash",
   provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0, createdAt: new Date("2026-09-25T19:40:00Z"), startedAt: new Date("2026-09-25T19:40:05Z"), finishedAt: new Date("2026-09-25T19:59:00Z"),
@@ -229,4 +229,33 @@ test("a defect whose replay failed is not judged, its row gives the reason, and 
   const [row] = rows(html, "Not judged");
   expect(text(row!.split("</summary>")[0]!)).toBe(`high severity 01 · Ana Export is empty The replay failed: ${error} →`);
   expect(text(row!.split("</summary>")[1]!)).toContain(`Why it was not judged: The replay failed: ${error}`);
+});
+
+test("a finding shows the page it was reported on and the person's own words, and one reported before either existed shows neither", () => {
+  const html = render(summary({
+    ...finished,
+    findings: [
+      finding("ana:f1", "ana", { title: "Saving an invoice fails", verdict: "confirmed", url: "https://app.acme.test/invoices/new?step=2", quote: "I saved it twice and still have nothing." }),
+      finding("lee:f2", "lee", { title: "An old finding", verdict: "confirmed" }),
+    ],
+  }));
+  const [first, second] = html.split("<li ").slice(1).map(text);
+  expect(first).toContain("Page: /invoices/new?step=2");
+  expect(first).toContain("In Ana's words “I saved it twice and still have nothing.”");
+  expect(second).toContain("An old finding");
+  expect(second).not.toContain("Page:");
+  expect(second).not.toContain("words");
+});
+
+test("a defect others reported too shows each report's page and words, under the name of who said them", () => {
+  const html = render(summary({
+    ...finished,
+    findings: [
+      finding("ana:f1", "ana", { title: "Saving an invoice fails", verdict: "confirmed" }),
+      finding("lee:f1", "lee", { title: "Save does nothing", sameAs: "ana:f1", url: "https://app.acme.test/invoices/7", quote: "Nothing happened when I saved." }),
+    ],
+  }));
+  const row = text(html.split("<li ").slice(1)[0]!);
+  expect(row).toContain("Page: /invoices/7");
+  expect(row).toContain("In Lee Park's words: “Nothing happened when I saved.”");
 });

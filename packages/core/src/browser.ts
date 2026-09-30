@@ -356,6 +356,7 @@ export interface Browser {
   tools: ToolSet;
   fillField(ref: string, text: string, kind: FieldKind): Promise<string>;
   screenshot(): Promise<Screenshot | null>;
+  pageUrl(): string | null;
   close(): Promise<void>;
 }
 
@@ -829,6 +830,10 @@ export async function openBrowser(opts: {
         const shot = await Promise.race([capture(page).catch(() => null), new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), 2 * SCREENSHOT_MS)))]);
         clearTimeout(timer);
         return shot;
+      },
+      pageUrl() {
+        const page = actingPage();
+        return !page || disconnected || page.url() === "about:blank" ? null : page.url();
       },
       async close() {
         const bounded = (step: Promise<unknown>) => within(step.catch(() => undefined), CLOSE_STEP_MS, undefined);

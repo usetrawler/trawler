@@ -20,7 +20,7 @@ function deps(over: Partial<CliDeps> = {}) {
     err: (l) => err.push(l),
     model: () => scriptedModel([]),
     fetchText: async () => "<h1>Acme</h1>",
-    openBrowser: async () => ({ tools: {}, fillField: async () => "typed", screenshot: async () => null, close: async () => {} }),
+    openBrowser: async () => ({ tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => {} }),
     runsRoot: mkdtempSync(join(tmpdir(), "runs-")),
     ...over,
   };
@@ -152,7 +152,7 @@ test("run passes --judge-model, --headed and the budget through", async () => {
   const agent = scriptedModel([toolCall("goal_status", { goal: "g", status: "reached", note: "" }), toolCall("finish", { summary: "done" })]);
   const run = deps({
     model: (id) => (models.push(id), agent),
-    openBrowser: async (o) => (headless.push(o.headless), { tools: {}, fillField: async () => "typed", screenshot: async () => null, close: async () => {} }),
+    openBrowser: async (o) => (headless.push(o.headless), { tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => {} }),
   });
   expect(await runCli(["run", "--config", join(dir, "p.yaml"), "--model", "m/a", "--judge-model", "m/j", "--headed"], run.d)).toBe(0);
   expect(models).toEqual(["m/a", "m/j"]);
@@ -225,17 +225,21 @@ test("setup passes a focus through to the proposal", async () => {
   expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toContain("the invite flow");
 });
 
-test("work hands the browser's screenshots to the job, so a finding's screenshot is uploaded", async () => {
+test("work hands the browser's screenshots and page address to the job, so a finding's screenshot is uploaded and the finding names its page", async () => {
   const job = {
     kind: "role_session", personaKey: "ana", jobId: "11111111-1111-4111-8111-111111111111", runId: "22222222-2222-4222-8222-222222222222", token: "job-token-" + "x".repeat(40),
     config: { name: "Acme", targetUrl: "https://a.test/", description: "", allowedOrigins: ["https://a.test"], personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "x" }], accounts: [], extraHeaders: {}, secretHeaders: {} },
     maxSteps: 10, budgetUsd: 1, agentModel: "m/agent", judgeModel: "m/judge",
   };
   const uploads: Array<{ path: string; type: string | null }> = [];
+  const sent: string[] = [];
   const controlPlane = (async (url: string | URL, init?: RequestInit) => {
     const { pathname, search } = new URL(String(url));
     if (pathname === "/api/runner/claim") return Response.json(job);
-    if (pathname.endsWith("/events")) return Response.json({ cancel: false });
+    if (pathname.endsWith("/events")) {
+      sent.push(String(init?.body ?? ""));
+      return Response.json({ cancel: false });
+    }
     if (pathname.endsWith("/artifacts")) {
       uploads.push({ path: pathname + search, type: new Headers(init?.headers).get("content-type") });
       return Response.json({ id: "33333333-3333-4333-8333-333333333333" }, { status: 201 });
@@ -252,11 +256,13 @@ test("work hands the browser's screenshots to the job, so a finding's screenshot
       toolCall("goal_status", { goal: "g", status: "failed", note: "500" }),
       toolCall("finish", { summary: "done" }),
     ]),
-    openBrowser: async () => ({ tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => "the page" }) }, fillField: async () => "typed", screenshot: async () => ({ bytes: png, contentType: "image/png" as const }), close: async () => {} }),
+    openBrowser: async () => ({ tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => "the page" }) }, fillField: async () => "typed", screenshot: async () => ({ bytes: png, contentType: "image/png" as const }), pageUrl: () => "https://a.test/save?token=t0ps3cr3t", close: async () => {} }),
     startReporting: async () => ({ report: () => {}, maskWith: () => {}, close: async () => {} }),
   });
   expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(0);
   expect(uploads).toEqual([{ path: `/api/jobs/${job.jobId}/artifacts?kind=screenshot&finding=f1`, type: "image/png" }]);
+  const finding = sent.flatMap((body) => (JSON.parse(body) as { events: Array<{ type: string; finding?: { url?: string } }> }).events).find((e) => e.type === "finding");
+  expect(finding?.finding?.url).toBe("https://a.test/save?token=%E2%80%A2%E2%80%A2%E2%80%A2");
 });
 
 test("work refuses to send the runner token over plain http to another machine", async () => {
@@ -337,7 +343,7 @@ test("in work mode with an egress proxy, each browser gets its own proxy session
     openBrowser: async ({ proxy: given }) => {
       proxies.push(given);
       await tryPrivate(given!.server);
-      return { tools: {}, fillField: async () => "typed", screenshot: async () => null, close: async () => {} };
+      return { tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => {} };
     },
     startReporting: async () => ({ report: () => {}, maskWith: () => {}, close: async () => {} }),
   });
@@ -386,7 +392,7 @@ test.each([[[]], [["--once"]]])("a work runner whose egress proxy has gone hands
     fetchImpl: controlPlane,
     openBrowser: async () => {
       browsers++;
-      return { tools: {}, fillField: async () => "typed", screenshot: async () => null, close: async () => {} };
+      return { tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => {} };
     },
     startReporting: async () => ({ report: () => {}, maskWith: () => {}, close: async () => {} }),
   });

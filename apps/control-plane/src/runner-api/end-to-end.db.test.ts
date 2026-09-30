@@ -37,6 +37,7 @@ afterAll(async () => {
 const keys = new Keyring(randomBytes(32));
 const runnerToken = "runner-" + "r".repeat(40);
 const deps: RunnerApiDeps = { db: t.db, keys, runnerToken, claimWaitMs: 50, pollMs: 10, artifacts: s3Store(bucket.storage) };
+const PAGE_URL = "https://app.acme.test/invoices/new?step=2&token=secret-reset-token#section";
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...randomBytes(64)]);
 const ORG_KEY = "sk-or-v1-" + "k".repeat(64);
 let server: Server;
@@ -98,7 +99,7 @@ afterAll(() => new Promise<void>((r) => server.close(() => openRouter.close(() =
 const worker = () => ({
   controlPlane: base, runnerToken, log: () => {}, flushMs: 5, retryBaseMs: 5,
   model: (modelId: string, jobToken: string) => createModel({ modelId, apiKey: jobToken, baseURL: `${base}/api/llm/v1` }),
-  openBrowser: async () => ({ tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => "the invoice form" }) }, fillField: async () => "typed", screenshot: async () => ({ bytes: PNG, contentType: "image/png" as const }), close: async () => {} }),
+  openBrowser: async () => ({ tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => "the invoice form" }) }, fillField: async () => "typed", screenshot: async () => ({ bytes: PNG, contentType: "image/png" as const }), pageUrl: () => PAGE_URL, close: async () => {} }),
 });
 
 test("a run goes from start to a confirmed defect, with the screenshots of its report and its replay, through the real runner API and worker", async () => {
@@ -121,7 +122,10 @@ test("a run goes from start to a confirmed defect, with the screenshots of its r
   expect(await workOnce(worker())).toBe("idle");
   const summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
   expect(summary).toMatchObject({ status: "succeeded" });
-  expect(summary!.findings).toEqual([expect.objectContaining({ key: "ana:f1", title: "Saving fails", verdict: "confirmed", replay: expect.objectContaining({ completed: true }) })]);
+  expect(summary!.findings).toEqual([expect.objectContaining({ key: "ana:f1", title: "Saving fails", verdict: "confirmed", replay: expect.objectContaining({ completed: true }), url: "https://app.acme.test/invoices/new?step=2&token=%E2%80%A2%E2%80%A2%E2%80%A2" })]);
+  const replayCalls = seen.map((c) => JSON.stringify(c.body)).filter((b) => b.includes("report_replay"));
+  expect(replayCalls.length).toBeGreaterThan(0);
+  expect(replayCalls.join("")).not.toContain("step=2");
   const { reported, replayed } = summary!.findings[0]!.screenshots;
   const listed = await bucket.client.send(new ListObjectsV2Command({ Bucket: bucket.storage.bucket, Prefix: `orgs/org-a/runs/${run.id}/` }));
   expect((listed.Contents ?? []).map((o) => o.Key).sort()).toEqual([reported, replayed].map((id) => `orgs/org-a/runs/${run.id}/${id}.png`).sort());

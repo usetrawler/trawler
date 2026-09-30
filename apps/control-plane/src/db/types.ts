@@ -79,6 +79,7 @@ export interface Findings {
   observed: string;
   org_id: string;
   persona_key: string;
+  quote: string | null;
   replay: Json | null;
   reproduction: Json;
   run_id: string;
@@ -86,6 +87,7 @@ export interface Findings {
   severity: string;
   title: string;
   updated_at: Generated<Timestamp>;
+  url: string | null;
   verdict: string | null;
 }
 

@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { tool } from "ai";
 import { z } from "zod";
-import { FindingSchema, type Finding, type Goal, type GoalOutcome, type RunEventInput, type TargetAccount, MAX_GOAL_NOTE, MAX_NOTE } from "@usetrawler/protocol";
+import { FindingSchema, type Finding, type Goal, type GoalOutcome, type RunEventInput, type TargetAccount, MAX_GOAL_NOTE, MAX_NOTE, MAX_QUOTE, MAX_URL } from "@usetrawler/protocol";
 import { MIN_SECRET_LENGTH, type SecretScrubber } from "./secrets.ts";
 
 export interface SessionState {
@@ -51,6 +51,72 @@ function lower(value: unknown): unknown {
   return typeof value === "string" ? value.trim().toLowerCase() : value;
 }
 
+const SECRET_WORDS = new Set(["token", "code", "key", "apikey", "secret", "pass", "passwd", "password", "pwd", "sig", "signature", "hmac", "hash", "auth", "authorization", "session", "sess", "sessid", "sid", "jsessionid", "phpsessid", "jwt", "otp", "nonce", "state", "ticket", "credential", "credentials", "assertion", "samlresponse"]);
+const SECRET_ROUTE = /reset|invit|accept|verif|confirm|token|magic|activat|unsubscribe|password/i;
+const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MASKED = encodeURIComponent("•••");
+
+function wordsOf(name: string): string[] {
+  return name.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+const SECRET_PART = /token|secret|passw|passcode|session|sessid|signature|credential|jwt|apikey/;
+const secretName = (name: string) => SECRET_PART.test(name.toLowerCase()) || wordsOf(name).some((w) => SECRET_WORDS.has(w));
+const looksLikeSecret = (segment: string) => /^eyJ[\w-]+\.[\w-]+/.test(segment) || segment.length >= 20 && /[a-z]/i.test(segment) && /\d/.test(segment) && /^[\w-]+$/.test(segment) && (segment.match(/-/g)?.length ?? 0) < 3 && !UUID_SEGMENT.test(segment);
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value.replace(/\+/g, " "));
+  } catch {
+    return value;
+  }
+}
+
+function maskedQuery(search: string): string {
+  if (!search || search === "?") return "";
+  const parts = search.slice(1).split("&").map((part) => {
+    const at = part.indexOf("=");
+    if (at < 0) return part;
+    const name = part.slice(0, at);
+    const value = part.slice(at + 1);
+    if (secretName(safeDecode(name))) return `${name}=${MASKED}`;
+    const inner = safeDecode(value);
+    if (!/^(\/|[a-z][a-z0-9+.-]*:\/\/)/i.test(inner)) return part;
+    const masked = maskedAddress(inner);
+    return masked === inner ? part : `${name}=${encodeURIComponent(masked).replaceAll(encodeURIComponent(MASKED), MASKED)}`;
+    return part;
+  });
+  return `?${parts.join("&")}`;
+}
+
+function maskedPath(pathname: string): string {
+  const segments = pathname.replace(/;jsessionid=[^/]*/gi, "").split("/");
+  return segments.map((segment, i) => (i > 0 && (looksLikeSecret(segment) || (SECRET_ROUTE.test(segments[i - 1] ?? "") && segment.length >= 8)) ? MASKED : segment)).join("/");
+}
+
+function maskedAddress(address: string): string {
+  const hash = address.indexOf("#");
+  const bare = hash < 0 ? address : address.slice(0, hash);
+  const query = bare.indexOf("?");
+  const head = query < 0 ? bare : bare.slice(0, query);
+  const origin = /^[a-z][a-z0-9+.-]*:\/\/[^/]*/i.exec(head)?.[0] ?? "";
+  return `${origin.replace(/\/\/[^@/]*@/, "//")}${maskedPath(head.slice(origin.length))}${query < 0 ? "" : maskedQuery(bare.slice(query))}`;
+}
+
+export function findingUrl(raw: string | null | undefined): string | undefined {
+  if (!raw || !URL.canParse(raw)) return undefined;
+  const url = new URL(raw);
+  if (!/^https?:$/.test(url.protocol)) return undefined;
+  const kept = `${url.origin}${maskedPath(url.pathname)}${maskedQuery(url.search)}`;
+  return kept.length <= MAX_URL ? kept : `${url.origin}${maskedPath(url.pathname)}`.slice(0, MAX_URL);
+}
+
+function oneLine(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const line = value.replace(/\s+/g, " ").trim();
+  return line ? Array.from(line).slice(0, MAX_QUOTE).join("") : undefined;
+}
+
 function steps(value: unknown): unknown {
   if (typeof value !== "string") return value;
   return value.split("\n").map((s) => s.replace(/^\s*(?:\d+[.)]|[-*•])\s+/, "").trim()).filter(Boolean);
@@ -66,6 +132,7 @@ export function sessionTools(opts: {
   scrubber: SecretScrubber;
   newId: () => string;
   capture?: (findingId: string) => Promise<void>;
+  pageUrl?: () => string | null;
 }) {
   const { state, emit, jobId } = opts;
   const goalIds = () => [...state.goals.keys()];
@@ -89,7 +156,7 @@ export function sessionTools(opts: {
     }),
     submit_finding: tool({
       description:
-        "Record a defect or a friction the moment you have seen it. All fields are required. kind: defect | friction. severity: low | medium | high. reproduction: the literal actions, one per array item, with no expected or actual result (that goes in observed); a defect needs at least two.",
+        "Record a defect or a friction the moment you have seen it. kind, goal, title, observed, reproduction and severity are required. kind: defect | friction. severity: low | medium | high. reproduction: the literal actions, one per array item, with no expected or actual result (that goes in observed); a defect needs at least two. quote: one sentence in your own voice about how this felt, as you would say it to a friend; not a repeat of observed, and never a password or code.",
       inputSchema: z.object({
         kind: z.string().nullish(),
         goal: z.string().nullish(),
@@ -97,13 +164,19 @@ export function sessionTools(opts: {
         observed: z.string().nullish(),
         reproduction: z.union([z.array(z.string()), z.string()]).nullish(),
         severity: z.string().nullish(),
+        quote: z.string().nullish(),
       }),
       execute: async (input) => {
         if (state.finished !== null) return CLOSED;
         if (state.page !== "seen") return state.page === "unseen" ? "rejected: you have not looked at the product yet; open it and take a browser_snapshot, then report what it shows" : "rejected: your last browser action failed, so you are not looking at the page any more; take a browser_snapshot and report what it shows";
         const goal = lower(input.goal);
         if (typeof goal !== "string" || !state.goals.has(goal)) return unknownGoal(input.goal);
-        const candidate = { ...input, goal, kind: lower(input.kind), severity: lower(input.severity), reproduction: steps(input.reproduction), id: "pending" };
+        const url = findingUrl(opts.pageUrl ? await opts.inBrowser(async () => opts.pageUrl!()) : null);
+        const said = oneLine(input.quote);
+        const candidate = {
+          id: "pending", goal, kind: lower(input.kind), title: input.title, observed: input.observed, reproduction: steps(input.reproduction), severity: lower(input.severity),
+          ...(url ? { url } : {}), ...(said ? { quote: said } : {}),
+        };
         const parsed = FindingSchema.safeParse(candidate);
         if (!parsed.success) {
           const tooFew = candidate.kind === "defect" && Array.isArray(candidate.reproduction) && candidate.reproduction.length < 2;

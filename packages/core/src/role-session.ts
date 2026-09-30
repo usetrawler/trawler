@@ -23,6 +23,7 @@ export async function runRoleSession(opts: {
   newFindingId: () => string;
   screenshot?: () => Promise<Screenshot | null>;
   keepScreenshot?: (findingId: string, shot: Screenshot) => void;
+  pageUrl?: () => string | null;
   goalIds?: string[];
   story?: StoryEntry[];
   signUpSeed?: string;
@@ -52,7 +53,7 @@ export async function runRoleSession(opts: {
       accounts: opts.project.accounts.filter((a) => a.ref === opts.persona.accountRef),
       emit, jobId,
       fillField: opts.fillField, inBrowser: queue.run,
-      scrubber: opts.scrubber, newId: opts.newFindingId, capture,
+      scrubber: opts.scrubber, newId: opts.newFindingId, capture, pageUrl: opts.pageUrl,
     }),
     ...(opts.persona.accountRef ? {} : ownPasswordTool({ state, fillField: opts.fillField, inBrowser: queue.run, scrubber: opts.scrubber, password: seed === undefined ? undefined : madeUpPassword(seed) })),
   };

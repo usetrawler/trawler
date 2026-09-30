@@ -2,7 +2,7 @@ import { generateText, isStepCount } from "ai";
 import { describe, expect, test, vi } from "vitest";
 import type { RunEventInput } from "@usetrawler/protocol";
 import { SecretScrubber } from "./secrets.ts";
-import { madeUpEmail, madeUpPassword, newSessionState, ownPasswordTool, sessionTools } from "./session-tools.ts";
+import { findingUrl, madeUpEmail, madeUpPassword, newSessionState, ownPasswordTool, sessionTools } from "./session-tools.ts";
 import { scriptedModel, text, toolCall } from "./testing.ts";
 
 const goals = [{ id: "sign-up", instruction: "Create an account." }, { id: "invoice", instruction: "Send an invoice." }];
@@ -22,6 +22,43 @@ function setup(over: Partial<Parameters<typeof sessionTools>[0]> = {}) {
 }
 
 describe("submit_finding", () => {
+  test("records the page the browser is on, never an address the model gives, and the person's words on one line", async () => {
+    const { tools, events } = setup({ pageUrl: () => "https://app.acme.test/signup?step=2#top" });
+    const said = "  I clicked Submit\n and   nothing told me why.  ";
+    expect(await tools.submit_finding.execute!({ ...finding, quote: said, url: "https://evil.test/made-up" } as typeof finding, ctx)).toBe("recorded f1");
+    expect(events[0]).toMatchObject({ type: "finding", finding: { url: "https://app.acme.test/signup?step=2", quote: "I clicked Submit and nothing told me why." } });
+    const blind = setup({ pageUrl: () => null });
+    await blind.tools.submit_finding.execute!({ ...finding, quote: "   ", url: "https://evil.test/made-up" } as typeof finding, ctx);
+    expect(Object.keys((blind.events[0] as { finding: object }).finding)).not.toEqual(expect.arrayContaining(["url"]));
+    expect(blind.events[0]).not.toMatchObject({ finding: { quote: expect.anything() } });
+    const long = setup({ pageUrl: () => "https://app.acme.test/" });
+    await long.tools.submit_finding.execute!({ ...finding, quote: "x".repeat(400) }, ctx);
+    expect((long.events[0] as { finding: { quote: string } }).finding.quote).toHaveLength(300);
+  });
+
+  test("a page address keeps its path and harmless query as the browser had them, and loses its fragment, credentials and anything that looks like a secret", () => {
+    const M = "%E2%80%A2%E2%80%A2%E2%80%A2";
+    expect(findingUrl("https://ana:pw@app.acme.test/reset?step=2&token=abc&Session_ID=s1&api_key=k&code=c&q=a%20b~#access_token=xyz")).toBe(`https://app.acme.test/reset?step=2&token=${M}&Session_ID=${M}&api_key=${M}&code=${M}&q=a%20b~`);
+    expect(findingUrl("https://a.test/p?sid=1&PHPSESSID=2&pwd=3&hmac=4&hash=5&X-Amz-Signature=6&accessToken=7")).toBe(`https://a.test/p?sid=${M}&PHPSESSID=${M}&pwd=${M}&hmac=${M}&hash=${M}&X-Amz-Signature=${M}&accessToken=${M}`);
+    expect(findingUrl("https://a.test/search?keyword=fern&author=ana&zipcode=10115&design=x")).toBe("https://a.test/search?keyword=fern&author=ana&zipcode=10115&design=x");
+    expect(findingUrl("https://a.test/login?next=%2Finvite%2Faccept%3Ftoken%3Dabc123secret")).toBe(`https://a.test/login?next=%2Finvite%2Faccept%3Ftoken%3D${M}`);
+    expect(findingUrl("https://a.test/x?accesstoken=a&authtoken=b&sessionid=c&refreshtoken=d&passcode=1&apitoken=e&secretkey=f&oauthtoken=g")).toBe(`https://a.test/x?accesstoken=${M}&authtoken=${M}&sessionid=${M}&refreshtoken=${M}&passcode=${M}&apitoken=${M}&secretkey=${M}&oauthtoken=${M}`);
+    expect(findingUrl("https://a.test/search?q=what%3F&page=2")).toBe("https://a.test/search?q=what%3F&page=2");
+    expect(findingUrl("https://a.test/docs?path=/docs/intro&next=%2Fhome")).toBe("https://a.test/docs?path=/docs/intro&next=%2Fhome");
+    expect(findingUrl("https://a.test/d/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc123def")).toBe(`https://a.test/d/${M}`);
+    expect(findingUrl("https://a.test/blog/how-to-setup-2fa-in-2024-guide")).toBe("https://a.test/blog/how-to-setup-2fa-in-2024-guide");
+    expect(findingUrl("https://a.test/sso?returnTo=https%3A%2F%2Fa.test%2Fback%3Fcode%3Dxyz%23frag")).toBe(`https://a.test/sso?returnTo=https%3A%2F%2Fa.test%2Fback%3Fcode%3D${M}`);
+    expect(findingUrl("https://a.test/reset-password/9f8e7d6c5b4a39281706f5e4d3c2b1a0")).toBe(`https://a.test/reset-password/${M}`);
+    expect(findingUrl("https://a.test/accept-invite/abcdefgh/done")).toBe(`https://a.test/accept-invite/${M}/done`);
+    expect(findingUrl("https://a.test/app;jsessionid=ABC123/cart")).toBe("https://a.test/app/cart");
+    expect(findingUrl("https://a.test/invoices/0f8fad5b-d9cb-469f-a165-70867728950e/edit")).toBe("https://a.test/invoices/0f8fad5b-d9cb-469f-a165-70867728950e/edit");
+    expect(findingUrl("https://a.test/login/callback")).toBe("https://a.test/login/callback");
+    expect(findingUrl("about:blank")).toBeUndefined();
+    expect(findingUrl("data:text/html,hi")).toBeUndefined();
+    expect(findingUrl(null)).toBeUndefined();
+    expect(findingUrl(`https://app.acme.test/p?q=${"a".repeat(5000)}`)).toBe("https://app.acme.test/p");
+  });
+
   test("refuses a finding while the model is not looking at the page", async () => {
     const { tools, state, events } = setup();
     state.page = "unseen";

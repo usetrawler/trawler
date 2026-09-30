@@ -44,6 +44,14 @@ export class RunDir {
 const usd = (n: number) => `$${n.toFixed(2)}`;
 const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
 
+function readable(url: string): string {
+  try {
+    return decodeURI(url);
+  } catch {
+    return url;
+  }
+}
+
 type Located = Finding & { persona: string };
 
 function describe(f: Located, replay?: ReplayObservation, replayError?: string, judgeError?: string): string {
@@ -56,7 +64,9 @@ function describe(f: Located, replay?: ReplayObservation, replayError?: string, 
       ? "\n\nReplay: wrote no report."
       : `\n\nReplay: ${replay.completed ? "carried out every step" : `could not carry out step ${replay.blockedAt}`}. ${oneLine(replay.observed)}`;
   const judged = judgeError ? `\n\nJudge: could not be judged. ${oneLine(judgeError)}` : "";
-  return `### ${oneLine(f.title)}\n${f.kind}, ${f.severity}, ${oneLine(f.persona)} / ${oneLine(f.goal)}\n\n${oneLine(f.observed)}\n\n${steps}${replayed}${judged}\n`;
+  const page = f.url ? `\nPage: ${readable(f.url)}` : "";
+  const said = f.quote ? `\n\n> ${oneLine(f.quote)}` : "";
+  return `### ${oneLine(f.title)}\n${f.kind}, ${f.severity}, ${oneLine(f.persona)} / ${oneLine(f.goal)}${page}\n\n${oneLine(f.observed)}${said}\n\n${steps}${replayed}${judged}\n`;
 }
 
 export function renderReport(s: RunSummary): string {
