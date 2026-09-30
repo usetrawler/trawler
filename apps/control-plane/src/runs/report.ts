@@ -77,7 +77,8 @@ export function runView(s: RunSummary) {
   const defects = s.findings.filter((f) => f.kind === "defect" && !f.sameAs);
   const rejudging = defects.some(judgingAgain);
   const use = stage(byKind("role_session"), live);
-  const replay = stage([...byKind("group"), ...byKind("replay")], live);
+  const grouping = live && byKind("group").some((j) => OPEN.has(j.status));
+  const replay = grouping ? "active" : stage(byKind("replay"), live);
   const judge = rejudging ? "active" : stage(byKind("judge"), live);
   const stages = [
     { label: "Use", detail: useDetail(s.personas.length, byKind("role_session").length), state: use },

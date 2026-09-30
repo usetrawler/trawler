@@ -37,7 +37,7 @@ export const StoryEntrySchema = z.object({
 });
 export type StoryEntry = z.infer<typeof StoryEntrySchema>;
 
-export const MAX_GROUPED_DEFECTS = 200;
+export const MAX_GROUPED_DEFECTS = 60;
 
 export const DefectToGroupSchema = z.object({
   key: z.string().min(1).max(200),

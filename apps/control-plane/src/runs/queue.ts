@@ -17,6 +17,7 @@ const LEASE_MINUTES = 10;
 const GROUPED_OBSERVED_CHARS = 600;
 const GROUPED_STEPS = 12;
 const GROUPED_STEP_CHARS = 200;
+const GROUPED_GOAL_CHARS = 300;
 
 const clipped = (text: string, max: number) => (Array.from(text).length > max ? `${Array.from(text).slice(0, max - 1).join("")}…` : text);
 const ACTIVE = ["queued", "running"];
@@ -273,7 +274,7 @@ async function defectsToGroup(tx: Tx, runId: string, config: ProjectConfig): Pro
   return rows.map((row) => ({
     key: row.key,
     person: config.personas.find((p) => p.id === row.persona_key)?.name ?? row.persona_key,
-    goal: config.goals.find((g) => g.id === row.goal)?.instruction ?? row.goal,
+    goal: clipped(config.goals.find((g) => g.id === row.goal)?.instruction ?? row.goal, GROUPED_GOAL_CHARS),
     title: row.title,
     observed: clipped(row.observed, GROUPED_OBSERVED_CHARS),
     reproduction: (row.reproduction as string[]).slice(0, GROUPED_STEPS).map((step) => clipped(step, GROUPED_STEP_CHARS)),
