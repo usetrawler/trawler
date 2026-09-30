@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
 type Member = { userId: string; name: string; email: string; orgId: string; orgName: string; role: string };
-const state = vi.hoisted(() => ({ member: null as { userId: string; name: string; email: string; orgId: string; orgName: string; role: string } | null, shells: [] as string[] }));
+const state = vi.hoisted(() => ({ member: null as { userId: string; name: string; email: string; orgId: string; orgName: string; role: string } | null, shells: [] as string[], demoUrl: undefined as string | undefined }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({ redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); } }));
@@ -15,13 +15,22 @@ vi.mock("../../server/shell.ts", () => ({
     return { user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [], runs: 0 } };
   },
 }));
-vi.mock("./setup-wizard.tsx", () => ({ SetupWizard: ({ intro }: { intro: unknown }) => intro }));
+vi.mock("./setup-wizard.tsx", () => ({ SetupWizard: ({ intro, demo }: { intro: unknown; demo: unknown }) => [intro, demo] }));
+vi.mock("./try-demo.tsx", () => ({ TryDemo: () => "Try our demo" }));
+vi.mock("../../server/env.ts", () => ({ readEnv: () => ({ demoUrl: state.demoUrl }) }));
 
 const { default: NewProjectPage } = await import("./page.tsx");
 
 beforeEach(() => {
   state.member = { userId: "u1", name: "Ana", email: "ana@acme.test", orgId: "org-1", orgName: "Acme workspace", role: "member" };
   state.shells = [];
+  state.demoUrl = undefined;
+});
+
+test("the demo is offered under the address field only when this server has one", async () => {
+  expect(renderToStaticMarkup(await NewProjectPage())).not.toContain("Try our demo");
+  state.demoUrl = "https://demo.usetrawler.test/";
+  expect(renderToStaticMarkup(await NewProjectPage())).toContain("Try our demo");
 });
 
 test("a visitor who is not signed in, or no longer belongs to any workspace, is sent to sign in", async () => {

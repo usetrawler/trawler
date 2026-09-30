@@ -114,6 +114,7 @@ jobs:
           IMAGE_MIGRATE: ${{ needs.images.outputs.migrate }}
           IMAGE_CONTROL_PLANE: ${{ needs.images.outputs.control-plane }}
           IMAGE_RUNNER: ${{ needs.images.outputs.runner }}
+          IMAGE_DEMO: ${{ needs.images.outputs.demo }}
       - name: smoke-check staging
         run: node scripts/release/smoke.ts "$RELEASE_URL" "$RELEASE_COMMIT"
         env:
@@ -141,3 +142,4 @@ jobs:
           IMAGE_MIGRATE: ${{ needs.images.outputs.migrate }}
           IMAGE_CONTROL_PLANE: ${{ needs.images.outputs.control-plane }}
           IMAGE_RUNNER: ${{ needs.images.outputs.runner }}
+          IMAGE_DEMO: ${{ needs.images.outputs.demo }}

@@ -6,6 +6,7 @@ export interface Images {
   migrate: string;
   controlPlane: string;
   runner: string;
+  demo: string;
 }
 
 export interface DeployOptions {
@@ -168,17 +169,19 @@ export async function deploy(o: DeployOptions): Promise<void> {
   const migrate = core.service("migrate");
   const controlPlane = core.service("control-plane");
   const runner = workers.service("runner");
+  const demo = core.service("demo");
   await release(o, o.core, core, "migrate", migrate, o.images.migrate, "exited");
   const [, runnerDeployment] = await Promise.all([
     release(o, o.core, core, "control-plane", controlPlane, o.images.controlPlane, "running"),
     release(o, o.workers, workers, "runner", runner, o.images.runner, "running"),
+    release(o, o.core, core, "demo", demo, o.images.demo, "running"),
   ]);
   await soleDeployment(o, o.workers, workers, "runner", runner, runnerDeployment);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const env = process.env;
-  const missing = ["RELEASE_ENVIRONMENT", "RELEASE_URL", "RELEASE_COMMIT", "RAILWAY_CORE_TOKEN", "RAILWAY_WORKERS_TOKEN", "IMAGE_MIGRATE", "IMAGE_CONTROL_PLANE", "IMAGE_RUNNER"].filter((k) => !env[k]);
+  const missing = ["RELEASE_ENVIRONMENT", "RELEASE_URL", "RELEASE_COMMIT", "RAILWAY_CORE_TOKEN", "RAILWAY_WORKERS_TOKEN", "IMAGE_MIGRATE", "IMAGE_CONTROL_PLANE", "IMAGE_RUNNER", "IMAGE_DEMO"].filter((k) => !env[k]);
   if (missing.length) {
     console.error(`missing environment variables: ${missing.join(", ")}`);
     process.exit(2);
@@ -188,7 +191,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     workers: railway(env.RAILWAY_WORKERS_TOKEN!),
     environment: env.RELEASE_ENVIRONMENT!,
     commit: env.RELEASE_COMMIT!,
-    images: { migrate: env.IMAGE_MIGRATE!, controlPlane: env.IMAGE_CONTROL_PLANE!, runner: env.IMAGE_RUNNER! },
+    images: { migrate: env.IMAGE_MIGRATE!, controlPlane: env.IMAGE_CONTROL_PLANE!, runner: env.IMAGE_RUNNER!, demo: env.IMAGE_DEMO! },
     deployed: () => deployedCommit(env.RELEASE_URL!),
     isAncestor: (older, newer) => gitAncestry(spawnSync("git", ["merge-base", "--is-ancestor", older, newer]).status),
   }).catch((err: unknown) => {

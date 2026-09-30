@@ -1,12 +1,20 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 type Member = { userId: string; email: string; orgId: string; orgName: string; role: string };
-const state = vi.hoisted(() => ({ member: null as Member | null, calls: [] as string[], failWith: null as Error | null }));
+const state = vi.hoisted(() => ({ member: null as Member | null, calls: [] as string[], failWith: null as Error | null, demoUrl: undefined as string | undefined, demoFails: false, demoFor: [] as unknown[][] }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({ redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); } }));
 vi.mock("../../server/auth.ts", () => ({ signedInMember: async (headers: Headers) => (headers.get("cookie") === "session=ana" ? state.member : null) }));
-vi.mock("../../server/env.ts", () => ({ readEnv: () => ({ openRouterUrl: "https://openrouter.ai/api/v1", setup: { model: "deepseek/deepseek-v4.1-flash", apiKey: "sk-or-v1-unused" } }) }));
+vi.mock("../../server/env.ts", () => ({ readEnv: () => ({ openRouterUrl: "https://openrouter.ai/api/v1", setup: { model: "deepseek/deepseek-v4.1-flash", apiKey: "sk-or-v1-unused" }, demoUrl: state.demoUrl }) }));
+vi.mock("../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => work({ orgId }) }));
+vi.mock("../../projects/demo.ts", () => ({
+  demoProject: async (tx: { orgId: string }, orgId: string, url: string) => {
+    state.demoFor.push([tx.orgId, orgId, url]);
+    if (state.demoFails) throw new Error("db down");
+    return "demo-project";
+  },
+}));
 vi.mock("../../server/db.ts", () => ({ getDb: () => ({}), getKeyring: () => ({}) }));
 vi.mock("../../server/log.ts", () => ({ logError: async () => {}, writeLog: async () => {} }));
 vi.mock("@usetrawler/core/setup", async (importOriginal) => ({ ...(await importOriginal<typeof import("@usetrawler/core/setup")>()), createModel: () => ({}) }));
@@ -24,7 +32,7 @@ vi.mock("../../setup/propose.ts", async (importOriginal) => {
   };
 });
 
-const { describeProductAction, proposePeopleAction, readProductAction } = await import("./actions.ts");
+const { describeProductAction, proposePeopleAction, readProductAction, tryDemoAction } = await import("./actions.ts");
 const { SetupModelFailed } = await import("@usetrawler/core/setup");
 const DRAFT = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const ana: Member = { userId: "u1", email: "ana@acme.test", orgId: "org-2", orgName: "Acme workspace", role: "member" };
@@ -33,6 +41,20 @@ beforeEach(() => {
   state.member = null;
   state.calls = [];
   state.failWith = null;
+  state.demoUrl = undefined;
+  state.demoFails = false;
+  state.demoFor = [];
+});
+
+test("Try our demo opens the workspace's demo project, set up in that workspace, and says so plainly when it cannot", async () => {
+  await expect(tryDemoAction()).rejects.toMatchObject({ to: "/sign-in" });
+  state.member = ana;
+  expect(await tryDemoAction()).toEqual({ error: "The demo is not available on this server." });
+  state.demoUrl = "https://demo.usetrawler.test/";
+  await expect(tryDemoAction()).rejects.toMatchObject({ to: "/projects/demo-project" });
+  expect(state.demoFor).toEqual([["org-2", "org-2", "https://demo.usetrawler.test/"]]);
+  state.demoFails = true;
+  expect(await tryDemoAction()).toEqual({ error: "The demo could not be set up. Try again in a moment." });
 });
 
 test("a session that no longer belongs to any workspace is sent to sign in, and nothing is read or proposed", async () => {

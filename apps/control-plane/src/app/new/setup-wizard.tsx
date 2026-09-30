@@ -92,7 +92,7 @@ export function Progress({ step, host }: { step: Step; host: string }) {
   );
 }
 
-export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], initialDescription }: { intro?: React.ReactNode; projectId?: string; projectHost?: string; chosenBefore?: string[]; initialDescription?: string }) {
+export function SetupWizard({ intro, demo, projectId, projectHost, chosenBefore = [], initialDescription }: { intro?: React.ReactNode; demo?: React.ReactNode; projectId?: string; projectHost?: string; chosenBefore?: string[]; initialDescription?: string }) {
   const [stage, setStage] = useState<Stage>({ kind: "address" });
   const [url, setUrl] = useState("");
   const [extra, setExtra] = useState("");
@@ -137,24 +137,27 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
 
   if (stage.kind === "address") {
     return (
-      <form className="flex flex-col gap-6" onSubmit={(e) => { e.preventDefault(); analyse(); }}>
-        {intro}
-        <label className="flex flex-col gap-2">
-          <span className="text-sm text-muted">Product URL</span>
-          <input
-            name="url" type="text" inputMode="url" autoComplete="url" required value={url} onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://app.example.com"
-            className="h-14 border border-line bg-soft px-4 font-mono text-base outline-none focus:border-ink"
-          />
-        </label>
-        {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
-        <div className="flex flex-col-reverse items-stretch justify-between gap-4 border-t border-line pt-6 sm:flex-row sm:items-center">
-          <p className="text-sm text-muted">Next: confirm what the product does and which features to try.</p>
-          <button type="submit" disabled={pending} className="flex h-12 items-center justify-between gap-6 bg-action px-5 font-mono text-sm tracking-[0.12em] text-[#17191c] uppercase transition hover:brightness-110 disabled:opacity-70">
-            Analyse product <span aria-hidden>→</span>
-          </button>
-        </div>
-      </form>
+      <div className="flex flex-col gap-6">
+        <form className="flex flex-col gap-6" onSubmit={(e) => { e.preventDefault(); analyse(); }}>
+          {intro}
+          <label className="flex flex-col gap-2">
+            <span className="text-sm text-muted">Product URL</span>
+            <input
+              name="url" type="text" inputMode="url" autoComplete="url" required value={url} onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://app.example.com"
+              className="h-14 border border-line bg-soft px-4 font-mono text-base outline-none focus:border-ink"
+            />
+          </label>
+          {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
+          <div className="flex flex-col-reverse items-stretch justify-between gap-4 border-t border-line pt-6 sm:flex-row sm:items-center">
+            <p className="text-sm text-muted">Next: confirm what the product does and which features to try.</p>
+            <button type="submit" disabled={pending} className="flex h-12 items-center justify-between gap-6 bg-action px-5 font-mono text-sm tracking-[0.12em] text-[#17191c] uppercase transition hover:brightness-110 disabled:opacity-70">
+              Analyse product <span aria-hidden>→</span>
+            </button>
+          </div>
+        </form>
+        {demo}
+      </div>
     );
   }
 
