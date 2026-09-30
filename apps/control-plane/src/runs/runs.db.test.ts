@@ -65,7 +65,6 @@ async function drain() {
 }
 
 describe("a whole run", () => {
-
   test("roles, then a replay and a judge per defect, then the run finishes", async () => {
     await drain();
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));

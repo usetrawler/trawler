@@ -181,9 +181,20 @@ function readable(address: string): string {
   }
 }
 
+function readableQuery(search: string): string {
+  if (!search) return "";
+  return `?${search.slice(1).split("&").map((part) => {
+    try {
+      return decodeURIComponent(part.replace(/\+/g, " "));
+    } catch {
+      return part;
+    }
+  }).join("&")}`;
+}
+
 export function pageLabel(url: string | null, target: string): string | null {
   if (!url || !URL.canParse(url)) return null;
   const page = new URL(url);
-  const where = readable(`${page.pathname}${page.search}`);
+  const where = `${readable(page.pathname)}${readableQuery(page.search)}`;
   return URL.canParse(target) && new URL(target).host === page.host ? where : `${page.host}${where}`;
 }

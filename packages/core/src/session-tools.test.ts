@@ -41,8 +41,11 @@ describe("submit_finding", () => {
     expect(findingUrl("https://ana:pw@app.acme.test/reset?step=2&token=abc&Session_ID=s1&api_key=k&code=c&q=a%20b~#access_token=xyz")).toBe(`https://app.acme.test/reset?step=2&token=${M}&Session_ID=${M}&api_key=${M}&code=${M}&q=a%20b~`);
     expect(findingUrl("https://a.test/p?sid=1&PHPSESSID=2&pwd=3&hmac=4&hash=5&X-Amz-Signature=6&accessToken=7")).toBe(`https://a.test/p?sid=${M}&PHPSESSID=${M}&pwd=${M}&hmac=${M}&hash=${M}&X-Amz-Signature=${M}&accessToken=${M}`);
     expect(findingUrl("https://a.test/search?keyword=fern&author=ana&zipcode=10115&design=x")).toBe("https://a.test/search?keyword=fern&author=ana&zipcode=10115&design=x");
-    expect(findingUrl("https://a.test/login?next=%2Finvite%2Faccept%3Ftoken%3Dabc123secret")).toBe(`https://a.test/login?next=${encodeURIComponent(`/invite/accept?token=${M}`)}`);
-    expect(findingUrl("https://a.test/sso?returnTo=https%3A%2F%2Fa.test%2Fback%3Fcode%3Dxyz%23frag")).toBe(`https://a.test/sso?returnTo=${encodeURIComponent(`https://a.test/back?code=${M}`)}`);
+    expect(findingUrl("https://a.test/login?next=%2Finvite%2Faccept%3Ftoken%3Dabc123secret")).toBe(`https://a.test/login?next=%2Finvite%2Faccept%3Ftoken%3D${M}`);
+    expect(findingUrl("https://a.test/x?accesstoken=a&authtoken=b&sessionid=c&refreshtoken=d&passcode=1&apitoken=e&secretkey=f&oauthtoken=g")).toBe(`https://a.test/x?accesstoken=${M}&authtoken=${M}&sessionid=${M}&refreshtoken=${M}&passcode=${M}&apitoken=${M}&secretkey=${M}&oauthtoken=${M}`);
+    expect(findingUrl("https://a.test/search?q=what%3F&page=2")).toBe("https://a.test/search?q=what%3F&page=2");
+    expect(findingUrl("https://a.test/blog/how-to-setup-2fa-in-2024-guide")).toBe("https://a.test/blog/how-to-setup-2fa-in-2024-guide");
+    expect(findingUrl("https://a.test/sso?returnTo=https%3A%2F%2Fa.test%2Fback%3Fcode%3Dxyz%23frag")).toBe(`https://a.test/sso?returnTo=https%3A%2F%2Fa.test%2Fback%3Fcode%3D${M}`);
     expect(findingUrl("https://a.test/reset-password/9f8e7d6c5b4a39281706f5e4d3c2b1a0")).toBe(`https://a.test/reset-password/${M}`);
     expect(findingUrl("https://a.test/accept-invite/abcdefgh/done")).toBe(`https://a.test/accept-invite/${M}/done`);
     expect(findingUrl("https://a.test/app;jsessionid=ABC123/cart")).toBe("https://a.test/app/cart");

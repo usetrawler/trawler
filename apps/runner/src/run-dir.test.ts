@@ -27,7 +27,7 @@ const summary: RunSummary = {
   roles: [{
     persona: "a", stoppedBy: "finish", goals: [{ goal: "g", status: "reached", note: "" }],
     findings: [
-      { id: "f1", kind: "defect", goal: "g", title: "Broken save", observed: "Save returned 500", reproduction: ["Open /x", "Click Save"], severity: "high", url: "https://a.test/x?step=2", quote: "I pressed Save and lost my work." },
+      { id: "f1", kind: "defect", goal: "g", title: "Broken save", observed: "Save returned 500", reproduction: ["Open /x", "Click Save"], severity: "high", url: "https://a.test/x?step=2&token=%E2%80%A2%E2%80%A2%E2%80%A2", quote: "I pressed Save and lost my work." },
       { id: "f2", kind: "friction", goal: "g", title: "Hidden billing", observed: "o", reproduction: ["x"], severity: "low" },
       { id: "f3", kind: "defect", goal: "g", title: "Flaky export", observed: "o", reproduction: ["x", "y"], severity: "low" },
       { id: "f4", kind: "defect", goal: "g", title: "Never checked", observed: "o", reproduction: ["x", "y"], severity: "low" },
@@ -44,7 +44,7 @@ test("report groups findings by verdict and shows cost and the replay", () => {
   expect(md).toContain("Total $1.23 of $5.00.");
   expect(md).toContain("| role:a | m1 | 10 | $1.23 |");
   expect(md).toMatch(/## Confirmed defects[\s\S]*Broken save[\s\S]*Replay: carried out every step\. Internal Server Error/);
-  expect(md).toMatch(/### Broken save\ndefect, high, a \/ g\nPage: https:\/\/a\.test\/x\?step=2\n\nSave returned 500\n\n> I pressed Save and lost my work\.\n/);
+  expect(md).toMatch(/### Broken save\ndefect, high, a \/ g\nPage: https:\/\/a\.test\/x\?step=2&token=•••\n\nSave returned 500\n\n> I pressed Save and lost my work\.\n/);
   expect(md).toMatch(/### Hidden billing\nfriction, low, a \/ g\n\no\n\n1\. x/);
   expect(md).toMatch(/## Refuted defects[\s\S]*Flaky export[\s\S]*could not carry out step 2/);
   expect(md).toMatch(/## Friction[\s\S]*Hidden billing/);

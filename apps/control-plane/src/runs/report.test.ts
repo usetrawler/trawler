@@ -356,6 +356,8 @@ test("a finding's page reads as its path and query on the product, and names the
   expect(pageLabel("https://login.acme.test/sso", "https://app.acme.test/")).toBe("login.acme.test/sso");
   expect(pageLabel(null, "https://app.acme.test/")).toBeNull();
   expect(pageLabel("not a url", "https://app.acme.test/")).toBeNull();
-  expect(pageLabel("https://app.acme.test/reset?token=%E2%80%A2%E2%80%A2%E2%80%A2&next=%2Fhome", "https://app.acme.test/")).toBe("/reset?token=•••&next=%2Fhome");
+  expect(pageLabel("https://app.acme.test/reset?token=%E2%80%A2%E2%80%A2%E2%80%A2&next=%2Fhome", "https://app.acme.test/")).toBe("/reset?token=•••&next=/home");
   expect(pageLabel("https://app.acme.test/a%ZZb", "https://app.acme.test/")).toBe("/a%ZZb");
+  expect(pageLabel("https://app.acme.test/login?next=%2Finvite%2Faccept%3Ftoken%3D%E2%80%A2%E2%80%A2%E2%80%A2", "https://app.acme.test/")).toBe("/login?next=/invite/accept?token=•••");
+  expect(pageLabel("https://app.acme.test/faktury/zaleg%C5%82e", "https://app.acme.test/")).toBe("/faktury/zaległe");
 });

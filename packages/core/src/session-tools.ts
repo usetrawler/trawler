@@ -60,8 +60,9 @@ function wordsOf(name: string): string[] {
   return name.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 }
 
-const secretName = (name: string) => wordsOf(name).some((w) => SECRET_WORDS.has(w) || w.startsWith("aspsessionid"));
-const looksLikeSecret = (segment: string) => segment.length >= 20 && /[a-z]/i.test(segment) && /\d/.test(segment) && /^[\w-]+$/.test(segment) && !UUID_SEGMENT.test(segment);
+const SECRET_PART = /token|secret|passw|passcode|session|sessid|signature|credential|jwt|apikey/;
+const secretName = (name: string) => SECRET_PART.test(name.toLowerCase()) || wordsOf(name).some((w) => SECRET_WORDS.has(w));
+const looksLikeSecret = (segment: string) => segment.length >= 20 && /[a-z]/i.test(segment) && /\d/.test(segment) && /^[\w-]+$/.test(segment) && (segment.match(/-/g)?.length ?? 0) < 3 && !UUID_SEGMENT.test(segment);
 
 function safeDecode(value: string): string {
   try {
@@ -80,7 +81,7 @@ function maskedQuery(search: string): string {
     const value = part.slice(at + 1);
     if (secretName(safeDecode(name))) return `${name}=${MASKED}`;
     const inner = safeDecode(value);
-    if (inner.includes("?") || /^[a-z][a-z0-9+.-]*:\/\//i.test(inner)) return `${name}=${encodeURIComponent(maskedAddress(inner))}`;
+    if (/^(\/|[a-z][a-z0-9+.-]*:\/\/)/i.test(inner)) return `${name}=${encodeURIComponent(maskedAddress(inner)).replaceAll(encodeURIComponent(MASKED), MASKED)}`;
     return part;
   });
   return `?${parts.join("&")}`;
