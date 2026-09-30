@@ -21,7 +21,7 @@ test("Chromium is launched with that environment, not the runner's, so a page th
   vi.stubEnv("TRAWLER_RUNNER_TOKEN", secrets.TRAWLER_RUNNER_TOKEN);
   vi.stubEnv("OPENROUTER_API_KEY", secrets.OPENROUTER_API_KEY);
   vi.stubEnv("PATH", "/usr/bin");
-  await expect(openBrowser({ allowedOrigins: ["https://app.acme.test"], outputDir: "/tmp/unused", scrubber: new SecretScrubber([]), onBlocked: () => {} })).rejects.toThrow("stop after launch options");
+  await expect(openBrowser({ allowedOrigins: ["https://app.acme.test"], outputDir: "/tmp/unused", scrubber: new SecretScrubber(), onBlocked: () => {} })).rejects.toThrow("stop after launch options");
   vi.unstubAllEnvs();
   const env = launched.options[0]!.env as Record<string, string>;
   expect(env.PATH).toBe("/usr/bin");
