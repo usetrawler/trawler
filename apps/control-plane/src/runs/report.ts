@@ -134,7 +134,7 @@ export function runView(s: RunSummary) {
       reason: judgingAgain(f) ? "Judging again…" : whyNotJudged(lastJudge(f)!, s.status, s.cancelReason, capSpent),
       action: (judgingAgain(f) ? "judging" : live ? "after_run" : capSpent ? "cap_spent" : "judge_again") as JudgeAgainState,
     })),
-    notJudged: settled.filter((f) => !f.verdict).map((f) => ({ ...withPersona(f), reason: notJudgedReason(f, live, failedReplay(f), live && byKind("group").some((j) => OPEN.has(j.status))) })),
+    notJudged: settled.filter((f) => !f.verdict).map((f) => ({ ...withPersona(f), reason: notJudgedReason(f, live, failedReplay(f), grouping) })),
     friction: s.findings.filter((f) => f.kind === "friction").map(withPersona),
   };
 
