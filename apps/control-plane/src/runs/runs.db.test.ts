@@ -166,11 +166,12 @@ describe("a whole run", () => {
   });
 
   test("a group job that fails or is never answered leaves every defect on its own, and each is replayed", async () => {
-    for (const end of ["failed", "released"] as const) {
+    for (const end of ["failed", "failed with groups", "expired"] as const) {
       await rolesReport(saveBroken);
       const group = (await claimPastChecks())!;
       expect(group.kind).toBe("group");
       if (end === "failed") await completeJob(t.db, group.token, { usage: usage(0), stoppedBy: "error", error: "the model did not group the defects (2 tries)" });
+      else if (end === "failed with groups") await completeJob(t.db, group.token, { usage: usage(0), stoppedBy: "error", error: "the runner could not report events", groups: [["ana:f1", "ana:f2", "lee:f1"]] });
       else await sql`update jobs set lease_until = now() - interval '1 minute' where id = ${group.jobId}`.execute(t.db);
       const replayed: string[] = [];
       for (let job = await claimPastChecks(); job; job = await claimPastChecks()) {
@@ -179,6 +180,32 @@ describe("a whole run", () => {
       }
       expect(replayed).toEqual(["ana:f1", "ana:f2", "lee:f1"]);
     }
+  });
+
+  test("a group job handed back by a stopping runner is grouped by the next runner", async () => {
+    await rolesReport(saveBroken);
+    const group = (await claimPastChecks())!;
+    await releaseJob(t.db, group);
+    const again = (await claimPastChecks())!;
+    expect(again).toMatchObject({ kind: "group", jobId: group.jobId });
+    await completeJob(t.db, again.token, { usage: usage(0), stoppedBy: "done", groups: [["ana:f1", "lee:f1"]] });
+    expect(await claimPastChecks()).toMatchObject({ kind: "replay", finding: { id: "ana:f1" } });
+  });
+
+  test("when the first report's steps cannot be followed, the next report of its group is replayed in its place and becomes the one shown", async () => {
+    const run = await rolesReport(saveBroken);
+    const group = (await claimPastChecks())!;
+    await completeJob(t.db, group.token, { usage: usage(0), stoppedBy: "done", groups: [["ana:f1", "lee:f1"], ["ana:f2"]] });
+    const lost = { completed: false, observed: "the replay session wrote no report", blockedAt: null };
+    const seen: string[] = [];
+    for (let job = await claimPastChecks(); job; job = await claimPastChecks()) {
+      seen.push(`${job.kind} ${job.finding!.id}`);
+      const followed = job.kind === "replay" && job.finding!.id === "lee:f1";
+      await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: job.kind === "judge" ? "done" : "report", observation: followed ? { completed: true, observed: "Nothing saved", blockedAt: null } : lost });
+    }
+    expect(seen).toEqual(["replay ana:f1", "replay ana:f2", "replay lee:f1", "judge lee:f1"]);
+    const summary = (await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!;
+    expect(summary.findings.map((f) => [f.key, f.sameAs])).toEqual([["ana:f1", "lee:f1"], ["ana:f2", null], ["lee:f1", null]]);
   });
 
   test("a single defect goes straight to its replay, with no group job", async () => {

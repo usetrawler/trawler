@@ -173,7 +173,7 @@ export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused 
           {detail && <p className="break-words"><span className="text-muted">Why it was not judged: </span>{detail}</p>}
           {f.sameReports.length > 0 && (
             <div className="flex flex-col gap-3 border-t border-line pt-3">
-              <p className={`${label} text-muted`}>Also reported by {[...new Set(f.sameReports.map((other) => other.personaName))].join(", ")}</p>
+              <p className={`${label} text-muted`}>Also reported by {[...new Set(f.sameReports.map((other) => (other.personaName === f.personaName ? `${other.personaName} again` : other.personaName)))].join(", ")}</p>
               {f.sameReports.map((other) => (
                 <div key={other.key} className="flex flex-col gap-1">
                   <p><strong>{other.personaName}</strong><span className="text-muted">, while trying to: </span>{other.goalText}</p>

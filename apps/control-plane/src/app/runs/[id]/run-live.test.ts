@@ -88,7 +88,7 @@ test("a defect several people found is one row naming each of them once, that op
   const [row] = rows(html, "Confirmed");
   expect(text(row!)).toContain("01 · Ana, Lee Park Saving an invoice fails");
   expect(text(row!)).toContain("Ana , while trying to: Get an account.");
-  expect(text(row!)).toContain("Also reported by Lee Park, Ana");
+  expect(text(row!)).toContain("Also reported by Lee Park, Ana again");
   expect(text(row!)).toContain("Lee Park , while trying to: Send an invoice. Reported as: Invoice will not save What they saw: o Open Invoices. Press Save twice.");
   expect(row).toContain('href="/captures/11111111-1111-4111-8111-111111111111"');
   expect(text(band(html))).toContain("Verified 1 of 2 reported");

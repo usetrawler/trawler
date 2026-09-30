@@ -14,6 +14,11 @@ import { turnSteps } from "./models.ts";
 import { ACCOUNT_REFUSED, affordableOutputTokens, capSpent, endRun, giveBackUnusedFirstRun, signUpSeedContext, type CancelReason, type ConfigSnapshot, type PaidBy } from "./runs.ts";
 
 const LEASE_MINUTES = 10;
+const GROUPED_OBSERVED_CHARS = 600;
+const GROUPED_STEPS = 12;
+const GROUPED_STEP_CHARS = 200;
+
+const clipped = (text: string, max: number) => (Array.from(text).length > max ? `${Array.from(text).slice(0, max - 1).join("")}…` : text);
 const ACTIVE = ["queued", "running"];
 
 export class InvalidJobToken extends Error {
@@ -270,8 +275,8 @@ async function defectsToGroup(tx: Tx, runId: string, config: ProjectConfig): Pro
     person: config.personas.find((p) => p.id === row.persona_key)?.name ?? row.persona_key,
     goal: config.goals.find((g) => g.id === row.goal)?.instruction ?? row.goal,
     title: row.title,
-    observed: row.observed,
-    reproduction: row.reproduction as string[],
+    observed: clipped(row.observed, GROUPED_OBSERVED_CHARS),
+    reproduction: (row.reproduction as string[]).slice(0, GROUPED_STEPS).map((step) => clipped(step, GROUPED_STEP_CHARS)),
   }));
 }
 
@@ -514,6 +519,15 @@ async function queueReplays(tx: Tx, job: { run_id: string; org_id: string }, nex
   if (keys.length) await tx.insertInto("jobs").values(keys.map((key, i) => ({ org_id: job.org_id, run_id: job.run_id, kind: "replay", position: next + i, finding_key: key }))).execute();
 }
 
+async function handOverToNextReport(tx: Tx, runId: string, key: string): Promise<string | null> {
+  const successor = await defectsOf(tx, runId).select("key").where("same_as", "=", key).limit(1).executeTakeFirst();
+  if (!successor) return null;
+  const now = new Date();
+  await tx.updateTable("findings").set({ same_as: null, updated_at: now }).where("run_id", "=", runId).where("key", "=", successor.key).execute();
+  await tx.updateTable("findings").set({ same_as: successor.key, updated_at: now }).where("run_id", "=", runId).where((eb) => eb.or([eb("same_as", "=", key), eb("key", "=", key)])).execute();
+  return successor.key;
+}
+
 async function planNext(tx: Tx, job: { run_id: string; org_id: string; kind: string; finding_key: string | null }, result: JobResult) {
   const { next } = await tx.selectFrom("jobs").select(sql<number>`coalesce(max(position), -1) + 1`.as("next")).where("run_id", "=", job.run_id).executeTakeFirstOrThrow();
   if (job.kind === "role_session") {
@@ -526,7 +540,7 @@ async function planNext(tx: Tx, job: { run_id: string; org_id: string; kind: str
     }
   } else if (job.kind === "group") {
     const keys = (await defectsOf(tx, job.run_id).select("key").execute()).map((d) => d.key);
-    const groups = result.groups ? settleGroups(keys, result.groups) : keys.map((key) => [key]);
+    const groups = result.groups && result.stoppedBy !== "error" ? settleGroups(keys, result.groups) : keys.map((key) => [key]);
     const firstReported = groups.map((group) => group.toSorted((a, b) => keys.indexOf(a) - keys.indexOf(b)));
     for (const [representative, ...same] of firstReported) {
       if (same.length) await tx.updateTable("findings").set({ same_as: representative, updated_at: new Date() }).where("run_id", "=", job.run_id).where("key", "in", same).execute();
@@ -534,6 +548,9 @@ async function planNext(tx: Tx, job: { run_id: string; org_id: string; kind: str
     await queueReplays(tx, job, next, keys.filter((key) => firstReported.some((group) => group[0] === key)));
   } else if (job.kind === "replay" && !noReport(result.observation)) {
     await tx.insertInto("jobs").values({ org_id: job.org_id, run_id: job.run_id, kind: "judge", position: next, finding_key: job.finding_key }).execute();
+  } else if (job.kind === "replay" && result.observation) {
+    const successor = await handOverToNextReport(tx, job.run_id, job.finding_key!);
+    if (successor) await queueReplays(tx, job, next, [successor]);
   }
   const open = await tx.selectFrom("jobs").select("id").where("run_id", "=", job.run_id).where("status", "in", ["queued", "leased"]).executeTakeFirst();
   if (!open) {
