@@ -1,11 +1,11 @@
 import { expect, test } from "vitest";
-import { runView } from "./report.ts";
+import { pageLabel, runView } from "./report.ts";
 import type { RunSummary } from "./runs.ts";
 
 const job = (kind: string, status: string, extra: Partial<RunSummary["jobs"][number]> = {}) =>
   ({ id: `${kind}-${status}-${Math.random()}`, kind, status, persona_key: null, finding_key: null, usage: null, stopped_by: null, error: null, requested: false, ...extra }) as RunSummary["jobs"][number];
 const finding = (key: string, persona: string, extra: Partial<RunSummary["findings"][number]> = {}) =>
-  ({ key, personaKey: persona, kind: "defect", goal: "g", title: key, observed: "o", reproduction: ["a", "b"], severity: "high", replay: null, verdict: null, sameAs: null, ...extra }) as RunSummary["findings"][number];
+  ({ key, personaKey: persona, kind: "defect", goal: "g", title: key, observed: "o", reproduction: ["a", "b"], severity: "high", replay: null, verdict: null, sameAs: null, url: null, quote: null, ...extra }) as RunSummary["findings"][number];
 
 function summary(over: Partial<RunSummary>): RunSummary {
   return {
@@ -331,7 +331,7 @@ test("defects that were the same as another count once, under the first report, 
   }));
   expect(view.report.confirmed.map((f) => f.key)).toEqual(["ana:f1"]);
   expect(view.report.confirmed[0]!.sameReports).toEqual([
-    { key: "lee:f1", title: "Save does nothing", observed: "o", screenshots: shots, personaName: "Lee", goalText: "Get in.", reproduction: ["Open /x", "Press Save"] },
+    { key: "lee:f1", title: "Save does nothing", observed: "o", screenshots: shots, personaName: "Lee", goalText: "Get in.", reproduction: ["Open /x", "Press Save"], page: null, quote: null },
     expect.objectContaining({ key: "lee:f2", personaName: "Lee" }),
   ]);
   expect(view.report.notJudged).toEqual([]);
@@ -349,4 +349,11 @@ test("a run stopped while or right after the defects were grouped, before any re
   const view = runView(summary({ status: "cancelled", jobs: [job("role_session", "succeeded", { persona_key: "ana" }), job("role_session", "succeeded", { persona_key: "lee" }), job("group", "succeeded")], findings: [finding("ana:f1", "ana"), finding("lee:f1", "lee")] }));
   expect(view.stages.map((s) => s.state)).toEqual(["done", "skipped", "skipped", "done"]);
   expect(view.report.notJudged.map((f) => f.reason)).toEqual(["The run ended before it was replayed.", "The run ended before it was replayed."]);
+});
+
+test("a finding's page reads as its path and query on the product, and names the host only on another origin", () => {
+  expect(pageLabel("https://app.acme.test/invoices/new?step=2", "https://app.acme.test/")).toBe("/invoices/new?step=2");
+  expect(pageLabel("https://login.acme.test/sso", "https://app.acme.test/")).toBe("login.acme.test/sso");
+  expect(pageLabel(null, "https://app.acme.test/")).toBeNull();
+  expect(pageLabel("not a url", "https://app.acme.test/")).toBeNull();
 });

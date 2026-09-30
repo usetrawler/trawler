@@ -79,7 +79,7 @@ describe("a whole run", () => {
     const events = [
       ev({ type: "job_started", jobId: first.jobId, kind: "role_session" }),
       ev({ type: "step", jobId: first.jobId, step: 1, tool: "browser_snapshot", costUsd: 0.01 }),
-      ev({ type: "finding", jobId: first.jobId, finding: defect }),
+      ev({ type: "finding", jobId: first.jobId, finding: { ...defect, url: "https://app.acme.test/x?step=2", quote: "I saved and it just broke." } }),
       ev({ type: "goal_status", jobId: first.jobId, outcome: { goal: "g", status: "failed", note: "500" } }),
     ];
     expect(await ingestEvents(t.db, first.token, events)).toEqual({ cancel: false });
@@ -91,12 +91,18 @@ describe("a whole run", () => {
     expect(second).toMatchObject({ kind: "role_session", personaKey: "lee" });
     await completeJob(t.db, second.token, { usage: usage(0), stoppedBy: "finish" });
 
+    const stored = (await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.findings[0]!;
+    expect({ url: stored.url, quote: stored.quote }).toEqual({ url: "https://app.acme.test/x?step=2", quote: "I saved and it just broke." });
+
     const replay = (await claimPastChecks())!;
     expect(replay).toMatchObject({ kind: "replay", finding: { id: "ana:f1", title: "Broken save" }, accountRef: "ana", maxSteps: 20 });
+    expect(Object.keys(replay.finding!)).not.toEqual(expect.arrayContaining(["url"]));
+    expect(Object.keys(replay.finding!)).not.toEqual(expect.arrayContaining(["quote"]));
     await completeJob(t.db, replay.token, { usage: usage(0.02), stoppedBy: "report", observation: { completed: true, observed: "Internal Server Error", blockedAt: null } });
 
     const judge = (await claimPastChecks())!;
     expect(judge).toMatchObject({ kind: "judge", finding: { id: "ana:f1" }, observation: { completed: true }, judgeModel: "m/judge" });
+    expect(JSON.stringify(judge.finding)).not.toMatch(/acme\.test\/x|just broke/);
     seq = 0;
     await ingestEvents(t.db, judge.token, [ev({ type: "verdict", jobId: judge.jobId, findingId: "ana:f1", verdict: "confirmed", observed: "Internal Server Error" })]);
     await completeJob(t.db, judge.token, { usage: usage(0.001), stoppedBy: "done" });

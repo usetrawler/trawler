@@ -394,8 +394,8 @@ export async function ingestEvents(db: Database, token: string, events: RunEvent
         const f = { ...e.finding, id: `${job.persona_key}:${e.finding.id}` };
         await tx
           .insertInto("findings")
-          .values({ org_id: job.org_id, run_id: job.run_id, job_id: job.id, key: f.id, persona_key: job.persona_key!, kind: f.kind, goal: f.goal, title: f.title, observed: f.observed, reproduction: JSON.stringify(f.reproduction), severity: f.severity })
-          .onConflict((oc) => oc.columns(["run_id", "key"]).doUpdateSet({ kind: f.kind, goal: f.goal, title: f.title, observed: f.observed, reproduction: JSON.stringify(f.reproduction), severity: f.severity, updated_at: new Date() }).where("findings.job_id", "=", job.id))
+          .values({ org_id: job.org_id, run_id: job.run_id, job_id: job.id, key: f.id, persona_key: job.persona_key!, kind: f.kind, goal: f.goal, title: f.title, observed: f.observed, reproduction: JSON.stringify(f.reproduction), severity: f.severity, url: f.url ?? null, quote: f.quote ?? null })
+          .onConflict((oc) => oc.columns(["run_id", "key"]).doUpdateSet({ kind: f.kind, goal: f.goal, title: f.title, observed: f.observed, reproduction: JSON.stringify(f.reproduction), severity: f.severity, url: f.url ?? null, quote: f.quote ?? null, updated_at: new Date() }).where("findings.job_id", "=", job.id))
           .execute();
       } else if (e.type === "goal_status" && job.kind === "role_session") {
         const o = e.outcome;

@@ -114,7 +114,7 @@ export function runView(s: RunSummary) {
   });
 
   const name = new Map(s.personas.map((p) => [p.id, p.name]));
-  const reported = (f: Finding) => ({ personaName: name.get(f.personaKey) ?? f.personaKey, goalText: goalText.get(f.goal) ?? f.goal, reproduction: f.reproduction as string[] });
+  const reported = (f: Finding) => ({ personaName: name.get(f.personaKey) ?? f.personaKey, goalText: goalText.get(f.goal) ?? f.goal, reproduction: f.reproduction as string[], page: pageLabel(f.url, s.target), quote: f.quote });
   const withPersona = (f: Finding) => {
     const same = s.findings.filter((other) => other.sameAs === f.key);
     return {
@@ -171,4 +171,11 @@ function headline(s: RunSummary, confirmed: number, defects: number, replaysAllF
   if (replaysAllFailed) return `${prefix}None of the reported defects could be checked: every replay failed.`;
   if (defects > 0) return `${prefix}None of the reported defects was confirmed.`;
   return `${prefix}No defects found.`;
+}
+
+export function pageLabel(url: string | null, target: string): string | null {
+  if (!url || !URL.canParse(url)) return null;
+  const page = new URL(url);
+  const where = `${page.pathname}${page.search}`;
+  return URL.canParse(target) && new URL(target).host === page.host ? where : `${page.host}${where}`;
 }

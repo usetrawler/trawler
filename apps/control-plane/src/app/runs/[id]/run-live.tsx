@@ -167,8 +167,15 @@ export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused 
             <p className="mb-1 text-muted">Steps</p>
             <ol className="list-decimal pl-5 break-words">{f.reproduction.map((step, i) => <li key={i}>{step}</li>)}</ol>
           </div>
+          {f.page && <p className="break-words"><span className="text-muted">Page: </span><span className="font-mono text-[13px]">{f.page}</span></p>}
           <FindingScreenshots title={f.title} screenshots={f.screenshots} onOpen={address} />
           <p><span className="text-muted">What happened: </span>{f.observed}</p>
+          {f.quote && (
+            <figure className="flex flex-col gap-1 border-l-2 border-line pl-3">
+              <figcaption className={`${label} text-muted`}>In {f.personaName}&apos;s words</figcaption>
+              <blockquote className="break-words italic">“{f.quote}”</blockquote>
+            </figure>
+          )}
           {replay?.observed && <p><span className="text-muted">What the replay saw: </span>{replay.observed}</p>}
           {detail && <p className="break-words"><span className="text-muted">Why it was not judged: </span>{detail}</p>}
           {f.sameReports.length > 0 && (
@@ -178,7 +185,9 @@ export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused 
                 <div key={other.key} className="flex flex-col gap-1">
                   <p><strong>{other.personaName}</strong><span className="text-muted">, while trying to: </span>{other.goalText}</p>
                   <p className="break-words"><span className="text-muted">Reported as: </span>{other.title}</p>
+                  {other.page && <p className="break-words"><span className="text-muted">Page: </span><span className="font-mono text-[13px]">{other.page}</span></p>}
                   <p className="break-words"><span className="text-muted">What they saw: </span>{other.observed}</p>
+                  {other.quote && <p className="break-words italic"><span className="not-italic text-muted">In their words: </span>“{other.quote}”</p>}
                   <p className="text-muted">Steps</p>
                   <ol className="list-decimal pl-5 break-words">{other.reproduction.map((step, i) => <li key={i}>{step}</li>)}</ol>
                   <FindingScreenshots title={other.title} screenshots={other.screenshots} onOpen={address} />
