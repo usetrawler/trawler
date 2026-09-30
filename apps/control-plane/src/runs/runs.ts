@@ -9,7 +9,8 @@ import type { Provider } from "../llm/providers.ts";
 import { loadProjectConfig, ProjectNotFound } from "../projects/projects.ts";
 import { budgetLeft, budgetSpentMessage, HALTED, monthlyBudget, PAUSED, projectPaused, runsHalted, type MonthlyBudget } from "./limits.ts";
 import { FIRST_RUN_ON_US } from "./models.ts";
-import { peopleLimitMessage, runsPerDayMessage, runsToday, workspacePlan } from "./plans.ts";
+import { peopleLimitMessage, runsPerDayMessage, type WorkspacePlan } from "./plan-limits.ts";
+import { runsToday, workspacePlan } from "./plans.ts";
 import { gaveNoVerdict } from "./report.ts";
 import { runTitle } from "./status.ts";
 
@@ -64,6 +65,12 @@ export class RunInProgress extends RunRefused {
 export class WorkspaceBudgetSpent extends RunRefused {
   constructor(readonly budget: MonthlyBudget) {
     super(budgetSpentMessage(budget));
+  }
+}
+
+export class TooManyPeople extends RunRefused {
+  constructor(readonly plan: WorkspacePlan, readonly people: number) {
+    super(peopleLimitMessage(plan, people));
   }
 }
 
@@ -122,7 +129,7 @@ async function refusalToRun(tx: Tx, orgId: string, projectId: string, paidBy: Pa
   const plan = await workspacePlan(tx, orgId);
   if ((await runsToday(tx, orgId)) >= plan.limits.runsPerDay) return new RunRefused(runsPerDayMessage(plan));
   const people = await peopleOn(tx, projectId);
-  if (people > plan.limits.people) return new RunRefused(peopleLimitMessage(plan, people));
+  if (people > plan.limits.people) return new TooManyPeople(plan, people);
   if (paidBy === "trawler") return null;
   const budget = await monthlyBudget(tx, orgId);
   if (budget && budgetLeft(budget) < 0.01) return new WorkspaceBudgetSpent(budget);

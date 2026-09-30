@@ -9,7 +9,8 @@ import { modelKeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
 import { projectRunCount } from "../../../projects/overview.ts";
 import { FIRST_RUN_ON_US } from "../../../runs/models.ts";
-import { firstRunOnUsLeft, projectRunState, refusalToStart, RunInProgress } from "../../../runs/runs.ts";
+import { firstRunOnUsLeft, projectRunState, refusalToStart, RunInProgress, TooManyPeople } from "../../../runs/runs.ts";
+import { workspacePlan } from "../../../runs/plans.ts";
 import { projectForEditing } from "../../../projects/projects.ts";
 import { canManageBilling, signedInMember } from "../../../server/auth.ts";
 import { getDb } from "../../../server/db.ts";
@@ -33,12 +34,13 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   const { orgId } = member;
   if (!UUID.test(id)) notFound();
   const env = readEnv();
-  const [project, keyHint, runs, runState, onUsLeft] = await withOrg(getDb(), orgId, (tx) =>
-    Promise.all([projectForEditing(tx, orgId, id), modelKeyHint(tx, orgId), projectRunCount(tx, orgId, id), projectRunState(tx, orgId, id), env.setup ? firstRunOnUsLeft(tx, orgId) : false]),
+  const [project, keyHint, runs, runState, onUsLeft, plan] = await withOrg(getDb(), orgId, (tx) =>
+    Promise.all([projectForEditing(tx, orgId, id), modelKeyHint(tx, orgId), projectRunCount(tx, orgId, id), projectRunState(tx, orgId, id), env.setup ? firstRunOnUsLeft(tx, orgId) : false, workspacePlan(tx, orgId)]),
   );
   if (!project || !runState) notFound();
   const offeredOnUs = onUsLeft && project.personas.length <= FIRST_RUN_ON_US.maxPeople;
-  const refusal = await withOrg(getDb(), orgId, (tx) => refusalToStart(tx, orgId, id, offeredOnUs ? "trawler" : "workspace"));
+  const refused = await withOrg(getDb(), orgId, (tx) => refusalToStart(tx, orgId, id, offeredOnUs ? "trawler" : "workspace"));
+  const refusal = refused instanceof TooManyPeople ? null : refused;
   const shell = await shellFor(member);
   return (
     <AppShell shell={shell} current={{ project: id }} wide>
@@ -62,6 +64,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           canManageKey={canManageBilling(member)}
           authorisedBefore={runs > 0}
           firstRunOnUs={onUsLeft}
+          workspacePlan={plan}
           startRefusal={refusal ? { message: refusal.message, ...(refusal instanceof RunInProgress ? { activeRun: refusal.run } : {}) } : undefined}
         />
       </div>
