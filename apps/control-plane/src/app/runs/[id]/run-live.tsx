@@ -179,6 +179,7 @@ export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused 
                   <p><strong>{other.personaName}</strong><span className="text-muted">, while trying to: </span>{other.goalText}</p>
                   <p className="break-words"><span className="text-muted">Reported as: </span>{other.title}</p>
                   <p className="break-words"><span className="text-muted">What they saw: </span>{other.observed}</p>
+                  <p className="text-muted">Steps</p>
                   <ol className="list-decimal pl-5 break-words">{other.reproduction.map((step, i) => <li key={i}>{step}</li>)}</ol>
                   <FindingScreenshots title={other.title} screenshots={other.screenshots} onOpen={address} />
                 </div>
