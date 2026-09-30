@@ -40,6 +40,16 @@ async function connected<T>(url: string, work: (client: pg.Client) => Promise<T>
   }
 }
 
+// pg-pool resolves end() before its idle clients have closed; dropping under them makes the pool emit an unhandled error.
+async function untilDisconnected(c: pg.Client, name: string, timeoutMs = 5000): Promise<number> {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const { rows } = await c.query<{ n: number }>("SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1 AND backend_type = 'client backend'", [name]);
+    if (rows[0]!.n === 0 || Date.now() >= until) return rows[0]!.n;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 export async function testDb(): Promise<{ db: Database; url: string; name: string; drop: () => Promise<void> }> {
   const name = `trawler_test_${randomUUID().replaceAll("-", "")}`;
   await onServer((c) => c.query(`CREATE DATABASE ${name} TEMPLATE ${inject("testTemplate")}`));
@@ -49,7 +59,12 @@ export async function testDb(): Promise<{ db: Database; url: string; name: strin
     db, url, name,
     drop: async () => {
       await db.destroy();
-      await onServer((c) => c.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`));
+      const open = await onServer(async (c) => {
+        const left = await untilDisconnected(c, name);
+        await c.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+        return left;
+      });
+      if (open) throw new Error(`test database ${name} still had ${open} open connection(s) 5 s after its pool closed; a test left a pool or client open`);
     },
   };
 }
