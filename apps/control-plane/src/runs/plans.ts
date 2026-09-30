@@ -24,14 +24,20 @@ export async function runsToday(tx: Tx, orgId: string): Promise<number> {
   return Number(row.n);
 }
 
-export async function projectLimitReached(tx: Tx, orgId: string): Promise<WorkspacePlan | null> {
+export interface ProjectLimit {
+  plan: WorkspacePlan;
+  projects: number;
+}
+
+export async function projectLimitReached(tx: Tx, orgId: string): Promise<ProjectLimit | null> {
   const plan = await workspacePlan(tx, orgId);
-  return (await projectsCounted(tx, orgId)) >= plan.limits.projects ? plan : null;
+  const projects = await projectsCounted(tx, orgId);
+  return projects >= plan.limits.projects ? { plan, projects } : null;
 }
 
 export class ProjectLimitReached extends Error {
-  constructor(readonly plan: WorkspacePlan) {
-    super(projectLimitMessage(plan));
+  constructor(readonly limit: ProjectLimit) {
+    super(projectLimitMessage(limit.plan, limit.projects));
   }
 }
 
