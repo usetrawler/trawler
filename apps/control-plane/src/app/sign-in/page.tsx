@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { signedInPerson, signInProviders } from "../../server/auth.ts";
 import { BrandMark } from "../../components/brand-mark.tsx";
 import { DocsLink } from "../../components/docs-link.tsx";
+import { LegalLinks } from "../../components/legal-links.tsx";
 import { SignInButtons } from "./sign-in-buttons.tsx";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +30,7 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
         <p className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Sign in</p>
         {error && <p role="alert" className="text-sm text-bad">Signing in did not work. Please try again.</p>}
         <SignInButtons providers={signInProviders()} />
+        <LegalLinks lead="By signing in you accept" />
       </section>
     </main>
   );

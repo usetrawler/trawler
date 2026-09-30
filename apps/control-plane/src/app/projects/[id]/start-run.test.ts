@@ -97,3 +97,12 @@ test("while a run on Trawler starts the button says Starting, and while a key is
   expect(label(false)).toBe("Starting…→");
   expect(label(true)).toBe("Checking the key…→");
 });
+
+test("the Start panel links to the terms and the privacy notice, whether or not the product had a run", () => {
+  for (const authorisedBefore of [false, true]) {
+    const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme", personas: 2, keyHint: null, canManageKey: true, authorisedBefore }));
+    expect(html.replace(/<[^>]+>/g, "")).toContain("Hosted runs follow the Terms ↗ (opens in a new tab) and the Privacy notice ↗ (opens in a new tab).");
+    expect(html).toContain('href="https://usetrawler.com/terms/"');
+    expect(html).toContain('href="https://usetrawler.com/privacy/"');
+  }
+});
