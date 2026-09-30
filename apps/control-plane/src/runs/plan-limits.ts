@@ -26,8 +26,8 @@ const CONTACT = "contact@usetrawler.com";
 const moreOn = (plan: WorkspacePlanName) => (plan === "free" ? `write to ${CONTACT} about the Team plan` : `write to ${CONTACT} to raise it`);
 const counted = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-export function projectLimitMessage({ plan, limits }: WorkspacePlan): string {
-  return `The ${PLAN_LABEL[plan]} plan includes ${counted(limits.projects, "project", "projects")}, and this workspace has ${counted(limits.projects, "project", "projects")} already. Plan new runs on the one you have, test other products on your own machine with the local runner, or ${moreOn(plan)}.`;
+export function projectLimitMessage({ plan, limits }: WorkspacePlan, projects: number): string {
+  return `The ${PLAN_LABEL[plan]} plan includes ${counted(limits.projects, "project", "projects")}, and this workspace has ${counted(projects, "project", "projects")} already. Plan new runs on the one you have, test other products on your own machine with the local runner, or ${moreOn(plan)}.`;
 }
 
 export function runsPerDayMessage({ plan, limits }: WorkspacePlan): string {

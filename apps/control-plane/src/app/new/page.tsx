@@ -25,7 +25,7 @@ export default async function NewProjectPage() {
         <div className="flex max-w-2xl flex-col gap-4">
           <p className="font-mono text-xs tracking-[0.2em] text-action-ink uppercase">New project</p>
           <h1 className="text-4xl leading-[0.95] font-bold tracking-tight md:text-6xl">This workspace has all its projects.</h1>
-          <p className="text-lg text-muted">{projectLimitMessage(limit)}</p>
+          <p className="text-lg text-muted">{projectLimitMessage(limit.plan, limit.projects)}</p>
           <p><Link href="/" className="underline underline-offset-4 hover:text-action-ink">Go to your projects</Link></p>
         </div>
       </AppShell>

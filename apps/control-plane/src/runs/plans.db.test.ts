@@ -67,6 +67,14 @@ describe("projects per workspace", () => {
     for (let i = 0; i < 5; i++) await enterprise.create();
   });
 
+  test("a workspace over its limit, such as one that had more projects before plans, is told how many it has", async () => {
+    const w = await workspace("enterprise");
+    await w.create();
+    await w.create();
+    await asSystem(t.db, (tx) => tx.deleteFrom("workspace_plans").where("org_id", "=", w.org).execute());
+    expect((await refusal(w.create()) as Error).message).toMatch(/^The Free plan includes 1 project, and this workspace has 2 projects already\./);
+  });
+
   test("two projects created at once on Free leave exactly one", async () => {
     const w = await workspace();
     const results = await Promise.allSettled([w.create(), w.create()]);
@@ -159,6 +167,20 @@ describe("the queue", () => {
       await sql`update jobs set status = 'succeeded', token_hash = null, lease_until = null, finished_at = now() where id = ${job!.jobId}`.execute(t.db);
     }
     expect(order).toEqual([paid.id, big.id, older.id, newer.id]);
+  });
+});
+
+describe("the queue once a run has started", () => {
+  test("a Free run that has started keeps its place ahead of a Team run that has not, so it is not starved into its time limit", async () => {
+    const free = await workspace();
+    const started = await free.start(await free.create(plan(2)));
+    const first = await claimJob(t.db, keys);
+    expect(first!.runId).toBe(started.id);
+    await sql`update jobs set status = 'succeeded', token_hash = null, lease_until = null, finished_at = now() where id = ${first!.jobId}`.execute(t.db);
+    const team = await workspace("team");
+    const paid = await team.start(await team.create(plan(1)));
+    expect((await claimJob(t.db, keys))!.runId).toBe(started.id);
+    expect((await claimJob(t.db, keys))!.runId).toBe(paid.id);
   });
 });
 

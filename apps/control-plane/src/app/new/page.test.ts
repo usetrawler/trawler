@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
 type Member = { userId: string; name: string; email: string; orgId: string; orgName: string; role: string };
-const state = vi.hoisted(() => ({ member: null as { userId: string; name: string; email: string; orgId: string; orgName: string; role: string } | null, shells: [] as string[], limit: null as null | { plan: "free" | "team" | "enterprise"; limits: { projects: number; runsPerDay: number; people: number } } }));
+const state = vi.hoisted(() => ({ member: null as { userId: string; name: string; email: string; orgId: string; orgName: string; role: string } | null, shells: [] as string[], limit: null as null | { plan: { plan: "free" | "team" | "enterprise"; limits: { projects: number; runsPerDay: number; people: number } }; projects: number } }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({ redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); } }));
@@ -54,10 +54,10 @@ test("Sign out sits in the header on a phone and under the nav on wider screens,
 });
 
 test("a workspace at its plan's project limit is told so, with what to do, instead of the setup", async () => {
-  state.limit = { plan: "free", limits: { projects: 1, runsPerDay: 3, people: 4 } };
+  state.limit = { plan: { plan: "free", limits: { projects: 1, runsPerDay: 3, people: 4 } }, projects: 2 };
   const html = renderToStaticMarkup(await NewProjectPage());
   expect(html).toContain(">This workspace has all its projects.</h1>");
-  expect(html).toContain("The Free plan includes 1 project, and this workspace has 1 project already.");
+  expect(html).toContain("The Free plan includes 1 project, and this workspace has 2 projects already.");
   expect(html).toContain('<a href="/"');
   expect(html).not.toContain("What should Trawler use?");
 });

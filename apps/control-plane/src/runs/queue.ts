@@ -141,6 +141,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
       .where("p.paused_at", "is", null)
       .where((eb) => eb.or([eb("r.status", "in", ACTIVE), eb("j.requested_by", "is not", null)]))
       .where((eb) => eb.not(eb.exists(eb.selectFrom("jobs as busy").select("busy.id").whereRef("busy.run_id", "=", "j.run_id").where("busy.status", "=", "leased"))))
+      .orderBy(sql`r.started_at is null`)
       .orderBy(sql`coalesce(wp.plan, 'free') = 'free'`)
       .orderBy("r.created_at")
       .orderBy("j.position")
