@@ -44,6 +44,8 @@ describe("submit_finding", () => {
     expect(findingUrl("https://a.test/login?next=%2Finvite%2Faccept%3Ftoken%3Dabc123secret")).toBe(`https://a.test/login?next=%2Finvite%2Faccept%3Ftoken%3D${M}`);
     expect(findingUrl("https://a.test/x?accesstoken=a&authtoken=b&sessionid=c&refreshtoken=d&passcode=1&apitoken=e&secretkey=f&oauthtoken=g")).toBe(`https://a.test/x?accesstoken=${M}&authtoken=${M}&sessionid=${M}&refreshtoken=${M}&passcode=${M}&apitoken=${M}&secretkey=${M}&oauthtoken=${M}`);
     expect(findingUrl("https://a.test/search?q=what%3F&page=2")).toBe("https://a.test/search?q=what%3F&page=2");
+    expect(findingUrl("https://a.test/docs?path=/docs/intro&next=%2Fhome")).toBe("https://a.test/docs?path=/docs/intro&next=%2Fhome");
+    expect(findingUrl("https://a.test/d/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc123def")).toBe(`https://a.test/d/${M}`);
     expect(findingUrl("https://a.test/blog/how-to-setup-2fa-in-2024-guide")).toBe("https://a.test/blog/how-to-setup-2fa-in-2024-guide");
     expect(findingUrl("https://a.test/sso?returnTo=https%3A%2F%2Fa.test%2Fback%3Fcode%3Dxyz%23frag")).toBe(`https://a.test/sso?returnTo=https%3A%2F%2Fa.test%2Fback%3Fcode%3D${M}`);
     expect(findingUrl("https://a.test/reset-password/9f8e7d6c5b4a39281706f5e4d3c2b1a0")).toBe(`https://a.test/reset-password/${M}`);
