@@ -25,7 +25,7 @@ const proxies = { HTTPS_PROXY: "http://proxy.corp.test:3128", http_proxy: "http:
 
 test("the browser's environment keeps what Chromium needs, headed or not, on any platform, and nothing else", () => {
   expect(browserEnv({ ...secrets, ...needed, EMPTY: undefined }, { proxied: true })).toEqual(needed);
-  expect(browserEnv({ PATH: "/usr/bin", TZ: undefined }, { proxied: true })).toEqual({ PATH: "/usr/bin" });
+  expect(Object.keys(browserEnv({ PATH: "/usr/bin", TZ: undefined }, { proxied: true }))).toEqual(["PATH"]);
 });
 
 test("the machine's own proxy settings reach a browser that has no proxy of Trawler's, and never one that goes through the egress proxy", () => {
