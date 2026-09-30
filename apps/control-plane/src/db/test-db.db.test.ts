@@ -1,6 +1,7 @@
 import { sql } from "kysely";
+import pg from "pg";
 import { afterAll, expect, test } from "vitest";
-import { testDb } from "./test-db.ts";
+import { onServer, testDb } from "./test-db.ts";
 
 const first = await testDb();
 afterAll(() => first.drop());
@@ -24,4 +25,19 @@ test("dropping a test database removes it", async () => {
   await third.drop();
   const { rows } = await sql<{ n: number }>`select count(*)::int as n from pg_database where datname = ${name}`.execute(first.db);
   expect(rows[0]!.n).toBe(0);
+});
+
+test("dropping a test database waits for a connection that is still closing instead of killing it, which is how a pool's closing clients raised an unhandled error", async () => {
+  const t = await testDb();
+  const closing = new pg.Client({ connectionString: t.url });
+  await closing.connect();
+  const errors: string[] = [];
+  closing.on("error", (err: Error & { code?: string }) => errors.push(err.code ?? err.message));
+  const dropped = t.drop();
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  expect(errors).toEqual([]);
+  await closing.end();
+  await dropped;
+  expect(errors).toEqual([]);
+  expect((await onServer((c) => c.query("SELECT 1 FROM pg_database WHERE datname = $1", [t.name]))).rowCount).toBe(0);
 });
