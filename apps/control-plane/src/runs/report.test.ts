@@ -356,4 +356,6 @@ test("a finding's page reads as its path and query on the product, and names the
   expect(pageLabel("https://login.acme.test/sso", "https://app.acme.test/")).toBe("login.acme.test/sso");
   expect(pageLabel(null, "https://app.acme.test/")).toBeNull();
   expect(pageLabel("not a url", "https://app.acme.test/")).toBeNull();
+  expect(pageLabel("https://app.acme.test/reset?token=%E2%80%A2%E2%80%A2%E2%80%A2&next=%2Fhome", "https://app.acme.test/")).toBe("/reset?token=•••&next=%2Fhome");
+  expect(pageLabel("https://app.acme.test/a%ZZb", "https://app.acme.test/")).toBe("/a%ZZb");
 });

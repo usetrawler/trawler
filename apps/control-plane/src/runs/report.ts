@@ -173,9 +173,17 @@ function headline(s: RunSummary, confirmed: number, defects: number, replaysAllF
   return `${prefix}No defects found.`;
 }
 
+function readable(address: string): string {
+  try {
+    return decodeURI(address);
+  } catch {
+    return address;
+  }
+}
+
 export function pageLabel(url: string | null, target: string): string | null {
   if (!url || !URL.canParse(url)) return null;
   const page = new URL(url);
-  const where = `${page.pathname}${page.search}`;
+  const where = readable(`${page.pathname}${page.search}`);
   return URL.canParse(target) && new URL(target).host === page.host ? where : `${page.host}${where}`;
 }
