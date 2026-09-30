@@ -427,6 +427,14 @@ function withoutFileParameters(t: Tool): Tool {
   return { ...t, inputSchema: jsonSchema({ ...schema, properties, required: (schema.required ?? []).filter((r) => !FILE_PARAMETERS.includes(r)) }) } as Tool;
 }
 
+const BROWSER_ENV = /^(PATH|HOME|TMPDIR|TMP|TEMP|LANG|LANGUAGE|LC_[A-Z_]+|TZ|XDG_[A-Z_]+|FONTCONFIG_(FILE|PATH)|DISPLAY|WAYLAND_DISPLAY|XAUTHORITY|DBUS_SESSION_BUS_ADDRESS|SYSTEMROOT|SYSTEMDRIVE|WINDIR|HOMEDRIVE|HOMEPATH|USERNAME|USERPROFILE|APPDATA|LOCALAPPDATA|PROGRAMDATA|ALLUSERSPROFILE|PROGRAMFILES|PROGRAMFILES\(X86\)|PROGRAMW6432|COMMONPROGRAMFILES|COMSPEC|PATHEXT|NUMBER_OF_PROCESSORS|PROCESSOR_ARCHITECTURE)$/i;
+const PROXY_ENV = /^(HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY|AUTO_PROXY|SOCKS_SERVER|SOCKS_VERSION)$/i;
+
+export function browserEnv(env: NodeJS.ProcessEnv, { proxied }: { proxied: boolean }): Record<string, string> {
+  const kept = (name: string) => BROWSER_ENV.test(name) || (!proxied && PROXY_ENV.test(name));
+  return Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined && kept(entry[0])));
+}
+
 export async function openBrowser(opts: {
   allowedOrigins: string[];
   httpCredentials?: { username: string; password: string };
@@ -458,7 +466,7 @@ export async function openBrowser(opts: {
   let blockedNavigation: string | null = null;
 
   await registerEngines();
-  const chrome = await chromium.launch({ headless: opts.headless ?? true, proxy: opts.proxy, args: opts.proxy ? ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"] : [], handleSIGTERM: !opts.survivesSignals, handleSIGINT: !opts.survivesSignals, handleSIGHUP: !opts.survivesSignals });
+  const chrome = await chromium.launch({ headless: opts.headless ?? true, env: browserEnv(process.env, { proxied: Boolean(opts.proxy) }), proxy: opts.proxy, args: opts.proxy ? ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"] : [], handleSIGTERM: !opts.survivesSignals, handleSIGINT: !opts.survivesSignals, handleSIGHUP: !opts.survivesSignals });
   let disconnected = false;
   chrome.on("disconnected", () => (disconnected = true));
   try {
