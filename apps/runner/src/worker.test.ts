@@ -69,14 +69,14 @@ function fakeControlPlane(job: unknown, opts: { cancelAfter?: number; cancelOnFi
   return new Promise<{ url: string; seen: typeof seen }>((resolve) => server!.listen(0, "127.0.0.1", () => resolve({ url: `http://127.0.0.1:${(server!.address() as { port: number }).port}`, seen })));
 }
 
-const browser = async () => ({ tools: {}, fillField: async () => "typed", screenshot: async () => null, close: async () => {} });
+const browser = async () => ({ tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => {} });
 
 function deps(url: string, model: ReturnType<typeof scriptedModel>, over: Partial<WorkerDeps> = {}): WorkerDeps {
   return { controlPlane: url, runnerToken: "runner-" + "r".repeat(40), model: () => model, openBrowser: browser, log: () => {}, flushMs: 20, retryBaseMs: 10, ...over };
 }
 
 const shot = { bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]), contentType: "image/png" as const };
-const shooting = async () => ({ tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => "the page" }) }, fillField: async () => "typed", screenshot: async () => shot, close: async () => {} });
+const shooting = async () => ({ tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => "the page" }) }, fillField: async () => "typed", screenshot: async () => shot, pageUrl: () => null, close: async () => {} });
 const reportsDefect = () => scriptedModel([
   toolCall("browser_snapshot", {}),
   toolCall("submit_finding", { kind: "defect", goal: "g", title: "Broken", observed: "500", reproduction: ["Open /", "Click Save"], severity: "high" }),

@@ -27,6 +27,7 @@ function fakeBrowsers() {
       tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => (onBlocked("https://evil.test/?p=hunter22-secret"), "page") }) },
       fillField: async () => "typed",
       screenshot: async () => null,
+      pageUrl: () => null,
       close: async () => void closed++,
     };
   };
@@ -100,7 +101,7 @@ test("a browser that fails to close does not end the run", async () => {
   const agent = scriptedModel([signedIn, ...finished("p1"), ...finished("p2")]);
   const summary = await localRun({
     project, agentModel: agent, agentModelId: "a", judgeModel: agent, judgeModelId: "a", budgetUsd: 5, maxSteps: 10, replaySteps: 10,
-    emit: () => {}, openBrowser: async () => ({ tools: {}, fillField: async () => "typed", screenshot: async () => null, close: async () => { throw new Error("already gone"); } }),
+    emit: () => {}, openBrowser: async () => ({ tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => { throw new Error("already gone"); } }),
   });
   expect(summary.roles.map((r) => r.stoppedBy)).toEqual(["finish", "finish"]);
 });
@@ -110,7 +111,7 @@ test("a job that throws does not end the run; its role is recorded as an error",
   let n = 0;
   const open: OpenBrowser = async () => {
     if (n++ === 1) throw new Error("browserType.launch: Timeout exceeded with hunter22-secret");
-    return { tools: seeing, fillField: async () => "typed", screenshot: async () => null, close: async () => {} };
+    return { tools: seeing, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => {} };
   };
   const summary = await localRun({
     project, agentModel: agent, agentModelId: "a", judgeModel: agent, judgeModelId: "a", budgetUsd: 5, maxSteps: 10, replaySteps: 10,
@@ -171,7 +172,7 @@ test("failed jobs are recorded as events and replay failures leave a trace", asy
   const open: OpenBrowser = async () => {
     n++;
     if (n === 3 || n === 4) throw new Error("no chromium hunter22-secret");
-    return { tools: seeing, fillField: async () => "typed", screenshot: async () => null, close: async () => {} };
+    return { tools: seeing, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => {} };
   };
   const events: RunEventInput[] = [];
   const summary = await localRun({

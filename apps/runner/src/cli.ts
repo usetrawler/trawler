@@ -179,7 +179,7 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
       };
       try {
         const browser = await deps.openBrowser({ project, outputDir, headless: true, onBlocked, scrubber, survivesSignals: true, proxy: session?.proxy });
-        return { tools: browser.tools, fillField: (ref, text, kind) => browser.fillField(ref, text, kind), screenshot: () => browser.screenshot(), close: () => browser.close().finally(finish) };
+        return { tools: browser.tools, fillField: (ref, text, kind) => browser.fillField(ref, text, kind), screenshot: () => browser.screenshot(), pageUrl: () => browser.pageUrl(), close: () => browser.close().finally(finish) };
       } catch (err) {
         await finish();
         throw err;

@@ -2,7 +2,7 @@ import { generateText, isStepCount } from "ai";
 import { describe, expect, test, vi } from "vitest";
 import type { RunEventInput } from "@usetrawler/protocol";
 import { SecretScrubber } from "./secrets.ts";
-import { madeUpEmail, madeUpPassword, newSessionState, ownPasswordTool, sessionTools } from "./session-tools.ts";
+import { findingUrl, madeUpEmail, madeUpPassword, newSessionState, ownPasswordTool, sessionTools } from "./session-tools.ts";
 import { scriptedModel, text, toolCall } from "./testing.ts";
 
 const goals = [{ id: "sign-up", instruction: "Create an account." }, { id: "invoice", instruction: "Send an invoice." }];
@@ -22,6 +22,28 @@ function setup(over: Partial<Parameters<typeof sessionTools>[0]> = {}) {
 }
 
 describe("submit_finding", () => {
+  test("records the page the browser is on, never an address the model gives, and the person's words on one line", async () => {
+    const { tools, events } = setup({ pageUrl: () => "https://app.acme.test/signup?step=2#top" });
+    const said = "  I clicked Submit\n and   nothing told me why.  ";
+    expect(await tools.submit_finding.execute!({ ...finding, quote: said, url: "https://evil.test/made-up" } as typeof finding, ctx)).toBe("recorded f1");
+    expect(events[0]).toMatchObject({ type: "finding", finding: { url: "https://app.acme.test/signup?step=2", quote: "I clicked Submit and nothing told me why." } });
+    const blind = setup({ pageUrl: () => null });
+    await blind.tools.submit_finding.execute!({ ...finding, quote: "   ", url: "https://evil.test/made-up" } as typeof finding, ctx);
+    expect(Object.keys((blind.events[0] as { finding: object }).finding)).not.toEqual(expect.arrayContaining(["url"]));
+    expect(blind.events[0]).not.toMatchObject({ finding: { quote: expect.anything() } });
+    const long = setup({ pageUrl: () => "https://app.acme.test/" });
+    await long.tools.submit_finding.execute!({ ...finding, quote: "x".repeat(400) }, ctx);
+    expect((long.events[0] as { finding: { quote: string } }).finding.quote).toHaveLength(300);
+  });
+
+  test("a page address keeps its path and harmless query, and loses its fragment, credentials and the values of anything that looks like a secret", () => {
+    expect(findingUrl("https://ana:pw@app.acme.test/reset?step=2&token=abc&Session_ID=s1&api_key=k&code=c&next=%2Fhome#access_token=xyz")).toBe("https://app.acme.test/reset?step=2&token=%E2%80%A2%E2%80%A2%E2%80%A2&Session_ID=%E2%80%A2%E2%80%A2%E2%80%A2&api_key=%E2%80%A2%E2%80%A2%E2%80%A2&code=%E2%80%A2%E2%80%A2%E2%80%A2&next=%2Fhome");
+    expect(findingUrl("about:blank")).toBeUndefined();
+    expect(findingUrl("data:text/html,hi")).toBeUndefined();
+    expect(findingUrl(null)).toBeUndefined();
+    expect(findingUrl(`https://app.acme.test/p?q=${"a".repeat(5000)}`)).toBe("https://app.acme.test/p");
+  });
+
   test("refuses a finding while the model is not looking at the page", async () => {
     const { tools, state, events } = setup();
     state.page = "unseen";

@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { tool } from "ai";
 import { z } from "zod";
-import { FindingSchema, type Finding, type Goal, type GoalOutcome, type RunEventInput, type TargetAccount, MAX_GOAL_NOTE, MAX_NOTE } from "@usetrawler/protocol";
+import { FindingSchema, type Finding, type Goal, type GoalOutcome, type RunEventInput, type TargetAccount, MAX_GOAL_NOTE, MAX_NOTE, MAX_QUOTE, MAX_URL } from "@usetrawler/protocol";
 import { MIN_SECRET_LENGTH, type SecretScrubber } from "./secrets.ts";
 
 export interface SessionState {
@@ -51,6 +51,28 @@ function lower(value: unknown): unknown {
   return typeof value === "string" ? value.trim().toLowerCase() : value;
 }
 
+const SENSITIVE_PARAM = /token|code|key|secret|pass|sig|auth|session|jwt|otp|nonce|state|ticket|credential/i;
+
+export function findingUrl(raw: string | null | undefined): string | undefined {
+  if (!raw || !URL.canParse(raw)) return undefined;
+  const url = new URL(raw);
+  if (!/^https?:$/.test(url.protocol)) return undefined;
+  url.hash = "";
+  url.username = "";
+  url.password = "";
+  for (const name of new Set(url.searchParams.keys())) {
+    if (SENSITIVE_PARAM.test(name)) url.searchParams.set(name, "•••");
+  }
+  const kept = url.toString();
+  return kept.length <= MAX_URL ? kept : `${url.origin}${url.pathname}`.slice(0, MAX_URL);
+}
+
+function oneLine(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const line = value.replace(/\s+/g, " ").trim();
+  return line ? Array.from(line).slice(0, MAX_QUOTE).join("") : undefined;
+}
+
 function steps(value: unknown): unknown {
   if (typeof value !== "string") return value;
   return value.split("\n").map((s) => s.replace(/^\s*(?:\d+[.)]|[-*•])\s+/, "").trim()).filter(Boolean);
@@ -66,6 +88,7 @@ export function sessionTools(opts: {
   scrubber: SecretScrubber;
   newId: () => string;
   capture?: (findingId: string) => Promise<void>;
+  pageUrl?: () => string | null;
 }) {
   const { state, emit, jobId } = opts;
   const goalIds = () => [...state.goals.keys()];
@@ -89,7 +112,7 @@ export function sessionTools(opts: {
     }),
     submit_finding: tool({
       description:
-        "Record a defect or a friction the moment you have seen it. All fields are required. kind: defect | friction. severity: low | medium | high. reproduction: the literal actions, one per array item, with no expected or actual result (that goes in observed); a defect needs at least two.",
+        "Record a defect or a friction the moment you have seen it. kind, goal, title, observed, reproduction and severity are required. kind: defect | friction. severity: low | medium | high. reproduction: the literal actions, one per array item, with no expected or actual result (that goes in observed); a defect needs at least two. quote: optional, one sentence in your own voice about how this felt, as you would say it to a friend.",
       inputSchema: z.object({
         kind: z.string().nullish(),
         goal: z.string().nullish(),
@@ -97,13 +120,19 @@ export function sessionTools(opts: {
         observed: z.string().nullish(),
         reproduction: z.union([z.array(z.string()), z.string()]).nullish(),
         severity: z.string().nullish(),
+        quote: z.string().nullish(),
       }),
       execute: async (input) => {
         if (state.finished !== null) return CLOSED;
         if (state.page !== "seen") return state.page === "unseen" ? "rejected: you have not looked at the product yet; open it and take a browser_snapshot, then report what it shows" : "rejected: your last browser action failed, so you are not looking at the page any more; take a browser_snapshot and report what it shows";
         const goal = lower(input.goal);
         if (typeof goal !== "string" || !state.goals.has(goal)) return unknownGoal(input.goal);
-        const candidate = { ...input, goal, kind: lower(input.kind), severity: lower(input.severity), reproduction: steps(input.reproduction), id: "pending" };
+        const url = findingUrl(opts.pageUrl?.());
+        const said = oneLine(input.quote);
+        const candidate = {
+          id: "pending", goal, kind: lower(input.kind), title: input.title, observed: input.observed, reproduction: steps(input.reproduction), severity: lower(input.severity),
+          ...(url ? { url } : {}), ...(said ? { quote: said } : {}),
+        };
         const parsed = FindingSchema.safeParse(candidate);
         if (!parsed.success) {
           const tooFew = candidate.kind === "defect" && Array.isArray(candidate.reproduction) && candidate.reproduction.length < 2;
