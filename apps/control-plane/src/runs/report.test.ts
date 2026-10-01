@@ -1,11 +1,11 @@
 import { expect, test } from "vitest";
-import { pageLabel, runView } from "./report.ts";
+import { pageLabel, runView, stepsWithPeople } from "./report.ts";
 import type { RunSummary } from "./runs.ts";
 
 const job = (kind: string, status: string, extra: Partial<RunSummary["jobs"][number]> = {}) =>
   ({ id: `${kind}-${status}-${Math.random()}`, kind, status, persona_key: null, finding_key: null, usage: null, stopped_by: null, error: null, requested: false, ...extra }) as RunSummary["jobs"][number];
 const finding = (key: string, persona: string, extra: Partial<RunSummary["findings"][number]> = {}) =>
-  ({ key, personaKey: persona, kind: "defect", goal: "g", title: key, observed: "o", reproduction: ["a", "b"], severity: "high", replay: null, verdict: null, sameAs: null, url: null, quote: null, ...extra }) as RunSummary["findings"][number];
+  ({ key, personaKey: persona, kind: "defect", goal: "g", title: key, observed: "o", reproduction: ["a", "b"], severity: "high", replay: null, verdict: null, sameAs: null, url: null, quote: null, stepPeople: null, ...extra }) as RunSummary["findings"][number];
 
 function summary(over: Partial<RunSummary>): RunSummary {
   return {
@@ -360,4 +360,13 @@ test("a finding's page reads as its path and query on the product, and names the
   expect(pageLabel("https://app.acme.test/a%ZZb", "https://app.acme.test/")).toBe("/a%ZZb");
   expect(pageLabel("https://app.acme.test/login?next=%2Finvite%2Faccept%3Ftoken%3D%E2%80%A2%E2%80%A2%E2%80%A2", "https://app.acme.test/")).toBe("/login?next=/invite/accept?token=•••");
   expect(pageLabel("https://app.acme.test/faktury/zaleg%C5%82e", "https://app.acme.test/")).toBe("/faktury/zaległe");
+});
+
+test("a report's steps name who did each one when the finding records it, and stay as they were otherwise", () => {
+  const name = new Map([["priya", "Priya"], ["marco", "Marco"]]);
+  expect(stepsWithPeople(["Submit Solar", "Click Accept"], ["priya", "marco"], name)).toEqual(["Priya: Submit Solar", "Marco: Click Accept"]);
+  expect(stepsWithPeople(["Submit Solar", "Click Accept"], null, name)).toEqual(["Submit Solar", "Click Accept"]);
+  expect(stepsWithPeople(["a", "b"], ["gone", "marco"], name)).toEqual(["gone: a", "Marco: b"]);
+  const view = runView(summary({ status: "succeeded", findings: [finding("ana:f1", "ana", { verdict: "confirmed", reproduction: ["Invite Lee", "Open the invite"], stepPeople: ["ana", "lee"] })] }));
+  expect(view.report.confirmed[0]!.reproduction).toEqual(["Ana: Invite Lee", "Lee: Open the invite"]);
 });
