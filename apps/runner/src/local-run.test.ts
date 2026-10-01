@@ -247,3 +247,26 @@ test("a test account the product refuses stops the run before any person spends 
   expect(summary.jobs.map((j) => j.jobId)).toEqual(["account:acct"]);
   expect(browsers.opened).toHaveLength(1);
 });
+
+test("a defect that needs two people is replayed in two browsers, one per person, and both are closed", async () => {
+  const agent = scriptedModel([signedIn,
+    toolCall("browser_snapshot", {}),
+    toolCall("submit_finding", { kind: "defect", goal: "g", title: "Broken", observed: "o", reproduction: ["B: Submit the form", "Open the result"], severity: "high" }),
+    ...finished("p1 done"),
+    ...finished("p2 done"),
+    toolCall("browser_snapshot", {}),
+    toolCall("act_as", { person: "A" }),
+    toolCall("browser_snapshot", {}),
+    toolCall("report_replay", { completed: true, observed: "It broke", blockedAt: null }),
+  ]);
+  const judgeModel = scriptedModel([text(JSON.stringify({ verdict: "confirmed" }))]);
+  const browsers = fakeBrowsers();
+  const summary = await localRun({
+    project, agentModel: agent, agentModelId: "a", judgeModel, judgeModelId: "j", budgetUsd: 5, maxSteps: 10, replaySteps: 10,
+    emit: () => {}, openBrowser: browsers.open,
+  });
+  expect(summary.roles[0]!.findings[0]).toMatchObject({ reproduction: ["Submit the form", "Open the result"], by: ["p2", "p1"] });
+  expect(summary.verdicts).toEqual({ f1: "confirmed" });
+  expect(browsers.opened).toHaveLength(5);
+  expect(browsers.closed()).toBe(5);
+});
