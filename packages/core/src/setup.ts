@@ -283,7 +283,7 @@ const humanName = (name: string) => humanWords(name) && !slug(name).split("-").s
 const firstName = (name: string) => name.trim().split(/\s+/)[0]!;
 const CALENDAR = new Set(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "today", "tomorrow", "yesterday", "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]);
 const NOT_PEOPLE = new Set(["everyone", "everybody", "someone", "somebody", "anyone", "anybody", "nobody", "no-one", "i", "you", "we", "they", "he", "she", "it", "the", "a", "an", "this", "that", "your", "my", "our", "their", "his", "her"]);
-const NAMED_ACTOR = /(?<=(?:^|\s)\p{Ll}+[,;:]? )(\p{Lu}\p{Ll}+)(?:['’]s\b| (?:submitted|sent|created|approved|reviewed|rejected|posted|shared|invited|requested|made|wrote|added|uploaded|booked|ordered|assigned|accepted|declined|edited|updated|deleted|published)\b)/gu;
+const NAMED_ACTOR = /(?<=(?:^|\s)\p{Ll}+[,;:]? )(\p{Lu}\p{Ll}+)(['’]s\b| (?:submitted|sent|created|approved|reviewed|rejected|posted|shared|invited|requested|made|wrote|added|uploaded|booked|ordered|assigned|accepted|declined|edited|updated|deleted|published)\b)/gu;
 const mentions = (text: string, name: string) => new RegExp(`(^|[^\\p{L}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\p{L}]|$)`, "iu").test(text);
 
 function dependencyOrder<G extends { from: string; personaId: string; needs?: z.infer<typeof GoalRef>[] }>(goals: G[]): G[] | null {
@@ -331,12 +331,12 @@ function teamProblems(answer: { personas: z.infer<typeof PersonProposal>[]; play
   const productWords = new Set(product.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
   for (const p of people) {
     for (const g of p.goals) {
-      for (const [, actor] of g.instruction.matchAll(NAMED_ACTOR)) {
+      for (const [, actor, how] of g.instruction.matchAll(NAMED_ACTOR)) {
         const word = actor!.toLowerCase();
         if (CALENDAR.has(word) || NOT_PEOPLE.has(word) || productWords.has(word)) continue;
         const other = personByName.get(word);
         if (!other) problems.push(`goal ${JSON.stringify(g.id)} of ${JSON.stringify(p.id)} names ${actor}, who is not in this plan; refer to people only by the names in this plan`);
-        else if (other !== p && !(g.needs ?? []).some((ref) => slug(ref.person) === slug(other.id))) problems.push(`goal ${JSON.stringify(g.id)} of ${JSON.stringify(p.id)} relies on what ${actor} did; list the goal of ${JSON.stringify(other.id)} it needs in its needs`);
+        else if (other !== p && !/^['’]/.test(how!) && !(g.needs ?? []).some((ref) => slug(ref.person) === slug(other.id))) problems.push(`goal ${JSON.stringify(g.id)} of ${JSON.stringify(p.id)} relies on what ${actor} did; list the goal of ${JSON.stringify(other.id)} it needs in its needs`);
       }
     }
   }

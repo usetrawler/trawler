@@ -457,6 +457,18 @@ describe("proposePeople", () => {
     }
   });
 
+  test("a goal that acts on another person's record does not need what that person did, and names that are not people stay out of the check", async () => {
+    const entitle = { personas: [
+      { id: "admin", name: "Ben", brief: "You run HR.", signsIn: true, goals: [{ id: "entitle", instruction: "A leave entitlement is added to Priya's record." }] },
+      { id: "employee", name: "Priya", brief: "You work here.", signsIn: true, goals: [{ id: "request", instruction: "A leave request is submitted against the entitlement Ben added.", needs: [{ person: "admin", goal: "entitle" }] }] },
+    ], playOrder: [] };
+    expect(await askedOnce(entitle)).toBe(1);
+    for (const instruction of ["The request shows in Acme's queue.", "The leave is booked for next Monday.", "The team calendar shows the leave for Monday's meeting.", "The rota names everyone; then Everyone's shifts are shown."]) {
+      expect({ instruction, calls: await askedOnce(onePerson(instruction), "Acme") }).toEqual({ instruction, calls: 1 });
+    }
+    expect(await askedOnce(onePerson("The request shows in Zeta's queue."), "Acme")).toBe(2);
+  });
+
   test("a goal may call someone by the first name of their full name in the plan", async () => {
     const full = leave({ names: ["Priya Sharma", "Ben Okafor"], approveText: "The pending leave request Priya submitted is approved." });
     const { model, plan } = leavePlan([full, full]);
