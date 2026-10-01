@@ -268,6 +268,8 @@ function inPlayOrder<G extends { from: string; personaId: string }>(goals: G[], 
 
 const refOf = (ref: z.infer<typeof GoalRef>) => `${slug(ref.person)}\0${slug(ref.goal)}`;
 const HUMAN_NAME = /^\p{Lu}[\p{L}'’.-]*(?: \p{Lu}[\p{L}'’.-]*)?$/u;
+const ROLE_WORDS = new Set(["admin", "administrator", "manager", "employee", "user", "reviewer", "approver", "customer", "client", "owner", "member", "guest", "visitor", "lead", "staff", "hr", "support", "agent", "operator", "editor", "author", "buyer", "seller", "tester", "persona", "person"]);
+const humanName = (name: string, id: string) => HUMAN_NAME.test(name) && !slug(name).split("-").some((w) => ROLE_WORDS.has(w)) && !(slug(name) === slug(id) && slug(id).includes("-"));
 const mentions = (text: string, name: string) => new RegExp(`(^|[^\\p{L}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\p{L}]|$)`, "iu").test(text);
 
 function dependencyOrder<G extends { from: string; personaId: string; needs?: z.infer<typeof GoalRef>[] }>(goals: G[]): G[] | null {
@@ -298,7 +300,7 @@ function teamProblems(answer: { personas: z.infer<typeof PersonProposal>[]; play
   const problems: string[] = [];
   const people = answer.personas.filter(usable);
   for (const p of people) {
-    if (!HUMAN_NAME.test(p.name.trim()) || slug(p.name) === slug(p.id)) problems.push(`person ${JSON.stringify(p.id)} is named ${JSON.stringify(p.name)}; give every person a human first name and keep the role in the brief`);
+    if (!humanName(p.name.trim(), p.id)) problems.push(`person ${JSON.stringify(p.id)} is named ${JSON.stringify(p.name)}; give every person a human first name and keep the role in the brief`);
   }
   const nameOf = new Map(people.map((p) => [slug(p.id), p.name.trim()]));
   const known = new Set(people.flatMap((p) => p.goals.map((g) => `${slug(p.id)}\0${slug(g.id)}`)));

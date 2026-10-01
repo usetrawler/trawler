@@ -407,7 +407,7 @@ describe("proposePeople", () => {
   });
 
   test("people named after their role, or goals calling someone by a name not in the plan, are asked for again with what to fix", async () => {
-    const roles = leave({ names: ["employee", "Leave-Manager"] });
+    const roles = leave({ names: ["employee", "Leave Manager"] });
     const strangers = leave({ approveText: "The pending leave request Maya submitted is approved." });
     const { model, plan } = leavePlan([roles, leave()]);
     expect((await plan).project.personas.map((p) => p.name)).toEqual(["Priya", "Ben"]);
