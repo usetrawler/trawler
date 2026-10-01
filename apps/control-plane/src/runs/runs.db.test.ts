@@ -1024,14 +1024,14 @@ describe("a finding that names who did each step", () => {
     await completeJob(t.db, second.token, { usage: usage(0), stoppedBy: "finish" });
     const summary = (await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!;
     expect(summary.findings.map((f) => f.stepPeople)).toEqual([["lee", first.personaKey], null]);
-    const replays: Array<{ id: string; by: unknown }> = [];
+    const replays: Array<{ id: string; by: unknown; steps: number }> = [];
     for (let i = 0; i < 6; i++) {
       const job = await claimPastChecks();
       if (!job) break;
-      if (job.kind === "replay") replays.push({ id: job.finding!.id, by: job.finding!.by });
+      if (job.kind === "replay") replays.push({ id: job.finding!.id, by: job.finding!.by, steps: job.maxSteps });
       await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "report", observation: { completed: true, observed: "500", blockedAt: null } });
     }
-    expect(replays).toEqual(expect.arrayContaining([{ id: `${first.personaKey}:f1`, by: ["lee", first.personaKey] }, { id: `${first.personaKey}:f2`, by: undefined }]));
+    expect(replays).toEqual(expect.arrayContaining([{ id: `${first.personaKey}:f1`, by: ["lee", first.personaKey], steps: options.replaySteps * 2 }, { id: `${first.personaKey}:f2`, by: undefined, steps: options.replaySteps }]));
     await drain();
   });
 });

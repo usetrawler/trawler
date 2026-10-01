@@ -185,7 +185,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
           finding: finding?.finding,
           observation: finding?.replay,
           ...(defects ? { defects } : {}),
-          maxSteps: picked.kind === "role_session" ? (turn ? turnSteps(turn.goalIds.length, picked.max_steps) : picked.max_steps) : picked.kind === "account_check" ? Math.min(ACCOUNT_CHECK_STEPS, picked.replay_steps) : picked.replay_steps,
+          maxSteps: picked.kind === "role_session" ? (turn ? turnSteps(turn.goalIds.length, picked.max_steps) : picked.max_steps) : picked.kind === "account_check" ? Math.min(ACCOUNT_CHECK_STEPS, picked.replay_steps) : picked.replay_steps * Math.max(1, new Set(finding?.finding.by ?? []).size),
           budgetUsd: Math.max(0, Number(picked.budget_usd) - Number(picked.cost_usd)),
           agentModel: picked.agent_model,
           judgeModel: picked.judge_model,
