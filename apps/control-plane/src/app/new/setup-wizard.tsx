@@ -1,9 +1,11 @@
 "use client";
-import { unstable_isUnrecognizedActionError } from "next/navigation";
+import { unstable_isUnrecognizedActionError, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import type { ProductSummary, SignUp } from "@usetrawler/core/setup";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
-import { describeProductAction, proposePeopleAction, readProductAction } from "./actions.ts";
+import { isRedirectError } from "next/dist/client/components/redirect-error.js";
+import { WORKING_MINUTES, type SetupProgress } from "../../setup/progress.ts";
+import { describeProductAction, proposePeopleAction, readProductAction, setupProgressAction } from "./actions.ts";
 
 const MAX_CHOSEN = 10;
 
@@ -23,16 +25,65 @@ const SIGN_UP_NOTE: Record<SignUp, string> = {
 type Feature = { title: string; summary: string; chosen: boolean };
 type Stage =
   | { kind: "address" }
-  | { kind: "working"; step: Step; host: string }
+  | { kind: "working"; step: Step; host: string; checking?: boolean }
   | { kind: "context"; draftId: string; host: string; description: string; signUp: SignUp; features: Feature[] };
 
-async function outdatedAware<T>(call: () => Promise<T>, redo: string): Promise<T | { ok: false; error: string }> {
+export const LOST = Symbol("the request did not come back");
+
+export async function reached<T>(call: () => Promise<T>, redo: string): Promise<T | { ok: false; error: string } | typeof LOST> {
   try {
     return await call();
   } catch (err) {
-    if (!unstable_isUnrecognizedActionError(err)) throw err;
-    return { ok: false, error: updatedSinceOpened(redo) };
+    if (isRedirectError(err)) throw err;
+    if (unstable_isUnrecognizedActionError(err)) return { ok: false, error: updatedSinceOpened(redo) };
+    return LOST;
   }
+}
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const ASK_EVERY_MS = 3000;
+const TRIES = Math.ceil((WORKING_MINUTES * 60_000) / ASK_EVERY_MS) + 10;
+
+export async function untilSettled(draftId: string, opts: { ask?: (draftId: string) => Promise<SetupProgress>; wait?: (ms: number) => Promise<unknown>; tries?: number; signal?: AbortSignal } = {}): Promise<SetupProgress | "unreachable" | "left"> {
+  const ask = opts.ask ?? setupProgressAction;
+  const wait = opts.wait ?? pause;
+  for (let i = 0; i < (opts.tries ?? TRIES); i++) {
+    await wait(ASK_EVERY_MS);
+    if (opts.signal?.aborted) return "left";
+    try {
+      const progress = await ask(draftId);
+      if (opts.signal?.aborted) return "left";
+      if (progress.state !== "working") return progress;
+    } catch {
+      continue;
+    }
+  }
+  return "unreachable";
+}
+
+export const LOST_MESSAGE = {
+  read: "Trawler did not answer while reading the page. Check your connection and try again.",
+  gone: "Trawler did not answer, and this setup was lost. Start again from the product's address.",
+  failed: "Trawler's setup model could not write a plan this time. Start again from the product's address.",
+  unreachable: "Trawler could not be reached for a few minutes. Check your connection and try again; a project that was already made is not made twice.",
+  notChosen: "Trawler did not answer before it chose the people. Choose them again.",
+};
+
+type Settled = SetupProgress | "unreachable";
+
+export function afterLostProposal(progress: Settled): { open: string } | { error: string; back: "context" | "address" } {
+  if (progress === "unreachable") return { error: LOST_MESSAGE.unreachable, back: "context" };
+  if (progress.state === "failed") return { error: LOST_MESSAGE.failed, back: "address" };
+  if (progress.state === "project") return { open: `/projects/${progress.projectId}` };
+  if (progress.state === "gone") return { error: LOST_MESSAGE.gone, back: "address" };
+  return { error: LOST_MESSAGE.notChosen, back: "context" };
+}
+
+export function afterLostDescription(progress: Settled): { summary: ProductSummary } | { error: string } {
+  if (progress !== "unreachable" && progress.state === "described") return { summary: progress.summary };
+  if (progress === "unreachable") return { error: LOST_MESSAGE.unreachable };
+  return { error: progress.state === "failed" ? LOST_MESSAGE.failed : LOST_MESSAGE.gone };
 }
 
 function hostOf(raw: string): string {
@@ -65,7 +116,7 @@ function Working() {
   );
 }
 
-export function Progress({ step, host }: { step: Step; host: string }) {
+export function Progress({ step, host, checking = false }: { step: Step; host: string; checking?: boolean }) {
   const at = STEPS.findIndex((s) => s.step === step);
   return (
     <div role="status" className="flex flex-col gap-6">
@@ -74,6 +125,7 @@ export function Progress({ step, host }: { step: Step; host: string }) {
         <p className="font-mono text-xs tracking-[0.2em] text-action-ink uppercase">Building your test plan</p>
         <h2 className="text-3xl leading-tight font-bold tracking-tight break-words md:text-5xl">Understanding {host}</h2>
         <p className="max-w-xl text-muted">Trawler reads the product&apos;s page, works out what it does, and then chooses people with different roles and goals. This usually takes 1–2 minutes; keep this page open.</p>
+        {checking && <p className="max-w-xl text-sm text-muted">Trawler did not answer. Checking whether setup finished…</p>}
       </div>
       <ol className="flex flex-col border-t border-line">
         {STEPS.map((s, i) => (
@@ -98,6 +150,16 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
   const [extra, setExtra] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const router = useRouter();
+  const polling = useRef<AbortController | null>(null);
+  useEffect(() => () => polling.current?.abort(), []);
+  const settle = async (draftId: string, step: Step, host: string) => {
+    polling.current?.abort();
+    const controller = new AbortController();
+    polling.current = controller;
+    setStage({ kind: "working", step, host, checking: true });
+    return untilSettled(draftId, { signal: controller.signal });
+  };
 
   const analyse = () => {
     const host = projectHost ?? hostOf(url);
@@ -106,12 +168,23 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
     start(() => describe(host));
   };
   const describe = async (host: string) => {
-    const read = await outdatedAware(() => readProductAction(projectId ? { projectId } : { url }), "Reload the page to analyse the product.");
+    const read = await reached(() => readProductAction(projectId ? { projectId } : { url }), "Reload the page to analyse the product.");
+    if (read === LOST) return (setError(LOST_MESSAGE.read), setStage({ kind: "address" }));
     if (!read.ok) return (setError(read.error), setStage({ kind: "address" }));
     setStage({ kind: "working", step: "describe", host });
-    const described = await outdatedAware(() => describeProductAction(read.draftId), "Reload the page to analyse the product.");
-    if (!described.ok) return (setError(described.error), setStage({ kind: "address" }));
-    const summary = described.summary;
+    const described = await reached(() => describeProductAction(read.draftId), "Reload the page to analyse the product.");
+    let summary: ProductSummary;
+    if (described === LOST) {
+      const settled = await settle(read.draftId, "describe", host);
+      if (settled === "left") return;
+      const after = afterLostDescription(settled);
+      if ("error" in after) return (setError(after.error), setStage({ kind: "address" }));
+      summary = after.summary;
+    } else if (!described.ok) {
+      return (setError(described.error), setStage({ kind: "address" }));
+    } else {
+      summary = described.summary;
+    }
     setStage({ kind: "context", draftId: read.draftId, host, description: initialDescription || summary.description, signUp: summary.signUp, features: featuresFrom(summary, chosenBefore) });
   };
 
@@ -158,7 +231,7 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
     );
   }
 
-  if (stage.kind === "working") return <Progress step={stage.step} host={stage.host} />;
+  if (stage.kind === "working") return <Progress step={stage.step} host={stage.host} checking={stage.checking} />;
 
   const chosen = stage.features.filter((f) => f.chosen);
   const update = (patch: Partial<Extract<Stage, { kind: "context" }>>) => setStage({ ...stage, ...patch });
@@ -175,7 +248,15 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
     const context = stage;
     setStage({ kind: "working", step: "propose", host: stage.host });
     start(async () => {
-      const res = await outdatedAware(() => proposePeopleAction({ draftId: context.draftId, description: context.description, signUp: context.signUp, features: context.features.filter((f) => f.chosen).map((f) => f.title) }), "Reload the page and start again.");
+      const res = await reached(() => proposePeopleAction({ draftId: context.draftId, description: context.description, signUp: context.signUp, features: context.features.filter((f) => f.chosen).map((f) => f.title) }), "Reload the page and start again.");
+      if (res === LOST) {
+        const settled = await settle(context.draftId, "propose", context.host);
+        if (settled === "left") return;
+        const after = afterLostProposal(settled);
+        if ("open" in after) return router.push(after.open);
+        setError(after.error);
+        return setStage(after.back === "context" ? context : { kind: "address" });
+      }
       if (res && !res.ok) {
         setError(res.error);
         setStage(context);
