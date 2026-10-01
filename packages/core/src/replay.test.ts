@@ -567,11 +567,11 @@ describe("a replay with several people", () => {
     expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "report" });
   });
 
-  test("switching and acting in the same step opens the second person's browser once", async () => {
+  test("switching to the same person twice in one step opens their browser once", async () => {
     const log: string[] = [];
     let opened = 0;
-    const model = scriptedModel([[toolCall("act_as", { person: "Marco" }), toolCall("browser_snapshot", {})], report({ completed: true, observed: "ok", blockedAt: null })]);
-    await base({ openBrowser: async () => (opened++, browserFor("b2", log)) }, log, model);
+    const model = scriptedModel([[toolCall("act_as", { person: "Marco" }), toolCall("act_as", { person: "Marco" }), toolCall("browser_snapshot", {})], report({ completed: true, observed: "ok", blockedAt: null })]);
+    await base({ openBrowser: async () => (opened++, await new Promise((r) => setTimeout(r, 20)), browserFor("b2", log)) }, log, model);
     expect(opened).toBe(1);
   });
 
