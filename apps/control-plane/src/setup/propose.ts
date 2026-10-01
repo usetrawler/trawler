@@ -188,7 +188,7 @@ async function proposeClaimed(deps: SetupDeps, input: { orgId: string; descripti
       const config = { ...project, allowedOrigins: [...new Set([...project.allowedOrigins, ...draft.origins])] };
       projectId = await createProject(tx, input.orgId, config, deps.keys, { features, signsIn });
     }
-    await tx.updateTable("setup_drafts").set({ result_project_id: projectId }).where("id", "=", draft.id).execute();
+    await tx.updateTable("setup_drafts").set({ result_project_id: projectId, page: "", docs: null }).where("id", "=", draft.id).execute();
     return projectId;
   });
 }

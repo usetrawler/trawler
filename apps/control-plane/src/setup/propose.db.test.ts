@@ -211,6 +211,7 @@ test("a setup whose answer was lost can be asked about: working while people are
   await sql`update setup_drafts set proposing_at = now() - interval '6 minutes' where id = ${draftId}`.execute(t.db);
   const id = await proposeFromDraft(deps(model), { orgId: "org-lost", draftId, description: "d", features: ["Get paid"] });
   expect(await setupProgress({ db: t.db }, { orgId: "org-lost", draftId })).toEqual({ state: "project", projectId: id });
+  expect((await sql<{ page: string; docs: string | null }>`select page, docs from setup_drafts where id = ${draftId}`.execute(t.db)).rows[0]).toEqual({ page: "", docs: null });
   expect(await proposeFromDraft(deps(model), { orgId: "org-lost", draftId, description: "d", features: ["Get paid"] })).toBe(id);
   const { rows } = await sql<{ n: number }>`select count(*)::int as n from projects where org_id = 'org-lost'`.execute(t.db);
   expect(rows[0]!.n).toBe(1);
