@@ -25,6 +25,7 @@ export async function localRun(opts: {
   const summary: RunSummary = {
     project: opts.project.name, agentModel: opts.agentModelId, judgeModel: opts.judgeModelId,
     startedAt, finishedAt: startedAt, budgetUsd: opts.budgetUsd, totalCostUsd: 0, jobs: [], roles: [], replays: {}, replayErrors: {}, verdicts: {}, judgeErrors: {},
+    people: Object.fromEntries(opts.project.personas.map((p) => [p.id, p.name])),
   };
   const scrubberFor = () => SecretScrubber.forProject(opts.project);
   let findingNo = 0;

@@ -75,3 +75,11 @@ test("a defect whose judge failed says so instead of passing for inconclusive", 
   expect(md).toMatch(/## Defects not judged[\s\S]*Never checked[\s\S]*Replay: carried out every step\. Crashed on save\n\nJudge: could not be judged\. the model ran out of room before it gave a verdict \(2 tries\)/);
   expect(md).not.toContain("## Inconclusive defects");
 });
+
+test("a defect that needed several people names who did each step", () => {
+  const md = renderReport({
+    ...summary, people: { a: "Ana", lee: "Lee" },
+    roles: [{ ...summary.roles[0]!, findings: [{ id: "f1", kind: "defect", goal: "g", title: "Broken save", observed: "500", reproduction: ["Invite Ana", "Open the invite"], by: ["lee", "a"], severity: "high" }] }],
+  });
+  expect(md).toContain("1. Lee: Invite Ana\n2. Ana: Open the invite");
+});

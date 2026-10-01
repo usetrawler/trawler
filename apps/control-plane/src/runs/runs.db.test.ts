@@ -1035,3 +1035,19 @@ describe("a finding that names who did each step", () => {
     await drain();
   });
 });
+
+describe("a finding sent again with other people", () => {
+  test("keeps the people of the latest report, and none when the latest names none", async () => {
+    await drain();
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const first = (await claimPastChecks())!;
+    seq = 0;
+    const people = async () => (await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.findings[0]!.stepPeople;
+    await ingestEvents(t.db, first.token, [ev({ type: "finding", jobId: first.jobId, finding: { ...defect, by: ["lee", first.personaKey!] } })]);
+    await ingestEvents(t.db, first.token, [ev({ type: "finding", jobId: first.jobId, finding: { ...defect, by: [first.personaKey!, "lee"] } })]);
+    expect(await people()).toEqual([first.personaKey, "lee"]);
+    await ingestEvents(t.db, first.token, [ev({ type: "finding", jobId: first.jobId, finding: defect })]);
+    expect(await people()).toBeNull();
+    await drain();
+  });
+});

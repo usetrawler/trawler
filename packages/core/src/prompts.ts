@@ -21,7 +21,7 @@ Build on it: when a goal of yours refers to something another person made or did
 function othersSteps(self: string, others: string[]): string {
   if (others.length === 0) return "";
   const example = others[0]!;
-  return `Other people use this product with you: ${others.join(", ")}. When what someone else did earlier is part of reproducing a defect, for example something they submitted that you then saw fail, put their steps in too, in order, each starting with their name and a colon ("${example}: Sign in and submit a pitch titled Solar"). Steps without a name are yours, ${self}.
+  return `Other people use this product with you: ${others.join(", ")}. When what someone else did earlier is part of reproducing a defect, for example something they submitted that you then saw fail, put their steps in too, in order, each starting with their name and a colon ("${example}: Create the item you then opened"). Steps without a name are yours, ${self}.
 `;
 }
 
@@ -63,10 +63,10 @@ export function sessionStatus(notes: string[], goals: GoalOutcome[], step: numbe
 }
 
 export function replayPrompt(p: { targetUrl: string; steps: string[]; accountRef?: string; signUpEmail?: string; people?: { name: string; accountRef?: string; signUpEmail?: string }[]; stepPeople?: string[] }): string {
-  const together = p.people && p.stepPeople && p.people.length > 1;
+  const together = p.people && p.stepPeople && p.people.length >= 1;
   const steps = p.steps.map((s, i) => `${i + 1}. ${together ? `(as ${p.stepPeople![i]}) ` : ""}${s}`).join("\n");
   const signIn = together
-    ? `You act as several people, each in their own browser: ${p.people!.map((x) => x.name).join(", ")}. You start as ${p.stepPeople![0]}. Before a step marked with another person, call act_as with their name; their browser stays signed in as them.
+    ? `${p.people!.length > 1 ? `You act as several people, each in their own browser: ${p.people!.map((x) => x.name).join(", ")}. You start as ${p.stepPeople![0]}. Before a step marked with another person, call act_as with their name; their browser stays signed in as them.` : `You act as ${p.people![0]!.name}.`}
 ${p.people!.map((x) => (x.accountRef ? `- ${x.name} has an account "${x.accountRef}". To sign in as ${x.name}, take a snapshot and call sign_in with that account and the refs of the username and password fields. You will never see the password.` : `- ${x.name} has no account. Where a step has ${x.name} type a password, use type_own_password; wherever the steps use the email address ${x.name} signed up with, use ${x.signUpEmail} instead.`)).join("\n")}`
     : p.accountRef
       ? `If a step needs you signed in, take a snapshot and call sign_in with account "${p.accountRef}" and the refs of the username and password fields. You will never see the password.`

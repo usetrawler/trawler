@@ -14,6 +14,7 @@ const NUDGE = "Every turn must call a tool; plain text does nothing. Carry on wi
 const MAX_OBSERVED_CODE_POINTS = 4000;
 const JUDGE_OUTPUT_TOKENS = 8000;
 const JUDGE_REPLIES = 2;
+const CLOSE_TIMEOUT_MS = 10_000;
 
 const isNoReport = (o: ReplayObservation) => !o.completed && o.blockedAt === null;
 
@@ -67,6 +68,7 @@ export async function runReplay(opts: {
   screenshot?: () => Promise<Screenshot | null>;
   keepScreenshot?: (findingId: string, shot: Screenshot) => void;
   openBrowser?: () => Promise<ReplayBrowser>;
+  closeTimeoutMs?: number;
 }): Promise<{ observation: ReplayObservation; usage: JobUsage }> {
   onlyDefects(opts.finding, "replayed");
   if (!Number.isInteger(opts.maxSteps) || opts.maxSteps < 1) throw new RangeError(`maxSteps must be a positive integer, got ${opts.maxSteps}`);
@@ -75,15 +77,13 @@ export async function runReplay(opts: {
   const stepCount = opts.finding.reproduction.length;
   const people = peopleOf(opts.finding);
   const known = people.filter((id) => opts.project.personas.some((p) => p.id === id));
-  const together = known.length > 1 && known.length === people.length && opts.openBrowser !== undefined;
+  const together = known.length >= 1 && known.length === people.length && (known.length === 1 || opts.openBrowser !== undefined);
   const persona = (id: string) => opts.project.personas.find((p) => p.id === id)!;
-  const actors = new Map<string, Actor>();
+  const actors = new Map<string, Promise<Actor>>();
   const opened: ReplayBrowser[] = [];
-  const actorFor = async (id: string): Promise<Actor> => {
-    const existing = actors.get(id);
-    if (existing) return existing;
-    const browser = actors.size === 0 ? { tools: opts.browserTools, fillField: opts.fillField, screenshot: opts.screenshot } : await opts.openBrowser!();
-    if (actors.size > 0) opened.push(browser);
+  const open = async (id: string, first: boolean): Promise<Actor> => {
+    const browser = first ? { tools: opts.browserTools, fillField: opts.fillField, screenshot: opts.screenshot } : await opts.openBrowser!();
+    if (!first) opened.push(browser);
     const accountRef = together ? persona(id).accountRef : opts.accountRef;
     const queue = browserQueue(browser.tools);
     const state = newSessionState([]);
@@ -96,9 +96,15 @@ export async function runReplay(opts: {
       newId: () => "unused",
     });
     const own = accountRef ? undefined : ownPasswordTool({ state, fillField: browser.fillField, inBrowser: queue.run, scrubber: opts.scrubber }).type_own_password;
-    const actor: Actor = { id, name: together ? persona(id).name : "you", accountRef, browser, queue, sign_in, ownPassword: own };
-    actors.set(id, actor);
-    return actor;
+    return { id, name: together ? persona(id).name : "you", accountRef, browser, queue, sign_in, ownPassword: own };
+  };
+  const actorFor = (id: string): Promise<Actor> => {
+    const existing = actors.get(id);
+    if (existing) return existing;
+    const pending = open(id, actors.size === 0);
+    actors.set(id, pending);
+    pending.catch(() => actors.delete(id));
+    return pending;
   };
   let current = together ? opts.finding.by![0]! : "you";
   const now = () => actorFor(current);
@@ -106,7 +112,7 @@ export async function runReplay(opts: {
   const report_replay = tool({
     description: "Report what you saw while following the steps. completed is true only if you carried out every step; otherwise give the number of the step you could not do as blockedAt.",
     inputSchema: z.object({ completed: z.boolean().nullish(), observed: z.string().nullish(), blockedAt: z.number().nullish() }),
-    execute: async ({ completed, observed, blockedAt }) => (await now()).queue.run(async () => {
+    execute: async ({ completed, observed, blockedAt }) => {
       if (report) return "rejected: the replay is already reported";
       if (typeof completed !== "boolean") return "rejected: completed: say whether you carried out every step";
       if (!observed?.trim()) return "rejected: observed: describe what you saw";
@@ -116,18 +122,20 @@ export async function runReplay(opts: {
       }
       report = { completed, observed: Array.from(opts.scrubber.scrub(observed.trim())).slice(0, MAX_OBSERVED_CODE_POINTS).join(""), blockedAt: completed ? null : blockedAt! };
       return "reported";
-    }),
+    },
   });
   const delegate = (name: string, definition: ToolSet[string]): ToolSet[string] => ({
     ...definition,
     execute: async (input: unknown, options: unknown) => {
-      const actor = await now();
+      const actor = track(await now());
       const own = name === "type_own_password" ? actor.ownPassword : name === "sign_in" ? actor.sign_in : actor.queue.tools[name];
       if (!own?.execute) return `rejected: ${actor.name} ${name === "type_own_password" ? "has an account; use sign_in" : "cannot do that"}`;
       return own.execute(input as never, options as never);
     },
   });
   const first = await actorFor(current);
+  const crashedActors: Actor[] = [first];
+  const track = (actor: Actor) => (crashedActors.includes(actor) ? actor : (crashedActors.push(actor), actor));
   const anyWithoutAccount = together ? known.some((id) => !persona(id).accountRef) : !opts.accountRef;
   const ownDefinition = anyWithoutAccount ? (first.ownPassword ?? ownPasswordTool({ state: newSessionState([]), fillField: opts.fillField, inBrowser: first.queue.run, scrubber: opts.scrubber }).type_own_password) : undefined;
   const act_as = tool({
@@ -136,8 +144,12 @@ export async function runReplay(opts: {
     execute: async ({ person }) => {
       const id = known.find((k) => persona(k).name.toLowerCase() === (person ?? "").trim().toLowerCase());
       if (!id) return `rejected: person: use one of ${known.map((k) => persona(k).name).join(", ")}`;
+      try {
+        await actorFor(id);
+      } catch (err) {
+        return `rejected: ${persona(id).name}'s browser could not be opened (${err instanceof Error ? err.message : String(err)}); you are still ${persona(current).name}`;
+      }
       current = id;
-      await actorFor(id);
       return `you are now ${persona(id).name}, in their own browser; take a browser_snapshot`;
     },
   });
@@ -170,7 +182,7 @@ export async function runReplay(opts: {
       maxSteps: opts.maxSteps,
       usage,
       finished: () => report !== null,
-      crashed: () => [...actors.values()].map((a) => a.queue.crashed()).find((c) => c !== false) ?? false,
+      crashed: () => crashedActors.map((a) => a.queue.crashed()).find((c) => c !== false) ?? false,
       onStep: (step, costUsd) => emit({ type: "step", jobId, step: usage.steps, tool: step.toolCalls[0]?.toolName ?? null, costUsd }),
       largeResultChars: 4000,
     });
@@ -185,7 +197,8 @@ export async function runReplay(opts: {
     emitSafely(emit, { type: "job_finished", jobId, usage, stoppedBy, ...(outcome.error ? { error: outcome.error } : {}) });
     return { observation, usage };
   } finally {
-    await Promise.allSettled(opened.map((b) => b.close?.()));
+    const limit = opts.closeTimeoutMs ?? CLOSE_TIMEOUT_MS;
+    await Promise.allSettled(opened.map((b) => Promise.race([Promise.resolve(b.close?.()).catch(() => undefined), new Promise((resolve) => setTimeout(resolve, limit).unref?.())])));
   }
 }
 
