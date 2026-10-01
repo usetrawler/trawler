@@ -6,7 +6,7 @@ import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { addAccount, loadProjectConfig, projectForEditing, replacePlan } from "../projects/projects.ts";
-import { describeDraft, DraftGone, proposeFromDraft, SETUP_LIMITS, SetupLimited, startDraft, type SetupDeps } from "./propose.ts";
+import { describeDraft, DraftGone, proposeFromDraft, SETUP_LIMITS, SetupLimited, SetupStillRunning, setupProgress, startDraft, type SetupDeps } from "./propose.ts";
 import { FetchRefused } from "./safe-fetch.ts";
 import { ProjectLimitReached } from "../runs/plans.ts";
 import { SetupModelFailed } from "@usetrawler/core/setup";
@@ -42,7 +42,7 @@ test("a URL becomes a draft, the draft a description and features, and the chose
   expect(prompts[0]).toContain("Acme invoices");
   expect(prompts[1]).toContain("My own flow");
   expect(prompts[1]).toContain("Invoices, edited.");
-  await expect(proposeFromDraft(deps(model), { orgId: "org-a", draftId, description: "d", features: ["x"] })).rejects.toBeInstanceOf(DraftGone);
+  expect(await proposeFromDraft(deps(model), { orgId: "org-a", draftId, description: "d", features: ["x"] })).toBe(id);
 });
 
 test("changing a project's features proposes its people again and keeps its test accounts", async () => {
@@ -129,7 +129,7 @@ test("a draft proposes people once, even when asked twice at the same time", asy
   await describeDraft(deps(model), { orgId: "org-twice", draftId });
   const both = await Promise.allSettled([0, 1].map(() => proposeFromDraft(deps(model), { orgId: "org-twice", draftId, description: "d", features: ["Get paid"] })));
   expect(both.filter((r) => r.status === "fulfilled")).toHaveLength(1);
-  expect(both.filter((r) => r.status === "rejected" && r.reason instanceof DraftGone)).toHaveLength(1);
+  expect(both.filter((r) => r.status === "rejected" && r.reason instanceof SetupStillRunning)).toHaveLength(1);
   const { rows } = await sql<{ n: number }>`select count(*)::int as n from projects where target_url = 'https://twice.acme.test/'`.execute(t.db);
   expect(rows[0]!.n).toBe(1);
 });
@@ -195,4 +195,43 @@ test("a Free workspace at its project limit is refused before the page is read o
   await expect(startDraft(deps(model, async () => (read++, { text: "x", finalUrl: "https://new.acme.test/" })), { orgId: "org-free", url: "https://new.acme.test/" })).rejects.toBeInstanceOf(ProjectLimitReached);
   expect({ read, asked: model.doGenerateCalls.length }).toEqual({ read: 0, asked });
   await expect(startDraft(deps(model), { orgId: "org-free", projectId: id })).resolves.toEqual(expect.any(String));
+});
+
+test("a setup whose answer was lost can be asked about: working while people are chosen, then the project it made, and asking again gives the same project without a second one, even on Free at its limit", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-lost', 'L', 'lost', now())`.execute(t.db);
+  await asSystem(t.db, (tx) => tx.deleteFrom("workspace_plans").where("org_id", "=", "org-lost").execute());
+  const model = scriptedModel([text(JSON.stringify(summary)), text(JSON.stringify(people))]);
+  const draftId = await startDraft(deps(model), { orgId: "org-lost", url: "https://lost.acme.test/" });
+  expect(await setupProgress({ db: t.db }, { orgId: "org-lost", draftId })).toEqual({ state: "gone" });
+  await describeDraft(deps(model), { orgId: "org-lost", draftId });
+  expect(await setupProgress({ db: t.db }, { orgId: "org-lost", draftId })).toEqual({ state: "described", summary });
+  await sql`update setup_drafts set proposing_at = now() where id = ${draftId}`.execute(t.db);
+  expect(await setupProgress({ db: t.db }, { orgId: "org-lost", draftId })).toEqual({ state: "working" });
+  await expect(proposeFromDraft(deps(model), { orgId: "org-lost", draftId, description: "d", features: ["Get paid"] })).rejects.toBeInstanceOf(SetupStillRunning);
+  await sql`update setup_drafts set proposing_at = now() - interval '6 minutes' where id = ${draftId}`.execute(t.db);
+  const id = await proposeFromDraft(deps(model), { orgId: "org-lost", draftId, description: "d", features: ["Get paid"] });
+  expect(await setupProgress({ db: t.db }, { orgId: "org-lost", draftId })).toEqual({ state: "project", projectId: id });
+  expect(await proposeFromDraft(deps(model), { orgId: "org-lost", draftId, description: "d", features: ["Get paid"] })).toBe(id);
+  const { rows } = await sql<{ n: number }>`select count(*)::int as n from projects where org_id = 'org-lost'`.execute(t.db);
+  expect(rows[0]!.n).toBe(1);
+  expect(await setupProgress({ db: t.db }, { orgId: "org-x", draftId })).toEqual({ state: "gone" });
+});
+
+test("when choosing people fails, the setup can choose them again instead of looking busy", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-retry', 'R', 'retry', now())`.execute(t.db);
+  const model = scriptedModel([text(JSON.stringify(summary)), text("not json"), text("still not json"), text(JSON.stringify(people))]);
+  const draftId = await startDraft(deps(model), { orgId: "org-retry", url: "https://retry.acme.test/" });
+  await describeDraft(deps(model), { orgId: "org-retry", draftId });
+  await expect(proposeFromDraft(deps(model), { orgId: "org-retry", draftId, description: "d", features: ["Get paid"] })).rejects.toBeInstanceOf(SetupModelFailed);
+  expect((await setupProgress({ db: t.db }, { orgId: "org-retry", draftId })).state).toBe("described");
+  await expect(proposeFromDraft(deps(model), { orgId: "org-retry", draftId, description: "d", features: ["Get paid"] })).resolves.toEqual(expect.any(String));
+});
+
+test("describing that is still going reads as working, and one that stopped long ago without a result as gone", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-slow', 'S', 'slow', now())`.execute(t.db);
+  const draftId = await startDraft(deps(scriptedModel([])), { orgId: "org-slow", url: "https://slow.acme.test/" });
+  await sql`update setup_drafts set described_at = now() where id = ${draftId}`.execute(t.db);
+  expect(await setupProgress({ db: t.db }, { orgId: "org-slow", draftId })).toEqual({ state: "working" });
+  await sql`update setup_drafts set described_at = now() - interval '10 minutes' where id = ${draftId}`.execute(t.db);
+  expect(await setupProgress({ db: t.db }, { orgId: "org-slow", draftId })).toEqual({ state: "gone" });
 });

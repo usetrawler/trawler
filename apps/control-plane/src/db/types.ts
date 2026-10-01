@@ -291,6 +291,8 @@ export interface SetupDrafts {
   origins: Generated<string[]>;
   page: string;
   project_id: string | null;
+  proposing_at: Timestamp | null;
+  result_project_id: string | null;
   sign_up: string | null;
   url: string;
 }

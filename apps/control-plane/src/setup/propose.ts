@@ -43,6 +43,10 @@ async function claimSetupAttempt(db: Database, orgId: string): Promise<void> {
 
 export class DraftGone extends Error {}
 
+export class SetupStillRunning extends Error {}
+
+const WORKING_MINUTES = 5;
+
 const DRAFT_HOURS = 24;
 const MAX_OTHER_ORIGINS = 19;
 
@@ -51,6 +55,14 @@ async function draftOf(deps: SetupDeps, orgId: string, draftId: string) {
     .where("created_at", ">", sql<Date>`now() - make_interval(hours => ${DRAFT_HOURS})`).executeTakeFirst());
   if (!draft) throw new DraftGone("the setup draft is gone");
   return draft;
+}
+
+function summaryOf(draft: { name: string | null; url: string; description: string | null; sign_up: string | null; features: unknown }): ProductSummary {
+  return {
+    name: draft.name ?? new URL(draft.url).hostname, description: draft.description ?? "",
+    signUp: (SIGN_UP as readonly string[]).includes(draft.sign_up ?? "") ? (draft.sign_up as SignUp) : "unclear",
+    features: draft.features as ProductSummary["features"],
+  };
 }
 
 function productOf(draft: { url: string; docs_url: string | null; page: string; docs: string | null }): ProductPage {
@@ -111,21 +123,44 @@ export async function describeDraft(deps: SetupDeps, input: { orgId: string; dra
   if (!claimed) {
     const described = await draftOf(deps, input.orgId, input.draftId);
     if (!described.features) throw new DraftGone("the setup draft was already described without a result");
-    return {
-      name: described.name ?? new URL(described.url).hostname, description: described.description ?? "",
-      signUp: (SIGN_UP as readonly string[]).includes(described.sign_up ?? "") ? (described.sign_up as SignUp) : "unclear",
-      features: described.features as unknown as ProductSummary["features"],
-    };
+    return summaryOf(described);
   }
   const { summary } = await describeProduct({ model: deps.model, modelId: deps.modelId, budget: new Budget(SETUP_BUDGET_USD), product: productOf(draft) });
   await withOrg(deps.db, input.orgId, (tx) => tx.updateTable("setup_drafts").set({ name: summary.name, description: summary.description, sign_up: summary.signUp, features: JSON.stringify(summary.features) }).where("id", "=", draft.id).execute());
   return summary;
 }
 
+async function claimProposal(deps: SetupDeps, orgId: string, draftId: string): Promise<boolean> {
+  const claimed = await withOrg(deps.db, orgId, (tx) => tx.updateTable("setup_drafts").set({ proposing_at: new Date() })
+    .where("id", "=", draftId).where("result_project_id", "is", null)
+    .where((eb) => eb.or([eb("proposing_at", "is", null), eb("proposing_at", "<", sql<Date>`now() - make_interval(mins => ${WORKING_MINUTES})`)]))
+    .returning("id").executeTakeFirst());
+  return Boolean(claimed);
+}
+
+async function releaseProposal(deps: SetupDeps, orgId: string, draftId: string): Promise<void> {
+  await withOrg(deps.db, orgId, (tx) => tx.updateTable("setup_drafts").set({ proposing_at: null }).where("id", "=", draftId).where("result_project_id", "is", null).execute());
+}
+
 export async function proposeFromDraft(deps: SetupDeps, input: { orgId: string; draftId: string; description: string; features: string[]; signUp?: SignUp }): Promise<string> {
   const draft = await draftOf(deps, input.orgId, input.draftId);
+  if (draft.result_project_id) return draft.result_project_id;
   if (!draft.project_id) await refuseAtProjectLimit(deps, input.orgId);
-  await claimSetupAttempt(deps.db, input.orgId);
+  if (!(await claimProposal(deps, input.orgId, draft.id))) {
+    const now = await draftOf(deps, input.orgId, input.draftId);
+    if (now.result_project_id) return now.result_project_id;
+    throw new SetupStillRunning("the people for this setup are still being chosen");
+  }
+  try {
+    await claimSetupAttempt(deps.db, input.orgId);
+    return await proposeClaimed(deps, input, draft);
+  } catch (err) {
+    await releaseProposal(deps, input.orgId, draft.id).catch(() => undefined);
+    throw err;
+  }
+}
+
+async function proposeClaimed(deps: SetupDeps, input: { orgId: string; description: string; features: string[]; signUp?: SignUp }, draft: Awaited<ReturnType<typeof draftOf>>): Promise<string> {
   const product = productOf(draft);
   const { project, signsIn } = await proposePeople({
     model: deps.model, modelId: deps.modelId, budget: new Budget(SETUP_BUDGET_USD), product,
@@ -133,8 +168,9 @@ export async function proposeFromDraft(deps: SetupDeps, input: { orgId: string; 
   });
   const features = input.features.map((f) => f.trim()).filter(Boolean);
   return withOrg(deps.db, input.orgId, async (tx) => {
-    const taken = await tx.deleteFrom("setup_drafts").where("id", "=", draft.id).returning("id").executeTakeFirst();
-    if (!taken) throw new DraftGone("the setup draft was already used");
+    const taken = await tx.selectFrom("setup_drafts").select(["id", "result_project_id"]).where("id", "=", draft.id).forUpdate().executeTakeFirst();
+    if (!taken) throw new DraftGone("the setup draft is gone");
+    if (taken.result_project_id) return taken.result_project_id;
     let projectId = draft.project_id;
     if (projectId) {
       const before = await tx.selectFrom("personas").select(["key", "account_ref"]).where("project_id", "=", projectId).execute();
@@ -152,6 +188,25 @@ export async function proposeFromDraft(deps: SetupDeps, input: { orgId: string; 
       const config = { ...project, allowedOrigins: [...new Set([...project.allowedOrigins, ...draft.origins])] };
       projectId = await createProject(tx, input.orgId, config, deps.keys, { features, signsIn });
     }
+    await tx.updateTable("setup_drafts").set({ result_project_id: projectId }).where("id", "=", draft.id).execute();
     return projectId;
   });
+}
+
+export type SetupProgress =
+  | { state: "project"; projectId: string }
+  | { state: "described"; summary: ProductSummary }
+  | { state: "working" }
+  | { state: "gone" };
+
+const recent = (at: Date | null) => at !== null && Date.now() - at.getTime() < WORKING_MINUTES * 60_000;
+
+export async function setupProgress(deps: Pick<SetupDeps, "db">, input: { orgId: string; draftId: string }): Promise<SetupProgress> {
+  const draft = await withOrg(deps.db, input.orgId, (tx) => tx.selectFrom("setup_drafts").selectAll().where("id", "=", input.draftId).where("org_id", "=", input.orgId)
+    .where("created_at", ">", sql<Date>`now() - make_interval(hours => ${DRAFT_HOURS})`).executeTakeFirst());
+  if (!draft) return { state: "gone" };
+  if (draft.result_project_id) return { state: "project", projectId: draft.result_project_id };
+  if (recent(draft.proposing_at)) return { state: "working" };
+  if (draft.features) return { state: "described", summary: summaryOf(draft) };
+  return recent(draft.described_at) ? { state: "working" } : { state: "gone" };
 }
