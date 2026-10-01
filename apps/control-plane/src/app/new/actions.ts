@@ -8,7 +8,7 @@ import { getDb, getKeyring } from "../../server/db.ts";
 import { readEnv } from "../../server/env.ts";
 import { logError, writeLog } from "../../server/log.ts";
 import { FetchRefused, safeFetchText, type RefusalReason } from "../../setup/safe-fetch.ts";
-import { describeDraft, DraftGone, proposeFromDraft, SetupLimited, startDraft, type SetupDeps } from "../../setup/propose.ts";
+import { describeDraft, DraftGone, proposeFromDraft, SetupLimited, SetupStillRunning, setupProgress, startDraft, type SetupDeps, type SetupProgress } from "../../setup/propose.ts";
 import { ProjectNotFound } from "../../projects/projects.ts";
 import { ProjectLimitReached } from "../../runs/plans.ts";
 
@@ -36,6 +36,7 @@ function friendly(err: unknown): string {
   if (err instanceof SetupLimited) return "You have started many new projects recently. Try again in a few minutes.";
   if (err instanceof SetupModelFailed) return "Trawler's setup model could not write a plan this time. Try again in a moment.";
   if (err instanceof DraftGone) return "This setup has expired. Start again from the product's address.";
+  if (err instanceof SetupStillRunning) return "Trawler is still choosing the people for this setup. Wait a moment.";
   if (err instanceof ProjectNotFound) return "This project is gone.";
   if (err instanceof ProjectLimitReached) return err.message;
   return "We could not build a plan for this page. Try again in a moment.";
@@ -54,7 +55,7 @@ async function setupFor(): Promise<{ orgId: string; deps: SetupDeps } | { error:
 async function failed(err: unknown, orgId: string, what: string): Promise<{ ok: false; error: string }> {
   if (err instanceof FetchRefused) await writeLog("info", "setup refused the address", { orgId, reason: err.reason });
   else if (err instanceof SetupLimited) await writeLog("info", "setup is rate limited", { orgId });
-  else if (!(err instanceof DraftGone) && !(err instanceof ProjectNotFound) && !(err instanceof ProjectLimitReached)) await logError(what, { orgId, err });
+  else if (!(err instanceof DraftGone) && !(err instanceof ProjectNotFound) && !(err instanceof ProjectLimitReached) && !(err instanceof SetupStillRunning)) await logError(what, { orgId, err });
   return { ok: false, error: friendly(err) };
 }
 
@@ -103,4 +104,11 @@ export async function proposePeopleAction(input: { draftId: string; description:
     return failed(err, setup.orgId, "setup could not propose people");
   }
   redirect(`/projects/${projectId}`);
+}
+
+export async function setupProgressAction(draftId: string): Promise<SetupProgress> {
+  if (typeof draftId !== "string" || !UUID.test(draftId)) return { state: "gone" };
+  const member = await signedInMember(await headers());
+  if (!member) redirect("/sign-in");
+  return setupProgress({ db: getDb() }, { orgId: member.orgId, draftId });
 }

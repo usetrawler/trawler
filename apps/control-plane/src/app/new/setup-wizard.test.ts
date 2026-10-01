@@ -2,8 +2,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test, vi } from "vitest";
 
-vi.mock("./actions.ts", () => ({ readProductAction: vi.fn(), describeProductAction: vi.fn(), proposePeopleAction: vi.fn() }));
-const { featuresFrom, SetupWizard } = await import("./setup-wizard.tsx");
+vi.mock("./actions.ts", () => ({ readProductAction: vi.fn(), describeProductAction: vi.fn(), proposePeopleAction: vi.fn(), setupProgressAction: vi.fn() }));
+vi.mock("next/navigation", async (original) => ({ ...(await original<typeof import("next/navigation")>()), useRouter: () => ({ push: vi.fn() }) }));
+const { afterLostDescription, afterLostProposal, featuresFrom, LOST, LOST_MESSAGE, reached, SetupWizard, untilSettled } = await import("./setup-wizard.tsx");
+const { UnrecognizedActionError } = await import("next/dist/client/components/unrecognized-action-error.js");
 
 const summary = { name: "Acme", description: "d", signUp: "open" as const, features: [{ title: "Submit a pitch", summary: "a" }, { title: "Review pitches", summary: "b" }] };
 
@@ -34,4 +36,30 @@ test("while setup works something moves, gently for those who ask for less motio
   const moving = html.match(/class="[^"]*animate-(spin|ping)[^"]*"/g) ?? [];
   expect(moving.length).toBeGreaterThanOrEqual(3);
   expect(moving.every((c) => /motion-safe:animate-/.test(c))).toBe(true);
+});
+
+test("a request that never came back is told apart from an answer, and from Trawler having been updated", async () => {
+  expect(await reached(async () => ({ ok: true }), "redo")).toEqual({ ok: true });
+  expect(await reached(async () => { throw new TypeError("Failed to fetch"); }, "redo")).toBe(LOST);
+  expect(await reached(async () => { throw new UnrecognizedActionError("gone"); }, "Reload to redo.")).toMatchObject({ ok: false, error: expect.stringContaining("Reload to redo.") });
+});
+
+test("after a lost request the wizard asks until setup has settled, through answers that are still working and asks that fail too, and gives up in the end", async () => {
+  const answers = [new Error("offline"), { state: "working" as const }, { state: "project" as const, projectId: "p1" }];
+  const ask = vi.fn(async () => { const next = answers.shift()!; if (next instanceof Error) throw next; return next; });
+  const waited: number[] = [];
+  expect(await untilSettled("d1", { ask, wait: async (ms) => void waited.push(ms) })).toEqual({ state: "project", projectId: "p1" });
+  expect(ask).toHaveBeenCalledTimes(3);
+  expect(waited).toEqual([3000, 3000, 3000]);
+  expect(await untilSettled("d1", { ask: async () => ({ state: "working" }), wait: async () => {}, tries: 4 })).toBe("unreachable");
+});
+
+test("a lost proposal opens the project it made, goes back to the features when no people were chosen, and says what to do otherwise", () => {
+  expect(afterLostProposal({ state: "project", projectId: "p1" })).toEqual({ open: "/projects/p1" });
+  expect(afterLostProposal({ state: "described", summary })).toEqual({ error: LOST_MESSAGE.notChosen, back: "context" });
+  expect(afterLostProposal({ state: "gone" })).toEqual({ error: LOST_MESSAGE.gone, back: "address" });
+  expect(afterLostProposal("unreachable")).toEqual({ error: LOST_MESSAGE.unreachable, back: "context" });
+  expect(afterLostDescription({ state: "described", summary })).toEqual({ summary });
+  expect(afterLostDescription({ state: "gone" })).toEqual({ error: LOST_MESSAGE.gone });
+  expect(afterLostDescription("unreachable")).toEqual({ error: LOST_MESSAGE.unreachable });
 });

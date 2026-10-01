@@ -1,9 +1,10 @@
 "use client";
-import { unstable_isUnrecognizedActionError } from "next/navigation";
+import { unstable_isUnrecognizedActionError, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import type { ProductSummary, SignUp } from "@usetrawler/core/setup";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
-import { describeProductAction, proposePeopleAction, readProductAction } from "./actions.ts";
+import type { SetupProgress } from "../../setup/propose.ts";
+import { describeProductAction, proposePeopleAction, readProductAction, setupProgressAction } from "./actions.ts";
 
 const MAX_CHOSEN = 10;
 
@@ -26,13 +27,53 @@ type Stage =
   | { kind: "working"; step: Step; host: string }
   | { kind: "context"; draftId: string; host: string; description: string; signUp: SignUp; features: Feature[] };
 
-async function outdatedAware<T>(call: () => Promise<T>, redo: string): Promise<T | { ok: false; error: string }> {
+export const LOST = Symbol("the request did not come back");
+
+export async function reached<T>(call: () => Promise<T>, redo: string): Promise<T | { ok: false; error: string } | typeof LOST> {
   try {
     return await call();
   } catch (err) {
-    if (!unstable_isUnrecognizedActionError(err)) throw err;
-    return { ok: false, error: updatedSinceOpened(redo) };
+    if (unstable_isUnrecognizedActionError(err)) return { ok: false, error: updatedSinceOpened(redo) };
+    return LOST;
   }
+}
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export async function untilSettled(draftId: string, opts: { ask?: (draftId: string) => Promise<SetupProgress>; wait?: (ms: number) => Promise<unknown>; tries?: number } = {}): Promise<SetupProgress | "unreachable"> {
+  const ask = opts.ask ?? setupProgressAction;
+  const wait = opts.wait ?? pause;
+  for (let i = 0; i < (opts.tries ?? 120); i++) {
+    await wait(3000);
+    try {
+      const progress = await ask(draftId);
+      if (progress.state !== "working") return progress;
+    } catch {
+      continue;
+    }
+  }
+  return "unreachable";
+}
+
+export const LOST_MESSAGE = {
+  read: "The connection dropped while Trawler was reading the page. Check your connection and try again.",
+  gone: "The connection dropped and this setup was lost. Start again from the product's address.",
+  unreachable: "Trawler could not be reached for a few minutes. Check your connection and try again; a project that was already made is not made twice.",
+  notChosen: "The connection dropped before Trawler chose the people. Choose them again.",
+};
+
+type Settled = SetupProgress | "unreachable";
+
+export function afterLostProposal(progress: Settled): { open: string } | { error: string; back: "context" | "address" } {
+  if (progress === "unreachable") return { error: LOST_MESSAGE.unreachable, back: "context" };
+  if (progress.state === "project") return { open: `/projects/${progress.projectId}` };
+  if (progress.state === "gone") return { error: LOST_MESSAGE.gone, back: "address" };
+  return { error: LOST_MESSAGE.notChosen, back: "context" };
+}
+
+export function afterLostDescription(progress: Settled): { summary: ProductSummary } | { error: string } {
+  if (progress !== "unreachable" && progress.state === "described") return { summary: progress.summary };
+  return { error: progress === "unreachable" ? LOST_MESSAGE.unreachable : LOST_MESSAGE.gone };
 }
 
 function hostOf(raw: string): string {
@@ -98,6 +139,7 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
   const [extra, setExtra] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const router = useRouter();
 
   const analyse = () => {
     const host = projectHost ?? hostOf(url);
@@ -106,12 +148,21 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
     start(() => describe(host));
   };
   const describe = async (host: string) => {
-    const read = await outdatedAware(() => readProductAction(projectId ? { projectId } : { url }), "Reload the page to analyse the product.");
+    const read = await reached(() => readProductAction(projectId ? { projectId } : { url }), "Reload the page to analyse the product.");
+    if (read === LOST) return (setError(LOST_MESSAGE.read), setStage({ kind: "address" }));
     if (!read.ok) return (setError(read.error), setStage({ kind: "address" }));
     setStage({ kind: "working", step: "describe", host });
-    const described = await outdatedAware(() => describeProductAction(read.draftId), "Reload the page to analyse the product.");
-    if (!described.ok) return (setError(described.error), setStage({ kind: "address" }));
-    const summary = described.summary;
+    const described = await reached(() => describeProductAction(read.draftId), "Reload the page to analyse the product.");
+    let summary: ProductSummary;
+    if (described === LOST) {
+      const after = afterLostDescription(await untilSettled(read.draftId));
+      if ("error" in after) return (setError(after.error), setStage({ kind: "address" }));
+      summary = after.summary;
+    } else if (!described.ok) {
+      return (setError(described.error), setStage({ kind: "address" }));
+    } else {
+      summary = described.summary;
+    }
     setStage({ kind: "context", draftId: read.draftId, host, description: initialDescription || summary.description, signUp: summary.signUp, features: featuresFrom(summary, chosenBefore) });
   };
 
@@ -175,7 +226,13 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
     const context = stage;
     setStage({ kind: "working", step: "propose", host: stage.host });
     start(async () => {
-      const res = await outdatedAware(() => proposePeopleAction({ draftId: context.draftId, description: context.description, signUp: context.signUp, features: context.features.filter((f) => f.chosen).map((f) => f.title) }), "Reload the page and start again.");
+      const res = await reached(() => proposePeopleAction({ draftId: context.draftId, description: context.description, signUp: context.signUp, features: context.features.filter((f) => f.chosen).map((f) => f.title) }), "Reload the page and start again.");
+      if (res === LOST) {
+        const after = afterLostProposal(await untilSettled(context.draftId));
+        if ("open" in after) return router.push(after.open);
+        setError(after.error);
+        return setStage(after.back === "context" ? context : { kind: "address" });
+      }
       if (res && !res.ok) {
         setError(res.error);
         setStage(context);
