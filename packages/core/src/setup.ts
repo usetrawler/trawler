@@ -139,9 +139,10 @@ function uniqueIds<T extends { id: string }>(items: T[], fallback: string): T[] 
   });
 }
 
-const GoalProposal = z.object({ id: z.string(), instruction: z.string() });
+const GoalRef = z.object({ person: z.string(), goal: z.string() });
+const GoalProposal = z.object({ id: z.string(), instruction: z.string(), needs: z.array(GoalRef).optional() });
 const PersonProposal = z.object({ id: z.string(), name: z.string(), brief: z.string(), signsIn: z.boolean(), goals: z.array(GoalProposal) });
-const PlayOrder = z.array(z.object({ person: z.string(), goal: z.string() }));
+const PlayOrder = z.array(GoalRef);
 const ProposalSchema = z.object({ name: z.string(), description: z.string(), personas: z.array(PersonProposal), playOrder: PlayOrder.optional() });
 const PeopleSchema = z.object({ personas: z.array(PersonProposal), playOrder: PlayOrder.optional() });
 export const SIGN_UP = ["open", "closed", "unclear"] as const;
@@ -180,17 +181,31 @@ async function askOnce<T>(opts: { model: LanguageModel; budget: Budget }, schema
   }
 }
 
-async function ask<T>(opts: { model: LanguageModel; modelId: string; budget: Budget }, schema: z.ZodType<T>, prompt: string): Promise<{ answer: T; usage: JobUsage }> {
+async function ask<T>(opts: { model: LanguageModel; modelId: string; budget: Budget }, schema: z.ZodType<T>, prompt: string, problemsOf: (answer: T) => string[] = () => []): Promise<{ answer: T; usage: JobUsage }> {
   if (opts.budget.exceeded) throw spent();
   const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
   let answer: T | null = null;
+  let flawed: T | null = null;
   let finishReason: string | undefined;
   let tries = 0;
+  let asking = prompt;
   try {
     while (answer === null && tries < SETUP_REPLIES && !opts.budget.exceeded) {
       tries++;
-      ({ answer, finishReason } = await askOnce(opts, schema, prompt, usage));
+      try {
+        ({ answer, finishReason } = await askOnce(opts, schema, asking, usage));
+      } catch (err) {
+        if (flawed === null) throw err;
+        break;
+      }
+      const problems = answer === null ? [] : problemsOf(answer);
+      if (answer !== null && problems.length > 0 && tries < SETUP_REPLIES && !opts.budget.exceeded) {
+        flawed = answer;
+        answer = null;
+        asking = `${prompt}\n\nYour previous answer was refused. Answer again with the same structure and fix:\n${problems.map((p) => `- ${p}`).join("\n")}`;
+      }
     }
+    answer ??= flawed;
   } catch (err) {
     throw new SetupModelFailed(`the setup model could not propose a project: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
@@ -256,14 +271,89 @@ function inPlayOrder<G extends { from: string; personaId: string }>(goals: G[], 
   return [...ordered, ...left];
 }
 
+const refOf = (ref: z.infer<typeof GoalRef>) => `${slug(ref.person)}\0${slug(ref.goal)}`;
+const NAME_PARTICLES = new Set(["da", "de", "del", "della", "der", "di", "do", "dos", "du", "la", "le", "van", "von", "bin", "binti", "al", "el", "y"]);
+const HUMAN_NAME = /^(?:\p{Lu}[\p{L}\p{M}'’.-]*|\p{Lo}[\p{Lo}\p{M}]*)$/u;
+const humanWords = (name: string) => {
+  const words = name.split(/\s+/);
+  return words.length <= 4 && HUMAN_NAME.test(words[0]!) && words.every((w) => HUMAN_NAME.test(w) || NAME_PARTICLES.has(w));
+};
+const ROLE_WORDS = new Set(["admin", "administrator", "manager", "employee", "user", "reviewer", "approver", "customer", "client", "owner", "member", "guest", "visitor", "lead", "staff", "hr", "support", "agent", "operator", "editor", "author", "buyer", "seller", "tester", "persona", "person"]);
+const humanName = (name: string) => humanWords(name) && !slug(name).split("-").some((w) => ROLE_WORDS.has(w));
+const firstName = (name: string) => name.trim().split(/\s+/)[0]!;
+const CALENDAR = new Set(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "today", "tomorrow", "yesterday", "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]);
+const NOT_PEOPLE = new Set(["everyone", "everybody", "someone", "somebody", "anyone", "anybody", "nobody", "no-one", "i", "you", "we", "they", "he", "she", "it", "the", "a", "an", "this", "that", "your", "my", "our", "their", "his", "her"]);
+const NAMED_ACTOR = /(?<=(?:^|\s)\p{Ll}+[,;:]? )(\p{Lu}\p{Ll}+)(['’]s\b| (?:submitted|sent|created|approved|reviewed|rejected|posted|shared|invited|requested|made|wrote|added|uploaded|booked|ordered|assigned|accepted|declined|edited|updated|deleted|published)\b)/gu;
+const mentions = (text: string, name: string) => new RegExp(`(^|[^\\p{L}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\p{L}]|$)`, "iu").test(text);
+
+function dependencyOrder<G extends { from: string; personaId: string; needs?: z.infer<typeof GoalRef>[] }>(goals: G[]): G[] | null {
+  const byRef = new Map(goals.map((g) => [g.from, g]));
+  const before = new Map<G, Set<G>>(goals.map((g) => [g, new Set<G>()]));
+  goals.forEach((g, i) => {
+    const previous = goals.slice(0, i).reverse().find((o) => o.personaId === g.personaId);
+    if (previous) before.get(g)!.add(previous);
+    for (const ref of g.needs ?? []) {
+      const needed = byRef.get(refOf(ref));
+      if (needed && needed !== g && needed.personaId !== g.personaId) before.get(g)!.add(needed);
+    }
+  });
+  const placed = new Set<G>();
+  const ordered: G[] = [];
+  while (ordered.length < goals.length) {
+    const next = goals.find((g) => !placed.has(g) && [...before.get(g)!].every((b) => placed.has(b)));
+    if (!next) return null;
+    placed.add(next);
+    ordered.push(next);
+  }
+  return ordered;
+}
+
+const usable = (p: z.infer<typeof PersonProposal>) => Boolean(p.name.trim() && p.brief.trim() && p.goals.some((g) => g.instruction.trim()));
+
+function teamProblems(answer: { personas: z.infer<typeof PersonProposal>[]; playOrder?: z.infer<typeof PlayOrder> }, product: string): string[] {
+  const problems: string[] = [];
+  const people = answer.personas.filter(usable);
+  for (const p of people) {
+    if (!humanName(p.name.trim())) problems.push(`person ${JSON.stringify(p.id)} is named ${JSON.stringify(p.name)}; give every person a human first name and keep the role in the brief`);
+  }
+  const nameOf = new Map(people.map((p) => [slug(p.id), p.name.trim()]));
+  const known = new Set(people.flatMap((p) => p.goals.map((g) => `${slug(p.id)}\0${slug(g.id)}`)));
+  for (const p of people) {
+    for (const g of p.goals) {
+      for (const ref of g.needs ?? []) {
+        const name = nameOf.get(slug(ref.person));
+        if (!known.has(refOf(ref))) problems.push(`goal ${JSON.stringify(g.id)} of ${JSON.stringify(p.id)} needs ${JSON.stringify(ref.goal)} of ${JSON.stringify(ref.person)}, which is not in the plan; name only goals of people in the plan`);
+        else if (name && slug(ref.person) !== slug(p.id) && !mentions(g.instruction, name) && !mentions(g.instruction, firstName(name))) problems.push(`goal ${JSON.stringify(g.id)} of ${JSON.stringify(p.id)} depends on what ${name} did, so its instruction must call them ${firstName(name)}, the name they have in this plan`);
+      }
+    }
+  }
+  const personByName = new Map(people.map((p) => [firstName(p.name).toLowerCase(), p]));
+  const productWords = new Set(product.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+  for (const p of people) {
+    for (const g of p.goals) {
+      for (const [, actor, how] of g.instruction.matchAll(NAMED_ACTOR)) {
+        const word = actor!.toLowerCase();
+        if (CALENDAR.has(word) || NOT_PEOPLE.has(word) || productWords.has(word)) continue;
+        const other = personByName.get(word);
+        if (!other) problems.push(`goal ${JSON.stringify(g.id)} of ${JSON.stringify(p.id)} names ${actor}, who is not in this plan; refer to people only by the names in this plan`);
+        else if (other !== p && !/^['’]/.test(how!) && !(g.needs ?? []).some((ref) => slug(ref.person) === slug(other.id))) problems.push(`goal ${JSON.stringify(g.id)} of ${JSON.stringify(p.id)} relies on what ${actor} did; list the goal of ${JSON.stringify(other.id)} it needs in its needs`);
+      }
+    }
+  }
+  const owned = people.flatMap((p) => p.goals.map((g) => ({ from: `${slug(p.id)}\0${slug(g.id)}`, personaId: slug(p.id), needs: g.needs })));
+  if (dependencyOrder(owned) === null) problems.push("the goals' needs go round in a circle; a goal can only need goals that can come before it");
+  return problems;
+}
+
 function planFrom(product: ProductPage, head: { name: string; description: string }, proposed: z.infer<typeof PersonProposal>[], playOrder: z.infer<typeof PlayOrder> = []): ProposedPlan {
   const people = uniqueIds(
-    proposed.filter((p) => p.name.trim() && p.brief.trim() && p.goals.some((g) => g.instruction.trim())).slice(0, MAX_PERSONAS).map((p) => ({ ...p, from: slug(p.id) })),
+    proposed.filter(usable).slice(0, MAX_PERSONAS).map((p) => ({ ...p, from: slug(p.id) })),
     "persona",
   );
   const personas = people.map((p) => ({ id: p.id, name: clip(p.name, 100), brief: clip(p.brief, 800) }));
   const owned = people.flatMap((p) => p.goals.filter((g) => g.instruction.trim()).slice(0, MAX_GOALS_PER_PERSONA).map((g) => ({ ...g, personaId: p.id, from: `${p.from}\0${slug(g.id)}` })));
-  const goals = uniqueIds(inPlayOrder(owned, playOrder), "goal").map((g) => ({ id: g.id, instruction: clip(g.instruction, 300), personaId: g.personaId }));
+  const played = inPlayOrder(owned, playOrder);
+  const goals = uniqueIds(dependencyOrder(played) ?? played, "goal").map((g) => ({ id: g.id, instruction: clip(g.instruction, 300), personaId: g.personaId }));
   if (personas.length === 0) throw new SetupModelFailed("the setup model proposed no personas with goals");
   const project = ProjectConfigSchema.parse({
     name: clip(head.name, 100) || new URL(product.url).hostname,
@@ -292,7 +382,7 @@ export async function proposePeople(opts: {
   const features = opts.features.map((f) => clip(f, MAX_FEATURE_CHARS)).filter(Boolean).slice(0, MAX_CHOSEN_FEATURES);
   if (features.length === 0) throw new RangeError("choose at least one feature");
   const signUp = opts.signUp ?? "unclear";
-  const { answer, usage } = await ask(opts, PeopleSchema, setupPrompt({ ...opts.product, context: { description, features, signUp } }));
+  const { answer, usage } = await ask(opts, PeopleSchema, setupPrompt({ ...opts.product, context: { description, features, signUp } }), (a) => teamProblems(a, opts.name));
   const plan = planFrom(opts.product, { name: opts.name, description }, answer.personas, answer.playOrder ?? []);
   return { ...plan, signsIn: signUp === "closed" ? plan.project.personas.map((p) => p.id) : plan.signsIn, usage };
 }
@@ -309,6 +399,6 @@ export async function proposeProject(opts: {
   const focus = opts.focus?.trim() ? clip(opts.focus, MAX_FOCUS_CHARS) : undefined;
   if (opts.budget.exceeded) throw spent();
   const product = await readProduct(opts);
-  const { answer, usage } = await ask(opts, ProposalSchema, setupPrompt({ ...product, focus }));
+  const { answer, usage } = await ask(opts, ProposalSchema, setupPrompt({ ...product, focus }), (a) => teamProblems(a, a.name));
   return { project: planFrom(product, { name: answer.name, description: clip(answer.description, 600) }, answer.personas, answer.playOrder ?? []).project, usage };
 }
