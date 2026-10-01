@@ -1,7 +1,7 @@
 import { generateText, tool, type LanguageModel, type ToolSet } from "ai";
 import { z } from "zod";
 import { VerdictSchema, type Finding, type JobStopReason, type JobUsage, type ProjectConfig, type ReplayObservation, type RunEventInput, type Verdict } from "@usetrawler/protocol";
-import { browserQueue, runAgentLoop } from "./agent-loop.ts";
+import { browserQueue, oneAtATime, runAgentLoop } from "./agent-loop.ts";
 import { type Budget, failureMessage, stoppedByRun, tallyStep } from "./llm.ts";
 import { judgePrompt, replayPrompt } from "./prompts.ts";
 import type { Screenshot } from "./browser.ts";
@@ -106,13 +106,14 @@ export async function runReplay(opts: {
     pending.catch(() => actors.delete(id));
     return pending;
   };
+  const inOrder = oneAtATime();
   let current = together ? opts.finding.by![0]! : "you";
   const now = () => actorFor(current);
   let report: ReplayObservation | null = null;
   const report_replay = tool({
     description: "Report what you saw while following the steps. completed is true only if you carried out every step; otherwise give the number of the step you could not do as blockedAt.",
     inputSchema: z.object({ completed: z.boolean().nullish(), observed: z.string().nullish(), blockedAt: z.number().nullish() }),
-    execute: async ({ completed, observed, blockedAt }) => {
+    execute: async ({ completed, observed, blockedAt }) => inOrder(async () => {
       if (report) return "rejected: the replay is already reported";
       if (typeof completed !== "boolean") return "rejected: completed: say whether you carried out every step";
       if (!observed?.trim()) return "rejected: observed: describe what you saw";
@@ -122,16 +123,16 @@ export async function runReplay(opts: {
       }
       report = { completed, observed: Array.from(opts.scrubber.scrub(observed.trim())).slice(0, MAX_OBSERVED_CODE_POINTS).join(""), blockedAt: completed ? null : blockedAt! };
       return "reported";
-    },
+    }),
   });
   const delegate = (name: string, definition: ToolSet[string]): ToolSet[string] => ({
     ...definition,
-    execute: async (input: unknown, options: unknown) => {
+    execute: async (input: unknown, options: unknown) => inOrder(async () => {
       const actor = track(await now());
       const own = name === "type_own_password" ? actor.ownPassword : name === "sign_in" ? actor.sign_in : actor.queue.tools[name];
       if (!own?.execute) return `rejected: ${actor.name} ${name === "type_own_password" ? "has an account; use sign_in" : "cannot do that"}`;
       return own.execute(input as never, options as never);
-    },
+    }),
   });
   const first = await actorFor(current);
   const crashedActors: Actor[] = [first];
@@ -141,7 +142,7 @@ export async function runReplay(opts: {
   const act_as = tool({
     description: "Switch to the person who does the next steps. Each person has their own browser and stays signed in as themselves.",
     inputSchema: z.object({ person: z.string().nullish() }),
-    execute: async ({ person }) => {
+    execute: async ({ person }) => inOrder(async () => {
       const id = known.find((k) => persona(k).name.toLowerCase() === (person ?? "").trim().toLowerCase());
       if (!id) return `rejected: person: use one of ${known.map((k) => persona(k).name).join(", ")}`;
       try {
@@ -151,7 +152,7 @@ export async function runReplay(opts: {
       }
       current = id;
       return `you are now ${persona(id).name}, in their own browser; take a browser_snapshot`;
-    },
+    }),
   });
   const browserTools = Object.fromEntries(Object.entries(first.queue.tools).map(([name, t]) => [name, delegate(name, t)]));
   const tools: ToolSet = {
@@ -159,7 +160,7 @@ export async function runReplay(opts: {
     sign_in: delegate("sign_in", first.sign_in),
     report_replay,
     ...(ownDefinition ? { type_own_password: delegate("type_own_password", ownDefinition) } : {}),
-    ...(together ? { act_as } : {}),
+    ...(together && known.length > 1 ? { act_as } : {}),
   };
   const instructions = together
     ? replayPrompt({
@@ -198,7 +199,11 @@ export async function runReplay(opts: {
     return { observation, usage };
   } finally {
     const limit = opts.closeTimeoutMs ?? CLOSE_TIMEOUT_MS;
-    await Promise.allSettled(opened.map((b) => Promise.race([Promise.resolve(b.close?.()).catch(() => undefined), new Promise((resolve) => setTimeout(resolve, limit).unref?.())])));
+    await Promise.allSettled(opened.map(async (b) => {
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([Promise.resolve(b.close?.()).catch(() => undefined), new Promise((resolve) => (timer = setTimeout(resolve, limit)))]);
+      clearTimeout(timer);
+    }));
   }
 }
 

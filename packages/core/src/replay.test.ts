@@ -593,4 +593,15 @@ describe("a replay with several people", () => {
     expect(log).toEqual(expect.arrayContaining(["b1:fill:priya@v.test"]));
     expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toContain("1. (as Priya) Sign in");
   });
+
+  test("a switch and a browser call in the same step run in that order, so each person's call reaches their own browser", async () => {
+    const log: string[] = [];
+    const model = scriptedModel([
+      [toolCall("act_as", { person: "Marco" }), toolCall("browser_snapshot", {})],
+      [toolCall("act_as", { person: "Priya" }), toolCall("browser_snapshot", {})],
+      report({ completed: true, observed: "ok", blockedAt: null }),
+    ]);
+    await base({}, log, model);
+    expect(log.filter((l) => l.endsWith(":snapshot"))).toEqual(["b2:snapshot", "b1:snapshot"]);
+  });
 });
