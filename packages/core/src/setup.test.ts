@@ -417,6 +417,18 @@ describe("proposePeople", () => {
     const again = leavePlan([strangers, leave()]);
     await again.plan;
     expect(JSON.stringify(again.model.doGenerateCalls[1]!.prompt)).toMatch(/must call them Priya/);
+    const unlinked = leave();
+    unlinked.personas[0]!.goals[1] = { id: "see", instruction: "The leave request is shown as approved after Ben's review and Marta's sign-off." } as never;
+    const loose = leavePlan([unlinked, leave()]);
+    await loose.plan;
+    const asked = JSON.stringify(loose.model.doGenerateCalls[1]!.prompt);
+    expect(asked).toMatch(/names Marta, who is not in this plan/);
+    expect(asked).not.toMatch(/names Ben,/);
+    const calendar = leave();
+    calendar.personas[0]!.goals[0] = { id: "submit", instruction: "Next Monday's leave request is submitted and shown as pending." } as never;
+    const plain = leavePlan([calendar]);
+    await plain.plan;
+    expect(plain.model.doGenerateCalls).toHaveLength(1);
   });
 
   test("an answer still wrong after asking again is used, with its goals in an order they can be played in", async () => {

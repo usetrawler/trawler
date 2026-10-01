@@ -270,6 +270,8 @@ const refOf = (ref: z.infer<typeof GoalRef>) => `${slug(ref.person)}\0${slug(ref
 const HUMAN_NAME = /^\p{Lu}[\p{L}'’.-]*(?: \p{Lu}[\p{L}'’.-]*)?$/u;
 const ROLE_WORDS = new Set(["admin", "administrator", "manager", "employee", "user", "reviewer", "approver", "customer", "client", "owner", "member", "guest", "visitor", "lead", "staff", "hr", "support", "agent", "operator", "editor", "author", "buyer", "seller", "tester", "persona", "person"]);
 const humanName = (name: string, id: string) => HUMAN_NAME.test(name) && !slug(name).split("-").some((w) => ROLE_WORDS.has(w)) && !(slug(name) === slug(id) && slug(id).includes("-"));
+const CALENDAR = new Set(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "today", "tomorrow", "yesterday", "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]);
+const NAMED_ACTOR = /(?<![\p{L}])(\p{Lu}\p{Ll}+)(?:['’]s\b| (?:submitted|sent|created|approved|reviewed|rejected|posted|shared|invited|requested|made|wrote|added|uploaded|booked|ordered|assigned|accepted|declined|edited|updated|deleted|published)\b)/gu;
 const mentions = (text: string, name: string) => new RegExp(`(^|[^\\p{L}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\p{L}]|$)`, "iu").test(text);
 
 function dependencyOrder<G extends { from: string; personaId: string; needs?: z.infer<typeof GoalRef>[] }>(goals: G[]): G[] | null {
@@ -310,6 +312,14 @@ function teamProblems(answer: { personas: z.infer<typeof PersonProposal>[]; play
         const name = nameOf.get(slug(ref.person));
         if (!known.has(refOf(ref))) problems.push(`goal ${JSON.stringify(g.id)} of ${JSON.stringify(p.id)} needs ${JSON.stringify(ref.goal)} of ${JSON.stringify(ref.person)}, which is not in the plan; name only goals of people in the plan`);
         else if (name && slug(ref.person) !== slug(p.id) && !mentions(g.instruction, name)) problems.push(`goal ${JSON.stringify(g.id)} of ${JSON.stringify(p.id)} depends on what ${name} did, so its instruction must call them ${name}, the name they have in this plan`);
+      }
+    }
+  }
+  const names = new Set(people.map((p) => p.name.trim().split(" ")[0]!.toLowerCase()));
+  for (const p of people) {
+    for (const g of p.goals) {
+      for (const [, actor] of g.instruction.matchAll(NAMED_ACTOR)) {
+        if (!names.has(actor!.toLowerCase()) && !CALENDAR.has(actor!.toLowerCase())) problems.push(`goal ${JSON.stringify(g.id)} of ${JSON.stringify(p.id)} names ${actor}, who is not in this plan; refer to people only by the names in this plan`);
       }
     }
   }
