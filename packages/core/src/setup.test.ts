@@ -481,6 +481,18 @@ describe("proposePeople", () => {
     expect((await plan).project.personas.map((p) => p.name)).toEqual(["employee", "Ben"]);
   });
 
+  test("a person's goal that waits for someone else holds back that person's later goals too", async () => {
+    const answer = { personas: [
+      { id: "employee", name: "Priya", brief: "b", signsIn: true, goals: [
+        { id: "submit", instruction: "The leave request is submitted once the form Ben opened is there.", needs: [{ person: "manager", goal: "open" }] },
+        { id: "check", instruction: "The submitted request is listed as pending." },
+      ] },
+      { id: "manager", name: "Ben", brief: "b", signsIn: true, goals: [{ id: "open", instruction: "Leave requests are open for the team." }] },
+    ], playOrder: [{ person: "employee", goal: "submit" }, { person: "employee", goal: "check" }, { person: "manager", goal: "open" }] };
+    const { plan } = leavePlan([answer]);
+    expect((await plan).project.goals.map((g) => `${g.personaId}:${g.id}`)).toEqual(["manager:open", "employee:submit", "employee:check"]);
+  });
+
   test("a person's own goals keep their order around another person's", async () => {
     const answer = leave({ playOrder: [{ person: "employee", goal: "see" }, { person: "manager", goal: "approve" }, { person: "employee", goal: "submit" }] });
     const { plan } = leavePlan([answer]);
