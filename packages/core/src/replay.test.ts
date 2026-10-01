@@ -471,3 +471,82 @@ describe("judge", () => {
     expect(JSON.stringify(events)).not.toContain("hunter22-secret");
   });
 });
+
+describe("a replay with several people", () => {
+  const team = ProjectConfigSchema.parse({
+    name: "Ventures", targetUrl: "https://ventures.test", description: "Pitches.",
+    personas: [{ id: "priya", name: "Priya", brief: "Founder.", accountRef: "priya" }, { id: "marco", name: "Marco", brief: "Reviewer.", accountRef: "marco" }],
+    goals: [{ id: "submit", instruction: "Submit a pitch.", personaId: "priya" }, { id: "review", instruction: "Review a pitch.", personaId: "marco" }],
+    accounts: [{ ref: "priya", username: "priya@v.test", password: "priya-pass-123" }, { ref: "marco", username: "marco@v.test", password: "marco-pass-456" }],
+  });
+  const together: Finding = {
+    id: "f1", kind: "defect", goal: "review", title: "Accept fails", observed: "Accept returned 500.", severity: "high",
+    reproduction: ["Sign in and submit a pitch titled Solar", "Sign in and open the pitch Solar", "Click Accept"], by: ["priya", "marco", "marco"],
+  };
+  const browserFor = (who: string, log: string[]) => ({
+    tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => (log.push(`${who}:snapshot`), { content: [{ type: "text", text: '- textbox "Email" [ref=e1]\n- textbox "Password" [ref=e2]' }] }) }) },
+    fillField: async (ref: string, value: string) => (log.push(`${who}:fill:${value}`), "typed"),
+    screenshot: async () => (log.push(`${who}:screenshot`), { bytes: new Uint8Array([1]), contentType: "image/png" as const }),
+    close: async () => void log.push(`${who}:close`),
+  });
+
+  test("each person acts in their own browser, signed in with their own account, in the order the steps name them, and the extra browsers are closed", async () => {
+    const log: string[] = [];
+    const first = browserFor("b1", log);
+    const model = scriptedModel([
+      toolCall("browser_snapshot", {}),
+      toolCall("sign_in", { account: "priya", usernameField: "e1", passwordField: "e2" }),
+      toolCall("act_as", { person: "Marco" }),
+      toolCall("browser_snapshot", {}),
+      toolCall("sign_in", { account: "marco", usernameField: "e1", passwordField: "e2" }),
+      report({ completed: true, observed: "Accept returned Internal Server Error", blockedAt: null }),
+    ]);
+    const kept: string[] = [];
+    const { observation } = await runReplay({
+      model, modelId: "mock", finding: together, project: team, accountRef: "marco", browserTools: first.tools, fillField: first.fillField, screenshot: first.screenshot,
+      keepScreenshot: (id) => void kept.push(id), openBrowser: async () => browserFor("b2", log),
+      scrubber: SecretScrubber.forProject(team), budget: new Budget(10), maxSteps: 20, emit: () => {},
+    }).then((r) => r);
+    expect(observation.completed).toBe(true);
+    expect(log).toEqual(["b1:snapshot", "b1:fill:priya@v.test", "b1:fill:priya-pass-123", "b2:snapshot", "b2:fill:marco@v.test", "b2:fill:marco-pass-456", "b2:screenshot", "b2:close"]);
+    expect(kept).toEqual(["f1"]);
+    const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
+    expect(prompt).toContain("1. (as Priya) Sign in and submit a pitch titled Solar");
+    expect(prompt).toContain("3. (as Marco) Click Accept");
+    for (const leak of ["Accept fails", "500", "Review a pitch", "Submit a pitch."]) expect(prompt).not.toContain(leak);
+  });
+
+  test("a person may only use their own account, and switching names only the plan's people", async () => {
+    const log: string[] = [];
+    const first = browserFor("b1", log);
+    const model = scriptedModel([
+      toolCall("act_as", { person: "Mallory" }),
+      toolCall("sign_in", { account: "marco", usernameField: "e1", passwordField: "e2" }),
+      report({ completed: false, observed: "stopped", blockedAt: 1 }),
+    ]);
+    const results: string[] = [];
+    await runReplay({
+      model, modelId: "mock", finding: together, project: team, browserTools: first.tools, fillField: first.fillField,
+      openBrowser: async () => browserFor("b2", log), scrubber: SecretScrubber.forProject(team), budget: new Budget(10), maxSteps: 20,
+      emit: (e) => { if (e.type === "step") results.push(String(e.tool)); },
+    });
+    const outputs = JSON.stringify(model.doGenerateCalls.at(-1)!.prompt);
+    expect(outputs).toContain("rejected: person: use one of Priya, Marco");
+    expect(log.some((l) => l.includes("marco-pass"))).toBe(false);
+  });
+
+  test("a finding without people, or naming someone no longer in the plan, is replayed by one person as before", async () => {
+    const log: string[] = [];
+    const first = browserFor("b1", log);
+    const opened: string[] = [];
+    const model = scriptedModel([toolCall("browser_snapshot", {}), report({ completed: true, observed: "ok", blockedAt: null })]);
+    await runReplay({
+      model, modelId: "mock", finding: { ...together, by: ["priya", "gone", "marco"] }, project: team, accountRef: "marco", browserTools: first.tools, fillField: first.fillField,
+      openBrowser: async () => (opened.push("x"), browserFor("b2", log)), scrubber: SecretScrubber.forProject(team), budget: new Budget(10), maxSteps: 20, emit: () => {},
+    });
+    expect(opened).toEqual([]);
+    const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
+    expect(prompt).not.toContain("act_as");
+    expect(prompt).toContain('account \\"marco\\"');
+  });
+});

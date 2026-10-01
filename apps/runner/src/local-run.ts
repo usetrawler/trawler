@@ -131,6 +131,7 @@ export async function localRun(opts: {
         runReplay({
           model: opts.agentModel, modelId: opts.agentModelId, finding, project: opts.project, accountRef,
           browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: opts.replaySteps, emit: opts.emit,
+          openBrowser: () => opts.openBrowser({ scrubber, onBlocked: (url) => { try { opts.emit(scrubber.scrub({ type: "blocked_request", jobId: `replay:${finding.id}`, url: url.slice(0, MAX_URL) })); } catch { return; } } }),
         }),
       ).catch((err) => {
         const error = failure(scrubber, err);

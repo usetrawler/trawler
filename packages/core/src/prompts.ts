@@ -18,7 +18,14 @@ ${story.map(storyLine).join("\n")}
 Build on it: when a goal of yours refers to something another person made or did, find that exact thing.`;
 }
 
-export function rolePrompt(p: { persona: Persona; targetUrl: string; docsUrl?: string; goals: Goal[]; accountRef?: string; signUpEmail?: string; story?: StoryEntry[]; returning?: boolean }): string {
+function othersSteps(self: string, others: string[]): string {
+  if (others.length === 0) return "";
+  const example = others[0]!;
+  return `Other people use this product with you: ${others.join(", ")}. When what someone else did earlier is part of reproducing a defect, for example something they submitted that you then saw fail, put their steps in too, in order, each starting with their name and a colon ("${example}: Sign in and submit a pitch titled Solar"). Steps without a name are yours, ${self}.
+`;
+}
+
+export function rolePrompt(p: { persona: Persona; targetUrl: string; docsUrl?: string; goals: Goal[]; accountRef?: string; signUpEmail?: string; story?: StoryEntry[]; returning?: boolean; others?: string[] }): string {
   const goalLines = p.goals.map((g, i) => `${i + 1}. [${g.id}] ${g.instruction}`).join("\n");
   const signIn = p.accountRef
     ? `You have an account "${p.accountRef}". To sign in, take a snapshot, then call sign_in with the account and the refs of the username and password fields. You will never see the password.`
@@ -38,7 +45,7 @@ Do not give up on a goal the moment it is awkward, and do not keep going once yo
 
 Record findings with submit_finding the moment you see them, not at the end. Give each one a quote: one sentence, as you would tell a friend how it felt.
 A "defect" is a claim about the product: something behaved wrongly. Its reproduction must be literal enough that a stranger told nothing else can follow it on a fresh copy of the product and see the same thing: exact URLs, exact button labels, exact values typed. The steps are actions only; what went wrong belongs in observed, never in the steps, because the stranger checking your report is shown the steps alone. If you cannot write steps like that, it is not a defect.
-"friction" is a claim about you: you could not find something, or it was not clear. Its reproduction is the path you actually took while confused. Do not dress friction up as a defect.
+${othersSteps(p.persona.name, p.others ?? [])}"friction" is a claim about you: you could not find something, or it was not clear. Its reproduction is the path you actually took while confused. Do not dress friction up as a defect.
 Report nothing you did not see in the browser. An opinion about the design is not a finding.
 
 When every goal has a status, call finish.`;
@@ -55,11 +62,16 @@ export function sessionStatus(notes: string[], goals: GoalOutcome[], step: numbe
   return `\n\n## Your scratchpad\n${pad}\n\n## Goal status\n${table}\n\nStep ${step + 1} of ${maxSteps}.${warning}`;
 }
 
-export function replayPrompt(p: { targetUrl: string; steps: string[]; accountRef?: string; signUpEmail?: string }): string {
-  const steps = p.steps.map((s, i) => `${i + 1}. ${s}`).join("\n");
-  const signIn = p.accountRef
-    ? `If a step needs you signed in, take a snapshot and call sign_in with account "${p.accountRef}" and the refs of the username and password fields. You will never see the password.`
-    : `You have no account. If a step has you type a password, fill the password fields with type_own_password instead; you will never see the password. Wherever the steps use the email address they signed up with, use ${p.signUpEmail} instead, since that one may be taken already.`;
+export function replayPrompt(p: { targetUrl: string; steps: string[]; accountRef?: string; signUpEmail?: string; people?: { name: string; accountRef?: string; signUpEmail?: string }[]; stepPeople?: string[] }): string {
+  const together = p.people && p.stepPeople && p.people.length > 1;
+  const steps = p.steps.map((s, i) => `${i + 1}. ${together ? `(as ${p.stepPeople![i]}) ` : ""}${s}`).join("\n");
+  const signIn = together
+    ? `You act as several people, each in their own browser: ${p.people!.map((x) => x.name).join(", ")}. You start as ${p.stepPeople![0]}. Before a step marked with another person, call act_as with their name; their browser stays signed in as them.
+${p.people!.map((x) => (x.accountRef ? `- ${x.name} has an account "${x.accountRef}". To sign in as ${x.name}, take a snapshot and call sign_in with that account and the refs of the username and password fields. You will never see the password.` : `- ${x.name} has no account. Where a step has ${x.name} type a password, use type_own_password; wherever the steps use the email address ${x.name} signed up with, use ${x.signUpEmail} instead.`)).join("\n")}`
+    : p.accountRef
+      ? `If a step needs you signed in, take a snapshot and call sign_in with account "${p.accountRef}" and the refs of the username and password fields. You will never see the password.`
+      : `You have no account. If a step has you type a password, fill the password fields with type_own_password instead; you will never see the password. Wherever the steps use the email address they signed up with, use ${p.signUpEmail} instead, since that one may be taken already.`;
+  const accounts = together ? p.people!.some((x) => x.accountRef) : Boolean(p.accountRef);
   return `You are checking a web application at ${p.targetUrl}, on a fresh copy of it. ${signIn}
 
 Follow these steps exactly, in order:
@@ -69,7 +81,7 @@ Every turn must call a tool; plain text does nothing.
 Use browser_snapshot to see the page; actions such as clicking do not return the page. To act on an element, pass its ref from the latest snapshot (for example e12) as target.
 Do not guess at what you are supposed to find and do not explore beyond the steps.
 If one of the numbered steps cannot be carried out, for example a button that is not there or a page that does not exist, stop and call report_replay with completed false, that step's number as blockedAt, and what the page showed instead.
-${p.accountRef ? "If the product refuses the account's username or password when you sign in, stop and call report_replay with completed false, that step as blockedAt, and say in observed that the product refused the stored test account's credentials.\n" : ""}When you have done the last step, call report_replay with completed true and describe exactly what the page showed. Report only what you saw; you are not being asked whether anything is wrong.`;
+${accounts ? "If the product refuses the account's username or password when you sign in, stop and call report_replay with completed false, that step as blockedAt, and say in observed that the product refused the stored test account's credentials.\n" : ""}When you have done the last step, call report_replay with completed true and describe exactly what the page showed. Report only what you saw; you are not being asked whether anything is wrong.`;
 }
 
 export function accountCheckPrompt(p: { targetUrl: string; accountRef: string }): string {

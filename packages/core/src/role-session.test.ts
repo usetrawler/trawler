@@ -76,6 +76,24 @@ describe("runRoleSession", () => {
     expect(prompt).not.toContain("Send an invoice.");
   });
 
+  test("with other people in the plan, the person is told to put their steps in under their names, and a step so named is recorded as theirs", async () => {
+    const team = ProjectConfigSchema.parse({
+      ...project,
+      personas: [...project.personas, { id: "admin", name: "Dana", brief: "You review.", accountRef: "admin" }],
+    });
+    const model = scriptedModel([
+      toolCall("browser_snapshot", {}),
+      toolCall("submit_finding", { kind: "defect", goal: "sign-up", title: "Approve fails", observed: "500", reproduction: ["Kwame: Send an invoice to Lee", "Open the invoice", "Click Approve"], severity: "high" }),
+      reached("sign-up"), finish,
+    ]);
+    const { result } = await run(model, { project: team, persona: team.personas[1]!, scrubber: SecretScrubber.forProject(team) }).promise;
+    expect(result.findings[0]).toMatchObject({ reproduction: ["Send an invoice to Lee", "Open the invoice", "Click Approve"], by: ["solo", "admin", "admin"] });
+    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toContain("Other people use this product with you: Kwame.");
+    const alone = scriptedModel([reached("sign-up"), finish]);
+    await run(alone).promise;
+    expect(JSON.stringify(alone.doGenerateCalls[0]!.prompt)).not.toContain("Other people use this product");
+  });
+
   test("a refused finish keeps the session going", async () => {
     const model = scriptedModel([finish, reached("sign-up"), reached("invoice"), finish]);
     const { result, usage } = await run(model).promise;

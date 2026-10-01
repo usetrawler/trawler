@@ -272,6 +272,7 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
         model: deps.model(job.agentModel, job.token), modelId: job.agentModel, finding, project: config, accountRef: job.accountRef,
         browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: job.maxSteps, emit: events.emit,
         screenshot: () => b.screenshot(), keepScreenshot: screenshots.keep,
+        openBrowser: () => deps.openBrowser(config, { scrubber, onBlocked: (url) => events.emit(scrubber.scrub({ type: "blocked_request", jobId: job.jobId, url: url.slice(0, MAX_URL) })) }),
       }),
     );
     return { usage, stoppedBy: events.finished?.stoppedBy ?? "error", observation, ...(events.finished?.error ? { error: clip(events.finished.error) } : {}) };
