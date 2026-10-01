@@ -311,6 +311,7 @@ test("work starts reporting with the runner token, reports a failed job with its
 });
 
 test("in work mode with an egress proxy, each browser gets its own proxy session, and what the proxy refused becomes blocked requests", async () => {
+  const launchers: Array<string | undefined> = [];
   const egressToken = "egress-token-".padEnd(40, "x");
   const proxy = await startEgressProxy({ token: egressToken });
   const job = {
@@ -337,11 +338,12 @@ test("in work mode with an egress proxy, each browser gets its own proxy session
       socket.on("close", () => resolveTry());
     });
   const { d } = deps({
-    env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_EGRESS_PROXY: `http://127.0.0.1:${proxy.port}`, TRAWLER_EGRESS_TOKEN: egressToken },
+    env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_EGRESS_PROXY: `http://127.0.0.1:${proxy.port}`, TRAWLER_EGRESS_TOKEN: egressToken, TRAWLER_BROWSER_LAUNCHER: "/usr/local/bin/trawler-chromium" },
     fetchImpl: controlPlane,
     model: () => scriptedModel([toolCall("goal_status", { goal: "g", status: "failed", note: "blocked" }), toolCall("finish", { summary: "done" })]),
-    openBrowser: async ({ proxy: given }) => {
+    openBrowser: async ({ proxy: given, executablePath }) => {
       proxies.push(given);
+      launchers.push(executablePath);
       await tryPrivate(given!.server);
       return { tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => {} };
     },
@@ -350,6 +352,7 @@ test("in work mode with an egress proxy, each browser gets its own proxy session
   try {
     expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(0);
     expect(proxies).toEqual([{ server: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/) }]);
+    expect(launchers).toEqual(["/usr/local/bin/trawler-chromium"]);
     expect((proxies[0] as { server: string }).server).not.toBe(`http://127.0.0.1:${proxy.port}`);
     expect(events.filter((e) => e.type === "blocked_request").map((e) => e.url)).toEqual(["https://169.254.169.254"]);
     const health = await fetch(`http://127.0.0.1:${proxy.port}/health`, { headers: { authorization: `Bearer ${egressToken}` } });
@@ -401,6 +404,12 @@ test.each([[[]], [["--once"]]])("a work runner whose egress proxy has gone hands
   expect(browsers).toBe(0);
   expect(handedBack).toEqual([`/api/jobs/${job.jobId}/release`]);
   expect(err.join("\n")).toContain("stopped: the egress proxy is not answering");
+});
+
+test("a runner that must browse through the egress proxy refuses to work without the launcher that starts the browser as its own user", async () => {
+  const { d, err } = deps({ env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_REQUIRE_EGRESS: "1", TRAWLER_EGRESS_PROXY: "http://127.0.0.1:9", TRAWLER_EGRESS_TOKEN: "e".repeat(40) } });
+  expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(2);
+  expect(err.join("\n")).toMatch(/start the browser as its own user, and TRAWLER_BROWSER_LAUNCHER is not set/);
 });
 
 test("a runner that must browse through the egress proxy refuses to work without one", async () => {

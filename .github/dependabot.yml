@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    allow:
+      - dependency-name: playwright
+      - dependency-name: playwright-core
+      - dependency-name: "@playwright/mcp"
+    groups:
+      playwright:
+        patterns: ["playwright", "playwright-core", "@playwright/mcp"]
+    open-pull-requests-limit: 2

@@ -1,0 +1,25 @@
+#!/bin/bash
+set -u
+chrome=@CHROME@
+kill -KILL -1 2>/dev/null
+find /tmp "$HOME" -mindepth 1 -user browser -delete 2>/dev/null
+profile="$(mktemp -d /tmp/trawler-browser.XXXXXXXX)"
+args=()
+for arg in "$@"; do
+  case "$arg" in
+    --user-data-dir=*) args+=("--user-data-dir=$profile") ;;
+    *) args+=("$arg") ;;
+  esac
+done
+"$chrome" "${args[@]}" &
+child=$!
+trap 'kill -TERM "$child" 2>/dev/null' TERM INT HUP
+status=0
+while :; do
+  wait "$child"
+  status=$?
+  kill -0 "$child" 2>/dev/null || break
+done
+kill -KILL -1 2>/dev/null
+rm -rf "$profile"
+exit "$status"

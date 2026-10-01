@@ -1,0 +1,2 @@
+Defaults:node closefrom_override, !use_pty, !lecture, env_reset
+node ALL=(browser) NOPASSWD: /usr/local/libexec/trawler-chromium-as-browser

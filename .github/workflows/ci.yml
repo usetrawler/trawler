@@ -38,3 +38,11 @@ jobs:
           curl -sf localhost:3000/healthz
           css=$(curl -s localhost:3000/ci-missing-page | grep -o '/_next/static/[^"]*\.css' | head -1)
           test -n "$css" && curl -sf "localhost:3000$css" > /dev/null
+  runner-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: build the runner image
+        run: docker build -f apps/runner/Dockerfile -t trawler-runner:check .
+      - name: hosted Chromium runs as its own user and cannot read the runner
+        run: docker run --rm -v "$PWD/apps/runner/browser:/check:ro" trawler-runner:check /check/isolation-check.sh
