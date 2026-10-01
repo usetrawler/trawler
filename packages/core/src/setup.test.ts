@@ -438,6 +438,62 @@ describe("proposePeople", () => {
     expect(model.doGenerateCalls).toHaveLength(2);
   });
 
+  const onePerson = (instruction: string, name = "Priya") => ({ personas: [{ id: "employee", name, brief: "You work here.", signsIn: true, goals: [{ id: "g", instruction }] }], playOrder: [] });
+  const askedOnce = async (answer: unknown, productName = "OrangeHRM") => {
+    const model = scriptedModel([text(JSON.stringify(answer)), text(JSON.stringify(answer))]);
+    await proposePeople({ model, modelId: "mock", budget: new Budget(1), product, name: productName, description: "d", features: ["f"] });
+    return model.doGenerateCalls.length;
+  };
+
+  test("ordinary goal wording, the product's own name and real human names are not taken for strangers or roles", async () => {
+    for (const instruction of ["Account created and the dashboard is shown.", "Invoice sent to a client and marked as sent.", "Everyone's leave shows on the team calendar.", "A day off for New Year's Eve is booked.", "The request appears in OrangeHRM's approval list."]) {
+      expect({ instruction, calls: await askedOnce(onePerson(instruction)) }).toEqual({ instruction, calls: 1 });
+    }
+    for (const name of ["Ana Lopez", "Mary-Jane", "José da Silva", "陈伟", "Priya Sharma"]) {
+      expect({ name, calls: await askedOnce(onePerson("A leave request is submitted.", name)) }).toEqual({ name, calls: 1 });
+    }
+    for (const name of ["employee", "Leave Manager", "priya"]) {
+      expect({ name, calls: await askedOnce(onePerson("A leave request is submitted.", name)) }).toEqual({ name, calls: 2 });
+    }
+  });
+
+  test("a goal may call someone by the first name of their full name in the plan", async () => {
+    const full = leave({ names: ["Priya Sharma", "Ben Okafor"], approveText: "The pending leave request Priya submitted is approved." });
+    const { model, plan } = leavePlan([full, full]);
+    await plan;
+    expect(model.doGenerateCalls).toHaveLength(1);
+  });
+
+  test("a goal that relies on what another person did but declares no needs is asked for its needs, and played after them once declared", async () => {
+    const silent = leave({ seeNeeds: [] });
+    const { model, plan } = leavePlan([silent, leave()]);
+    const { project } = await plan;
+    expect(JSON.stringify(model.doGenerateCalls[1]!.prompt)).toMatch(/relies on what Ben did; list the goal of \\"manager\\" it needs/);
+    expect(project.goals.map((g) => `${g.personaId}:${g.id}`)).toEqual(["employee:submit", "manager:approve", "employee:see"]);
+  });
+
+  test("when asking again fails or brings back nothing usable, the first answer is kept", async () => {
+    const roles = leave({ names: ["employee", "Ben"] });
+    const failing = new MockLanguageModelV4({ doGenerate: (() => { let n = 0; return async () => { if (n++ === 0) return { content: [{ type: "text", text: JSON.stringify(roles) }], finishReason: { unified: "stop", raw: "stop" }, usage: { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } }, warnings: [] } as never; throw new Error("provider 503"); }; })() });
+    const kept = await proposePeople({ model: failing, modelId: "mock", budget: new Budget(1), product, name: "OrangeHRM", description: "d", features: ["f"] });
+    expect(kept.project.personas.map((p) => p.name)).toEqual(["employee", "Ben"]);
+    const { plan } = leavePlan([roles, { nothing: true }]);
+    expect((await plan).project.personas.map((p) => p.name)).toEqual(["employee", "Ben"]);
+  });
+
+  test("a person's own goals keep their order around another person's", async () => {
+    const answer = leave({ playOrder: [{ person: "employee", goal: "see" }, { person: "manager", goal: "approve" }, { person: "employee", goal: "submit" }] });
+    const { plan } = leavePlan([answer]);
+    expect((await plan).project.goals.map((g) => `${g.personaId}:${g.id}`)).toEqual(["employee:submit", "manager:approve", "employee:see"]);
+  });
+
+  test("an answer that spent the budget is not asked for again, even when it needs fixing", async () => {
+    const model = scriptedModel([text(JSON.stringify(leave({ names: ["employee", "Ben"] })))], 5);
+    const plan = await proposePeople({ model, modelId: "mock", budget: new Budget(1), product, name: "OrangeHRM", description: "d", features: ["f"] });
+    expect(model.doGenerateCalls).toHaveLength(1);
+    expect(plan.project.personas.map((p) => p.name)).toEqual(["employee", "Ben"]);
+  });
+
   test("needs that go round in a circle are asked for again, and kept to the model's order of play if they stay", async () => {
     const circle = leave({ seeNeeds: [{ person: "manager", goal: "approve" }], playOrder: [{ person: "employee", goal: "submit" }, { person: "manager", goal: "approve" }, { person: "employee", goal: "see" }] });
     circle.personas[0]!.goals[0] = { ...circle.personas[0]!.goals[0]!, needs: [{ person: "manager", goal: "approve" }] } as never;
