@@ -65,3 +65,17 @@ test("a run whose every replay failed shows no count of confirmed defects, but t
   expect(row).toMatch(/max-md:hidden text-ok"><span class="wide:hidden">Complete · not checked<\/span><span class="max-wide:hidden">Complete<\/span><\/span>/);
   expect(row).not.toContain(">confirmed<");
 });
+
+const narrowSummary = (html: string) => html.match(/<small class="mt-1 block text-\[10px\] text-muted wide:hidden">([^<]*)<\/small>/)?.[1];
+
+test("narrow run rows keep their results and spend below the date in both histories", () => {
+  for (const project of [true, false]) {
+    expect(narrowSummary(render([line()], project))).toBe("3 confirmed · 2/3 goals · $3.08");
+    expect(narrowSummary(render([line({ confirmed: 0, goalsReached: 0, costUsd: 0 })], project))).toBe("0 confirmed · 0/3 goals · $0.00");
+  }
+});
+
+test("the narrow summary preserves unchecked defects and token-priced spend", () => {
+  expect(narrowSummary(render([line({ confirmed: 0, unchecked: true })]))).toBe("not checked · 2/3 goals · $3.08");
+  expect(narrowSummary(render([line({ tokenCap: 1_000_000, tokensUsed: 1_234_567 })]))).toBe("3 confirmed · 2/3 goals · 1.23M tokens");
+});
