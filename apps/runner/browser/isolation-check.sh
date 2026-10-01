@@ -19,6 +19,8 @@ as_browser kill -0 $runner 2>/dev/null; result $(( $? == 0 )) "browser cannot si
 kill $runner
 
 [ "$(stat -c %U:%a $launcher /usr/local/bin/trawler-chromium /etc/sudoers.d/trawler-browser | tr '\n' ' ')" = "root:755 root:755 root:440 " ]; result $? "the launchers and the sudo rule belong to root and only root can change them"
+rules=$(as_node sudo -n -l 2>/dev/null | tr ',' '\n' | sed 's/^ *//')
+printf '%s\n' "$rules" | grep -qx 'env_reset' && ! printf '%s\n' "$rules" | grep -qx '!env_reset'; result $? "sudo resets the environment it passes to the browser"
 as_node sudo -n -u root id >/dev/null 2>&1; result $(( $? == 0 )) "node cannot become root through sudo"
 as_node sudo -n -u egress $launcher --version >/dev/null 2>&1; result $(( $? == 0 )) "node cannot run the launcher as another user"
 as_node sudo -n -u browser /bin/sh -c id >/dev/null 2>&1; result $(( $? == 0 )) "node cannot run anything else as browser"
