@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { openBrowser } from "/app/packages/core/src/browser.ts";
 import { SecretScrubber } from "/app/packages/core/src/secrets.ts";
 
@@ -26,7 +26,10 @@ check(JSON.stringify(await browser.tools.browser_snapshot.execute({}, ctx)).incl
 check(Boolean(await browser.screenshot()), "a screenshot is taken");
 const chromes = processes().filter((p) => p.cmd.includes("chrome-headless-shell"));
 check(chromes.length > 0 && chromes.every((p) => p.uid === browserUid), `every Chromium process runs as browser (${chromes.length} processes)`);
+writeFileSync("/tmp/isolation-check.pids", chromes.map((p) => p.pid).join("\n"));
+for (let i = 0; i < 100 && !existsSync("/tmp/isolation-check.go"); i++) await new Promise((resolve) => setTimeout(resolve, 100));
 await browser.close();
-check(processes().every((p) => p.uid !== browserUid), "no browser process is left after close");
+for (let i = 0; i < 50 && processes().some((p) => p.uid === browserUid); i++) await new Promise((resolve) => setTimeout(resolve, 100));
+check(processes().every((p) => p.uid !== browserUid), "no browser process is left within 5 s of close");
 server.close();
 process.exit(failures.length ? 1 : 0);

@@ -1,2 +1,3 @@
 Defaults:node closefrom_override, !use_pty, !lecture, env_reset
+Defaults:node env_keep = "TZ LANG LANGUAGE LC_ALL LC_CTYPE LC_MESSAGES LC_TIME LC_NUMERIC"
 node ALL=(browser) NOPASSWD: /usr/local/libexec/trawler-chromium-as-browser

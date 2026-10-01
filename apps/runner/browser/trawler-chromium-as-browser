@@ -1,17 +1,33 @@
 #!/bin/bash
 set -u
 chrome=@CHROME@
-kill -KILL -1 2>/dev/null
-find /tmp "$HOME" -mindepth 1 -user browser -delete 2>/dev/null
-profile="$(mktemp -d /tmp/trawler-browser.XXXXXXXX)"
+writable=(/tmp /var/tmp /dev/shm /run/lock /dev/mqueue)
+
+clean() {
+  kill -KILL -1 2>/dev/null
+  for dir in "${writable[@]}"; do
+    [ -d "$dir" ] || continue
+    find "$dir" -mindepth 1 -user browser -type d -exec chmod u+rwx {} + 2>/dev/null
+    find "$dir" -mindepth 1 -depth -user browser -delete 2>/dev/null
+  done
+}
+
+clean
+home="$(mktemp -d /tmp/trawler-browser.XXXXXXXX)"
+mkdir "$home/profile" "$home/tmp"
 args=()
 for arg in "$@"; do
-  case "$arg" in
-    --user-data-dir=*) args+=("--user-data-dir=$profile") ;;
+  name="${arg#"${arg%%[!-]*}"}"
+  name="${name%%=*}"
+  case "$name" in
+    user-data-dir) args+=("--user-data-dir=$home/profile") ;;
+    *cmd-prefix | *subprocess-path | *launcher | load-extension | disable-extensions-except | remote-debugging-port | remote-debugging-address)
+      echo "trawler-chromium: refused switch $name" >&2
+      exit 64 ;;
     *) args+=("$arg") ;;
   esac
 done
-"$chrome" "${args[@]}" &
+HOME="$home" TMPDIR="$home/tmp" setpriv --no-new-privs "$chrome" "${args[@]}" &
 child=$!
 trap 'kill -TERM "$child" 2>/dev/null' TERM INT HUP
 status=0
@@ -20,6 +36,5 @@ while :; do
   status=$?
   kill -0 "$child" 2>/dev/null || break
 done
-kill -KILL -1 2>/dev/null
-rm -rf "$profile"
+clean
 exit "$status"
