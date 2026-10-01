@@ -10,9 +10,14 @@ as_browser() { setpriv --reuid=browser --regid=browser --clear-groups "$@"; }
 setpriv --reuid=node --regid=node --init-groups env TRAWLER_RUNNER_TOKEN=isolation-check-token sleep 120 &
 runner=$!
 sleep 1
-address=$(as_node head -1 /proc/$runner/maps | cut -d- -f1)
-as_node dd if=/proc/$runner/mem of=/dev/null bs=1 count=1 iflag=skip_bytes skip=$((0x$address)) 2>/dev/null; result $? "node can read its own process's memory, so the next check is meaningful"
-as_browser dd if=/proc/$runner/mem of=/dev/null bs=1 count=1 iflag=skip_bytes skip=$((0x$address)) 2>/dev/null; result $(( $? == 0 )) "browser cannot read the runner's memory"
+scope=$(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null || echo 0)
+if [ "$scope" = 0 ]; then
+  address=$(as_node head -1 /proc/$runner/maps | cut -d- -f1)
+  as_node dd if=/proc/$runner/mem of=/dev/null bs=1 count=1 iflag=skip_bytes skip=$((0x$address)) 2>/dev/null; result $? "node can read its own process's memory, so the next check is meaningful"
+  as_browser dd if=/proc/$runner/mem of=/dev/null bs=1 count=1 iflag=skip_bytes skip=$((0x$address)) 2>/dev/null; result $(( $? == 0 )) "browser cannot read the runner's memory"
+else
+  echo "skip memory checks: ptrace_scope $scope refuses them to every process that is not an ancestor (the hosted runner has 0)"
+fi
 as_browser cat /proc/$runner/environ >/dev/null 2>&1; result $(( $? == 0 )) "browser cannot read the runner's environment"
 as_browser ls /proc/$runner/fd >/dev/null 2>&1; result $(( $? == 0 )) "browser cannot list the runner's open files"
 as_browser kill -0 $runner 2>/dev/null; result $(( $? == 0 )) "browser cannot signal the runner"
