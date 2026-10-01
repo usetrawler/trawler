@@ -471,3 +471,9 @@ describe("judge", () => {
     expect(JSON.stringify(events)).not.toContain("hunter22-secret");
   });
 });
+
+test("the judge refutes a claim that only says an expected detail is missing, unless the product promised it", () => {
+  const missing = judgePrompt({ ...finding, title: "Transfer confirmation shows no new balances", observed: "The confirmation says $50.00 has been transferred, with no balances." }, { completed: true, observed: "The confirmation shows no balances.", blockedAt: null });
+  expect(missing).toMatch(/only says something the tester expected is missing .* is not a defect unless the claim or the observation shows the product promising it/);
+  expect(missing).toMatch(/answer "refuted", even when the observation agrees it is missing/);
+});

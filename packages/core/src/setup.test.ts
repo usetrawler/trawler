@@ -347,6 +347,7 @@ describe("proposePeople", () => {
     expect(prompt).toContain("Review pitches");
     expect(prompt).toContain("Pitches, reviewed.");
     expect(prompt).toMatch(/exercise these features and nothing else/);
+    expect(prompt).toMatch(/never a detail of a screen the page did not show you the product has/);
   });
 
   test("goals come in the order of play the model gives, across people, and anything it left out follows", async () => {

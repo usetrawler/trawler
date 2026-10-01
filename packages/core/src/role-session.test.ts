@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
 import { JOB_STOPPED, ProjectConfigSchema, RunEventSchema, type RunEventInput } from "@usetrawler/protocol";
 import { Budget } from "./llm.ts";
-import { sessionStatus } from "./prompts.ts";
+import { rolePrompt, sessionStatus } from "./prompts.ts";
 import { runRoleSession } from "./role-session.ts";
 import { SecretScrubber } from "./secrets.ts";
 import { proxyRefusal, scriptedModel, text, toolCall } from "./testing.ts";
@@ -558,4 +558,11 @@ describe("a turn of a team session", () => {
     expect(await email("run-1")).toBe(await email("run-1"));
     expect(await email("run-1")).not.toBe(await email("run-2"));
   });
+});
+
+test("a person is told their goals are not the product's promises, so a detail the product never offered is a goal note or friction, not a defect", () => {
+  const prompt = rolePrompt({ persona: { id: "owen", name: "Owen", brief: "You move money." }, targetUrl: "https://bank.test/", goals: [{ id: "move", instruction: "Money is in savings." }], signUpEmail: "owen@example.com" });
+  expect(prompt).toMatch(/goals are what you want, written for you; they are not the product's promises/);
+  expect(prompt).toMatch(/the goal is reached, and you say what was missing in its note, or report friction/);
+  expect(prompt).toMatch(/defect only when the product itself promised it, in its own words, labels or documentation, or a control that should provide it does not work/);
 });
