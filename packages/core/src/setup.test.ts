@@ -376,6 +376,64 @@ describe("proposePeople", () => {
     expect(await order([{ person: "founder-priya", goal: "submit" }, { person: "reviewer", goal: "review" }, { person: "founder-priya", goal: "decision" }])).toEqual(["sign-up", "submit", "review", "decision"]);
   });
 
+  const leave = (over: { names?: [string, string]; playOrder?: unknown; approveText?: string; seeNeeds?: unknown } = {}) => {
+    const [employee, manager] = over.names ?? ["Priya", "Ben"];
+    return {
+      personas: [
+        { id: "employee", name: employee, brief: "You work here and need a week off.", signsIn: true, goals: [
+          { id: "submit", instruction: "A leave request for next month is submitted and shown as pending." },
+          { id: "see", instruction: `The leave request is shown as approved after ${manager} reviewed it.`, needs: over.seeNeeds ?? [{ person: "manager", goal: "approve" }] },
+        ] },
+        { id: "manager", name: manager, brief: "You approve your team's leave.", signsIn: true, goals: [
+          { id: "approve", instruction: over.approveText ?? `The pending leave request ${employee} submitted is approved.`, needs: [{ person: "employee", goal: "submit" }] },
+        ] },
+      ],
+      playOrder: over.playOrder ?? [{ person: "manager", goal: "approve" }, { person: "employee", goal: "submit" }, { person: "employee", goal: "see" }],
+    };
+  };
+  const leavePlan = (replies: unknown[]) => {
+    const model = scriptedModel(replies.map((r) => text(JSON.stringify(r))));
+    return { model, plan: proposePeople({ model, modelId: "mock", budget: new Budget(1), product, name: "OrangeHRM", description: "d", features: ["Leave requests"] }) };
+  };
+
+  test("a goal that needs another person's goal plays after it, even when the model's order of play has it first", async () => {
+    const { model, plan } = leavePlan([leave()]);
+    const { project } = await plan;
+    expect(project.goals.map((g) => `${g.personaId}:${g.id}`)).toEqual(["employee:submit", "manager:approve", "employee:see"]);
+    expect(model.doGenerateCalls).toHaveLength(1);
+    const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
+    expect(prompt).toMatch(/needs/);
+    expect(prompt).toMatch(/human first name/);
+  });
+
+  test("people named after their role, or goals calling someone by a name not in the plan, are asked for again with what to fix", async () => {
+    const roles = leave({ names: ["employee", "Leave-Manager"] });
+    const strangers = leave({ approveText: "The pending leave request Maya submitted is approved." });
+    const { model, plan } = leavePlan([roles, leave()]);
+    expect((await plan).project.personas.map((p) => p.name)).toEqual(["Priya", "Ben"]);
+    const second = JSON.stringify(model.doGenerateCalls[1]!.prompt);
+    expect(second).toMatch(/previous answer was refused/);
+    expect(second).toMatch(/named \\"employee\\"; give every person a human first name/);
+    const again = leavePlan([strangers, leave()]);
+    await again.plan;
+    expect(JSON.stringify(again.model.doGenerateCalls[1]!.prompt)).toMatch(/must call them Priya/);
+  });
+
+  test("an answer still wrong after asking again is used, with its goals in an order they can be played in", async () => {
+    const stubborn = leave({ approveText: "The pending leave request Maya submitted is approved." });
+    const { model, plan } = leavePlan([stubborn, stubborn]);
+    expect((await plan).project.goals.map((g) => `${g.personaId}:${g.id}`)).toEqual(["employee:submit", "manager:approve", "employee:see"]);
+    expect(model.doGenerateCalls).toHaveLength(2);
+  });
+
+  test("needs that go round in a circle are asked for again, and kept to the model's order of play if they stay", async () => {
+    const circle = leave({ seeNeeds: [{ person: "manager", goal: "approve" }], playOrder: [{ person: "employee", goal: "submit" }, { person: "manager", goal: "approve" }, { person: "employee", goal: "see" }] });
+    circle.personas[0]!.goals[0] = { ...circle.personas[0]!.goals[0]!, needs: [{ person: "manager", goal: "approve" }] } as never;
+    const { model, plan } = leavePlan([circle, circle]);
+    expect((await plan).project.goals.map((g) => `${g.personaId}:${g.id}`)).toEqual(["employee:submit", "manager:approve", "employee:see"]);
+    expect(JSON.stringify(model.doGenerateCalls[1]!.prompt)).toMatch(/go round in a circle/);
+  });
+
   test("when nobody can sign up, every person signs in to an existing account, whatever the model marked", async () => {
     const model = scriptedModel([text(JSON.stringify(people))]);
     const plan = await proposePeople({ model, modelId: "mock", budget: new Budget(1), product, name: "Acme", description: "d", features: ["Submit a pitch"], signUp: "closed" });
