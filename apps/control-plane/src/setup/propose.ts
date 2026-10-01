@@ -7,6 +7,7 @@ import type { Keyring } from "../lib/secrets.ts";
 import { createProject, ProjectNotFound, replacePlan } from "../projects/projects.ts";
 import { ProjectLimitReached, projectLimitReached } from "../runs/plans.ts";
 import { FetchRefused } from "./safe-fetch.ts";
+import { WORKING_MINUTES, type SetupProgress } from "./progress.ts";
 
 const SETUP_BUDGET_USD = 0.25;
 
@@ -45,7 +46,6 @@ export class DraftGone extends Error {}
 
 export class SetupStillRunning extends Error {}
 
-const WORKING_MINUTES = 5;
 
 const DRAFT_HOURS = 24;
 const MAX_OTHER_ORIGINS = 19;
@@ -125,13 +125,19 @@ export async function describeDraft(deps: SetupDeps, input: { orgId: string; dra
     if (!described.features) throw new DraftGone("the setup draft was already described without a result");
     return summaryOf(described);
   }
-  const { summary } = await describeProduct({ model: deps.model, modelId: deps.modelId, budget: new Budget(SETUP_BUDGET_USD), product: productOf(draft) });
+  let summary: ProductSummary;
+  try {
+    ({ summary } = await describeProduct({ model: deps.model, modelId: deps.modelId, budget: new Budget(SETUP_BUDGET_USD), product: productOf(draft) }));
+  } catch (err) {
+    await withOrg(deps.db, input.orgId, (tx) => tx.updateTable("setup_drafts").set({ describe_failed_at: sql<Date>`now()` }).where("id", "=", draft.id).execute()).catch(() => undefined);
+    throw err;
+  }
   await withOrg(deps.db, input.orgId, (tx) => tx.updateTable("setup_drafts").set({ name: summary.name, description: summary.description, sign_up: summary.signUp, features: JSON.stringify(summary.features) }).where("id", "=", draft.id).execute());
   return summary;
 }
 
 async function claimProposal(deps: SetupDeps, orgId: string, draftId: string): Promise<boolean> {
-  const claimed = await withOrg(deps.db, orgId, (tx) => tx.updateTable("setup_drafts").set({ proposing_at: new Date() })
+  const claimed = await withOrg(deps.db, orgId, (tx) => tx.updateTable("setup_drafts").set({ proposing_at: sql<Date>`now()` })
     .where("id", "=", draftId).where("result_project_id", "is", null)
     .where((eb) => eb.or([eb("proposing_at", "is", null), eb("proposing_at", "<", sql<Date>`now() - make_interval(mins => ${WORKING_MINUTES})`)]))
     .returning("id").executeTakeFirst());
@@ -193,12 +199,6 @@ async function proposeClaimed(deps: SetupDeps, input: { orgId: string; descripti
   });
 }
 
-export type SetupProgress =
-  | { state: "project"; projectId: string }
-  | { state: "described"; summary: ProductSummary }
-  | { state: "working" }
-  | { state: "gone" };
-
 const recent = (at: Date | null) => at !== null && Date.now() - at.getTime() < WORKING_MINUTES * 60_000;
 
 export async function setupProgress(deps: Pick<SetupDeps, "db">, input: { orgId: string; draftId: string }): Promise<SetupProgress> {
@@ -208,5 +208,6 @@ export async function setupProgress(deps: Pick<SetupDeps, "db">, input: { orgId:
   if (draft.result_project_id) return { state: "project", projectId: draft.result_project_id };
   if (recent(draft.proposing_at)) return { state: "working" };
   if (draft.features) return { state: "described", summary: summaryOf(draft) };
+  if (draft.describe_failed_at) return { state: "failed" };
   return recent(draft.described_at) ? { state: "working" } : { state: "gone" };
 }

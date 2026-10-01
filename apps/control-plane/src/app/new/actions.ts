@@ -8,7 +8,8 @@ import { getDb, getKeyring } from "../../server/db.ts";
 import { readEnv } from "../../server/env.ts";
 import { logError, writeLog } from "../../server/log.ts";
 import { FetchRefused, safeFetchText, type RefusalReason } from "../../setup/safe-fetch.ts";
-import { describeDraft, DraftGone, proposeFromDraft, SetupLimited, SetupStillRunning, setupProgress, startDraft, type SetupDeps, type SetupProgress } from "../../setup/propose.ts";
+import { describeDraft, DraftGone, proposeFromDraft, SetupLimited, SetupStillRunning, setupProgress, startDraft, type SetupDeps } from "../../setup/propose.ts";
+import type { SetupProgress } from "../../setup/progress.ts";
 import { ProjectNotFound } from "../../projects/projects.ts";
 import { ProjectLimitReached } from "../../runs/plans.ts";
 

@@ -280,6 +280,7 @@ export interface SetupAttempts {
 
 export interface SetupDrafts {
   created_at: Generated<Timestamp>;
+  describe_failed_at: Timestamp | null;
   described_at: Timestamp | null;
   description: string | null;
   docs: string | null;

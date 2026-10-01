@@ -5,7 +5,8 @@ import { scriptedModel, text } from "../../../../packages/core/src/testing.ts";
 import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
-import { addAccount, loadProjectConfig, projectForEditing, replacePlan } from "../projects/projects.ts";
+import { addAccount, createProject, loadProjectConfig, projectForEditing, replacePlan } from "../projects/projects.ts";
+import { ProjectConfigSchema } from "@usetrawler/protocol";
 import { describeDraft, DraftGone, proposeFromDraft, SETUP_LIMITS, SetupLimited, SetupStillRunning, setupProgress, startDraft, type SetupDeps } from "./propose.ts";
 import { FetchRefused } from "./safe-fetch.ts";
 import { ProjectLimitReached } from "../runs/plans.ts";
@@ -118,6 +119,7 @@ test("a draft is described once: asking again returns the same answer without ca
   const failing = scriptedModel([text("not json"), text("not json")]);
   const broken = await startDraft(deps(failing), { orgId: "org-once", url: "https://app.acme.test/" });
   await expect(describeDraft(deps(failing), { orgId: "org-once", draftId: broken })).rejects.toBeInstanceOf(SetupModelFailed);
+  expect(await setupProgress({ db: t.db }, { orgId: "org-once", draftId: broken })).toEqual({ state: "failed" });
   await expect(describeDraft(deps(failing), { orgId: "org-once", draftId: broken })).rejects.toBeInstanceOf(DraftGone);
   expect(failing.doGenerateCalls).toHaveLength(2);
 });
@@ -235,4 +237,20 @@ test("describing that is still going reads as working, and one that stopped long
   expect(await setupProgress({ db: t.db }, { orgId: "org-slow", draftId })).toEqual({ state: "working" });
   await sql`update setup_drafts set described_at = now() - interval '10 minutes' where id = ${draftId}`.execute(t.db);
   expect(await setupProgress({ db: t.db }, { orgId: "org-slow", draftId })).toEqual({ state: "gone" });
+});
+
+test("a setup that another ask finished while people were being chosen hands back that project instead of making a second one", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-race', 'R', 'race', now())`.execute(t.db);
+  const model = scriptedModel([text(JSON.stringify(summary)), text(JSON.stringify(people))]);
+  const draftId = await startDraft(deps(model), { orgId: "org-race", url: "https://race.acme.test/" });
+  await describeDraft(deps(model), { orgId: "org-race", draftId });
+  const other = await withOrg(t.db, "org-race", (tx) => createProject(tx, "org-race", ProjectConfigSchema.parse({ name: "Race", targetUrl: "https://race.acme.test/", personas: [{ id: "a", name: "A", brief: "b" }], goals: [{ id: "g", instruction: "Look." }] }), keys));
+  const choose = model.doGenerate.bind(model);
+  model.doGenerate = async (options) => {
+    await sql`update setup_drafts set result_project_id = ${other} where id = ${draftId}`.execute(t.db);
+    return choose(options);
+  };
+  expect(await proposeFromDraft(deps(model), { orgId: "org-race", draftId, description: "d", features: ["Get paid"] })).toBe(other);
+  const { rows } = await sql<{ n: number }>`select count(*)::int as n from projects where org_id = 'org-race'`.execute(t.db);
+  expect(rows[0]!.n).toBe(1);
 });
