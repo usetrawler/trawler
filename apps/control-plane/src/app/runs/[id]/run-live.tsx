@@ -234,7 +234,7 @@ function BotProtectionNotice({ met }: { met: NonNullable<RunSummary["botProtecti
       <h2 id="bot-protection" className="text-base font-bold">Bot protection stopped Trawler</h2>
       <p className="text-sm">{met.vendor}&apos;s bot protection blocked Trawler&apos;s browser at <span className="font-mono break-all">{where}</span>. It stops automated browsers, so what lies behind it could not be tried, and it is not reported as a defect.</p>
       <p className="text-sm">To let Trawler through, turn the check off for this staging copy, or run the project with the local runner, which can send a header that a rule in {met.vendor} lets past.</p>
-      <DocsLink page="docs/reference/troubleshooting/#bot-protection" className="text-sm underline">How to let Trawler through</DocsLink>
+      <DocsLink page="docs/reference/troubleshooting/#bot-protection-stopped-trawler" className="text-sm underline">How to let Trawler through</DocsLink>
     </section>
   );
 }

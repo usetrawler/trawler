@@ -276,7 +276,7 @@ test("a run stopped by bot protection says which check blocked Trawler and where
   for (const run of [summary({ ...finished, botProtection: met }), summary({ ...live, botProtection: met })]) {
     const html = render(run);
     expect(text(html)).toContain("Bot protection stopped Trawler Cloudflare's bot protection blocked Trawler's browser at /register.htm . It stops automated browsers, so what lies behind it could not be tried, and it is not reported as a defect.");
-    expect(html).toContain('href="https://usetrawler.com/docs/reference/troubleshooting/#bot-protection"');
+    expect(html).toContain('href="https://usetrawler.com/docs/reference/troubleshooting/#bot-protection-stopped-trawler"');
   }
   expect(text(render(finished))).not.toContain("Bot protection");
 });
