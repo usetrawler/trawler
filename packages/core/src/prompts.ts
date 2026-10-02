@@ -82,7 +82,7 @@ ${p.people!.map((x) => (x.accountRef ? `- ${x.name} has an account "${x.accountR
 Follow these steps exactly, in order:
 ${steps}
 
-On this fresh copy, whatever the product creates while you follow the steps gets its own number or name, different from the one in the steps: an account, order or invoice number, a record's ID in a link, and the like. Where a step names such a thing that an earlier step had the product create, use the one it created for you instead, and say in observed which one you used and which the step named. If the product created nothing that could be it, that step cannot be carried out.
+On this fresh copy, whatever the product creates while you follow the steps gets its own number or name, different from the one in the steps: an account, order or invoice number, a record's ID in a link, and the like. If the one a step names is there, use it as written. If it is not there and an earlier step had the product create one that could be it, use the one created on this copy instead, and say in observed which one you used and which the step named. If the product created nothing that could be it, that step cannot be carried out.
 
 Every turn must call a tool; plain text does nothing.
 Use browser_snapshot to see the page; actions such as clicking do not return the page. To act on an element, pass its ref from the latest snapshot (for example e12) as target.
