@@ -209,7 +209,7 @@ describe("a whole run", () => {
         if (job.kind === "replay") replayed.push(job.finding!.id);
         await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "report", observation: { completed: true, observed: "Same", blockedAt: null } });
       }
-      expect(replayed.toSorted()).toEqual(["ana:f1", "ana:f2"]);
+      expect(replayed).toEqual(["ana:f1", "ana:f2"]);
     });
   });
 

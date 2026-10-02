@@ -554,10 +554,8 @@ async function planNext(tx: Tx, job: { run_id: string; org_id: string; kind: str
       await tx.updateTable("runs").set({ sign_up_seed: null }).where("id", "=", job.run_id).execute();
       const candidates = await frictionToCheck(tx, job.run_id);
       const defects = await reportedDefectsOf(tx, job.run_id).select("key").execute();
-      if (defects.length >= 2 && defects.length <= MAX_GROUPED_DEFECTS) {
-        await tx.insertInto("jobs").values({ org_id: job.org_id, run_id: job.run_id, kind: "group", position: next }).execute();
-        await queueReplays(tx, job, next + 1, candidates);
-      } else await queueReplays(tx, job, next, [...defects.map((d) => d.key), ...candidates]);
+      if (defects.length >= 2 && defects.length <= MAX_GROUPED_DEFECTS) await tx.insertInto("jobs").values({ org_id: job.org_id, run_id: job.run_id, kind: "group", position: next }).execute();
+      else await queueReplays(tx, job, next, [...defects.map((d) => d.key), ...candidates]);
     }
   } else if (job.kind === "group") {
     const keys = (await reportedDefectsOf(tx, job.run_id).select("key").execute()).map((d) => d.key);
@@ -566,7 +564,8 @@ async function planNext(tx: Tx, job: { run_id: string; org_id: string; kind: str
     for (const [representative, ...same] of firstReported) {
       if (same.length) await tx.updateTable("findings").set({ same_as: representative, updated_at: new Date() }).where("run_id", "=", job.run_id).where("key", "in", same).execute();
     }
-    await queueReplays(tx, job, next, keys.filter((key) => firstReported.some((group) => group[0] === key)));
+    const candidates = (await defectsOf(tx, job.run_id).select("key").where("filed_as", "=", "friction").execute()).map((d) => d.key);
+    await queueReplays(tx, job, next, [...keys.filter((key) => firstReported.some((group) => group[0] === key)), ...candidates]);
   } else if (job.kind === "replay" && !noReport(result.observation)) {
     await tx.insertInto("jobs").values({ org_id: job.org_id, run_id: job.run_id, kind: "judge", position: next, finding_key: job.finding_key }).execute();
   } else if (job.kind === "replay" && result.observation && result.stoppedBy !== "error") {
