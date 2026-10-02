@@ -49,6 +49,6 @@ test("a lost description switches the screen to checking, and leaving the page s
   (unmount!() as () => void)();
   expect(polling.signal.aborted).toBe(true);
   await vi.advanceTimersByTimeAsync(10_000);
-  await Promise.all(react.started);
   expect(actions.setupProgressAction).not.toHaveBeenCalled();
+  await Promise.all(react.started);
 });
