@@ -71,6 +71,7 @@ export interface Credentials {
 
 export interface Findings {
   created_at: Generated<Timestamp>;
+  filed_as: string | null;
   goal: string;
   id: Generated<string>;
   job_id: string;
