@@ -197,7 +197,7 @@ export async function runReplay(opts: {
       onStep: (step, costUsd) => emit({ type: "step", jobId, step: usage.steps, tool: step.toolCalls[0]?.toolName ?? null, costUsd }),
       largeResultChars: 4000,
     });
-    const observation: ReplayObservation = stoppedAt ? stoppedByBotProtection(stoppedAt) : (report ?? NO_REPORT);
+    const observation: ReplayObservation = stoppedAt ? opts.scrubber.scrub(stoppedByBotProtection(stoppedAt)) : (report ?? NO_REPORT);
     const last = await now();
     const screenshot = last.browser.screenshot;
     if (screenshot && opts.keepScreenshot && outcome.stoppedBy !== "budget") {

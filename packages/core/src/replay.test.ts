@@ -642,6 +642,15 @@ describe("bot protection", () => {
     expect(events.filter((e) => e.type === "bot_protection")).toEqual([{ type: "bot_protection", jobId: "replay:f1", vendor: "Cloudflare", url: "https://acme.test/join" }]);
   });
 
+  test("a secret in the check's address is masked in what the replay reports", async () => {
+    const leaky = { vendor: "Cloudflare", url: "https://acme.test/join?token=hunter22-secret" };
+    const tools = { ...browserTools, browser_click: tool({ inputSchema: z.object({ target: z.string() }), execute: async () => ({ content: [{ type: "text", text: "clicked" }] }) }) };
+    const { promise } = replay(scriptedModel([toolCall("browser_click", { target: "e2" })]), { browserTools: tools, botProtection: () => leaky });
+    const { observation } = await promise;
+    expect(JSON.stringify(observation)).not.toContain("hunter22-secret");
+    expect(observation.botProtection?.url).toContain("token=");
+  });
+
   test("the judge answers inconclusive for a replay stopped by bot protection, without asking the model", async () => {
     const model = scriptedModel([verdictCall("confirmed")]);
     const { promise, events } = judgeWith(model, { observation: { completed: false, observed: "stopped by Cloudflare", blockedAt: null, botProtection: challenge } });

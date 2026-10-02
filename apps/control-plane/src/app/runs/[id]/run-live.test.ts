@@ -272,7 +272,7 @@ test("a confirmed defect a person filed as friction says so, and a defect they f
 });
 
 test("a run stopped by bot protection says which check blocked Trawler and where, live and finished, and links to how to let Trawler through", () => {
-  const met = { vendor: "Cloudflare", url: "https://app.acme.test/register.htm?step=2", personaKey: "ana", during: "role_session" };
+  const met = { vendor: "Cloudflare", url: "https://app.acme.test/register.htm?step=2" };
   for (const run of [summary({ ...finished, botProtection: met }), summary({ ...live, botProtection: met })]) {
     const html = render(run);
     expect(text(html)).toContain("Bot protection stopped Trawler Cloudflare's bot protection blocked Trawler's browser at /register.htm . It stops automated browsers, so what lies behind it could not be tried, and it is not reported as a defect.");

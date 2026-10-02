@@ -87,6 +87,17 @@ beforeAll(async () => {
         res.statusCode = 403;
         res.setHeader("content-type", "text/html");
         return res.end(CLOUDFLARE_CHALLENGE);
+      case "/spa":
+        return html(`<h1>Register</h1><button onclick="fetch('/api/register', { method: 'POST' }).then((r) => (document.querySelector('h1').textContent = 'Got ' + r.status))">Save</button>`);
+      case "/api/register":
+        res.statusCode = 403;
+        res.setHeader("cf-mitigated", "challenge");
+        res.setHeader("content-type", "text/html");
+        return res.end(CLOUDFLARE_CHALLENGE);
+      case "/clears-itself":
+        return html(`<title>Just a moment...</title><p>Checking your browser</p><script>setTimeout(() => { location.href = "/two"; }, 1500)</script>`);
+      case "/hidden-turnstile":
+        return html(`<h1>Sign in</h1><div class="cf-turnstile" style="display:none"></div>`);
       case "/with-invisible-recaptcha":
         return html(`<h1>Contact us</h1><script src="https://www.google.com/recaptcha/api.js?render=site-key"></script><div class="grecaptcha-badge" style="position:fixed;bottom:14px;right:0;width:256px;height:60px"><iframe title="reCAPTCHA" width="256" height="60" src="https://www.google.com/recaptcha/api2/anchor?ar=1&k=site-key&size=invisible"></iframe></div>`);
       case "/short":
@@ -673,6 +684,30 @@ describe("bot protection", () => {
       expect(b.botProtection?.()).toEqual({ vendor: "Cloudflare", url: `${origin}/register-blocked` });
       const left = await navigate(b, `${origin}/two`);
       expect(JSON.stringify(left)).not.toContain("### Bot protection");
+      expect(b.botProtection?.()).toBeNull();
+    });
+  }, 60_000);
+
+  test("a request a single-page app makes that Cloudflare answers with a challenge is bot protection, though the page stays as it was", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/spa`);
+      const out = await b.tools.browser_click!.execute!({ element: "Save", target: refOf(await snapshot(b), "Save") }, ctx);
+      expect(JSON.stringify(out)).toContain("Cloudflare's bot-protection check");
+      expect(b.botProtection?.()).toEqual({ vendor: "Cloudflare", url: `${origin}/api/register` });
+    });
+  }, 60_000);
+
+  test("a check that lets the browser through by itself is not kept as one", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/clears-itself`);
+      expect(b.botProtection?.()).toBeNull();
+      expect(await snapshot(b)).toContain("Second page");
+    });
+  }, 60_000);
+
+  test("a hidden Turnstile on a sign-in page is not bot protection", async () => {
+    await withBrowser(async (b) => {
+      expect(JSON.stringify(await navigate(b, `${origin}/hidden-turnstile`))).not.toContain("### Bot protection");
       expect(b.botProtection?.()).toBeNull();
     });
   }, 60_000);

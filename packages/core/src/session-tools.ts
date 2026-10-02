@@ -186,7 +186,7 @@ export function sessionTools(opts: {
       }),
       execute: async (input) => {
         if (state.finished !== null) return CLOSED;
-        const blocked = botProtectionRefusal(opts.botProtection?.() ?? null, state.botProtection, `${input.title ?? ""} ${input.observed ?? ""}`);
+        const blocked = botProtectionRefusal(opts.botProtection?.() ?? null);
         if (blocked) return blocked;
         if (state.page !== "seen") return state.page === "unseen" ? "rejected: you have not looked at the product yet; open it and take a browser_snapshot, then report what it shows" : "rejected: your last browser action failed, so you are not looking at the page any more; take a browser_snapshot and report what it shows";
         const goal = lower(input.goal);

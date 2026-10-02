@@ -598,7 +598,7 @@ describe("bot protection", () => {
   const blockedSignUp = { kind: "defect", goal: "sign-up", title: "Registration is blocked by a Cloudflare challenge (403)", observed: "The register POST returns 403 and Just a moment...", reproduction: ["Open https://acme.test/register.htm", "Click Register"], severity: "high" };
   const realDefect = { kind: "defect", goal: "invoice", title: "Send button does nothing", observed: "Clicking Send leaves the invoice as a draft", reproduction: ["Open https://acme.test/invoices/1", "Click Send"], severity: "high" };
 
-  test("a person on a bot-protection check cannot report it, the run hears of it once, and a real defect elsewhere is still recorded", async () => {
+  test("a person on a bot-protection check cannot report it, the run hears of it once, and once off that page their findings are theirs to make", async () => {
     let current: typeof challenge | null = challenge;
     const model = scriptedModel([
       look,
@@ -614,10 +614,10 @@ describe("bot protection", () => {
     const tools = { ...browserTools, browser_navigate: tool({ inputSchema: z.object({ url: z.string() }), execute: async () => ((current = null), { content: [{ type: "text", text: "navigated" }] }) }) };
     const { promise, events } = run(model, { browserTools: tools, botProtection: () => current });
     const { result } = await promise;
-    expect(result.findings.map((f) => f.title)).toEqual(["Send button does nothing"]);
+    expect(result.findings.map((f) => f.title)).toEqual(["Cloudflare verification never finishes", "Send button does nothing"]);
     expect(events.filter((e) => e.type === "bot_protection")).toEqual([{ type: "bot_protection", jobId: "role:solo", vendor: "Cloudflare", url: "https://acme.test/register.htm" }]);
     const replies = JSON.stringify(model.doGenerateCalls.at(-1)!.prompt);
-    expect(replies.match(/Cloudflare's bot-protection check at https:\/\/acme.test\/register.htm stops automated browsers/g)).toHaveLength(2);
+    expect(replies.match(/Cloudflare's bot-protection check at https:\/\/acme.test\/register.htm stops automated browsers/g)).toHaveLength(1);
     expect(events.every((e) => RunEventSchema.safeParse({ ...e, seq: 1, at: new Date().toISOString() }).success)).toBe(true);
   });
 

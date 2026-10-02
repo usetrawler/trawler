@@ -3,6 +3,11 @@ export interface BotProtection {
   url: string;
 }
 
+export interface Detected {
+  vendor: string;
+  stops: boolean;
+}
+
 export interface PageSignals {
   title: string;
   text: string;
@@ -21,34 +26,36 @@ export const BOT_PROTECTION_SELECTORS = [
   "#captcha-container",
 ] as const;
 
-type Rule = { vendor: string; matches: (page: PageSignals) => boolean };
+type Rule = { vendor: string; stops: boolean; matches: (page: PageSignals) => boolean };
 
 const visibleFrame = (page: PageSignals, pattern: RegExp) => page.frames.some((f) => f.visible && pattern.test(f.src));
 const anySource = (page: PageSignals, pattern: RegExp) => page.scripts.some((s) => pattern.test(s)) || page.frames.some((f) => pattern.test(f.src));
 const has = (page: PageSignals, selector: (typeof BOT_PROTECTION_SELECTORS)[number]) => page.selectors.includes(selector);
 
 const RULES: Rule[] = [
-  { vendor: "Cloudflare Turnstile", matches: (p) => visibleFrame(p, /challenges\.cloudflare\.com\//) || has(p, ".cf-turnstile") },
   {
     vendor: "Cloudflare",
+    stops: true,
     matches: (p) =>
-      /^(just a moment\.\.\.|attention required! \| cloudflare)$/i.test(p.title.trim()) ||
+      /^(just a moment(\.\.\.|…)|attention required! \| cloudflare)$/i.test(p.title.trim()) ||
       anySource(p, /\/cdn-cgi\/challenge-platform\/.*\/orchestrate\/(chl_page|managed|jsch|captcha)\//) ||
       has(p, "#challenge-form") ||
       has(p, "#challenge-running") ||
       has(p, "#challenge-stage"),
   },
-  { vendor: "reCAPTCHA", matches: (p) => p.frames.some((f) => f.visible && /\/recaptcha\/(api2|enterprise)\/(anchor|bframe)/.test(f.src) && !/[?&]size=invisible/.test(f.src)) },
-  { vendor: "hCaptcha", matches: (p) => visibleFrame(p, /hcaptcha\.com\/.*(checkbox|challenge)/) },
-  { vendor: "DataDome", matches: (p) => anySource(p, /captcha-delivery\.com\//) },
-  { vendor: "PerimeterX", matches: (p) => has(p, "#px-captcha") },
-  { vendor: "Akamai", matches: (p) => has(p, "#sec-if-cpt-container") || (/^access denied$/i.test(p.title.trim()) && /reference #[\d.a-f]+/i.test(p.text)) },
-  { vendor: "Imperva", matches: (p) => /incapsula incident id/i.test(p.text) || anySource(p, /_Incapsula_Resource/) },
-  { vendor: "AWS WAF", matches: (p) => anySource(p, /\.awswaf\.com\//) && (has(p, "#captcha-container") || /^human verification$/i.test(p.title.trim())) },
+  { vendor: "DataDome", stops: true, matches: (p) => anySource(p, /captcha-delivery\.com\//) },
+  { vendor: "PerimeterX", stops: true, matches: (p) => has(p, "#px-captcha") },
+  { vendor: "Akamai", stops: true, matches: (p) => has(p, "#sec-if-cpt-container") || (/^access denied$/i.test(p.title.trim()) && /reference #[\d.a-f]+/i.test(p.text)) },
+  { vendor: "Imperva", stops: true, matches: (p) => /incapsula incident id/i.test(p.text) || p.frames.some((f) => /_Incapsula_Resource\?.*CWUDNSAI/.test(f.src)) },
+  { vendor: "AWS WAF", stops: true, matches: (p) => anySource(p, /\.awswaf\.com\//) && (has(p, "#captcha-container") || /^human verification$/i.test(p.title.trim())) },
+  { vendor: "Cloudflare Turnstile", stops: false, matches: (p) => visibleFrame(p, /challenges\.cloudflare\.com\//) || has(p, ".cf-turnstile") },
+  { vendor: "reCAPTCHA", stops: false, matches: (p) => p.frames.some((f) => f.visible && /\/recaptcha\/(api2|enterprise)\/(anchor|bframe)/.test(f.src) && !/[?&]size=invisible/.test(f.src)) },
+  { vendor: "hCaptcha", stops: false, matches: (p) => visibleFrame(p, /hcaptcha\.com\/.*(checkbox|challenge)/) },
 ];
 
-export function botProtection(page: PageSignals): string | null {
-  return RULES.find((rule) => rule.matches(page))?.vendor ?? null;
+export function botProtection(page: PageSignals): Detected | null {
+  const rule = RULES.find((r) => r.matches(page));
+  return rule ? { vendor: rule.vendor, stops: rule.stops } : null;
 }
 
 export const COLLECT_PAGE_SIGNALS = `() => {
@@ -62,18 +69,17 @@ export const COLLECT_PAGE_SIGNALS = `() => {
     text: (document.body?.innerText || "").slice(0, 4000),
     frames: [...document.querySelectorAll("iframe")].map((f) => ({ src: f.src || "", visible: visible(f) })),
     scripts: [...document.querySelectorAll("script[src]")].map((s) => s.src),
-    selectors: ${JSON.stringify(BOT_PROTECTION_SELECTORS)}.filter((sel) => document.querySelector(sel)),
+    selectors: ${JSON.stringify(BOT_PROTECTION_SELECTORS)}.filter((sel) => [...document.querySelectorAll(sel)].some(visible)),
   };
 }`;
 
-export function botProtectionNote(vendor: string): string {
-  return `### Bot protection\nThis page is ${vendor}'s bot-protection check. It stops automated browsers like this one, and a person in an ordinary browser gets past it, so it says nothing about the product. Do not try to get past it and do not report it as a finding. Mark the goal you are on as failed with the note "blocked by bot protection", and go on with a goal that does not need this page.`;
+export function botProtectionNote(found: Detected): string {
+  return found.stops
+    ? `### Bot protection\nThis page is ${found.vendor}'s bot-protection check. It stops automated browsers like this one, and a person in an ordinary browser gets past it, so it says nothing about the product. Do not try to get past it and do not report it as a finding. Mark the goal you are on as failed with the note "blocked by bot protection", and go on with a goal that does not need this page.`
+    : `### Bot protection\nThis page has a ${found.vendor} check. If it stops you from going on, that says nothing about the product: do not try to get past it and do not report the check as a finding. Go on with a goal that does not need it.`;
 }
 
-const ABOUT_BOT_PROTECTION = /cloudflare|turnstile|captcha|datadome|perimeterx|incapsula|imperva|akamai|aws waf|bot.?protection|bot.?detection|human verification|verify (that )?you are (a )?human|are you (a )?(human|robot)|just a moment|security check|challenge page|verification (process|page|step)/i;
-
-export function botProtectionRefusal(current: BotProtection | null, met: BotProtection | null, said: string): string | null {
-  const seen = current ?? (met && ABOUT_BOT_PROTECTION.test(said) ? met : null);
-  if (!seen) return null;
-  return `rejected: ${seen.vendor}'s bot-protection check at ${seen.url} stops automated browsers like yours, and a person in an ordinary browser gets past it, so it is not a finding about the product. Mark the goal you are on as failed with the note "blocked by bot protection", and go on with a goal that does not need that page.`;
+export function botProtectionRefusal(current: BotProtection | null): string | null {
+  if (!current) return null;
+  return `rejected: ${current.vendor}'s bot-protection check at ${current.url} stops automated browsers like yours, and a person in an ordinary browser gets past it, so it is not a finding about the product. Mark the goal you are on as failed with the note "blocked by bot protection", and go on with a goal that does not need that page.`;
 }

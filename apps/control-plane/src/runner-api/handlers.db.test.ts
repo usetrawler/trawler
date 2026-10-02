@@ -67,12 +67,12 @@ test("a job is claimed, streamed and completed over HTTP with its own token only
 });
 
 test("malformed bodies are rejected without touching the queue", async () => {
-  expect((await handleEvents(new Request("http://cp.test/x", { method: "POST", headers: { [PROTOCOL_HEADER]: "5", authorization: `Bearer ${"t".repeat(40)}` }, body: "{not json" }), "00000000-0000-0000-0000-000000000000", deps)).status).toBe(400);
+  expect((await handleEvents(new Request("http://cp.test/x", { method: "POST", headers: { [PROTOCOL_HEADER]: "6", authorization: `Bearer ${"t".repeat(40)}` }, body: "{not json" }), "00000000-0000-0000-0000-000000000000", deps)).status).toBe(400);
 });
 
 test("oversized bodies are refused before parsing", async () => {
   const big = JSON.stringify({ events: [{ seq: 1, at: new Date().toISOString(), jobId: "x", type: "note", text: "a".repeat(2_100_000) }] });
-  const res = await handleEvents(new Request("http://cp.test/x", { method: "POST", headers: { [PROTOCOL_HEADER]: "5", authorization: `Bearer ${"t".repeat(40)}` }, body: big }), "00000000-0000-0000-0000-000000000000", deps);
+  const res = await handleEvents(new Request("http://cp.test/x", { method: "POST", headers: { [PROTOCOL_HEADER]: "6", authorization: `Bearer ${"t".repeat(40)}` }, body: big }), "00000000-0000-0000-0000-000000000000", deps);
   expect(res.status).toBe(413);
 });
 

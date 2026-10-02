@@ -321,7 +321,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
     tx
       .selectFrom("run_events as e")
       .innerJoin("jobs as j", "j.id", "e.job_id")
-      .select(["e.payload", "j.persona_key", "j.kind"])
+      .select(["e.payload"])
       .where("e.run_id", "=", runId)
       .where("e.type", "=", "bot_protection")
       .orderBy("e.id")
@@ -341,16 +341,12 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
       screenshots: { reported: latestScreenshot(f.key, "role_session"), replayed: latestScreenshot(f.key, "replay") },
     })),
     goals: goals.map((g) => ({ personaKey: g.persona_key, goal: g.goal, status: g.status, note: g.note })),
-    botProtection: botProtection ? { ...botProtectionOf(botProtection.payload as unknown as RunEvent), personaKey: botProtection.persona_key, during: botProtection.kind } : null,
+    botProtection: botProtection ? (({ vendor, url }) => ({ vendor, url }))(botProtection.payload as unknown as Extract<RunEvent, { type: "bot_protection" }>) : null,
     target: snapshot.targetUrl,
     personas: snapshot.personas.map((p) => ({ id: p.id, name: p.name })),
     goalTexts: snapshot.goals.map((g) => ({ id: g.id, instruction: g.instruction, ...(g.personaId ? { personaId: g.personaId } : {}) })),
     activity: activity.map((a) => ({ id: String(a.id), at: a.at, personaKey: a.persona_key, kind: a.kind, text: activityText(a.payload as unknown as RunEvent, goalText, findingTitle) })),
   };
-}
-
-function botProtectionOf(e: RunEvent): { vendor: string; url: string } {
-  return e.type === "bot_protection" ? { vendor: e.vendor, url: e.url } : { vendor: "Bot protection", url: "" };
 }
 
 export type RunSummary = NonNullable<Awaited<ReturnType<typeof runSummary>>>;
