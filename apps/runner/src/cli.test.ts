@@ -402,6 +402,30 @@ test("in work mode, a browser whose close never settles still has its egress ses
   }
 }, 20_000);
 
+test("in work mode, a host where the browser's user can create kernel keys is reported once, not every job", async () => {
+  const job = {
+    kind: "role_session", personaKey: "ana", jobId: "11111111-1111-4111-8111-111111111111", runId: "22222222-2222-4222-8222-222222222222", token: "job-token-" + "x".repeat(40),
+    config: { name: "Acme", targetUrl: "https://a.test/", description: "", allowedOrigins: ["https://a.test"], personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "x" }], accounts: [], extraHeaders: {}, secretHeaders: {} },
+    maxSteps: 10, budgetUsd: 1, agentModel: "m/agent", judgeModel: "m/judge",
+  };
+  const controlPlane = (async (url: string | URL) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/api/runner/claim") return Response.json(job);
+    if (path.endsWith("/events")) return Response.json({ cancel: false });
+    return Response.json({ ok: true });
+  }) as typeof fetch;
+  const reports: string[] = [];
+  const { d } = deps({
+    env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_BROWSER_LAUNCHER: "/usr/local/bin/trawler-chromium" },
+    fetchImpl: controlPlane,
+    model: () => scriptedModel([toolCall("finish", { summary: "done" })]),
+    cleanBrowserUser: async () => ({ keysReachable: true }),
+    startReporting: async () => ({ report: (message: string) => void reports.push(message), maskWith: () => {}, close: async () => {} }),
+  });
+  expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(0);
+  expect(reports.filter((r) => r.includes("can create kernel keys"))).toHaveLength(1);
+});
+
 test("work refuses an egress proxy without its control token", async () => {
   const { d, err } = deps({ env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_EGRESS_PROXY: "http://127.0.0.1:9" } });
   expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(2);

@@ -39,7 +39,7 @@ export interface CliDeps {
   runsRoot: string;
   fetchImpl?: typeof fetch;
   startReporting?: typeof startReporting;
-  cleanBrowserUser?: (launcher: string) => Promise<void>;
+  cleanBrowserUser?: (launcher: string) => Promise<{ keysReachable: boolean } | void>;
 }
 
 class UsageError extends Error {}
@@ -151,9 +151,14 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
   if (!browserLauncher && deps.env.TRAWLER_REQUIRE_EGRESS === "1") throw new UsageError("this runner must start the browser as its own user, and TRAWLER_BROWSER_LAUNCHER is not set; use the runner image");
   const egress = egressServer ? egressClient(egressServer, egressToken!) : undefined;
   const unfinished = new Set<() => Promise<void>>();
+  let keysReported = false;
   const betweenJobs = browserLauncher
     ? async () => {
-        await (deps.cleanBrowserUser ?? cleanBrowserUser)(browserLauncher);
+        const cleaned = await (deps.cleanBrowserUser ?? cleanBrowserUser)(browserLauncher);
+        if (cleaned?.keysReachable && !keysReported) {
+          keysReported = true;
+          reporting.report("the browser's user can create kernel keys on this host, so its keyrings are shared by every runner container here; the per-job clear is all that stands between jobs", {});
+        }
         await Promise.all([...unfinished].map((finish) => finish().catch(() => undefined)));
         if (sharedDownloads) for (const dir of readdirSync(sharedDownloads)) rmSync(join(sharedDownloads, dir), { recursive: true, force: true });
       }
