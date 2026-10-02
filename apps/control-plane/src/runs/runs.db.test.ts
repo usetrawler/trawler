@@ -9,6 +9,7 @@ import { Keyring } from "../lib/secrets.ts";
 import { setModelKey } from "../credentials/credentials.ts";
 import { createProject, loadProjectConfig, ProjectNotFound, replacePlan } from "../projects/projects.ts";
 import { cancelLiveRuns, cancelRun, CannotJudgeAgain, judgeAgain, NeedsAccount, RunNotFound, runSummary, startRun, type StartRunOptions } from "./runs.ts";
+import { dismissFinding, undoDismissal } from "./dismissals.ts";
 import { claimJob, completeJob, ingestEvents, InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage, releaseJob } from "./queue.ts";
 
 const t = await testDb();
@@ -725,6 +726,15 @@ describe("judge again", () => {
     await refused(again(run.id), /already/);
     await claimPastChecks();
     await refused(again(run.id), /already/);
+    await drain();
+  });
+
+  test("is refused for a defect marked not a bug, and allowed again once that is undone", async () => {
+    const run = await runWithFailedJudge();
+    await withOrg(t.db, "org-a", (tx) => dismissFinding(tx, "org-a", run.id, "ana:f1", "Intended.", "u1"));
+    await refused(again(run.id), /marked not a bug/);
+    await withOrg(t.db, "org-a", (tx) => undoDismissal(tx, "org-a", run.id, "ana:f1"));
+    await again(run.id);
     await drain();
   });
 

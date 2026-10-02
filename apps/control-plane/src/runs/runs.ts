@@ -269,6 +269,7 @@ export async function judgeAgain(tx: Tx, orgId: string, runId: string, findingKe
   if (latest?.status === "queued" || latest?.status === "leased") throw new CannotJudgeAgain("It is already being judged again.");
   const finding = await tx.selectFrom("findings").select("verdict").where("run_id", "=", runId).where("key", "=", findingKey).executeTakeFirst();
   if (!latest || !finding || !gaveNoVerdict(latest, finding.verdict)) throw new CannotJudgeAgain("Only a defect whose judge gave no verdict can be judged again.");
+  if (await tx.selectFrom("finding_dismissals").select("run_id").where("run_id", "=", runId).where("finding_key", "=", findingKey).executeTakeFirst()) throw new CannotJudgeAgain("It is marked not a bug. Undo that to judge it again.");
   if (capSpent(run)) throw new CannotJudgeAgain("This run has spent its cap, so it cannot be judged again.");
   const stored = run.paid_by === "trawler" ? null : await modelKey(tx, orgId, keys);
   if (run.paid_by !== "trawler" && (!stored || stored.provider !== run.provider || (run.provider === "custom" && stored.baseUrl !== run.provider_base_url))) {

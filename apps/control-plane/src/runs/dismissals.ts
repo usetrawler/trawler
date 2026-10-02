@@ -1,4 +1,5 @@
-import { MAX_NOT_BUG_REASON, MAX_NOT_BUGS, type NotABug } from "@usetrawler/protocol";
+import { sql } from "kysely";
+import { MAX_NOT_BUG_REASON, MAX_NOT_BUG_TITLE, MAX_NOT_BUGS, type NotABug } from "@usetrawler/protocol";
 import type { Tx } from "../db/tenancy.ts";
 import { isLive } from "./report.ts";
 
@@ -13,9 +14,10 @@ export function dismissalReason(raw: unknown): string | null {
 export async function dismissFinding(tx: Tx, orgId: string, runId: string, findingKey: string, rawReason: unknown, userId: string): Promise<void> {
   const reason = dismissalReason(rawReason);
   if (!reason) throw new CannotDismiss(`Say why it is not a bug, in at most ${MAX_NOT_BUG_REASON} characters.`);
-  const run = await tx.selectFrom("runs").select("status").where("id", "=", runId).where("org_id", "=", orgId).executeTakeFirst();
+  const run = await tx.selectFrom("runs").select("status").where("id", "=", runId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
   if (!run) throw new CannotDismiss("This run was not found.");
-  if (isLive(run.status)) throw new CannotDismiss("The run is still going. You can mark a finding not a bug once it has finished.");
+  const working = await tx.selectFrom("jobs").select("id").where("run_id", "=", runId).where("status", "in", ["queued", "leased"]).executeTakeFirst();
+  if (isLive(run.status) || working) throw new CannotDismiss("Trawler is still working on this run. You can mark a finding not a bug once it has finished.");
   const finding = await tx.selectFrom("findings").select("same_as").where("run_id", "=", runId).where("key", "=", findingKey).executeTakeFirst();
   if (!finding || finding.same_as !== null) throw new CannotDismiss("This finding was not found.");
   const added = await tx
@@ -31,17 +33,20 @@ export async function undoDismissal(tx: Tx, orgId: string, runId: string, findin
   if (Number(removed.numDeletedRows) === 0) throw new CannotDismiss("It is no longer marked not a bug.");
 }
 
+const oneLine = (text: string, max: number) => text.replace(/\s+/g, " ").trim().slice(0, max).replace(/[\uD800-\uDBFF]$/, "");
+
 export async function notBugsOf(tx: Tx, orgId: string, projectId: string): Promise<NotABug[]> {
   const rows = await tx
     .selectFrom("finding_dismissals as d")
     .innerJoin("runs as r", "r.id", "d.run_id")
     .innerJoin("findings as f", (j) => j.onRef("f.run_id", "=", "d.run_id").onRef("f.key", "=", "d.finding_key"))
-    .select(["f.title", "d.reason"])
+    .select(["f.title", "d.reason", sql<Date>`max(d.dismissed_at)`.as("latest")])
     .where("d.org_id", "=", orgId)
     .where("r.project_id", "=", projectId)
-    .orderBy("d.dismissed_at", "desc")
-    .orderBy("d.finding_key")
+    .groupBy(["f.title", "d.reason"])
+    .orderBy("latest", "desc")
+    .orderBy("f.title")
     .limit(MAX_NOT_BUGS)
     .execute();
-  return rows.map((r) => ({ title: r.title, reason: r.reason }));
+  return rows.map((r) => ({ title: oneLine(r.title, MAX_NOT_BUG_TITLE), reason: oneLine(r.reason, MAX_NOT_BUG_REASON) }));
 }

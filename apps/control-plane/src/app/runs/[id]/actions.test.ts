@@ -71,6 +71,8 @@ test("not a bug is marked and undone in the member's workspace, by the member, a
 
   state.failWith = new CannotDismiss("It is already marked not a bug.");
   expect(await dismissFindingAction(RUN, "ana:f1", "Intended.")).toEqual({ error: "It is already marked not a bug." });
+  state.failWith = new CannotDismiss("It is no longer marked not a bug.");
+  expect(await undoDismissalAction(RUN, "ana:f1")).toEqual({ error: "It is no longer marked not a bug." });
   expect(state.logged).toEqual([]);
   state.failWith = new Error("connection lost");
   expect(await dismissFindingAction(RUN, "ana:f1", "Intended.")).toEqual({ error: "It could not be marked not a bug. Try again." });

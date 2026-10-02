@@ -64,10 +64,11 @@ export function settleGroups(keys: string[], groups: string[][]): string[][] {
 export const DefectGroupsSchema = z.array(z.array(z.string().min(1).max(200)).min(1).max(MAX_GROUPED_DEFECTS)).max(MAX_GROUPED_DEFECTS);
 
 export const MAX_NOT_BUGS = 20;
+export const MAX_NOT_BUG_TITLE = 300;
 export const MAX_NOT_BUG_REASON = 500;
 
 export const NotABugSchema = z.object({
-  title: z.string().max(300),
+  title: z.string().max(MAX_NOT_BUG_TITLE),
   reason: z.string().max(MAX_NOT_BUG_REASON),
 });
 export type NotABug = z.infer<typeof NotABugSchema>;

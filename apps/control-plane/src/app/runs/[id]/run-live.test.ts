@@ -11,7 +11,7 @@ const { RunLive, outcome, personLine } = await import("./run-live.tsx");
 const job = (kind: string, status: string, extra: Partial<RunSummary["jobs"][number]> = {}) =>
   ({ id: `${kind}-${status}-${Math.random()}`, kind, status, persona_key: null, finding_key: null, usage: null, stopped_by: null, error: null, requested: false, ...extra }) as RunSummary["jobs"][number];
 const finding = (key: string, persona: string, extra: Partial<RunSummary["findings"][number]> = {}) =>
-  ({ key, personaKey: persona, kind: "defect", filedAs: null, goal: "g1", title: key, observed: "o", reproduction: ["Open Invoices.", "Save."], severity: "high", replay: null, verdict: null, sameAs: null, url: null, quote: null, stepPeople: null, screenshots: { reported: null, replayed: null }, ...extra }) as RunSummary["findings"][number];
+  ({ key, personaKey: persona, kind: "defect", filedAs: null, goal: "g1", title: key, observed: "o", reproduction: ["Open Invoices.", "Save."], severity: "high", replay: null, verdict: null, sameAs: null, url: null, quote: null, stepPeople: null, screenshots: { reported: null, replayed: null }, dismissal: null, ...extra }) as RunSummary["findings"][number];
 const summary = (over: Partial<RunSummary>): RunSummary => ({
   id: "run-1", number: 7, status: "succeeded", cancelReason: null, projectId: "project-1", costUsd: 0.35, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash",
   provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0, createdAt: new Date("2026-09-25T19:40:00Z"), startedAt: new Date("2026-09-25T19:40:05Z"), finishedAt: new Date("2026-09-25T19:59:00Z"),
@@ -282,11 +282,18 @@ test("a run stopped by bot protection says which check blocked Trawler and where
 });
 
 
-test("every finding of a finished run opens to Not a bug, and none does while the run is live", () => {
-  const html = render(summary({ ...finished, findings: [...finished.findings, finding("ana:fr", "ana", { kind: "friction", title: "Hard to find Export" })] }));
-  for (const section of ["Confirmed", "Refuted", "Friction"]) {
+test("every finding of a finished run opens to Not a bug, in every section, and none does while the run is live", () => {
+  const html = render(summary({
+    ...finished,
+    jobs: [...finished.jobs, job("judge", "failed", { finding_key: "x:judge-failed", error: "the judge timed out" })],
+    findings: [
+      ...finished.findings, finding("ana:fr", "ana", { kind: "friction", title: "Hard to find Export" }), finding("x:open", "ana", { verdict: "inconclusive" }),
+      finding("x:judge-failed", "ana"), finding("x:unjudged", "ana"),
+    ],
+  }));
+  for (const section of ["Confirmed", "Could not be judged", "Inconclusive", "Not judged", "Refuted", "Friction"]) {
     const [, details] = rows(html, section)[0]!.split("</summary>");
-    expect(details).toMatch(/<div class="border-t border-line pt-3"><button type="button"[^>]*>Not a bug<\/button><\/div><\/div><\/details>/);
+    expect(details, section).toMatch(/<div class="border-t border-line pt-3"><button type="button"[^>]*>Not a bug<\/button><\/div><\/div><\/details>/);
   }
   expect(render(summary({ ...live, findings: finished.findings }))).not.toContain(">Not a bug<");
 });
@@ -311,5 +318,6 @@ test("a finding marked not a bug leaves its section and the counts for its own, 
   expect(text(first!.split("</details>")[1]!)).toBe("Not a bug, because: Saving twice is on purpose. Marked by ana@acme.test on 2026-10-02 10:00 UTC . Undo : Saving an invoice fails");
   expect(first).not.toContain(">Not a bug</button>");
   expect(text(second!.split("</details>")[1]!)).toContain("Marked by someone no longer in this workspace on");
-  expect(html).toMatch(/>Not a bug · 2<\/h2><p[^>]*>Marked not a bug by your team; later runs of this project are told so<\/p>/);
+  expect(html).toMatch(/>Not a bug · 2<\/h2><p[^>]*>Marked not a bug by your team; the people in later runs of this project are told<\/p>/);
+  expect(first).toMatch(/<span class="min-w-0 wrap-anywhere text-muted">Marked by ana@acme.test/);
 });
