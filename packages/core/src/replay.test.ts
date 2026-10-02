@@ -651,35 +651,34 @@ describe("bot protection", () => {
     expect(observation.botProtection?.url).toContain("token=");
   });
 
-  const widgetPage = (start: string) => {
-    let url = start;
-    const at = () => (url === "https://acme.test/join" ? { vendor: "Cloudflare Turnstile", url } : null);
+  const widgetForm = () => {
+    let held: { vendor: string; url: string } | null = null;
     const tools = {
       ...browserTools,
-      browser_click: tool({ inputSchema: z.object({ target: z.string() }), execute: async ({ target }) => (target === "footer-link" && (url = "https://acme.test/pricing"), { content: [{ type: "text", text: "clicked" }] }) }),
-      browser_navigate: tool({ inputSchema: z.object({ url: z.string() }), execute: async (input) => ((url = input.url), { content: [{ type: "text", text: "navigated" }] }) }),
+      browser_click: tool({ inputSchema: z.object({ target: z.string() }), execute: async ({ target }) => ((held = target === "register" ? { vendor: "Cloudflare Turnstile", url: "https://acme.test/join" } : null), { content: [{ type: "text", text: "clicked" }] }) }),
+      browser_navigate: tool({ inputSchema: z.object({ url: z.string() }), execute: async () => ((held = null), { content: [{ type: "text", text: "navigated" }] }) }),
     };
-    return { tools, unusableWidget: at };
+    return { tools, heldByWidget: () => held };
   };
 
-  test("a replay whose submit stayed on a page with a captcha that cannot load says so wherever it ends, and is never confirmed", async () => {
-    const page = widgetPage("https://acme.test/join");
-    const model = scriptedModel([toolCall("browser_click", { target: "e2" }), toolCall("browser_navigate", { url: "https://acme.test/login" }), report({ completed: true, observed: "Sign-in says no such user", blockedAt: null })]);
-    const { promise, events } = replay(model, { browserTools: page.tools, unusableWidget: page.unusableWidget });
+  test("a replay that sent a form held back by a captcha that cannot load says so wherever it ends, and is never confirmed", async () => {
+    const page = widgetForm();
+    const model = scriptedModel([toolCall("browser_click", { target: "register" }), toolCall("browser_navigate", { url: "https://acme.test/login" }), report({ completed: true, observed: "Sign-in says no such user", blockedAt: null })]);
+    const { promise, events } = replay(model, { browserTools: page.tools, heldByWidget: page.heldByWidget });
     const { observation } = await promise;
     expect(observation.botProtection).toEqual({ vendor: "Cloudflare Turnstile", url: "https://acme.test/join" });
-    expect(observation.observed).toBe("Sign-in says no such user The replay acted on https://acme.test/join, where Cloudflare Turnstile's check cannot load in Trawler's browser, and the page stayed where it was, so a form there could not go through.");
-    expect(events.filter((e) => e.type === "bot_protection")).toEqual([{ type: "bot_protection", jobId: "replay:f1", vendor: "Cloudflare Turnstile", url: "https://acme.test/join" }]);
+    expect(observation.observed).toBe("Sign-in says no such user The replay sent a form at https://acme.test/join that holds Cloudflare Turnstile's check, which cannot load in Trawler's browser, so that form could not go through.");
+    expect(events.filter((e) => e.type === "bot_protection")).toEqual([{ type: "bot_protection", jobId: "replay:f1", vendor: "Cloudflare Turnstile", url: "https://acme.test/join", kind: "widget" }]);
     const { promise: judged } = judgeWith(scriptedModel([verdictCall("confirmed")]), { observation });
     expect((await judged).verdict).toBe("inconclusive");
   });
 
-  test("a captcha in the footer of a page the replay only leaves through a link changes nothing", async () => {
-    const page = widgetPage("https://acme.test/join");
-    const model = scriptedModel([toolCall("browser_click", { target: "footer-link" }), report({ completed: true, observed: "Pricing shows $0 for every plan", blockedAt: null })]);
-    const { promise, events } = replay(model, { browserTools: page.tools, unusableWidget: page.unusableWidget });
+  test("clicks outside the captcha's form change nothing", async () => {
+    const page = widgetForm();
+    const model = scriptedModel([toolCall("browser_click", { target: "send" }), report({ completed: true, observed: "Clicking Send leaves the invoice as a draft", blockedAt: null })]);
+    const { promise, events } = replay(model, { browserTools: page.tools, heldByWidget: page.heldByWidget });
     const { observation } = await promise;
-    expect(observation).toEqual({ completed: true, observed: "Pricing shows $0 for every plan", blockedAt: null });
+    expect(observation).toEqual({ completed: true, observed: "Clicking Send leaves the invoice as a draft", blockedAt: null });
     expect(events.some((e) => e.type === "bot_protection")).toBe(false);
   });
 

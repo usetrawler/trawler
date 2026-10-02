@@ -79,6 +79,13 @@ const WIDGET_ORIGINS: Record<string, string[]> = {
   hCaptcha: ["https://hcaptcha.com", "https://newassets.hcaptcha.com"],
 };
 
+const WIDGET_SELECTOR = '.cf-turnstile, .g-recaptcha, .h-captcha, iframe[src*="challenges.cloudflare.com"], iframe[src*="/recaptcha/"], iframe[src*="hcaptcha.com"]';
+
+export const FORM_HOLDS_WIDGET = `(el) => {
+  const form = el && el.closest ? el.closest("form") : null;
+  return !!form && !!form.querySelector(${JSON.stringify(WIDGET_SELECTOR)});
+}`;
+
 export function widgetCanLoad(vendor: string, isAllowed: (url: string) => boolean): boolean {
   return (WIDGET_ORIGINS[vendor] ?? []).some((origin) => isAllowed(origin));
 }

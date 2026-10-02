@@ -340,7 +340,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
       screenshots: { reported: latestScreenshot(f.key, "role_session"), replayed: latestScreenshot(f.key, "replay") },
     })),
     goals: goals.map((g) => ({ personaKey: g.persona_key, goal: g.goal, status: g.status, note: g.note })),
-    botProtection: botProtection ? (({ vendor, url }) => ({ vendor, url }))(botProtection.payload as unknown as Extract<RunEvent, { type: "bot_protection" }>) : null,
+    botProtection: botProtection ? (({ vendor, url, kind }) => ({ vendor, url, kind: kind ?? "check" }))(botProtection.payload as unknown as Extract<RunEvent, { type: "bot_protection" }>) : null,
     target: snapshot.targetUrl,
     personas: snapshot.personas.map((p) => ({ id: p.id, name: p.name })),
     goalTexts: snapshot.goals.map((g) => ({ id: g.id, instruction: g.instruction, ...(g.personaId ? { personaId: g.personaId } : {}) })),

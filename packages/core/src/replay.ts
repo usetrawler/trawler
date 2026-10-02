@@ -38,7 +38,7 @@ export interface ReplayBrowser {
   fillField: FillField;
   screenshot?: () => Promise<Screenshot | null>;
   botProtection?: () => BotProtection | null;
-  unusableWidget?: () => BotProtection | null;
+  heldByWidget?: () => BotProtection | null;
   close?: () => Promise<void>;
 }
 
@@ -71,7 +71,7 @@ export async function runReplay(opts: {
   screenshot?: () => Promise<Screenshot | null>;
   keepScreenshot?: (findingId: string, shot: Screenshot) => void;
   botProtection?: () => BotProtection | null;
-  unusableWidget?: () => BotProtection | null;
+  heldByWidget?: () => BotProtection | null;
   openBrowser?: () => Promise<ReplayBrowser>;
   closeTimeoutMs?: number;
 }): Promise<{ observation: ReplayObservation; usage: JobUsage }> {
@@ -87,7 +87,7 @@ export async function runReplay(opts: {
   const actors = new Map<string, Promise<Actor>>();
   const opened: ReplayBrowser[] = [];
   const open = async (id: string, first: boolean): Promise<Actor> => {
-    const browser = first ? { tools: opts.browserTools, fillField: opts.fillField, screenshot: opts.screenshot, botProtection: opts.botProtection, unusableWidget: opts.unusableWidget } : await opts.openBrowser!();
+    const browser = first ? { tools: opts.browserTools, fillField: opts.fillField, screenshot: opts.screenshot, botProtection: opts.botProtection, heldByWidget: opts.heldByWidget } : await opts.openBrowser!();
     if (!first) opened.push(browser);
     const accountRef = together ? persona(id).accountRef : opts.accountRef;
     const queue = browserQueue(browser.tools);
@@ -138,17 +138,16 @@ export async function runReplay(opts: {
       const actor = track(await now());
       const own = name === "type_own_password" ? actor.ownPassword : name === "sign_in" ? actor.sign_in : actor.queue.tools[name];
       if (!own?.execute) return `rejected: ${actor.name} ${name === "type_own_password" ? "has an account; use sign_in" : "cannot do that"}`;
-      const before = actor.browser.unusableWidget?.() ?? null;
       const out = await own.execute(input as never, options as never);
       const met = actor.browser.botProtection?.() ?? null;
       if (met && !stoppedAt) {
         stoppedAt = met;
         emit({ type: "bot_protection", jobId, vendor: met.vendor, url: met.url });
       }
-      const after = actor.browser.unusableWidget?.() ?? null;
-      if (SUBMITS.has(name) && before && after?.url === before.url && !widgetMet && !stoppedAt) {
-        widgetMet = after;
-        emit({ type: "bot_protection", jobId, vendor: after.vendor, url: after.url });
+      const held = actor.browser.heldByWidget?.() ?? null;
+      if (held && !widgetMet && !stoppedAt) {
+        widgetMet = held;
+        emit({ type: "bot_protection", jobId, vendor: held.vendor, url: held.url, kind: "widget" });
       }
       return out;
     }),
@@ -230,10 +229,8 @@ export async function runReplay(opts: {
   }
 }
 
-const SUBMITS = new Set(["browser_click", "browser_press_key"]);
-
 function heldByWidget(report: ReplayObservation, met: BotProtection): ReplayObservation {
-  const note = `The replay acted on ${met.url}, where ${met.vendor}'s check cannot load in Trawler's browser, and the page stayed where it was, so a form there could not go through.`;
+  const note = `The replay sent a form at ${met.url} that holds ${met.vendor}'s check, which cannot load in Trawler's browser, so that form could not go through.`;
   return { ...report, observed: Array.from(`${report.observed} ${note}`).slice(0, MAX_OBSERVED_CODE_POINTS).join(""), botProtection: met };
 }
 
