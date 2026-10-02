@@ -16,7 +16,7 @@ export function RunTable({ runs, compact = false, project = true }: { runs: RunL
         const when = <LocalTime iso={r.createdAt.toISOString()} />;
         return (
           <li key={r.id} className="border-b border-line last:border-b-0">
-            <a href={runPath(r.number)} className={`grid min-h-[72px] items-center gap-3 bg-panel p-3 text-ink hover:bg-[color-mix(in_srgb,var(--action)_5%,var(--panel))] ${columns} max-wide:grid-cols-[50px_minmax(140px,1fr)_95px_65px_15px] max-md:grid-cols-[44px_minmax(0,1fr)_16px]`}>
+            <a href={runPath(r.number)} className={`grid min-h-[72px] items-center gap-3 bg-panel p-3 text-ink hover:bg-[color-mix(in_srgb,var(--action)_5%,var(--panel))] ${columns} max-wide:grid-cols-[50px_minmax(140px,1fr)_95px_15px] max-md:grid-cols-[44px_minmax(0,1fr)_16px]`}>
               <span className="font-mono text-[10px] text-muted">#{String(r.number).padStart(4, "0")}</span>
               <span className="min-w-0">
                 {project ? (
@@ -30,11 +30,14 @@ export function RunTable({ runs, compact = false, project = true }: { runs: RunL
                     <small className={`mt-0.5 block text-[10px] md:hidden ${tone}`}>{narrowStatus}</small>
                   </>
                 )}
+                <small className="mt-1 block text-[10px] text-muted wide:hidden">
+                  {r.unchecked ? "not checked" : `${r.confirmed} confirmed`} · {r.goalsReached}/{r.goalsTotal} goals · {spent.value}{spent.label === "tokens" ? " tokens" : ""}
+                </small>
               </span>
               <span className={`font-mono text-[10px] max-md:hidden ${tone}`}>{r.unchecked ? <><span className="wide:hidden">{narrowStatus}</span><span className="max-wide:hidden">{status}</span></> : status}</span>
               <span className="max-wide:hidden">{r.unchecked ? <><strong className="block"><span aria-hidden>—</span></strong><small className="text-[10px] text-muted">not checked<span className="sr-only">: every replay failed</span></small></> : <><strong className="block">{r.confirmed}</strong><small className="text-[10px] text-muted">confirmed<span className="sr-only"> defects</span></small></>}</span>
               <span className="max-wide:hidden"><strong className="block"><span aria-hidden>{r.goalsReached} / {r.goalsTotal}</span><span className="sr-only">{r.goalsReached} of {r.goalsTotal}</span></strong><small className="text-[10px] text-muted">goals<span className="sr-only"> reached</span></small></span>
-              <span className="max-md:hidden"><strong className="block">{spent.value}</strong><small className="text-[10px] text-muted">{spent.label}</small></span>
+              <span className="max-wide:hidden"><strong className="block">{spent.value}</strong><small className="text-[10px] text-muted">{spent.label}</small></span>
               <span aria-hidden className="font-bold">→</span>
             </a>
           </li>
