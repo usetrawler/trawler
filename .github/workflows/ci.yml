@@ -45,4 +45,6 @@ jobs:
       - name: build the runner image
         run: docker build -f apps/runner/Dockerfile -t trawler-runner:check .
       - name: hosted Chromium runs as its own user and cannot read the runner
-        run: docker run --rm -v "$PWD/apps/runner/browser:/check:ro" trawler-runner:check /check/isolation-check.sh
+        run: |
+          sudo sysctl -w kernel.yama.ptrace_scope=0
+          docker run --rm -e TRAWLER_REQUIRE_MEMORY_CHECK=1 -v "$PWD/apps/runner/browser:/check:ro" trawler-runner:check /check/isolation-check.sh
