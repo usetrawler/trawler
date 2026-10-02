@@ -102,7 +102,7 @@ export async function localRun(opts: {
       runRoleSession({
         model: opts.agentModel, modelId: opts.agentModelId, persona, project: opts.project,
         browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: opts.maxSteps, emit,
-        newFindingId: () => `f${++findingNo}`, pageUrl: () => b.pageUrl(),
+        newFindingId: () => `f${++findingNo}`, pageUrl: () => b.pageUrl(), botProtection: () => b.botProtection?.() ?? null,
         goalIds: turn.goalIds, story: trimStory(story), signUpSeed, jobId,
         returning: turns.slice(0, i).some((t) => t.personaId === persona.id),
       }),

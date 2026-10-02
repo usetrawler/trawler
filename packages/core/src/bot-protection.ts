@@ -1,3 +1,8 @@
+export interface BotProtection {
+  vendor: string;
+  url: string;
+}
+
 export interface PageSignals {
   title: string;
   text: string;
@@ -63,4 +68,12 @@ export const COLLECT_PAGE_SIGNALS = `() => {
 
 export function botProtectionNote(vendor: string): string {
   return `### Bot protection\nThis page is ${vendor}'s bot-protection check. It stops automated browsers like this one, and a person in an ordinary browser gets past it, so it says nothing about the product. Do not try to get past it and do not report it as a finding. Mark the goal you are on as failed with the note "blocked by bot protection", and go on with a goal that does not need this page.`;
+}
+
+const ABOUT_BOT_PROTECTION = /cloudflare|turnstile|captcha|datadome|perimeterx|incapsula|imperva|akamai|aws waf|bot.?protection|bot.?detection|human verification|verify (that )?you are (a )?human|are you (a )?(human|robot)|just a moment|security check|challenge page|verification (process|page|step)/i;
+
+export function botProtectionRefusal(current: BotProtection | null, met: BotProtection | null, said: string): string | null {
+  const seen = current ?? (met && ABOUT_BOT_PROTECTION.test(said) ? met : null);
+  if (!seen) return null;
+  return `rejected: ${seen.vendor}'s bot-protection check at ${seen.url} stops automated browsers like yours, and a person in an ordinary browser gets past it, so it is not a finding about the product. Mark the goal you are on as failed with the note "blocked by bot protection", and go on with a goal that does not need that page.`;
 }

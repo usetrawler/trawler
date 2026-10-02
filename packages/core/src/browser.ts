@@ -6,7 +6,9 @@ import { jsonSchema, type Tool, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
 import { MAX_ARTIFACT_BYTES } from "@usetrawler/protocol";
 import { asShown, longFormsOf, MASK, MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
-import { botProtection, botProtectionNote, COLLECT_PAGE_SIGNALS, type PageSignals } from "./bot-protection.ts";
+import { botProtection, botProtectionNote, COLLECT_PAGE_SIGNALS, type BotProtection, type PageSignals } from "./bot-protection.ts";
+
+export type { BotProtection } from "./bot-protection.ts";
 import type { FieldKind } from "./session-tools.ts";
 
 export const BROWSER_TOOLS = [
@@ -352,11 +354,6 @@ async function focusIsOnSecretIn(frame: Frame, filled: ElementHandle[], holdsSec
 export interface Screenshot {
   bytes: Uint8Array<ArrayBuffer>;
   contentType: "image/png";
-}
-
-export interface BotProtection {
-  vendor: string;
-  url: string;
 }
 
 export interface Browser {

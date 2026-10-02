@@ -3,6 +3,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { FindingSchema, type Finding, type Goal, type GoalOutcome, type RunEventInput, type TargetAccount, MAX_GOAL_NOTE, MAX_NOTE, MAX_QUOTE, MAX_URL } from "@usetrawler/protocol";
 import { MIN_SECRET_LENGTH, type SecretScrubber } from "./secrets.ts";
+import { botProtectionRefusal, type BotProtection } from "./bot-protection.ts";
 
 export interface SessionState {
   notes: string[];
@@ -10,6 +11,7 @@ export interface SessionState {
   goals: Map<string, GoalOutcome>;
   finished: string | null;
   page: "unseen" | "seen" | "stale";
+  botProtection: BotProtection | null;
 }
 
 export type FieldKind = "username" | "password";
@@ -40,6 +42,7 @@ export function newSessionState(goals: Goal[]): SessionState {
     goals: new Map(goals.map((g) => [g.id, { goal: g.id, status: "not_attempted", note: "" }])),
     finished: null,
     page: "unseen",
+    botProtection: null,
   };
 }
 
@@ -145,6 +148,7 @@ export function sessionTools(opts: {
   newId: () => string;
   capture?: (findingId: string) => Promise<void>;
   pageUrl?: () => string | null;
+  botProtection?: () => BotProtection | null;
   people?: { id: string; name: string }[];
   self?: string;
 }) {
@@ -182,6 +186,8 @@ export function sessionTools(opts: {
       }),
       execute: async (input) => {
         if (state.finished !== null) return CLOSED;
+        const blocked = botProtectionRefusal(opts.botProtection?.() ?? null, state.botProtection, `${input.title ?? ""} ${input.observed ?? ""}`);
+        if (blocked) return blocked;
         if (state.page !== "seen") return state.page === "unseen" ? "rejected: you have not looked at the product yet; open it and take a browser_snapshot, then report what it shows" : "rejected: your last browser action failed, so you are not looking at the page any more; take a browser_snapshot and report what it shows";
         const goal = lower(input.goal);
         if (typeof goal !== "string" || !state.goals.has(goal)) return unknownGoal(input.goal);
@@ -285,4 +291,10 @@ export function ownPasswordTool(opts: { state: SessionState; fillField: FillFiel
       },
     }),
   };
+}
+
+export function noteBotProtection(state: SessionState, met: BotProtection | null, emit: (e: RunEventInput) => void, jobId: string): void {
+  if (!met || state.botProtection) return;
+  state.botProtection = met;
+  emit({ type: "bot_protection", jobId, vendor: met.vendor, url: met.url });
 }
