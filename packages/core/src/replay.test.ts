@@ -651,14 +651,36 @@ describe("bot protection", () => {
     expect(observation.botProtection?.url).toContain("token=");
   });
 
-  test("a replay that ends on a page whose captcha cannot load says so, whatever it reports, so the judge cannot confirm it", async () => {
-    const widget = { vendor: "Cloudflare Turnstile", url: "https://acme.test/join" };
-    const model = scriptedModel([toolCall("browser_snapshot", {}), report({ completed: true, observed: "Register shows Verification failed", blockedAt: null })]);
-    const { promise } = replay(model, { unusableWidget: () => widget });
+  const widgetPage = (start: string) => {
+    let url = start;
+    const at = () => (url === "https://acme.test/join" ? { vendor: "Cloudflare Turnstile", url } : null);
+    const tools = {
+      ...browserTools,
+      browser_click: tool({ inputSchema: z.object({ target: z.string() }), execute: async ({ target }) => (target === "footer-link" && (url = "https://acme.test/pricing"), { content: [{ type: "text", text: "clicked" }] }) }),
+      browser_navigate: tool({ inputSchema: z.object({ url: z.string() }), execute: async (input) => ((url = input.url), { content: [{ type: "text", text: "navigated" }] }) }),
+    };
+    return { tools, unusableWidget: at };
+  };
+
+  test("a replay whose submit stayed on a page with a captcha that cannot load says so wherever it ends, and is never confirmed", async () => {
+    const page = widgetPage("https://acme.test/join");
+    const model = scriptedModel([toolCall("browser_click", { target: "e2" }), toolCall("browser_navigate", { url: "https://acme.test/login" }), report({ completed: true, observed: "Sign-in says no such user", blockedAt: null })]);
+    const { promise, events } = replay(model, { browserTools: page.tools, unusableWidget: page.unusableWidget });
     const { observation } = await promise;
-    expect(observation).toEqual({ completed: true, observed: "Register shows Verification failed", blockedAt: null, botProtection: widget });
+    expect(observation.botProtection).toEqual({ vendor: "Cloudflare Turnstile", url: "https://acme.test/join" });
+    expect(observation.observed).toBe("Sign-in says no such user The replay acted on https://acme.test/join, where Cloudflare Turnstile's check cannot load in Trawler's browser, and the page stayed where it was, so a form there could not go through.");
+    expect(events.filter((e) => e.type === "bot_protection")).toEqual([{ type: "bot_protection", jobId: "replay:f1", vendor: "Cloudflare Turnstile", url: "https://acme.test/join" }]);
     const { promise: judged } = judgeWith(scriptedModel([verdictCall("confirmed")]), { observation });
     expect((await judged).verdict).toBe("inconclusive");
+  });
+
+  test("a captcha in the footer of a page the replay only leaves through a link changes nothing", async () => {
+    const page = widgetPage("https://acme.test/join");
+    const model = scriptedModel([toolCall("browser_click", { target: "footer-link" }), report({ completed: true, observed: "Pricing shows $0 for every plan", blockedAt: null })]);
+    const { promise, events } = replay(model, { browserTools: page.tools, unusableWidget: page.unusableWidget });
+    const { observation } = await promise;
+    expect(observation).toEqual({ completed: true, observed: "Pricing shows $0 for every plan", blockedAt: null });
+    expect(events.some((e) => e.type === "bot_protection")).toBe(false);
   });
 
   test("the judge answers inconclusive for a replay stopped by bot protection, without asking the model", async () => {

@@ -116,6 +116,7 @@ export async function runReplay(opts: {
   const now = () => actorFor(current);
   let report: ReplayObservation | null = null;
   let stoppedAt: BotProtection | null = null;
+  let widgetMet: BotProtection | null = null;
   const report_replay = tool({
     description: "Report what you saw while following the steps. completed is true only if you carried out every step; otherwise give the number of the step you could not do as blockedAt.",
     inputSchema: z.object({ completed: z.boolean().nullish(), observed: z.string().nullish(), blockedAt: z.number().nullish() }),
@@ -137,11 +138,17 @@ export async function runReplay(opts: {
       const actor = track(await now());
       const own = name === "type_own_password" ? actor.ownPassword : name === "sign_in" ? actor.sign_in : actor.queue.tools[name];
       if (!own?.execute) return `rejected: ${actor.name} ${name === "type_own_password" ? "has an account; use sign_in" : "cannot do that"}`;
+      const before = actor.browser.unusableWidget?.() ?? null;
       const out = await own.execute(input as never, options as never);
       const met = actor.browser.botProtection?.() ?? null;
       if (met && !stoppedAt) {
         stoppedAt = met;
         emit({ type: "bot_protection", jobId, vendor: met.vendor, url: met.url });
+      }
+      const after = actor.browser.unusableWidget?.() ?? null;
+      if (SUBMITS.has(name) && before && after?.url === before.url && !widgetMet && !stoppedAt) {
+        widgetMet = after;
+        emit({ type: "bot_protection", jobId, vendor: after.vendor, url: after.url });
       }
       return out;
     }),
@@ -200,11 +207,10 @@ export async function runReplay(opts: {
       largeResultChars: 4000,
     });
     const last = await now();
-    const widget = stoppedAt ? null : (last.browser.unusableWidget?.() ?? null);
     const observation: ReplayObservation = stoppedAt
       ? opts.scrubber.scrub(stoppedByBotProtection(stoppedAt))
-      : widget
-        ? opts.scrubber.scrub({ ...(report ?? NO_REPORT), botProtection: widget })
+      : widgetMet
+        ? opts.scrubber.scrub(heldByWidget(report ?? NO_REPORT, widgetMet))
         : (report ?? NO_REPORT);
     const screenshot = last.browser.screenshot;
     if (screenshot && opts.keepScreenshot && outcome.stoppedBy !== "budget") {
@@ -222,6 +228,13 @@ export async function runReplay(opts: {
       clearTimeout(timer);
     }));
   }
+}
+
+const SUBMITS = new Set(["browser_click", "browser_press_key"]);
+
+function heldByWidget(report: ReplayObservation, met: BotProtection): ReplayObservation {
+  const note = `The replay acted on ${met.url}, where ${met.vendor}'s check cannot load in Trawler's browser, and the page stayed where it was, so a form there could not go through.`;
+  return { ...report, observed: Array.from(`${report.observed} ${note}`).slice(0, MAX_OBSERVED_CODE_POINTS).join(""), botProtection: met };
 }
 
 function stoppedByBotProtection(met: BotProtection): ReplayObservation {
