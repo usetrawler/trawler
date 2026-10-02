@@ -13,7 +13,7 @@ COPY apps/runner/package.json apps/runner/
 COPY apps/demo/package.json apps/demo/
 RUN npm ci --workspace @usetrawler/runner --include-workspace-root=false \
   && npx -w @usetrawler/core playwright install --with-deps chromium \
-  && apt-get update && apt-get install -y --no-install-recommends sudo tini \
+  && apt-get update && apt-get install -y --no-install-recommends sudo tini keyutils \
   && rm -rf /root/.npm /var/lib/apt/lists/*
 COPY --chmod=0755 apps/runner/browser/trawler-chromium /usr/local/bin/trawler-chromium
 COPY --chmod=0755 apps/runner/browser/trawler-chromium-as-browser /usr/local/libexec/trawler-chromium-as-browser

@@ -38,6 +38,16 @@ for switch in --renderer-cmd-prefix=/bin/true --browser-subprocess-path=/bin/tru
 done
 
 as_browser sh -c 'mkdir -p /tmp/left/locked /var/tmp/left /dev/shm/left && touch /tmp/left/locked/f /var/tmp/left/f /dev/shm/left/f /run/lock/left /var/lib/trawler-downloads/left && chmod 0500 /tmp/left/locked /tmp/left' 2>/dev/null
+keyring_check=0
+if setpriv --reuid=browser --regid=browser --init-groups keyctl add user trawler-left secret @u >/dev/null 2>&1; then
+  keyring_check=1
+  setpriv --reuid=browser --regid=browser --init-groups sh -c 'keyctl add user trawler-left-session secret @us && keyctl session - sh -c "keyctl add user trawler-left-persistent secret \$(keyctl get_persistent @s)"' >/dev/null 2>&1
+  result $? "browser can leave keys in its user, user-session and persistent keyrings, so the next check is meaningful"
+elif [ "${TRAWLER_REQUIRE_KEYRING_CHECK:-}" = 1 ]; then
+  result 1 "the keyring checks ran (the kernel or seccomp refused add_key for browser)"
+else
+  echo "skip keyring checks: the kernel or seccomp refuses add_key for browser, so no key can be left there"
+fi
 as_browser ipcmk -M 4096 >/dev/null 2>&1 && as_browser ipcmk -Q >/dev/null 2>&1 && as_browser ipcmk -S 1 >/dev/null 2>&1; result $? "browser can leave shared memory, a queue and a semaphore, so the next check is meaningful"
 setpriv --reuid=browser --regid=browser --clear-groups sleep 300 &
 other=$!
@@ -51,6 +61,10 @@ alive=$(for p in /proc/[0-9]*; do [ "$(stat -c %u "$p" 2>/dev/null)" = "$browser
 result $(( alive != 0 )) "cleaning ends every process the browser left running"
 ipc=$(ipcs -a 2>/dev/null | awk -v u=browser '$3 == u' | wc -l)
 result $(( ipc != 0 )) "cleaning removes the shared memory, queues and semaphores the browser left"
+if [ "$keyring_check" = 1 ]; then
+  setpriv --reuid=browser --regid=browser --init-groups sh -c 'keyctl search @u user trawler-left || keyctl search @us user trawler-left-session || keyctl session - sh -c "keyctl search \$(keyctl get_persistent @s) user trawler-left-persistent"' >/dev/null 2>&1
+  result $(( $? == 0 )) "cleaning removes the keys the browser left in its user, user-session and persistent keyrings"
+fi
 
 rm -f /tmp/isolation-check.pids /tmp/isolation-check.go
 (cd /app && as_node env HOME=/home/node TRAWLER_RUNNER_TOKEN=isolation-check-token node "$(dirname "$0")/isolation-check.mjs" "$browser_uid") &

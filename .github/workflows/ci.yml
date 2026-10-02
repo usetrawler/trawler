@@ -48,3 +48,5 @@ jobs:
         run: |
           sudo sysctl -w kernel.yama.ptrace_scope=0
           docker run --rm -e TRAWLER_REQUIRE_MEMORY_CHECK=1 -v "$PWD/apps/runner/browser:/check:ro" trawler-runner:check /check/isolation-check.sh
+      - name: the per-job clean clears the browser's kernel keyrings where the kernel lets it make keys
+        run: docker run --rm --security-opt seccomp=unconfined -e TRAWLER_REQUIRE_KEYRING_CHECK=1 -v "$PWD/apps/runner/browser:/check:ro" trawler-runner:check /check/isolation-check.sh

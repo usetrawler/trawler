@@ -7,6 +7,9 @@ writable=(/tmp /var/tmp /dev/shm /run/lock /dev/mqueue /var/lib/trawler-download
 clean() {
   kill -KILL -1 2>/dev/null
   ipcrm -a 2>/dev/null
+  keyctl clear @u 2>/dev/null || keyctl invalidate @u 2>/dev/null
+  keyctl clear @us 2>/dev/null || keyctl invalidate @us 2>/dev/null
+  keyctl session - sh -c 'p=$(keyctl get_persistent @s) && keyctl clear "$p"' >/dev/null 2>&1
   for dir in "${writable[@]}"; do
     [ -d "$dir" ] || continue
     find "$dir" -mindepth 1 -user browser -type d -exec chmod u+rwx {} + 2>/dev/null
@@ -16,6 +19,11 @@ clean() {
 
 if [ "$*" = --clean ]; then
   clean
+  refused=$(LC_ALL=C keyctl session - keyctl add user trawler-probe probe @s 2>&1 >/dev/null) || case "$refused" in
+    *"not permitted"* | *"not implemented"*) refused=yes ;;
+    *) refused=no ;;
+  esac
+  [ "$refused" = yes ] || echo "kernel keys reachable"
   exit 0
 fi
 home="$(mktemp -d /tmp/trawler-browser.XXXXXXXX)"
@@ -32,7 +40,9 @@ for arg in "$@"; do
     *) args+=("$arg") ;;
   esac
 done
-HOME="$home" TMPDIR="$home/tmp" "$chrome" "${args[@]}" &
+own_session=()
+keyctl session - true >/dev/null 2>&1 && own_session=(keyctl session -)
+HOME="$home" TMPDIR="$home/tmp" "${own_session[@]}" "$chrome" "${args[@]}" &
 child=$!
 trap 'kill -TERM "$child" 2>/dev/null' TERM INT HUP
 status=0
