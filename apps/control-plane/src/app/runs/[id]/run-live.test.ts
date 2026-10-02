@@ -54,7 +54,7 @@ test("a finished run sums up who reached every goal, what the replay confirmed a
   const summed = text(band(render(finished)));
   expect(summed).toContain("Outcome 1 of 2 people reached every goal. 3 of 4 goals reached in all.");
   expect(summed).toContain("Verified 1 of 2 reported");
-  expect(summed).toContain("Dismissed by replay 1 the replay did not see them");
+  expect(summed).toContain("Dismissed by replay 1 the replay did not bear them out");
   expect(summed).toContain("Cost $0.35 cap was $2.00");
   const priceless = text(band(render(summary({ ...finished, tokenCap: 3_000_000, tokensUsed: 1_200_000 }))));
   expect(priceless).toContain("Tokens 1.20M cap was 3.0M · price unknown");
@@ -171,7 +171,7 @@ test("every defect counts as reported whatever the replay made of it, friction d
     ],
   }));
   expect(text(band(html))).toContain("Verified 1 of 5 reported");
-  expect(text(band(html))).toContain("Dismissed by replay 1 the replay did not see them");
+  expect(text(band(html))).toContain("Dismissed by replay 1 the replay did not bear them out");
   const [unjudged] = rows(html, "Could not be judged");
   expect(text(unjudged!.split("</summary>")[0]!)).toBe("high severity 01 · Ana Export is empty Failed: the judge timed out →");
   expect(unjudged).toMatch(/<button type="button"[^>]*>Judge again<\/button>/);
