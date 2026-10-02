@@ -117,6 +117,18 @@ function oneLine(value: unknown): string | undefined {
   return line ? Array.from(line).slice(0, MAX_QUOTE).join("") : undefined;
 }
 
+export function byPerson(value: unknown, people: { id: string; name: string }[], self: string | undefined): { reproduction: unknown; by?: string[] } {
+  if (!Array.isArray(value) || !self || people.length < 2) return { reproduction: value };
+  const named = people.map((p) => ({ id: p.id, prefix: new RegExp(`^\\s*${p.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:\\s*`, "i") }));
+  const split = value.map((step) => {
+    if (typeof step !== "string") return { step, by: self };
+    const who = named.find((p) => p.prefix.test(step));
+    return who ? { step: step.replace(who.prefix, ""), by: who.id } : { step, by: self };
+  });
+  const by = split.map((s) => s.by);
+  return by.some((id) => id !== self) ? { reproduction: split.map((s) => s.step), by } : { reproduction: split.map((s) => s.step) };
+}
+
 function steps(value: unknown): unknown {
   if (typeof value !== "string") return value;
   return value.split("\n").map((s) => s.replace(/^\s*(?:\d+[.)]|[-*•])\s+/, "").trim()).filter(Boolean);
@@ -133,6 +145,8 @@ export function sessionTools(opts: {
   newId: () => string;
   capture?: (findingId: string) => Promise<void>;
   pageUrl?: () => string | null;
+  people?: { id: string; name: string }[];
+  self?: string;
 }) {
   const { state, emit, jobId } = opts;
   const goalIds = () => [...state.goals.keys()];
@@ -173,9 +187,10 @@ export function sessionTools(opts: {
         if (typeof goal !== "string" || !state.goals.has(goal)) return unknownGoal(input.goal);
         const url = findingUrl(opts.pageUrl ? await opts.inBrowser(async () => opts.pageUrl!()) : null);
         const said = oneLine(input.quote);
+        const attributed = byPerson(steps(input.reproduction), opts.people ?? [], opts.self);
         const candidate = {
-          id: "pending", goal, kind: lower(input.kind), title: input.title, observed: input.observed, reproduction: steps(input.reproduction), severity: lower(input.severity),
-          ...(url ? { url } : {}), ...(said ? { quote: said } : {}),
+          id: "pending", goal, kind: lower(input.kind), title: input.title, observed: input.observed, reproduction: attributed.reproduction, severity: lower(input.severity),
+          ...(url ? { url } : {}), ...(said ? { quote: said } : {}), ...(attributed.by ? { by: attributed.by } : {}),
         };
         const parsed = FindingSchema.safeParse(candidate);
         if (!parsed.success) {

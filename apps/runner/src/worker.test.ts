@@ -87,7 +87,7 @@ const reportsDefect = () => scriptedModel([
 test("a finding's screenshot is uploaded with the job token, as the image it is, before the job completes", async () => {
   const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" }, { uploadDelayMs: 300 });
   await workOnce(deps(url, reportsDefect(), { openBrowser: shooting }));
-  expect(seen.uploads).toEqual([{ url: `/api/jobs/${baseJob.jobId}/artifacts?kind=screenshot&finding=f1`, auth: `Bearer ${token}`, type: "image/png", protocol: "4", bytes: Buffer.from(shot.bytes) }]);
+  expect(seen.uploads).toEqual([{ url: `/api/jobs/${baseJob.jobId}/artifacts?kind=screenshot&finding=f1`, auth: `Bearer ${token}`, type: "image/png", protocol: "5", bytes: Buffer.from(shot.bytes) }]);
   expect(seen.order.slice(0, seen.order.indexOf("complete"))).toContain("artifacts answered");
   expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "finish" })]);
 });
@@ -310,7 +310,7 @@ test("a replay handed back because the runner is stopping takes and uploads no s
 test("with nothing to do, a claim comes back idle", async () => {
   const { url, seen } = await fakeControlPlane(null);
   expect(await workOnce(deps(url, scriptedModel([])))).toBe("idle");
-  expect(seen.headers[0]).toBe("4");
+  expect(seen.headers[0]).toBe("5");
   expect(seen.auth[0]).toBe("Bearer runner-" + "r".repeat(40));
 });
 
@@ -611,4 +611,16 @@ test("a claim failure is logged as an error and reported without the runner toke
   await looping;
   expect(reports).toEqual(["claim failed: connection refused while sending •••"]);
   expect(logs[0]).toEqual(["claim failed: connection refused while sending •••", { level: "error" }]);
+});
+
+test("a hosted replay of a defect that needs two people opens a second browser for the second person and closes it", async () => {
+  const team = { ...config, personas: [{ id: "ana", name: "Ana", brief: "b" }, { id: "lee", name: "Lee", brief: "b" }] };
+  const finding = { id: "ana:f1", kind: "defect", goal: "g", title: "Broken", observed: "500", reproduction: ["Invite Ana", "Open the invite"], by: ["lee", "ana"], severity: "high" };
+  const { url } = await fakeControlPlane({ ...baseJob, config: team, kind: "replay", finding });
+  let opened = 0;
+  let closed = 0;
+  const counting = async () => (opened++, { ...(await browser()), close: async () => void closed++ });
+  const model = scriptedModel([toolCall("browser_snapshot", {}), toolCall("act_as", { person: "Ana" }), toolCall("browser_snapshot", {}), toolCall("report_replay", { completed: true, observed: "500", blockedAt: null })]);
+  await workOnce(deps(url, model, { openBrowser: counting }));
+  expect({ opened, closed }).toEqual({ opened: 2, closed: 2 });
 });

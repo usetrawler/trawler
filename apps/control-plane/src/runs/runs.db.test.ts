@@ -1008,3 +1008,46 @@ describe("a finding sent again", () => {
     await drain();
   });
 });
+
+describe("a finding that names who did each step", () => {
+  test("is stored with its people, shown with their names, and handed to the replay with them, while a finding without people stays single-person", async () => {
+    await drain();
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const first = (await claimPastChecks())!;
+    seq = 0;
+    await ingestEvents(t.db, first.token, [
+      ev({ type: "finding", jobId: first.jobId, finding: { ...defect, by: ["lee", first.personaKey!] } }),
+      ev({ type: "finding", jobId: first.jobId, finding: { ...defect, id: "f2", title: "Alone" } }),
+    ]);
+    await completeJob(t.db, first.token, { usage: usage(0), stoppedBy: "finish" });
+    const second = (await claimPastChecks())!;
+    await completeJob(t.db, second.token, { usage: usage(0), stoppedBy: "finish" });
+    const summary = (await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!;
+    expect(summary.findings.map((f) => f.stepPeople)).toEqual([["lee", first.personaKey], null]);
+    const replays: Array<{ id: string; by: unknown; steps: number }> = [];
+    for (let i = 0; i < 6; i++) {
+      const job = await claimPastChecks();
+      if (!job) break;
+      if (job.kind === "replay") replays.push({ id: job.finding!.id, by: job.finding!.by, steps: job.maxSteps });
+      await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "report", observation: { completed: true, observed: "500", blockedAt: null } });
+    }
+    expect(replays).toEqual(expect.arrayContaining([{ id: `${first.personaKey}:f1`, by: ["lee", first.personaKey], steps: options.replaySteps * 2 }, { id: `${first.personaKey}:f2`, by: undefined, steps: options.replaySteps }]));
+    await drain();
+  });
+});
+
+describe("a finding sent again with other people", () => {
+  test("keeps the people of the latest report, and none when the latest names none", async () => {
+    await drain();
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const first = (await claimPastChecks())!;
+    seq = 0;
+    const people = async () => (await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.findings[0]!.stepPeople;
+    await ingestEvents(t.db, first.token, [ev({ type: "finding", jobId: first.jobId, finding: { ...defect, by: ["lee", first.personaKey!] } })]);
+    await ingestEvents(t.db, first.token, [ev({ type: "finding", jobId: first.jobId, finding: { ...defect, by: [first.personaKey!, "lee"] } })]);
+    expect(await people()).toEqual([first.personaKey, "lee"]);
+    await ingestEvents(t.db, first.token, [ev({ type: "finding", jobId: first.jobId, finding: defect })]);
+    expect(await people()).toBeNull();
+    await drain();
+  });
+});

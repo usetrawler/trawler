@@ -54,6 +54,7 @@ export async function runRoleSession(opts: {
       emit, jobId,
       fillField: opts.fillField, inBrowser: queue.run,
       scrubber: opts.scrubber, newId: opts.newFindingId, capture, pageUrl: opts.pageUrl,
+      people: opts.project.personas.map((p) => ({ id: p.id, name: p.name })), self: opts.persona.id,
     }),
     ...(opts.persona.accountRef ? {} : ownPasswordTool({ state, fillField: opts.fillField, inBrowser: queue.run, scrubber: opts.scrubber, password: seed === undefined ? undefined : madeUpPassword(seed) })),
   };
@@ -62,6 +63,7 @@ export async function runRoleSession(opts: {
     goals, accountRef: opts.persona.accountRef,
     signUpEmail: opts.persona.accountRef ? undefined : madeUpEmail(opts.persona.id, seed),
     story: opts.story, returning: opts.returning,
+    others: opts.project.personas.filter((p) => p.id !== opts.persona.id).map((p) => p.name),
   });
   const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
 

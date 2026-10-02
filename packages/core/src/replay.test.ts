@@ -471,3 +471,137 @@ describe("judge", () => {
     expect(JSON.stringify(events)).not.toContain("hunter22-secret");
   });
 });
+
+describe("a replay with several people", () => {
+  const team = ProjectConfigSchema.parse({
+    name: "Ventures", targetUrl: "https://ventures.test", description: "Pitches.",
+    personas: [{ id: "priya", name: "Priya", brief: "Founder.", accountRef: "priya" }, { id: "marco", name: "Marco", brief: "Reviewer.", accountRef: "marco" }],
+    goals: [{ id: "submit", instruction: "Submit a pitch.", personaId: "priya" }, { id: "review", instruction: "Review a pitch.", personaId: "marco" }],
+    accounts: [{ ref: "priya", username: "priya@v.test", password: "priya-pass-123" }, { ref: "marco", username: "marco@v.test", password: "marco-pass-456" }],
+  });
+  const together: Finding = {
+    id: "f1", kind: "defect", goal: "review", title: "Accept fails", observed: "Accept returned 500.", severity: "high",
+    reproduction: ["Sign in and submit a pitch titled Solar", "Sign in and open the pitch Solar", "Click Accept"], by: ["priya", "marco", "marco"],
+  };
+  const browserFor = (who: string, log: string[]) => ({
+    tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => (log.push(`${who}:snapshot`), { content: [{ type: "text", text: '- textbox "Email" [ref=e1]\n- textbox "Password" [ref=e2]' }] }) }) },
+    fillField: async (ref: string, value: string) => (log.push(`${who}:fill:${value}`), "typed"),
+    screenshot: async () => (log.push(`${who}:screenshot`), { bytes: new Uint8Array([1]), contentType: "image/png" as const }),
+    close: async () => void log.push(`${who}:close`),
+  });
+
+  test("each person acts in their own browser, signed in with their own account, in the order the steps name them, and the extra browsers are closed", async () => {
+    const log: string[] = [];
+    const first = browserFor("b1", log);
+    const model = scriptedModel([
+      toolCall("browser_snapshot", {}),
+      toolCall("sign_in", { account: "priya", usernameField: "e1", passwordField: "e2" }),
+      toolCall("act_as", { person: "Marco" }),
+      toolCall("browser_snapshot", {}),
+      toolCall("sign_in", { account: "marco", usernameField: "e1", passwordField: "e2" }),
+      report({ completed: true, observed: "Accept returned Internal Server Error", blockedAt: null }),
+    ]);
+    const kept: string[] = [];
+    const { observation } = await runReplay({
+      model, modelId: "mock", finding: together, project: team, accountRef: "marco", browserTools: first.tools, fillField: first.fillField, screenshot: first.screenshot,
+      keepScreenshot: (id) => void kept.push(id), openBrowser: async () => browserFor("b2", log),
+      scrubber: SecretScrubber.forProject(team), budget: new Budget(10), maxSteps: 20, emit: () => {},
+    }).then((r) => r);
+    expect(observation.completed).toBe(true);
+    expect(log).toEqual(["b1:snapshot", "b1:fill:priya@v.test", "b1:fill:priya-pass-123", "b2:snapshot", "b2:fill:marco@v.test", "b2:fill:marco-pass-456", "b2:screenshot", "b2:close"]);
+    expect(kept).toEqual(["f1"]);
+    const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
+    expect(prompt).toContain("1. (as Priya) Sign in and submit a pitch titled Solar");
+    expect(prompt).toContain("3. (as Marco) Click Accept");
+    for (const leak of ["Accept fails", "500", "Review a pitch", "Submit a pitch."]) expect(prompt).not.toContain(leak);
+  });
+
+  test("a person may only use their own account, and switching names only the plan's people", async () => {
+    const log: string[] = [];
+    const first = browserFor("b1", log);
+    const model = scriptedModel([
+      toolCall("act_as", { person: "Mallory" }),
+      toolCall("sign_in", { account: "marco", usernameField: "e1", passwordField: "e2" }),
+      report({ completed: false, observed: "stopped", blockedAt: 1 }),
+    ]);
+    await runReplay({
+      model, modelId: "mock", finding: together, project: team, browserTools: first.tools, fillField: first.fillField,
+      openBrowser: async () => browserFor("b2", log), scrubber: SecretScrubber.forProject(team), budget: new Budget(10), maxSteps: 20, emit: () => {},
+    });
+    const outputs = JSON.stringify(model.doGenerateCalls.at(-1)!.prompt);
+    expect(outputs).toContain("rejected: person: use one of Priya, Marco");
+    expect(log.some((l) => l.includes("marco-pass"))).toBe(false);
+  });
+
+  test("a finding naming someone no longer in the plan is replayed by one person as before", async () => {
+    const log: string[] = [];
+    const first = browserFor("b1", log);
+    const opened: string[] = [];
+    const model = scriptedModel([toolCall("browser_snapshot", {}), report({ completed: true, observed: "ok", blockedAt: null })]);
+    await runReplay({
+      model, modelId: "mock", finding: { ...together, by: ["priya", "gone", "marco"] }, project: team, accountRef: "marco", browserTools: first.tools, fillField: first.fillField,
+      openBrowser: async () => (opened.push("x"), browserFor("b2", log)), scrubber: SecretScrubber.forProject(team), budget: new Budget(10), maxSteps: 20, emit: () => {},
+    });
+    expect(opened).toEqual([]);
+    const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
+    expect(prompt).not.toContain("act_as");
+    expect(prompt).toContain('account \\"marco\\"');
+  });
+
+  const base = (over: Partial<Parameters<typeof runReplay>[0]>, log: string[], model: ReturnType<typeof scriptedModel>) => {
+    const first = browserFor("b1", log);
+    return runReplay({
+      model, modelId: "mock", finding: together, project: team, accountRef: "marco", browserTools: first.tools, fillField: first.fillField, screenshot: first.screenshot,
+      openBrowser: async () => browserFor("b2", log), scrubber: SecretScrubber.forProject(team), budget: new Budget(10), maxSteps: 20, emit: () => {}, ...over,
+    });
+  };
+
+  test("a second person's browser that cannot be opened is a clear refusal, the replay stays with the first person, and its report still counts", async () => {
+    const events: RunEventInput[] = [];
+    let tries = 0;
+    const model = scriptedModel([toolCall("act_as", { person: "Marco" }), report({ completed: false, observed: "Could not act as Marco", blockedAt: 2 })]);
+    const { observation } = await base({ openBrowser: async () => { tries++; throw new Error("the egress proxy refused the session"); }, emit: (e) => events.push(e) }, [], model);
+    expect(observation).toEqual({ completed: false, observed: "Could not act as Marco", blockedAt: 2 });
+    expect(tries).toBe(1);
+    expect(JSON.stringify(model.doGenerateCalls.at(-1)!.prompt)).toContain("rejected: Marco's browser could not be opened (the egress proxy refused the session); you are still Priya");
+    expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "report" });
+  });
+
+  test("switching to the same person twice in one step opens their browser once", async () => {
+    const log: string[] = [];
+    let opened = 0;
+    const model = scriptedModel([[toolCall("act_as", { person: "Marco" }), toolCall("act_as", { person: "Marco" }), toolCall("browser_snapshot", {})], report({ completed: true, observed: "ok", blockedAt: null })]);
+    await base({ openBrowser: async () => (opened++, await new Promise((r) => setTimeout(r, 20)), browserFor("b2", log)) }, log, model);
+    expect(opened).toBe(1);
+  });
+
+  test("extra browsers are closed when the replay fails, and a close that hangs does not hold the job", async () => {
+    const log: string[] = [];
+    const model = scriptedModel([toolCall("act_as", { person: "Marco" }), report({ completed: true, observed: "ok", blockedAt: null })]);
+    await expect(base({ keepScreenshot: () => { throw new Error("storage gone"); } }, log, model)).rejects.toThrow("storage gone");
+    expect(log).toContain("b2:close");
+    const hanging = scriptedModel([toolCall("act_as", { person: "Marco" }), report({ completed: true, observed: "ok", blockedAt: null })]);
+    const started = Date.now();
+    await base({ closeTimeoutMs: 50, openBrowser: async () => ({ ...browserFor("b2", []), close: () => new Promise<void>(() => {}) }) }, [], hanging);
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  test("a defect whose steps are all another person's is replayed as that person, with their account", async () => {
+    const log: string[] = [];
+    const model = scriptedModel([toolCall("sign_in", { account: "priya", usernameField: "e1", passwordField: "e2" }), report({ completed: true, observed: "ok", blockedAt: null })]);
+    await base({ finding: { ...together, reproduction: ["Sign in", "Submit Solar"], by: ["priya", "priya"] } }, log, model);
+    expect(log).toEqual(expect.arrayContaining(["b1:fill:priya@v.test"]));
+    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toContain("1. (as Priya) Sign in");
+  });
+
+  test("a switch and a browser call in the same step run in that order, so each person's call reaches their own browser", async () => {
+    const log: string[] = [];
+    const model = scriptedModel([
+      [toolCall("act_as", { person: "Marco" }), toolCall("browser_snapshot", {})],
+      [toolCall("act_as", { person: "Priya" }), toolCall("browser_snapshot", {})],
+      report({ completed: true, observed: "ok", blockedAt: null }),
+    ]);
+    await base({}, log, model);
+    expect(log.filter((l) => l.endsWith(":snapshot"))).toEqual(["b2:snapshot", "b1:snapshot"]);
+  });
+});

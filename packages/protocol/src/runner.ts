@@ -3,7 +3,7 @@ import { JobStopReasonSchema, JobUsageSchema, RunEventSchema } from "./event.ts"
 import { FindingSchema, ReplayObservationSchema } from "./finding.ts";
 import { ProjectConfigSchema } from "./project.ts";
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 export const PROTOCOL_HEADER = "x-trawler-protocol";
 export const MAX_EVENTS_PER_BATCH = 200;
 export const JOB_STOPPED = "job_stopped";

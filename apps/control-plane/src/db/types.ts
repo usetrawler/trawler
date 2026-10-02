@@ -85,6 +85,7 @@ export interface Findings {
   run_id: string;
   same_as: string | null;
   severity: string;
+  step_people: Json | null;
   title: string;
   updated_at: Generated<Timestamp>;
   url: string | null;

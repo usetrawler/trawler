@@ -10,7 +10,7 @@ const MAX_BROWSER_CRASHES = 3;
 const CUT_OFF = "Your reply was cut off before this tool ran. Call one tool at a time.";
 const CUT_OFF_TEXT = "Your reply was cut off. Plain text does nothing; call one tool at a time.";
 
-function oneAtATime() {
+export function oneAtATime() {
   let queue: Promise<unknown> = Promise.resolve();
   return <T>(task: () => Promise<T>): Promise<T> => {
     const run = queue.then(task);

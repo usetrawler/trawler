@@ -2,7 +2,7 @@ import { generateText, isStepCount } from "ai";
 import { describe, expect, test, vi } from "vitest";
 import type { RunEventInput } from "@usetrawler/protocol";
 import { SecretScrubber } from "./secrets.ts";
-import { findingUrl, madeUpEmail, madeUpPassword, newSessionState, ownPasswordTool, sessionTools } from "./session-tools.ts";
+import { byPerson, findingUrl, madeUpEmail, madeUpPassword, newSessionState, ownPasswordTool, sessionTools } from "./session-tools.ts";
 import { scriptedModel, text, toolCall } from "./testing.ts";
 
 const goals = [{ id: "sign-up", instruction: "Create an account." }, { id: "invoice", instruction: "Send an invoice." }];
@@ -22,6 +22,19 @@ function setup(over: Partial<Parameters<typeof sessionTools>[0]> = {}) {
 }
 
 describe("submit_finding", () => {
+  test("in a plan with other people, steps that start with someone's name are theirs; the rest are the reporter's, and a finding all of one person's carries no people", async () => {
+    const people = [{ id: "priya", name: "Priya" }, { id: "marco", name: "Marco Rossi" }];
+    expect(byPerson(["Priya: Submit a pitch titled Solar", "marco rossi : Open the pitch", "Click Accept"], people, "marco")).toEqual({
+      reproduction: ["Submit a pitch titled Solar", "Open the pitch", "Click Accept"], by: ["priya", "marco", "marco"],
+    });
+    expect(byPerson(["Open /x", "Click Save"], people, "marco")).toEqual({ reproduction: ["Open /x", "Click Save"] });
+    expect(byPerson(["Note: the page is slow", "Click Save"], people, "marco")).toEqual({ reproduction: ["Note: the page is slow", "Click Save"] });
+    expect(byPerson(["Priya: Submit"], [people[0]!], "priya")).toEqual({ reproduction: ["Priya: Submit"] });
+    const { tools, events } = setup({ people, self: "marco" });
+    expect(await tools.submit_finding.execute!({ ...finding, reproduction: ["Priya: Submit a pitch titled Solar", "Click Accept"] }, ctx)).toBe("recorded f1");
+    expect(events[0]).toMatchObject({ finding: { reproduction: ["Submit a pitch titled Solar", "Click Accept"], by: ["priya", "marco"] } });
+  });
+
   test("records the page the browser is on, never an address the model gives, and the person's words on one line", async () => {
     const { tools, events } = setup({ pageUrl: () => "https://app.acme.test/signup?step=2#top" });
     const said = "  I clicked Submit\n and   nothing told me why.  ";

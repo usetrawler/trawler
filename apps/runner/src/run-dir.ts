@@ -17,6 +17,7 @@ export interface RunSummary {
   verdicts: Record<string, Verdict>;
   judgeErrors: Record<string, string>;
   refusedAccount?: string;
+  people?: Record<string, string>;
 }
 
 export class RunDir {
@@ -54,8 +55,9 @@ function readable(url: string): string {
 
 type Located = Finding & { persona: string };
 
-function describe(f: Located, replay?: ReplayObservation, replayError?: string, judgeError?: string): string {
-  const steps = f.reproduction.map((step, i) => `${i + 1}. ${oneLine(step)}`).join("\n");
+function describe(f: Located, people: Record<string, string>, replay?: ReplayObservation, replayError?: string, judgeError?: string): string {
+  const who = (i: number) => (f.by && f.by.length === f.reproduction.length ? `${oneLine(people[f.by[i]!] ?? f.by[i]!)}: ` : "");
+  const steps = f.reproduction.map((step, i) => `${i + 1}. ${who(i)}${oneLine(step)}`).join("\n");
   const replayed = replayError
     ? `\n\nReplay: failed to run. ${oneLine(replayError)}`
     : !replay
@@ -72,7 +74,7 @@ function describe(f: Located, replay?: ReplayObservation, replayError?: string, 
 export function renderReport(s: RunSummary): string {
   const findings: Located[] = s.roles.flatMap((r) => r.findings.map((f) => ({ ...f, persona: r.persona })));
   const section = (title: string, items: Located[]) =>
-    items.length === 0 ? "" : `## ${title}\n\n${items.map((f) => describe(f, s.replays[f.id], s.replayErrors[f.id], s.judgeErrors[f.id])).join("\n")}\n`;
+    items.length === 0 ? "" : `## ${title}\n\n${items.map((f) => describe(f, s.people ?? {}, s.replays[f.id], s.replayErrors[f.id], s.judgeErrors[f.id])).join("\n")}\n`;
   const defects = findings.filter((f) => f.kind === "defect");
   const by = (v: Verdict) => defects.filter((f) => s.verdicts[f.id] === v);
   const jobs = s.jobs.map((j) => `| ${j.jobId} | ${j.model} | ${j.steps} | ${usd(j.costUsd)} |`).join("\n");

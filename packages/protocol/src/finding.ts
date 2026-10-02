@@ -16,10 +16,15 @@ export const FindingSchema = z
     severity: z.enum(["low", "medium", "high"]),
     url: z.string().max(MAX_URL).optional(),
     quote: z.string().trim().min(1).max(MAX_QUOTE).optional(),
+    by: z.array(z.string().min(1).max(100)).max(30).optional(),
   })
   .refine((f) => f.kind !== "defect" || f.reproduction.length >= 2, {
     message: "a defect needs at least two reproduction steps",
     path: ["reproduction"],
+  })
+  .refine((f) => f.by === undefined || f.by.length === f.reproduction.length, {
+    message: "by names one person for each reproduction step",
+    path: ["by"],
   });
 export type Finding = z.infer<typeof FindingSchema>;
 
