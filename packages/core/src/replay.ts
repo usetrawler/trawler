@@ -38,6 +38,7 @@ export interface ReplayBrowser {
   fillField: FillField;
   screenshot?: () => Promise<Screenshot | null>;
   botProtection?: () => BotProtection | null;
+  unusableWidget?: () => BotProtection | null;
   close?: () => Promise<void>;
 }
 
@@ -70,6 +71,7 @@ export async function runReplay(opts: {
   screenshot?: () => Promise<Screenshot | null>;
   keepScreenshot?: (findingId: string, shot: Screenshot) => void;
   botProtection?: () => BotProtection | null;
+  unusableWidget?: () => BotProtection | null;
   openBrowser?: () => Promise<ReplayBrowser>;
   closeTimeoutMs?: number;
 }): Promise<{ observation: ReplayObservation; usage: JobUsage }> {
@@ -85,7 +87,7 @@ export async function runReplay(opts: {
   const actors = new Map<string, Promise<Actor>>();
   const opened: ReplayBrowser[] = [];
   const open = async (id: string, first: boolean): Promise<Actor> => {
-    const browser = first ? { tools: opts.browserTools, fillField: opts.fillField, screenshot: opts.screenshot, botProtection: opts.botProtection } : await opts.openBrowser!();
+    const browser = first ? { tools: opts.browserTools, fillField: opts.fillField, screenshot: opts.screenshot, botProtection: opts.botProtection, unusableWidget: opts.unusableWidget } : await opts.openBrowser!();
     if (!first) opened.push(browser);
     const accountRef = together ? persona(id).accountRef : opts.accountRef;
     const queue = browserQueue(browser.tools);
@@ -197,8 +199,13 @@ export async function runReplay(opts: {
       onStep: (step, costUsd) => emit({ type: "step", jobId, step: usage.steps, tool: step.toolCalls[0]?.toolName ?? null, costUsd }),
       largeResultChars: 4000,
     });
-    const observation: ReplayObservation = stoppedAt ? opts.scrubber.scrub(stoppedByBotProtection(stoppedAt)) : (report ?? NO_REPORT);
     const last = await now();
+    const widget = stoppedAt ? null : (last.browser.unusableWidget?.() ?? null);
+    const observation: ReplayObservation = stoppedAt
+      ? opts.scrubber.scrub(stoppedByBotProtection(stoppedAt))
+      : widget
+        ? opts.scrubber.scrub({ ...(report ?? NO_REPORT), botProtection: widget })
+        : (report ?? NO_REPORT);
     const screenshot = last.browser.screenshot;
     if (screenshot && opts.keepScreenshot && outcome.stoppedBy !== "budget") {
       const shot = await screenshot().catch(() => null);

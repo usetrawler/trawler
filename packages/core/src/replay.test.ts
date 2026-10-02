@@ -651,6 +651,16 @@ describe("bot protection", () => {
     expect(observation.botProtection?.url).toContain("token=");
   });
 
+  test("a replay that ends on a page whose captcha cannot load says so, whatever it reports, so the judge cannot confirm it", async () => {
+    const widget = { vendor: "Cloudflare Turnstile", url: "https://acme.test/join" };
+    const model = scriptedModel([toolCall("browser_snapshot", {}), report({ completed: true, observed: "Register shows Verification failed", blockedAt: null })]);
+    const { promise } = replay(model, { unusableWidget: () => widget });
+    const { observation } = await promise;
+    expect(observation).toEqual({ completed: true, observed: "Register shows Verification failed", blockedAt: null, botProtection: widget });
+    const { promise: judged } = judgeWith(scriptedModel([verdictCall("confirmed")]), { observation });
+    expect((await judged).verdict).toBe("inconclusive");
+  });
+
   test("the judge answers inconclusive for a replay stopped by bot protection, without asking the model", async () => {
     const model = scriptedModel([verdictCall("confirmed")]);
     const { promise, events } = judgeWith(model, { observation: { completed: false, observed: "stopped by Cloudflare", blockedAt: null, botProtection: challenge } });

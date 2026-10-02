@@ -73,7 +73,18 @@ export const COLLECT_PAGE_SIGNALS = `() => {
   };
 }`;
 
-export function botProtectionNote(found: Detected): string {
+const WIDGET_ORIGINS: Record<string, string[]> = {
+  "Cloudflare Turnstile": ["https://challenges.cloudflare.com"],
+  reCAPTCHA: ["https://www.google.com", "https://www.recaptcha.net"],
+  hCaptcha: ["https://hcaptcha.com", "https://newassets.hcaptcha.com"],
+};
+
+export function widgetCanLoad(vendor: string, isAllowed: (url: string) => boolean): boolean {
+  return (WIDGET_ORIGINS[vendor] ?? []).some((origin) => isAllowed(origin));
+}
+
+export function botProtectionNote(found: Detected, widgetLoads = true): string {
+  if (!found.stops && !widgetLoads) return `### Bot protection\nThis page has a ${found.vendor} check, and it cannot load in this browser, so a form that needs it will not go through. That says nothing about the product: do not try to get past it and do not report the check or the form behind it as a finding. Go on with a goal that does not need it.`;
   return found.stops
     ? `### Bot protection\nThis page is ${found.vendor}'s bot-protection check. It stops automated browsers like this one, and a person in an ordinary browser gets past it, so it says nothing about the product. Do not try to get past it and do not report it as a finding. Mark the goal you are on as failed with the note "blocked by bot protection", and go on with a goal that does not need this page.`
     : `### Bot protection\nThis page has a ${found.vendor} check. If it stops you from going on, that says nothing about the product: do not try to get past it and do not report the check as a finding. Go on with a goal that does not need it.`;
@@ -82,4 +93,8 @@ export function botProtectionNote(found: Detected): string {
 export function botProtectionRefusal(current: BotProtection | null): string | null {
   if (!current) return null;
   return `rejected: ${current.vendor}'s bot-protection check at ${current.url} stops automated browsers like yours, and a person in an ordinary browser gets past it, so it is not a finding about the product. Mark the goal you are on as failed with the note "blocked by bot protection", and go on with a goal that does not need that page.`;
+}
+
+export function clearedNote(vendor: string): string {
+  return `### Bot protection\n${vendor}'s bot-protection check let the browser through while Trawler waited, so what is shown above may be the check rather than the page. Take a browser_snapshot to see the page now.`;
 }

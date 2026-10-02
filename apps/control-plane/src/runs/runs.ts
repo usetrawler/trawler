@@ -320,7 +320,6 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
       .execute(),
     tx
       .selectFrom("run_events as e")
-      .innerJoin("jobs as j", "j.id", "e.job_id")
       .select(["e.payload"])
       .where("e.run_id", "=", runId)
       .where("e.type", "=", "bot_protection")

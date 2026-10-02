@@ -94,6 +94,13 @@ beforeAll(async () => {
         res.setHeader("cf-mitigated", "challenge");
         res.setHeader("content-type", "text/html");
         return res.end(CLOUDFLARE_CHALLENGE);
+      case "/cf-clears-itself":
+        res.statusCode = 403;
+        res.setHeader("cf-mitigated", "challenge");
+        res.setHeader("content-type", "text/html");
+        return res.end(`<!doctype html><html><head><title>Just a moment...</title></head><body><p>Checking your browser</p><script>setTimeout(() => { location.href = "/two"; }, 1500)</script></body></html>`);
+      case "/turnstile-form":
+        return html(`<h1>Register</h1><form><input aria-label="Email"><div class="cf-turnstile" style="width:300px;height:65px"></div><button type="button">Register</button></form>`);
       case "/clears-itself":
         return html(`<title>Just a moment...</title><p>Checking your browser</p><script>setTimeout(() => { location.href = "/two"; }, 1500)</script>`);
       case "/hidden-turnstile":
@@ -702,6 +709,25 @@ describe("bot protection", () => {
       await navigate(b, `${origin}/clears-itself`);
       expect(b.botProtection?.()).toBeNull();
       expect(await snapshot(b)).toContain("Second page");
+    });
+  }, 60_000);
+
+  test("a Cloudflare challenge page that lets the browser through by itself is not a stop, though Cloudflare marked it as a challenge, and the person is told to look again", async () => {
+    await withBrowser(async (b) => {
+      const out = JSON.stringify(await navigate(b, `${origin}/cf-clears-itself`));
+      expect(b.botProtection?.()).toBeNull();
+      expect(out).toContain("let the browser through while Trawler waited");
+    });
+  }, 60_000);
+
+  test("a Turnstile on a product's form, which cannot load outside the allowed origins, stops nothing but is marked as unusable", async () => {
+    await withBrowser(async (b) => {
+      const out = JSON.stringify(await navigate(b, `${origin}/turnstile-form`));
+      expect(out).toContain("cannot load in this browser");
+      expect(b.botProtection?.()).toBeNull();
+      expect(b.unusableWidget?.()).toEqual({ vendor: "Cloudflare Turnstile", url: `${origin}/turnstile-form` });
+      await navigate(b, `${origin}/two`);
+      expect(b.unusableWidget?.()).toBeNull();
     });
   }, 60_000);
 

@@ -204,7 +204,7 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
       };
       try {
         const browser = await deps.openBrowser({ project, outputDir, headless: true, onBlocked, scrubber, survivesSignals: true, proxy: session?.proxy, executablePath: browserLauncher, downloadsPath });
-        return { tools: browser.tools, fillField: (ref, text, kind) => browser.fillField(ref, text, kind), screenshot: () => browser.screenshot(), pageUrl: () => browser.pageUrl(), botProtection: () => browser.botProtection?.() ?? null, close: () => browser.close().finally(finish) };
+        return { tools: browser.tools, fillField: (ref, text, kind) => browser.fillField(ref, text, kind), screenshot: () => browser.screenshot(), pageUrl: () => browser.pageUrl(), botProtection: () => browser.botProtection?.() ?? null, unusableWidget: () => browser.unusableWidget?.() ?? null, close: () => browser.close().finally(finish) };
       } catch (err) {
         await finish();
         throw err;
