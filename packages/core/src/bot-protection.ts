@@ -61,12 +61,6 @@ export const COLLECT_PAGE_SIGNALS = `() => {
   };
 }`;
 
-const WIDGET_ORIGINS: Record<string, string[]> = {
-  "Cloudflare Turnstile": ["https://challenges.cloudflare.com"],
-  reCAPTCHA: ["https://www.google.com", "https://www.recaptcha.net"],
-  hCaptcha: ["https://hcaptcha.com", "https://newassets.hcaptcha.com"],
-};
-
 export function botProtectionNote(vendor: string): string {
   return `### Bot protection\nThis page is ${vendor}'s bot-protection check. It stops automated browsers like this one, and a person in an ordinary browser gets past it, so it says nothing about the product. Do not try to get past it and do not report it as a finding. Mark the goal you are on as failed with the note "blocked by bot protection", and go on with a goal that does not need this page.`;
 }
