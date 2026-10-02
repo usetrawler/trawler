@@ -81,10 +81,9 @@ test("asking stops as soon as the person leaves, and nothing is asked once they 
   expect(await answered).toBe("left");
 });
 
-test("while it asks, the progress screen says Trawler did not answer and it is checking, and a setup that failed on the server says so", async () => {
+test("while it asks, the progress screen says Trawler did not answer and it is checking, and a description that failed on the server says so", async () => {
   const { Progress } = await import("./setup-wizard.tsx");
   expect(renderToStaticMarkup(createElement(Progress, { step: "propose", host: "acme.test", checking: true }))).toContain("Trawler did not answer. Checking whether setup finished…");
   expect(renderToStaticMarkup(createElement(Progress, { step: "propose", host: "acme.test" }))).not.toContain("Checking whether");
   expect(afterLostDescription({ state: "failed" })).toEqual({ error: LOST_MESSAGE.failed });
-  expect(afterLostProposal({ state: "failed" })).toEqual({ error: LOST_MESSAGE.failed, back: "address" });
 });

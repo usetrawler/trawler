@@ -1,9 +1,8 @@
 "use client";
-import { unstable_isUnrecognizedActionError, useRouter } from "next/navigation";
+import { unstable_isUnrecognizedActionError, unstable_rethrow, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import type { ProductSummary, SignUp } from "@usetrawler/core/setup";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
-import { isRedirectError } from "next/dist/client/components/redirect-error.js";
 import { WORKING_MINUTES, type SetupProgress } from "../../setup/progress.ts";
 import { describeProductAction, proposePeopleAction, readProductAction, setupProgressAction } from "./actions.ts";
 
@@ -34,7 +33,7 @@ export async function reached<T>(call: () => Promise<T>, redo: string): Promise<
   try {
     return await call();
   } catch (err) {
-    if (isRedirectError(err)) throw err;
+    unstable_rethrow(err);
     if (unstable_isUnrecognizedActionError(err)) return { ok: false, error: updatedSinceOpened(redo) };
     return LOST;
   }
@@ -74,7 +73,6 @@ type Settled = SetupProgress | "unreachable";
 
 export function afterLostProposal(progress: Settled): { open: string } | { error: string; back: "context" | "address" } {
   if (progress === "unreachable") return { error: LOST_MESSAGE.unreachable, back: "context" };
-  if (progress.state === "failed") return { error: LOST_MESSAGE.failed, back: "address" };
   if (progress.state === "project") return { open: `/projects/${progress.projectId}` };
   if (progress.state === "gone") return { error: LOST_MESSAGE.gone, back: "address" };
   return { error: LOST_MESSAGE.notChosen, back: "context" };
