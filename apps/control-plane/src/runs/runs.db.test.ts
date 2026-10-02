@@ -149,6 +149,70 @@ describe("a whole run", () => {
 
   const saveBroken = { ana: [defect, { ...defect, id: "f2", title: "Totals are wrong", reproduction: ["Open /y", "Look at the total"] }], lee: [{ ...defect, title: "Save does nothing", observed: "Nothing happened" }] };
 
+  describe("friction on a goal the person did not reach", () => {
+    const balance = { id: "f1", kind: "friction", goal: "g", title: "Balance has no history", observed: "The new account shows $515.50 but its activity says No transactions found", reproduction: ["Open /accounts", "Open the new account"], severity: "medium" } as const;
+    const noBalances = { id: "f1", kind: "friction", goal: "g", title: "Confirmation shows no balances", observed: "The transfer confirmation lists no balances", reproduction: ["Open /transfer", "Click Transfer"], severity: "low" } as const;
+    const oneStep = { id: "f2", kind: "friction", goal: "g", title: "The menu is hard to find", observed: "Took a while to find it", reproduction: ["Looked around"], severity: "low" } as const;
+
+    async function rolesWithGoals(verdictFor: string) {
+      await drain();
+      const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+      const ana = (await claimPastChecks())!;
+      seq = 0;
+      await ingestEvents(t.db, ana.token, [ev({ type: "finding", jobId: ana.jobId, finding: balance }), ev({ type: "finding", jobId: ana.jobId, finding: oneStep }), ev({ type: "goal_status", jobId: ana.jobId, outcome: { goal: "g", status: "failed", note: "the balance makes no sense" } })]);
+      await completeJob(t.db, ana.token, { usage: usage(0), stoppedBy: "finish" });
+      const lee = (await claimPastChecks())!;
+      seq = 0;
+      await ingestEvents(t.db, lee.token, [ev({ type: "finding", jobId: lee.jobId, finding: noBalances }), ev({ type: "goal_status", jobId: lee.jobId, outcome: { goal: "g", status: "reached", note: "no balances shown" } })]);
+      await completeJob(t.db, lee.token, { usage: usage(0), stoppedBy: "finish" });
+      const seen: string[] = [];
+      for (let job = await claimPastChecks(); job; job = await claimPastChecks()) {
+        seen.push(`${job.kind} ${job.finding?.id}`);
+        if (job.kind === "replay") expect(job.finding).toMatchObject({ kind: "defect", title: "Balance has no history" });
+        seq = 0;
+        if (job.kind === "judge") await ingestEvents(t.db, job.token, [ev({ type: "verdict", jobId: job.jobId, findingId: job.finding!.id, verdict: verdictFor, observed: "No transactions found" })]);
+        await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: job.kind === "judge" ? "done" : "report", observation: { completed: true, observed: "No transactions found", blockedAt: null } });
+      }
+      expect(seen).toEqual(["replay ana:f1", "judge ana:f1"]);
+      return (await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!;
+    }
+
+    test("is replayed and judged, and once confirmed it is a defect that says the person filed it as friction", async () => {
+      const summary = await rolesWithGoals("confirmed");
+      expect(summary.findings.map((f) => [f.key, f.kind, f.filedAs, f.verdict])).toEqual([["ana:f1", "defect", "friction", "confirmed"], ["ana:f2", "friction", null, null], ["lee:f1", "friction", null, null]]);
+    });
+
+    test("stays friction when the replay does not bear it out", async () => {
+      for (const verdict of ["refuted", "inconclusive"]) {
+        const summary = await rolesWithGoals(verdict);
+        expect(summary.findings.map((f) => [f.key, f.kind, f.filedAs, f.verdict])).toEqual([["ana:f1", "friction", "friction", verdict], ["ana:f2", "friction", null, null], ["lee:f1", "friction", null, null]]);
+      }
+    });
+
+    test("is replayed on its own, never grouped with the defects people reported", async () => {
+      await drain();
+      await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+      const ana = (await claimPastChecks())!;
+      seq = 0;
+      await ingestEvents(t.db, ana.token, [ev({ type: "finding", jobId: ana.jobId, finding: defect }), ev({ type: "finding", jobId: ana.jobId, finding: { ...balance, id: "f2" } }), ev({ type: "goal_status", jobId: ana.jobId, outcome: { goal: "g", status: "failed", note: "" } })]);
+      await completeJob(t.db, ana.token, { usage: usage(0), stoppedBy: "finish" });
+      const lee = (await claimPastChecks())!;
+      seq = 0;
+      await ingestEvents(t.db, lee.token, [ev({ type: "finding", jobId: lee.jobId, finding: { ...defect, title: "Save does nothing" } })]);
+      await completeJob(t.db, lee.token, { usage: usage(0), stoppedBy: "finish" });
+      const group = (await claimPastChecks())!;
+      expect(group.kind).toBe("group");
+      expect(group.defects!.map((d) => d.key)).toEqual(["ana:f1", "lee:f1"]);
+      await completeJob(t.db, group.token, { usage: usage(0), stoppedBy: "done", groups: [["ana:f1", "lee:f1"]] });
+      const replayed: string[] = [];
+      for (let job = await claimPastChecks(); job; job = await claimPastChecks()) {
+        if (job.kind === "replay") replayed.push(job.finding!.id);
+        await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "report", observation: { completed: true, observed: "Same", blockedAt: null } });
+      }
+      expect(replayed).toEqual(["ana:f1", "ana:f2"]);
+    });
+  });
+
   test("once several defects are in, one group job sees them all, and only the first report of each group is replayed; the rest point at it", async () => {
     const run = await rolesReport(saveBroken);
     const group = (await claimPastChecks())!;

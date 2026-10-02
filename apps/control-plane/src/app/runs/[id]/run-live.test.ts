@@ -11,7 +11,7 @@ const { RunLive, outcome, personLine } = await import("./run-live.tsx");
 const job = (kind: string, status: string, extra: Partial<RunSummary["jobs"][number]> = {}) =>
   ({ id: `${kind}-${status}-${Math.random()}`, kind, status, persona_key: null, finding_key: null, usage: null, stopped_by: null, error: null, requested: false, ...extra }) as RunSummary["jobs"][number];
 const finding = (key: string, persona: string, extra: Partial<RunSummary["findings"][number]> = {}) =>
-  ({ key, personaKey: persona, kind: "defect", goal: "g1", title: key, observed: "o", reproduction: ["Open Invoices.", "Save."], severity: "high", replay: null, verdict: null, sameAs: null, url: null, quote: null, stepPeople: null, screenshots: { reported: null, replayed: null }, ...extra }) as RunSummary["findings"][number];
+  ({ key, personaKey: persona, kind: "defect", filedAs: null, goal: "g1", title: key, observed: "o", reproduction: ["Open Invoices.", "Save."], severity: "high", replay: null, verdict: null, sameAs: null, url: null, quote: null, stepPeople: null, screenshots: { reported: null, replayed: null }, ...extra }) as RunSummary["findings"][number];
 const summary = (over: Partial<RunSummary>): RunSummary => ({
   id: "run-1", number: 7, status: "succeeded", cancelReason: null, projectId: "project-1", costUsd: 0.35, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash",
   provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0, createdAt: new Date("2026-09-25T19:40:00Z"), startedAt: new Date("2026-09-25T19:40:05Z"), finishedAt: new Date("2026-09-25T19:59:00Z"),
@@ -259,3 +259,15 @@ test("a defect others reported too shows each report's page and words, under the
   expect(row).toContain("Page: /invoices/7");
   expect(row).toContain("In Lee Park's words: “Nothing happened when I saved.”");
 });
+
+test("a confirmed defect a person filed as friction says so, and a defect they filed as one does not", () => {
+  const run = summary({ ...finished, findings: [
+    finding("ana:f1", "ana", { title: "Balance has no history", verdict: "confirmed", filedAs: "friction", replay: { completed: true, observed: "No transactions found", blockedAt: null } }),
+    finding("lee:f2", "lee", { title: "Saving an invoice fails", verdict: "confirmed", filedAs: null, replay: { completed: true, observed: "A 500 page.", blockedAt: null } }),
+    finding("lee:f3", "lee", { kind: "friction", title: "Confirmation shows no balances", verdict: "refuted", filedAs: "friction", severity: "low" }),
+  ] });
+  const said = text(render(run)).match(/filed this as friction on a goal they did not reach, so Trawler replayed it too/g);
+  expect(text(render(run))).toContain("Ana filed this as friction on a goal they did not reach, so Trawler replayed it too.");
+  expect(said).toHaveLength(1);
+});
+

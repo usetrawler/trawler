@@ -163,6 +163,7 @@ export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused 
         </summary>
         <div className="flex flex-col gap-3 border-t border-line p-[17px] text-sm wrap-anywhere">
           <p>{f.sameReports.length > 0 ? <><strong>{f.personaName}</strong><span className="text-muted">, while trying to: </span></> : <span className="text-muted">While trying to: </span>}{f.goalText}</p>
+          {f.filedAs === "friction" && f.verdict === "confirmed" && <p className="text-muted">{f.personaName} filed this as friction on a goal they did not reach, so Trawler replayed it too.</p>}
           <div>
             <p className="mb-1 text-muted">Steps</p>
             <ol className="list-decimal pl-5 break-words">{f.reproduction.map((step, i) => <li key={i}>{step}</li>)}</ol>

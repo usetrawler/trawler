@@ -271,9 +271,23 @@ async function findingFor(tx: Tx, runId: string, key: string) {
 }
 
 const defectsOf = (tx: Tx, runId: string) => tx.selectFrom("findings").where("run_id", "=", runId).where("kind", "=", "defect").orderBy("created_at").orderBy("key");
+const reportedDefectsOf = (tx: Tx, runId: string) => defectsOf(tx, runId).where("filed_as", "is", null);
+
+async function frictionToCheck(tx: Tx, runId: string): Promise<string[]> {
+  const rows = await tx
+    .updateTable("findings as f")
+    .set({ kind: "defect", filed_as: "friction", updated_at: new Date() })
+    .where("f.run_id", "=", runId)
+    .where("f.kind", "=", "friction")
+    .where(sql<boolean>`jsonb_array_length(f.reproduction) >= 2`)
+    .where((eb) => eb.exists(eb.selectFrom("goal_outcomes as g").select("g.goal").whereRef("g.run_id", "=", "f.run_id").whereRef("g.persona_key", "=", "f.persona_key").whereRef("g.goal", "=", "f.goal").where("g.status", "=", "failed")))
+    .returning(["f.key", "f.created_at"])
+    .execute();
+  return rows.toSorted((a, b) => a.created_at.getTime() - b.created_at.getTime() || a.key.localeCompare(b.key)).map((r) => r.key);
+}
 
 async function defectsToGroup(tx: Tx, runId: string, config: ProjectConfig): Promise<DefectToGroup[]> {
-  const rows = await defectsOf(tx, runId).select(["key", "persona_key", "goal", "title", "observed", "reproduction"]).execute();
+  const rows = await reportedDefectsOf(tx, runId).select(["key", "persona_key", "goal", "title", "observed", "reproduction"]).execute();
   return rows.map((row) => ({
     key: row.key,
     person: config.personas.find((p) => p.id === row.persona_key)?.name ?? row.persona_key,
@@ -538,18 +552,20 @@ async function planNext(tx: Tx, job: { run_id: string; org_id: string; kind: str
     const rolesLeft = await tx.selectFrom("jobs").select("id").where("run_id", "=", job.run_id).where("kind", "=", "role_session").where("status", "in", ["queued", "leased"]).executeTakeFirst();
     if (!rolesLeft) {
       await tx.updateTable("runs").set({ sign_up_seed: null }).where("id", "=", job.run_id).execute();
-      const defects = await defectsOf(tx, job.run_id).select("key").execute();
+      const candidates = await frictionToCheck(tx, job.run_id);
+      const defects = await reportedDefectsOf(tx, job.run_id).select("key").execute();
       if (defects.length >= 2 && defects.length <= MAX_GROUPED_DEFECTS) await tx.insertInto("jobs").values({ org_id: job.org_id, run_id: job.run_id, kind: "group", position: next }).execute();
-      else await queueReplays(tx, job, next, defects.map((d) => d.key));
+      else await queueReplays(tx, job, next, [...defects.map((d) => d.key), ...candidates]);
     }
   } else if (job.kind === "group") {
-    const keys = (await defectsOf(tx, job.run_id).select("key").execute()).map((d) => d.key);
+    const keys = (await reportedDefectsOf(tx, job.run_id).select("key").execute()).map((d) => d.key);
     const groups = result.groups && result.stoppedBy !== "error" ? settleGroups(keys, result.groups) : keys.map((key) => [key]);
     const firstReported = groups.map((group) => group.toSorted((a, b) => keys.indexOf(a) - keys.indexOf(b)));
     for (const [representative, ...same] of firstReported) {
       if (same.length) await tx.updateTable("findings").set({ same_as: representative, updated_at: new Date() }).where("run_id", "=", job.run_id).where("key", "in", same).execute();
     }
-    await queueReplays(tx, job, next, keys.filter((key) => firstReported.some((group) => group[0] === key)));
+    const candidates = (await defectsOf(tx, job.run_id).select("key").where("filed_as", "=", "friction").execute()).map((d) => d.key);
+    await queueReplays(tx, job, next, [...keys.filter((key) => firstReported.some((group) => group[0] === key)), ...candidates]);
   } else if (job.kind === "replay" && !noReport(result.observation)) {
     await tx.insertInto("jobs").values({ org_id: job.org_id, run_id: job.run_id, kind: "judge", position: next, finding_key: job.finding_key }).execute();
   } else if (job.kind === "replay" && result.observation && result.stoppedBy !== "error") {

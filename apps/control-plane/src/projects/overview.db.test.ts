@@ -37,7 +37,7 @@ let theirs: Seeded;
 const nothing = { runs: [], olderThan: null };
 const noCounts = { all: 0, completed: 0, attention: 0 };
 
-type Finding = { kind: "defect" | "friction"; verdict: "confirmed" | "refuted" | "inconclusive" | null };
+type Finding = { kind: "defect" | "friction"; verdict: "confirmed" | "refuted" | "inconclusive" | null; filedAs?: "friction" };
 
 async function seedRun(orgId: string, projectId: string, at: Date, set: { status: string; cost: number; tokenCap?: number; tokensUsed?: number }, findings: Finding[], reached: number, failedGoals: number) {
   const run = await withOrg(t.db, orgId, (tx) => startRun(tx, orgId, projectId, keys, options));
@@ -48,7 +48,7 @@ async function seedRun(orgId: string, projectId: string, at: Date, set: { status
     if (findings.length) {
       await tx.insertInto("findings").values(findings.map((f, i) => ({
         org_id: orgId, run_id: run.id, job_id: job.id, key: `ana:f${i}`, persona_key: "ana", kind: f.kind, goal: "sign-in",
-        title: `Finding ${i}`, observed: "o", reproduction: JSON.stringify(["Open /", "Click Save"]), severity: "high", verdict: f.verdict,
+        title: `Finding ${i}`, observed: "o", reproduction: JSON.stringify(["Open /", "Click Save"]), severity: "high", verdict: f.verdict, filed_as: f.filedAs ?? null,
       }))).execute();
     }
     const outcomes = [...Array(reached).fill("reached"), ...Array(failedGoals).fill("failed")] as string[];
@@ -191,6 +191,19 @@ test("a defect confirmed by its first judge counts at once, while that judge is 
   const history = (await withOrg(t.db, "org-c", (tx) => workspaceRuns(tx, "org-c", { projectId: judged }))).runs[0]!.confirmed;
   const runPage = runView((await withOrg(t.db, "org-c", (tx) => runSummary(tx, "org-c", run.id)))!).report.confirmed.length;
   expect({ history, runPage }).toEqual({ history: 1, runPage: 1 });
+});
+
+test("a run whose reported defects could not be replayed is not called unchecked when friction its people filed was confirmed, as on the run page", async () => {
+  const mixed = await project("org-d", "Mixed", "https://mixed.test/");
+  const unchecked = async (candidate: "confirmed" | "refuted") => {
+    const run = await seedRun("org-d", mixed, hoursAgo(1), { status: "succeeded", cost: 0.1 }, [{ kind: "defect", verdict: null }, { kind: "defect", verdict: candidate, filedAs: "friction" }], 0, 0);
+    await asSystem(t.db, (tx) => tx.insertInto("jobs").values({ org_id: "org-d", run_id: run.id, kind: "replay", position: 10, finding_key: "ana:f0", status: "failed" }).execute());
+    const row = (await withOrg(t.db, "org-d", (tx) => workspaceRuns(tx, "org-d", { projectId: mixed }))).runs.find((r) => r.id === run.id)!;
+    const page = runView((await withOrg(t.db, "org-d", (tx) => runSummary(tx, "org-d", run.id)))!);
+    return { unchecked: row.unchecked, confirmed: row.confirmed, runPageConfirmed: page.report.confirmed.length };
+  };
+  expect(await unchecked("confirmed")).toEqual({ unchecked: false, confirmed: 1, runPageConfirmed: 1 });
+  expect(await unchecked("refuted")).toEqual({ unchecked: true, confirmed: 0, runPageConfirmed: 0 });
 });
 
 test("a run keeps the number of goals it was started with after the plan changes", async () => {
