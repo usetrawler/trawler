@@ -9,7 +9,7 @@ import { initials } from "../../../components/initials.ts";
 import { DocsLink } from "../../../components/docs-link.tsx";
 import { LocalTime } from "../../../components/local-time.tsx";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
-import { cancelRunAction, judgeAgainAction } from "./actions.ts";
+import { cancelRunAction, dismissFindingAction, judgeAgainAction, undoDismissalAction } from "./actions.ts";
 import { FindingScreenshots } from "./finding-screenshots.tsx";
 import { RunAgainButton, RunAgainError, useRunAgain } from "./run-again-button.tsx";
 
@@ -17,6 +17,8 @@ type View = ReturnType<typeof runView>;
 type Data = { run: RunSummary; view: View };
 type ReportFinding = View["report"]["confirmed"][number];
 type UnjudgedFinding = View["report"]["couldNotJudge"][number];
+type DismissedFinding = View["report"]["dismissed"][number];
+type Moved = (key: string, text: string) => Promise<void>;
 
 const POLL_MS = 2000;
 const usd = (n: number) => `$${n.toFixed(2)}`;
@@ -113,9 +115,65 @@ export function JudgeAgainButton({ runId, findingKey, judging, onDone }: { runId
   );
 }
 
+export function NotABugButton({ runId, findingKey, title, onDone }: { runId: string; findingKey: string; title: string; onDone: Moved }) {
+  const [asking, setAsking] = useState(false);
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const field = useId();
+  const hint = useId();
+  if (!asking) return <button type="button" onClick={() => setAsking(true)} className="h-10 w-max border border-line bg-panel px-4 text-sm hover:border-ink">Not a bug</button>;
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (pending) return;
+    setError(null);
+    start(async () => {
+      const result = await dismissFindingAction(runId, findingKey, reason).catch((err) => ({ error: unstable_isUnrecognizedActionError(err) ? updatedSinceOpened("Reload the page to mark it not a bug.") : "It could not be marked not a bug. Try again." }));
+      if (result.error) return setError(result.error);
+      await onDone(findingKey, `${title}: marked not a bug.`);
+    });
+  };
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-2 text-sm">
+      <label htmlFor={field}>Why is it not a bug?</label>
+      <textarea id={field} required autoFocus maxLength={500} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} aria-describedby={hint} className="w-full min-w-0 resize-y border border-line bg-paper px-2 py-1 text-base outline-none focus:border-ink" />
+      <p id={hint} className="text-muted">Later runs of this project are told it is not a bug, with your reason, so they do not report it again.</p>
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="submit" aria-disabled={pending || undefined} className="h-10 border border-ink px-4 hover:bg-soft aria-disabled:cursor-wait aria-disabled:opacity-60">{pending ? "Saving…" : "Mark as not a bug"}</button>
+        <button type="button" onClick={() => { setAsking(false); setError(null); }} className="h-10 px-2 text-muted hover:text-ink">Cancel</button>
+        {error && <span role="alert" className="text-bad">{error}</span>}
+      </div>
+    </form>
+  );
+}
+
+export function UndoNotABug({ runId, f, onDone }: { runId: string; f: DismissedFinding; onDone: Moved }) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const undo = () => {
+    if (pending) return;
+    setError(null);
+    start(async () => {
+      const result = await undoDismissalAction(runId, f.key).catch((err) => ({ error: unstable_isUnrecognizedActionError(err) ? updatedSinceOpened("Reload the page to undo it.") : "It could not be undone. Try again." }));
+      if (result.error) return setError(result.error);
+      await onDone(f.key, `${f.title}: no longer marked not a bug.`);
+    });
+  };
+  return (
+    <div className="flex flex-col gap-2 text-sm">
+      <p className="break-words"><span className="text-muted">Not a bug, because: </span>{f.dismissal.reason}</p>
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-muted">Marked by {f.dismissal.by ?? "someone no longer in this workspace"} on <LocalTime iso={new Date(f.dismissal.at).toISOString()} />.</span>
+        <button type="button" aria-disabled={pending || undefined} onClick={undo} className="h-10 border border-line bg-panel px-4 hover:border-ink aria-disabled:cursor-wait aria-disabled:opacity-60">{pending ? "Undoing…" : "Undo"}<span className="sr-only">: {f.title}</span></button>
+        {error && <span role="alert" className="text-bad">{error}</span>}
+      </div>
+    </div>
+  );
+}
+
 function judgedText(report: View["report"], key: string): string {
   const sections: Array<[string, Array<{ key: string; title: string }>]> = [
-    ["confirmed", report.confirmed], ["refuted", report.refuted], ["inconclusive", report.inconclusive], ["could not be judged", report.couldNotJudge], ["not judged", report.notJudged],
+    ["confirmed", report.confirmed], ["refuted", report.refuted], ["inconclusive", report.inconclusive], ["could not be judged", report.couldNotJudge], ["not judged", report.notJudged], ["marked not a bug", report.dismissed],
   ];
   for (const [label, items] of sections) {
     const found = items.find((f) => f.key === key);
@@ -124,7 +182,7 @@ function judgedText(report: View["report"], key: string): string {
   return "";
 }
 
-export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused }: { f: ReportFinding; n: number; mark?: string; note?: string; detail?: string; action?: React.ReactNode; focus?: boolean; onFocused?: () => void }) {
+export function FindingRow({ f, n, mark, note, detail, action, dismiss, focus, onFocused }: { f: ReportFinding; n: number; mark?: string; note?: string; detail?: string; action?: React.ReactNode; dismiss?: React.ReactNode; focus?: boolean; onFocused?: () => void }) {
   const replay = f.replay as { observed: string } | null;
   const summary = useRef<HTMLElement>(null);
   const details = useRef<HTMLDetailsElement>(null);
@@ -197,6 +255,7 @@ export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused 
               ))}
             </div>
           )}
+          {dismiss && <div className="border-t border-line pt-3">{dismiss}</div>}
         </div>
       </details>
       {action && <div className="border-t border-line px-[17px] py-3">{action}</div>}
@@ -204,7 +263,7 @@ export function FindingRow({ f, n, mark, note, detail, action, focus, onFocused 
   );
 }
 
-function Section<T extends ReportFinding & { reason?: string }>({ title, hint, items, empty, mark, note, detail, action, focusKey, onFocused }: { title: string; hint: string; items: T[]; empty?: string; mark?: string; note?: boolean; detail?: (f: T) => string | undefined; action?: (f: T) => React.ReactNode; focusKey?: string | null; onFocused?: () => void }) {
+function Section<T extends ReportFinding & { reason?: string }>({ title, hint, items, empty, mark, note, detail, action, dismiss, focusKey, onFocused }: { title: string; hint: string; items: T[]; empty?: string; mark?: string; note?: boolean; detail?: (f: T) => string | undefined; action?: (f: T) => React.ReactNode; dismiss?: (f: T) => React.ReactNode; focusKey?: string | null; onFocused?: () => void }) {
   const id = useId();
   if (items.length === 0 && !empty) return null;
   return (
@@ -213,7 +272,7 @@ function Section<T extends ReportFinding & { reason?: string }>({ title, hint, i
         <h2 id={id} className={`${label} text-action-ink`}>{title} · {items.length}</h2>
         <p className="mt-[3px] text-[11px] text-muted">{hint}</p>
       </div>
-      {items.length === 0 ? <p className="border border-line bg-panel p-[17px] text-sm text-muted">{empty}</p> : <ol className="border border-line">{items.map((f, i) => <FindingRow key={f.key} f={f} n={i + 1} mark={mark} note={note ? f.reason : undefined} detail={detail?.(f)} action={action?.(f)} focus={f.key === focusKey} onFocused={onFocused} />)}</ol>}
+      {items.length === 0 ? <p className="border border-line bg-panel p-[17px] text-sm text-muted">{empty}</p> : <ol className="border border-line">{items.map((f, i) => <FindingRow key={f.key} f={f} n={i + 1} mark={mark} note={note ? f.reason : undefined} detail={detail?.(f)} action={action?.(f)} dismiss={dismiss?.(f)} focus={f.key === focusKey} onFocused={onFocused} />)}</ol>}
     </section>
   );
 }
@@ -410,6 +469,11 @@ export function RunLive({ initial }: { initial: Data }) {
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const focused = useCallback(() => setFocusKey(null), []);
   const again = useRunAgain();
+  const moved = useCallback<Moved>(async (key, text) => {
+    await refresh();
+    setFocusKey(key);
+    setAnnouncement((a) => ({ text, n: a.n + 1 }));
+  }, [refresh]);
   useEffect(() => {
     const now = new Set(view.report.couldNotJudge.filter((f) => f.action === "judging").map((f) => f.key));
     const finished = [...judging.current].filter((k) => !now.has(k));
@@ -432,6 +496,7 @@ export function RunLive({ initial }: { initial: Data }) {
 
   const host = URL.canParse(run.target) ? new URL(run.target).host : run.target;
   const { report } = view;
+  const dismiss = view.live ? undefined : (f: ReportFinding) => <NotABugButton runId={run.id} findingKey={f.key} title={f.title} onDone={moved} />;
   const when = view.live ? run.createdAt : run.finishedAt ?? run.createdAt;
   return (
     <div className="flex flex-col">
@@ -486,15 +551,16 @@ export function RunLive({ initial }: { initial: Data }) {
 
       <div className={`mt-[34px] grid gap-5 ${view.live ? "" : "wide:grid-cols-[minmax(0,1fr)_290px]"}`}>
         <div className="flex min-w-0 flex-col gap-8">
-          <Section title="Confirmed" hint="A fresh agent reproduced it and the judge agreed" items={report.confirmed} mark="✓ Replayed" empty={view.live ? "Nothing confirmed yet." : "No defect was confirmed."} focusKey={focusKey} onFocused={focused} />
-          <Section<UnjudgedFinding> title="Could not be judged" hint="The judge gave no verdict; the replay is kept" items={report.couldNotJudge} note detail={(f) => (f.action === "judging" ? undefined : f.reason)} focusKey={focusKey} onFocused={focused} action={(f) =>
+          <Section title="Confirmed" hint="A fresh agent reproduced it and the judge agreed" items={report.confirmed} mark="✓ Replayed" empty={view.live ? "Nothing confirmed yet." : "No defect was confirmed."} dismiss={dismiss} focusKey={focusKey} onFocused={focused} />
+          <Section<UnjudgedFinding> title="Could not be judged" hint="The judge gave no verdict; the replay is kept" items={report.couldNotJudge} note detail={(f) => (f.action === "judging" ? undefined : f.reason)} dismiss={dismiss} focusKey={focusKey} onFocused={focused} action={(f) =>
             f.action === "judge_again" || f.action === "judging" ? <JudgeAgainButton runId={run.id} findingKey={f.key} judging={f.action === "judging"} onDone={refresh} />
             : f.action === "after_run" ? <p className="text-sm text-muted">You can judge it again after the run, if its cap has room left.</p>
             : <p className="text-sm text-muted">This run has spent its cap, so it cannot be judged again.</p>} />
-          <Section title="Inconclusive" hint="The replay could not settle it" items={report.inconclusive} focusKey={focusKey} onFocused={focused} />
-          <Section title="Not judged" hint="Reported, but not replayed and judged to the end" items={report.notJudged} note detail={(f) => f.reason} focusKey={focusKey} onFocused={focused} />
-          <Section title="Refuted" hint="The replay did not see the problem, or saw only a detail the product never promised" items={report.refuted} focusKey={focusKey} onFocused={focused} />
-          <Section title="Friction" hint="Not broken, but slowed someone down" items={report.friction} />
+          <Section title="Inconclusive" hint="The replay could not settle it" items={report.inconclusive} dismiss={dismiss} focusKey={focusKey} onFocused={focused} />
+          <Section title="Not judged" hint="Reported, but not replayed and judged to the end" items={report.notJudged} note detail={(f) => f.reason} dismiss={dismiss} focusKey={focusKey} onFocused={focused} />
+          <Section title="Refuted" hint="The replay did not see the problem, or saw only a detail the product never promised" items={report.refuted} dismiss={dismiss} focusKey={focusKey} onFocused={focused} />
+          <Section title="Friction" hint="Not broken, but slowed someone down" items={report.friction} dismiss={dismiss} focusKey={focusKey} onFocused={focused} />
+          <Section<DismissedFinding> title="Not a bug" hint="Marked not a bug by your team; later runs of this project are told so" items={report.dismissed} action={(f) => <UndoNotABug runId={run.id} f={f} onDone={moved} />} focusKey={focusKey} onFocused={focused} />
         </div>
         {!view.live && <aside><PeopleOutcomes view={view} /></aside>}
       </div>

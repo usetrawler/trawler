@@ -69,6 +69,15 @@ export interface Credentials {
   secret: string;
 }
 
+export interface FindingDismissals {
+  dismissed_at: Generated<Timestamp>;
+  dismissed_by: string;
+  finding_key: string;
+  org_id: string;
+  reason: string;
+  run_id: string;
+}
+
 export interface Findings {
   created_at: Generated<Timestamp>;
   filed_as: string | null;
@@ -361,6 +370,7 @@ export interface DB {
   account: Account;
   artifacts: Artifacts;
   credentials: Credentials;
+  finding_dismissals: FindingDismissals;
   findings: Findings;
   first_runs_on_us: FirstRunsOnUs;
   goal_outcomes: GoalOutcomes;

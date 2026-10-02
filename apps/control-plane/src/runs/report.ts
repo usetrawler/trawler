@@ -74,7 +74,8 @@ export function runView(s: RunSummary) {
   };
   const judgingAgain = (f: Finding) => { const j = lastJudge(f); return !!j && j.requested && OPEN.has(j.status); };
   const unjudged = (f: Finding) => { const j = lastJudge(f); return !!j && gaveNoVerdict(j, f.verdict); };
-  const defects = s.findings.filter((f) => f.kind === "defect" && !f.sameAs);
+  const defects = s.findings.filter((f) => f.kind === "defect" && !f.sameAs && !f.dismissal);
+  const dismissed = s.findings.filter((f) => !f.sameAs && f.dismissal);
   const rejudging = defects.some(judgingAgain);
   const use = stage(byKind("role_session"), live);
   const grouping = live && byKind("group").some((j) => OPEN.has(j.status));
@@ -135,14 +136,15 @@ export function runView(s: RunSummary) {
       action: (judgingAgain(f) ? "judging" : live ? "after_run" : capSpent ? "cap_spent" : "judge_again") as JudgeAgainState,
     })),
     notJudged: settled.filter((f) => !f.verdict).map((f) => ({ ...withPersona(f), reason: notJudgedReason(f, live, failedReplay(f), grouping) })),
-    friction: s.findings.filter((f) => f.kind === "friction").map(withPersona),
+    friction: s.findings.filter((f) => f.kind === "friction" && !f.dismissal).map(withPersona),
+    dismissed: dismissed.map((f) => ({ ...withPersona(f), dismissal: f.dismissal! })),
   };
 
   const goalsReached = s.goals.filter((g) => g.status === "reached").length;
   const goalsTotal = s.personas.reduce((sum, p) => sum + goalsFor(s.goalTexts, p.id).length, 0);
   const replaysAllFailed = defects.length > 0 && defects.every((f) => failedReplay(f));
   const refreshes = live || s.jobs.some((j) => j.status === "leased" || (j.status === "queued" && j.requested));
-  return { live, rejudging, refreshes, stages, personas, report, goalsReached, goalsTotal, headline: headline(s, report.confirmed.length, defects.length, replaysAllFailed) };
+  return { live, rejudging, refreshes, stages, personas, report, goalsReached, goalsTotal, headline: headline(s, report.confirmed.length, defects.length, replaysAllFailed, dismissed.some((f) => f.kind === "defect")) };
 }
 
 const STOPPED_BECAUSE: Record<CancelReason, string> = {
@@ -155,7 +157,7 @@ const STOPPED_BECAUSE: Record<CancelReason, string> = {
   halted: "Stopped because Trawler paused hosted runs.",
 };
 
-function headline(s: RunSummary, confirmed: number, defects: number, replaysAllFailed: boolean): string {
+function headline(s: RunSummary, confirmed: number, defects: number, replaysAllFailed: boolean, defectsDismissed: boolean): string {
   const { status, cancelReason } = s;
   const checks = s.jobs.filter((j) => j.kind === "account_check");
   if (status === "queued") return "Waiting for a runner.";
@@ -170,6 +172,7 @@ function headline(s: RunSummary, confirmed: number, defects: number, replaysAllF
   if (confirmed > 0) return `${prefix}${confirmed} ${confirmed === 1 ? "defect" : "defects"} confirmed by replay.`;
   if (replaysAllFailed) return `${prefix}None of the reported defects could be checked: every replay failed.`;
   if (defects > 0) return `${prefix}None of the reported defects was confirmed.`;
+  if (defectsDismissed) return `${prefix}Every reported defect was marked not a bug.`;
   return `${prefix}No defects found.`;
 }
 

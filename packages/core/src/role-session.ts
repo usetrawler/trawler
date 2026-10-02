@@ -1,6 +1,6 @@
 import type { LanguageModel, ToolSet } from "ai";
 import type { Screenshot } from "./browser.ts";
-import { goalsFor, type JobUsage, type Persona, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
+import { goalsFor, type JobUsage, type NotABug, type Persona, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
 import { browserQueue, runAgentLoop } from "./agent-loop.ts";
 import type { Budget } from "./llm.ts";
 import { rolePrompt, sessionStatus } from "./prompts.ts";
@@ -30,6 +30,7 @@ export async function runRoleSession(opts: {
   story?: StoryEntry[];
   signUpSeed?: string;
   returning?: boolean;
+  notBugs?: NotABug[];
   jobId?: string;
 }): Promise<{ result: RoleResult; usage: JobUsage }> {
   if (!Number.isInteger(opts.maxSteps) || opts.maxSteps < 1) throw new RangeError(`maxSteps must be a positive integer, got ${opts.maxSteps}`);
@@ -67,7 +68,7 @@ export async function runRoleSession(opts: {
     persona: opts.persona, targetUrl: opts.project.targetUrl, docsUrl: opts.project.docsUrl,
     goals, accountRef: opts.persona.accountRef,
     signUpEmail: opts.persona.accountRef ? undefined : madeUpEmail(opts.persona.id, seed),
-    story: opts.story, returning: opts.returning,
+    story: opts.story, returning: opts.returning, notBugs: opts.notBugs,
     others: opts.project.personas.filter((p) => p.id !== opts.persona.id).map((p) => p.name),
   });
   const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };

@@ -7,6 +7,7 @@ import { priceFor, type Price } from "../../../llm/prices.ts";
 import { providerArticle } from "../../../llm/provider-kinds.ts";
 import { runCheckRefusal } from "../../../llm/key-input.ts";
 import { checkModelCall, endpointFor, PROVIDER_LABEL, type Provider } from "../../../llm/providers.ts";
+import { CannotDismiss, dismissFinding, undoDismissal } from "../../../runs/dismissals.ts";
 import { DEFAULT_RUN } from "../../../runs/models.ts";
 import { isLive } from "../../../runs/report.ts";
 import { cancelRun, CannotJudgeAgain, firstRunOnUsLeft, judgeAgain, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunNotFound, RunRefused, startRun } from "../../../runs/runs.ts";
@@ -46,6 +47,38 @@ export async function judgeAgainAction(runId: string, findingKey: string): Promi
     if (err instanceof CannotJudgeAgain) return { error: err.message };
     await logError("judge again could not start", { orgId, runId, err });
     return { error: "The judge could not be started. Try again." };
+  }
+}
+
+const isFindingKey = (key: unknown): key is string => typeof key === "string" && key.length >= 1 && key.length <= 200;
+
+export async function dismissFindingAction(runId: string, findingKey: string, reason: string): Promise<{ error?: string }> {
+  const member = await signedInMember(await headers());
+  if (!member) return { error: "Sign in again." };
+  const { orgId } = member;
+  if (!UUID.test(runId) || !isFindingKey(findingKey)) return { error: "This finding was not found." };
+  try {
+    await withOrg(getDb(), orgId, (tx) => dismissFinding(tx, orgId, runId, findingKey, reason, member.userId));
+    return {};
+  } catch (err) {
+    if (err instanceof CannotDismiss) return { error: err.message };
+    await logError("finding could not be marked not a bug", { orgId, runId, err });
+    return { error: "It could not be marked not a bug. Try again." };
+  }
+}
+
+export async function undoDismissalAction(runId: string, findingKey: string): Promise<{ error?: string }> {
+  const member = await signedInMember(await headers());
+  if (!member) return { error: "Sign in again." };
+  const { orgId } = member;
+  if (!UUID.test(runId) || !isFindingKey(findingKey)) return { error: "This finding was not found." };
+  try {
+    await withOrg(getDb(), orgId, (tx) => undoDismissal(tx, orgId, runId, findingKey));
+    return {};
+  } catch (err) {
+    if (err instanceof CannotDismiss) return { error: err.message };
+    await logError("not a bug could not be undone", { orgId, runId, err });
+    return { error: "It could not be undone. Try again." };
   }
 }
 

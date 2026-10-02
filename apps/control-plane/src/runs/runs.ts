@@ -294,7 +294,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   if (!run) return null;
   const snapshot = run.config_snapshot as unknown as ConfigSnapshot;
   const goalText = new Map(snapshot.goals.map((g) => [g.id, g.instruction]));
-  const [jobs, findings, goals, activity, screenshots, botProtection] = await Promise.all([
+  const [jobs, findings, goals, activity, screenshots, botProtection, dismissals] = await Promise.all([
     tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error", sql<boolean>`requested_by is not null`.as("requested")]).where("run_id", "=", runId).orderBy("position").execute(),
     tx.selectFrom("findings").select(["key", "persona_key", "kind", "filed_as", "goal", "title", "observed", "reproduction", "severity", "replay", "verdict", "same_as", "url", "quote", "step_people"]).where("run_id", "=", runId).orderBy("created_at").orderBy("key").execute(),
     tx.selectFrom("goal_outcomes").select(["persona_key", "goal", "status", "note"]).where("run_id", "=", runId).orderBy("persona_key").orderBy("goal").execute(),
@@ -326,7 +326,9 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
       .orderBy("e.id")
       .limit(1)
       .executeTakeFirst(),
+    tx.selectFrom("finding_dismissals").select(["finding_key", "reason", "dismissed_by", "dismissed_at"]).where("run_id", "=", runId).execute(),
   ]);
+  const dismissal = new Map(dismissals.map((d) => [d.finding_key, { reason: d.reason, userId: d.dismissed_by, at: d.dismissed_at, by: null as string | null }]));
   const findingTitle = new Map(findings.map((f) => [f.key, f.title]));
   const latestScreenshot = (key: string, kind: string) => screenshots.filter((a) => a.finding_key === key && a.kind === kind).at(-1)?.id ?? null;
   return {
@@ -338,6 +340,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
     findings: findings.map((f) => ({
       key: f.key, personaKey: f.persona_key, kind: f.filed_as === "friction" && f.verdict !== "confirmed" ? "friction" : f.kind, filedAs: f.filed_as as "friction" | null, goal: f.goal, title: f.title, observed: f.observed, reproduction: f.reproduction, severity: f.severity, replay: f.replay, verdict: f.verdict, sameAs: f.same_as, url: f.url, quote: f.quote, stepPeople: f.step_people as string[] | null,
       screenshots: { reported: latestScreenshot(f.key, "role_session"), replayed: latestScreenshot(f.key, "replay") },
+      dismissal: dismissal.get(f.key) ?? null,
     })),
     goals: goals.map((g) => ({ personaKey: g.persona_key, goal: g.goal, status: g.status, note: g.note })),
     botProtection: botProtection ? (({ vendor, url }) => ({ vendor, url }))(botProtection.payload as unknown as Extract<RunEvent, { type: "bot_protection" }>) : null,
