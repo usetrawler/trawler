@@ -4,8 +4,11 @@ import { createConnection } from "@playwright/mcp";
 import { chromium, selectors, type Dialog, type ElementHandle, type Frame, type Locator, type Page, type Route } from "playwright";
 import { jsonSchema, type Tool, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
-import { MAX_ARTIFACT_BYTES } from "@usetrawler/protocol";
+import { MAX_ARTIFACT_BYTES, MAX_URL } from "@usetrawler/protocol";
 import { asShown, longFormsOf, MASK, MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
+import { botProtection, botProtectionNote, clearedNote, COLLECT_PAGE_SIGNALS, type BotProtection, type PageSignals } from "./bot-protection.ts";
+
+export type { BotProtection } from "./bot-protection.ts";
 import type { FieldKind } from "./session-tools.ts";
 
 export const BROWSER_TOOLS = [
@@ -40,6 +43,9 @@ const MAX_HELD_FIELDS = 20;
 const KEYS_SAFE_ON_SECRETS = new Set(["Enter", "Tab", "Shift+Tab", "Escape"]);
 const FOCUS_CHECK_MS = 2000;
 const HANDLE_READ_MS = 500;
+const BOT_CHECK_MS = 1500;
+const BOT_SETTLE_MS = 8000;
+const BOT_SETTLE_STEP_MS = 1000;
 const CLOSE_STEP_MS = 2000;
 const FILLED_READ_MS = 5000;
 const FIELD_GONE = /Execution context was destroyed|Target page, context or browser has been closed|frame was detached|not attached to the DOM/i;
@@ -357,6 +363,7 @@ export interface Browser {
   fillField(ref: string, text: string, kind: FieldKind): Promise<string>;
   screenshot(): Promise<Screenshot | null>;
   pageUrl(): string | null;
+  botProtection?(): BotProtection | null;
   close(): Promise<void>;
 }
 
@@ -546,6 +553,32 @@ export async function openBrowser(opts: {
     const onNextDialog = new Set<(dialog: Dialog) => void>();
     const openDialogs = new Map<Dialog, Page>();
     const actingPage = () => context.pages()[0];
+    let challenge: BotProtection | null = null;
+    let mitigated: string | null = null;
+    context.on("response", (response) => {
+      if (response.headers()["cf-mitigated"] === "challenge" && response.request().resourceType() !== "document") mitigated = response.url();
+    });
+    const detect = async (): Promise<string | null> => {
+      const page = actingPage();
+      if (!page || disconnected || dialogOnActingPage() || page.url() === "about:blank") return null;
+      const signals = await within(page.evaluate<PageSignals>(`(${COLLECT_PAGE_SIGNALS})()`).catch(() => null), BOT_CHECK_MS, null);
+      return signals ? botProtection(signals) : null;
+    };
+    const checkBotProtection = async (): Promise<{ found: string | null; cleared: string | null }> => {
+      const first = await detect();
+      let found = first;
+      for (let waited = 0; found && waited < BOT_SETTLE_MS; waited += BOT_SETTLE_STEP_MS) {
+        await new Promise((resolve) => setTimeout(resolve, BOT_SETTLE_STEP_MS));
+        found = await detect();
+      }
+      let at = found ? (actingPage()?.url() ?? null) : null;
+      if (!found && mitigated) {
+        found = "Cloudflare";
+        at = mitigated;
+      }
+      challenge = found && at ? { vendor: found, url: at.slice(0, MAX_URL) } : null;
+      return { found, cleared: first && !found ? first : null };
+    };
     const dialogOnActingPage = () => [...openDialogs].filter(([, page]) => page === actingPage()).at(-1)?.[0];
     const modalState = (dialog: Dialog) => `### Modal state\n- ${dialogLine(dialog)}: can be handled by browser_handle_dialog`;
     context.on("page", (page) => {
@@ -749,6 +782,7 @@ export async function openBrowser(opts: {
           return scrubWithFilledValues({ content: [{ type: "text", text: `### Error\nError: Tool "${name}" does not handle the modal state.\n${modalState(waiting)}` }], isError: true });
         }
         blockedNavigation = null;
+        mitigated = null;
         const untilADialog = async () => {
           const running = Promise.resolve(execute(safeInput, options)) as Promise<McpResult>;
           running.catch(() => {});
@@ -767,6 +801,9 @@ export async function openBrowser(opts: {
         if (blockedNavigation) {
           result.content = [...(result.content ?? []), { type: "text", text: `### Blocked\n${blockedNavigation} is outside the allowed origins, so the browser did not open it. Go back or navigate to an allowed page.` }];
         }
+        const { found, cleared } = await checkBotProtection();
+        if (found) result.content = [...(result.content ?? []), { type: "text", text: botProtectionNote(found) }];
+        else if (cleared) result.content = [...(result.content ?? []), { type: "text", text: clearedNote(cleared) }];
         return scrubWithFilledValues(result);
       };
       tools[name] = {
@@ -836,6 +873,9 @@ export async function openBrowser(opts: {
       pageUrl() {
         const page = actingPage();
         return !page || disconnected || page.url() === "about:blank" ? null : page.url();
+      },
+      botProtection() {
+        return challenge;
       },
       async close() {
         const bounded = (step: Promise<unknown>) => within(step.catch(() => undefined), CLOSE_STEP_MS, undefined);

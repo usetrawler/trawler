@@ -622,3 +622,43 @@ test("in a replay with several people, each person who signs up gets their own f
   expect(prompt).toContain("wherever the steps have Dana sign up with a username or another value the product allows only one account to have, use replaydanaab12cd34 instead");
   expect(prompt).toContain("wherever the steps have Owen sign up with a username or another value the product allows only one account to have, use replayowenef56ab78 instead");
 });
+
+describe("bot protection", () => {
+  const challenge = { vendor: "Cloudflare", url: "https://acme.test/join" };
+
+  test("a replay that meets a bot-protection check stops there and says so, instead of reporting the claim", async () => {
+    let current: typeof challenge | null = null;
+    const tools = { ...browserTools, browser_click: tool({ inputSchema: z.object({ target: z.string() }), execute: async () => ((current = challenge), { content: [{ type: "text", text: "clicked" }] }) }) };
+    const model = scriptedModel([toolCall("browser_snapshot", {}), toolCall("browser_click", { target: "e2" }), toolCall("browser_snapshot", {}), report({ completed: false, observed: "Registration is blocked by Cloudflare (403)", blockedAt: 2 })]);
+    const { promise, events } = replay(model, { browserTools: tools, botProtection: () => current });
+    const { observation } = await promise;
+    expect(observation).toEqual({
+      completed: false,
+      observed: "The replay could not go on: Cloudflare's bot-protection check at https://acme.test/join stopped it. A person in an ordinary browser gets past such a check, so it says nothing about the claim.",
+      blockedAt: null,
+      botProtection: challenge,
+    });
+    expect(model.doGenerateCalls).toHaveLength(2);
+    expect(events.filter((e) => e.type === "bot_protection")).toEqual([{ type: "bot_protection", jobId: "replay:f1", vendor: "Cloudflare", url: "https://acme.test/join" }]);
+  });
+
+  test("a secret in the check's address is masked in what the replay reports", async () => {
+    const leaky = { vendor: "Cloudflare", url: "https://acme.test/join?token=hunter22-secret" };
+    const tools = { ...browserTools, browser_click: tool({ inputSchema: z.object({ target: z.string() }), execute: async () => ({ content: [{ type: "text", text: "clicked" }] }) }) };
+    const { promise } = replay(scriptedModel([toolCall("browser_click", { target: "e2" })]), { browserTools: tools, botProtection: () => leaky });
+    const { observation } = await promise;
+    expect(JSON.stringify(observation)).not.toContain("hunter22-secret");
+    expect(observation.botProtection?.url).toContain("token=");
+  });
+
+  test("the judge answers inconclusive for a replay stopped by bot protection, without asking the model", async () => {
+    const model = scriptedModel([verdictCall("confirmed")]);
+    const { promise, events } = judgeWith(model, { observation: { completed: false, observed: "stopped by Cloudflare", blockedAt: null, botProtection: challenge } });
+    const { verdict } = await promise;
+    expect(verdict).toBe("inconclusive");
+    expect(model.doGenerateCalls).toHaveLength(0);
+    expect(events.find((e) => e.type === "verdict")).toMatchObject({ verdict: "inconclusive" });
+    expect(events.at(-1)).toMatchObject({ type: "job_finished", stoppedBy: "done" });
+  });
+});
+

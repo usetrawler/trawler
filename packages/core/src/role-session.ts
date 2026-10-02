@@ -5,7 +5,8 @@ import { browserQueue, runAgentLoop } from "./agent-loop.ts";
 import type { Budget } from "./llm.ts";
 import { rolePrompt, sessionStatus } from "./prompts.ts";
 import type { SecretScrubber } from "./secrets.ts";
-import { madeUpEmail, madeUpPassword, newSessionState, ownPasswordTool, sessionTools, type FillField } from "./session-tools.ts";
+import { madeUpEmail, madeUpPassword, newSessionState, noteBotProtection, ownPasswordTool, sessionTools, type FillField } from "./session-tools.ts";
+import type { BotProtection } from "./bot-protection.ts";
 
 const NUDGE = "Every turn must call a tool; plain text does nothing. Continue with the goals, and call finish once every goal has a status.";
 
@@ -24,6 +25,7 @@ export async function runRoleSession(opts: {
   screenshot?: () => Promise<Screenshot | null>;
   keepScreenshot?: (findingId: string, shot: Screenshot) => void;
   pageUrl?: () => string | null;
+  botProtection?: () => BotProtection | null;
   goalIds?: string[];
   story?: StoryEntry[];
   signUpSeed?: string;
@@ -38,7 +40,10 @@ export async function runRoleSession(opts: {
   if (goals.length === 0) throw new RangeError(`this turn gives ${opts.persona.id} no goals of theirs`);
   const seed = opts.signUpSeed === undefined ? undefined : `${opts.signUpSeed}:${opts.persona.id}`;
   const state = newSessionState(goals);
-  const queue = browserQueue(opts.browserTools, (ok) => (state.page = ok ? "seen" : "stale"));
+  const queue = browserQueue(opts.browserTools, (ok) => {
+    state.page = ok ? "seen" : "stale";
+    if (ok) noteBotProtection(state, opts.botProtection?.() ?? null, emit, jobId);
+  });
   const { screenshot, keepScreenshot } = opts;
   const capture = screenshot && keepScreenshot
     ? async (findingId: string) => {
@@ -53,7 +58,7 @@ export async function runRoleSession(opts: {
       accounts: opts.project.accounts.filter((a) => a.ref === opts.persona.accountRef),
       emit, jobId,
       fillField: opts.fillField, inBrowser: queue.run,
-      scrubber: opts.scrubber, newId: opts.newFindingId, capture, pageUrl: opts.pageUrl,
+      scrubber: opts.scrubber, newId: opts.newFindingId, capture, pageUrl: opts.pageUrl, botProtection: opts.botProtection,
       people: opts.project.personas.map((p) => ({ id: p.id, name: p.name })), self: opts.persona.id,
     }),
     ...(opts.persona.accountRef ? {} : ownPasswordTool({ state, fillField: opts.fillField, inBrowser: queue.run, scrubber: opts.scrubber, password: seed === undefined ? undefined : madeUpPassword(seed) })),

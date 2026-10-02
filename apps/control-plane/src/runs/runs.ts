@@ -294,7 +294,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   if (!run) return null;
   const snapshot = run.config_snapshot as unknown as ConfigSnapshot;
   const goalText = new Map(snapshot.goals.map((g) => [g.id, g.instruction]));
-  const [jobs, findings, goals, activity, screenshots] = await Promise.all([
+  const [jobs, findings, goals, activity, screenshots, botProtection] = await Promise.all([
     tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error", sql<boolean>`requested_by is not null`.as("requested")]).where("run_id", "=", runId).orderBy("position").execute(),
     tx.selectFrom("findings").select(["key", "persona_key", "kind", "filed_as", "goal", "title", "observed", "reproduction", "severity", "replay", "verdict", "same_as", "url", "quote", "step_people"]).where("run_id", "=", runId).orderBy("created_at").orderBy("key").execute(),
     tx.selectFrom("goal_outcomes").select(["persona_key", "goal", "status", "note"]).where("run_id", "=", runId).orderBy("persona_key").orderBy("goal").execute(),
@@ -318,6 +318,14 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
       .orderBy("a.created_at")
       .orderBy("a.id")
       .execute(),
+    tx
+      .selectFrom("run_events as e")
+      .select(["e.payload"])
+      .where("e.run_id", "=", runId)
+      .where("e.type", "=", "bot_protection")
+      .orderBy("e.id")
+      .limit(1)
+      .executeTakeFirst(),
   ]);
   const findingTitle = new Map(findings.map((f) => [f.key, f.title]));
   const latestScreenshot = (key: string, kind: string) => screenshots.filter((a) => a.finding_key === key && a.kind === kind).at(-1)?.id ?? null;
@@ -332,6 +340,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
       screenshots: { reported: latestScreenshot(f.key, "role_session"), replayed: latestScreenshot(f.key, "replay") },
     })),
     goals: goals.map((g) => ({ personaKey: g.persona_key, goal: g.goal, status: g.status, note: g.note })),
+    botProtection: botProtection ? (({ vendor, url }) => ({ vendor, url }))(botProtection.payload as unknown as Extract<RunEvent, { type: "bot_protection" }>) : null,
     target: snapshot.targetUrl,
     personas: snapshot.personas.map((p) => ({ id: p.id, name: p.name })),
     goalTexts: snapshot.goals.map((g) => ({ id: g.id, instruction: g.instruction, ...(g.personaId ? { personaId: g.personaId } : {}) })),

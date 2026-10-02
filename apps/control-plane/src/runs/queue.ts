@@ -497,7 +497,7 @@ export async function recordLlmUsage(db: Database, call: LlmCall, usage: { model
   });
 }
 
-const noReport = (o?: ReplayObservation) => !o || (!o.completed && o.blockedAt === null);
+const noReport = (o?: ReplayObservation) => !o || (!o.completed && o.blockedAt === null && !o.botProtection);
 
 const JobResultSchema = z.object({ usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().max(2000).optional(), observation: ReplayObservationSchema.optional(), signIn: SignInCheckSchema.optional(), groups: DefectGroupsSchema.optional() });
 

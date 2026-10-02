@@ -15,7 +15,7 @@ const finding = (key: string, persona: string, extra: Partial<RunSummary["findin
 const summary = (over: Partial<RunSummary>): RunSummary => ({
   id: "run-1", number: 7, status: "succeeded", cancelReason: null, projectId: "project-1", costUsd: 0.35, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash",
   provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0, createdAt: new Date("2026-09-25T19:40:00Z"), startedAt: new Date("2026-09-25T19:40:05Z"), finishedAt: new Date("2026-09-25T19:59:00Z"),
-  jobs: [], findings: [], goals: [], target: "https://app.acme.test/", activity: [],
+  jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [],
   personas: [{ id: "ana", name: "Ana" }, { id: "lee", name: "Lee Park" }], goalTexts: [{ id: "g1", instruction: "Get an account." }, { id: "g2", instruction: "Send an invoice." }],
   ...over,
 });
@@ -269,5 +269,15 @@ test("a confirmed defect a person filed as friction says so, and a defect they f
   const said = text(render(run)).match(/filed this as friction on a goal they did not reach, so Trawler replayed it too/g);
   expect(text(render(run))).toContain("Ana filed this as friction on a goal they did not reach, so Trawler replayed it too.");
   expect(said).toHaveLength(1);
+});
+
+test("a run stopped by bot protection says which check blocked Trawler and where, live and finished, and links to how to let Trawler through", () => {
+  const met = { vendor: "Cloudflare", url: "https://app.acme.test/register.htm?step=2" };
+  for (const run of [summary({ ...finished, botProtection: met }), summary({ ...live, botProtection: met })]) {
+    const html = render(run);
+    expect(text(html)).toContain("Bot protection stopped Trawler Cloudflare's bot protection blocked Trawler's browser at /register.htm . It stops automated browsers, so what lies behind it could not be tried, and it is not reported as a defect.");
+    expect(html).toContain('href="https://usetrawler.com/docs/reference/troubleshooting/#bot-protection-stopped-trawler"');
+  }
+  expect(text(render(finished))).not.toContain("Bot protection");
 });
 

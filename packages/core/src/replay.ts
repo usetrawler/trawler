@@ -5,6 +5,7 @@ import { browserQueue, oneAtATime, runAgentLoop } from "./agent-loop.ts";
 import { type Budget, failureMessage, stoppedByRun, tallyStep } from "./llm.ts";
 import { judgePrompt, replayPrompt } from "./prompts.ts";
 import type { Screenshot } from "./browser.ts";
+import type { BotProtection } from "./bot-protection.ts";
 import type { SecretScrubber } from "./secrets.ts";
 import { madeUpEmail, newSessionState, ownPasswordTool, sessionTools, type FillField } from "./session-tools.ts";
 
@@ -16,7 +17,7 @@ const JUDGE_OUTPUT_TOKENS = 8000;
 const JUDGE_REPLIES = 2;
 const CLOSE_TIMEOUT_MS = 10_000;
 
-const isNoReport = (o: ReplayObservation) => !o.completed && o.blockedAt === null;
+const isNoReport = (o: ReplayObservation) => !o.completed && o.blockedAt === null && !o.botProtection;
 
 function onlyDefects(finding: Finding, what: string) {
   if (finding.kind !== "defect") throw new RangeError(`only defects are ${what}, ${finding.id} is ${finding.kind}`);
@@ -36,6 +37,7 @@ export interface ReplayBrowser {
   tools: ToolSet;
   fillField: FillField;
   screenshot?: () => Promise<Screenshot | null>;
+  botProtection?: () => BotProtection | null;
   close?: () => Promise<void>;
 }
 
@@ -67,6 +69,7 @@ export async function runReplay(opts: {
   emit: (e: RunEventInput) => void;
   screenshot?: () => Promise<Screenshot | null>;
   keepScreenshot?: (findingId: string, shot: Screenshot) => void;
+  botProtection?: () => BotProtection | null;
   openBrowser?: () => Promise<ReplayBrowser>;
   closeTimeoutMs?: number;
 }): Promise<{ observation: ReplayObservation; usage: JobUsage }> {
@@ -82,7 +85,7 @@ export async function runReplay(opts: {
   const actors = new Map<string, Promise<Actor>>();
   const opened: ReplayBrowser[] = [];
   const open = async (id: string, first: boolean): Promise<Actor> => {
-    const browser = first ? { tools: opts.browserTools, fillField: opts.fillField, screenshot: opts.screenshot } : await opts.openBrowser!();
+    const browser = first ? { tools: opts.browserTools, fillField: opts.fillField, screenshot: opts.screenshot, botProtection: opts.botProtection } : await opts.openBrowser!();
     if (!first) opened.push(browser);
     const accountRef = together ? persona(id).accountRef : opts.accountRef;
     const queue = browserQueue(browser.tools);
@@ -110,6 +113,7 @@ export async function runReplay(opts: {
   let current = together ? opts.finding.by![0]! : "you";
   const now = () => actorFor(current);
   let report: ReplayObservation | null = null;
+  let stoppedAt: BotProtection | null = null;
   const report_replay = tool({
     description: "Report what you saw while following the steps. completed is true only if you carried out every step; otherwise give the number of the step you could not do as blockedAt.",
     inputSchema: z.object({ completed: z.boolean().nullish(), observed: z.string().nullish(), blockedAt: z.number().nullish() }),
@@ -131,7 +135,13 @@ export async function runReplay(opts: {
       const actor = track(await now());
       const own = name === "type_own_password" ? actor.ownPassword : name === "sign_in" ? actor.sign_in : actor.queue.tools[name];
       if (!own?.execute) return `rejected: ${actor.name} ${name === "type_own_password" ? "has an account; use sign_in" : "cannot do that"}`;
-      return own.execute(input as never, options as never);
+      const out = await own.execute(input as never, options as never);
+      const met = actor.browser.botProtection?.() ?? null;
+      if (met && !stoppedAt) {
+        stoppedAt = met;
+        emit({ type: "bot_protection", jobId, vendor: met.vendor, url: met.url });
+      }
+      return out;
     }),
   });
   const first = await actorFor(current);
@@ -182,13 +192,13 @@ export async function runReplay(opts: {
       budget: opts.budget,
       maxSteps: opts.maxSteps,
       usage,
-      finished: () => report !== null,
+      finished: () => report !== null || stoppedAt !== null,
       crashed: () => crashedActors.map((a) => a.queue.crashed()).find((c) => c !== false) ?? false,
       onStep: (step, costUsd) => emit({ type: "step", jobId, step: usage.steps, tool: step.toolCalls[0]?.toolName ?? null, costUsd }),
       largeResultChars: 4000,
     });
-    const observation: ReplayObservation = report ?? NO_REPORT;
     const last = await now();
+    const observation: ReplayObservation = stoppedAt ? opts.scrubber.scrub(stoppedByBotProtection(stoppedAt)) : (report ?? NO_REPORT);
     const screenshot = last.browser.screenshot;
     if (screenshot && opts.keepScreenshot && outcome.stoppedBy !== "budget") {
       const shot = await screenshot().catch(() => null);
@@ -205,6 +215,15 @@ export async function runReplay(opts: {
       clearTimeout(timer);
     }));
   }
+}
+
+function stoppedByBotProtection(met: BotProtection): ReplayObservation {
+  return {
+    completed: false,
+    observed: `The replay could not go on: ${met.vendor}'s bot-protection check at ${met.url} stopped it. A person in an ordinary browser gets past such a check, so it says nothing about the claim.`,
+    blockedAt: null,
+    botProtection: met,
+  };
 }
 
 const Answer = z.object({ verdict: VerdictSchema });
@@ -255,7 +274,8 @@ export async function judge(opts: {
   let verdict: Verdict | null = null;
   let stoppedBy: JobStopReason = "done";
   let error: string | undefined;
-  if (isNoReport(opts.observation)) stoppedBy = "no_report";
+  if (opts.observation.botProtection) verdict = "inconclusive";
+  else if (isNoReport(opts.observation)) stoppedBy = "no_report";
   else if (opts.budget.exceeded) stoppedBy = "budget";
   else {
     try {

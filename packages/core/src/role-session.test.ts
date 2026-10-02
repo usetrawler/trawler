@@ -592,3 +592,41 @@ test("a person keeps a value the product contradicts, such as a balance its own 
   expect(prompt).toMatch(/a balance its own history does not account for/);
   expect(prompt).toMatch(/Do not explain such a thing away with a reason the product did not give/);
 });
+
+describe("bot protection", () => {
+  const challenge = { vendor: "Cloudflare", url: "https://acme.test/register.htm" };
+  const blockedSignUp = { kind: "defect", goal: "sign-up", title: "Registration is blocked by a Cloudflare challenge (403)", observed: "The register POST returns 403 and Just a moment...", reproduction: ["Open https://acme.test/register.htm", "Click Register"], severity: "high" };
+  const realDefect = { kind: "defect", goal: "invoice", title: "Send button does nothing", observed: "Clicking Send leaves the invoice as a draft", reproduction: ["Open https://acme.test/invoices/1", "Click Send"], severity: "high" };
+
+  test("a person on a bot-protection check cannot report it, the run hears of it once, and once off that page their findings are theirs to make", async () => {
+    let current: typeof challenge | null = challenge;
+    const model = scriptedModel([
+      look,
+      toolCall("submit_finding", blockedSignUp),
+      look,
+      toolCall("goal_status", { goal: "sign-up", status: "failed", note: "blocked by bot protection" }),
+      toolCall("browser_navigate", { url: "https://acme.test/invoices/1" }),
+      toolCall("submit_finding", { ...blockedSignUp, title: "Cloudflare verification never finishes" }),
+      toolCall("submit_finding", realDefect),
+      reached("invoice"),
+      finish,
+    ]);
+    const tools = { ...browserTools, browser_navigate: tool({ inputSchema: z.object({ url: z.string() }), execute: async () => ((current = null), { content: [{ type: "text", text: "navigated" }] }) }) };
+    const { promise, events } = run(model, { browserTools: tools, botProtection: () => current });
+    const { result } = await promise;
+    expect(result.findings.map((f) => f.title)).toEqual(["Cloudflare verification never finishes", "Send button does nothing"]);
+    expect(events.filter((e) => e.type === "bot_protection")).toEqual([{ type: "bot_protection", jobId: "role:solo", vendor: "Cloudflare", url: "https://acme.test/register.htm" }]);
+    const replies = JSON.stringify(model.doGenerateCalls.at(-1)!.prompt);
+    expect(replies.match(/Cloudflare's bot-protection check at https:\/\/acme.test\/register.htm stops automated browsers/g)).toHaveLength(1);
+    expect(events.every((e) => RunEventSchema.safeParse({ ...e, seq: 1, at: new Date().toISOString() }).success)).toBe(true);
+  });
+
+  test("a session that never met bot protection records a finding that mentions a captcha", async () => {
+    const model = scriptedModel([look, toolCall("submit_finding", { ...realDefect, goal: "sign-up", title: "The captcha image never loads" }), reached("sign-up"), reached("invoice"), finish]);
+    const { promise, events } = run(model, { botProtection: () => null });
+    const { result } = await promise;
+    expect(result.findings.map((f) => f.title)).toEqual(["The captcha image never loads"]);
+    expect(events.some((e) => e.type === "bot_protection")).toBe(false);
+  });
+});
+

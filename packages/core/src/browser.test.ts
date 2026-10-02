@@ -83,6 +83,26 @@ beforeAll(async () => {
         return html(`<h1>Login</h1><img src="https://blocked.example/pixel.png"><img src="https://blocked.example/other.png"><input aria-label="Email" type="text"><input aria-label="Password" type="password"><p>Welcome back</p><a href="/two">Next page</a>`);
       case "/two":
         return html(`<h1>Second page</h1>`);
+      case "/register-blocked":
+        res.statusCode = 403;
+        res.setHeader("content-type", "text/html");
+        return res.end(CLOUDFLARE_CHALLENGE);
+      case "/spa":
+        return html(`<h1>Register</h1><button onclick="fetch('/api/register', { method: 'POST' }).then((r) => (document.querySelector('h1').textContent = 'Got ' + r.status))">Save</button>`);
+      case "/api/register":
+        res.statusCode = 403;
+        res.setHeader("cf-mitigated", "challenge");
+        res.setHeader("content-type", "text/html");
+        return res.end(CLOUDFLARE_CHALLENGE);
+      case "/cf-clears-itself":
+        res.statusCode = 403;
+        res.setHeader("cf-mitigated", "challenge");
+        res.setHeader("content-type", "text/html");
+        return res.end(`<!doctype html><html><head><title>Just a moment...</title></head><body><p>Checking your browser</p><script>setTimeout(() => { location.href = "/two"; }, 1500)</script></body></html>`);
+      case "/clears-itself":
+        return html(`<title>Just a moment...</title><p>Checking your browser</p><script>setTimeout(() => { location.href = "/two"; }, 1500)</script>`);
+      case "/with-invisible-recaptcha":
+        return html(`<h1>Contact us</h1><script src="https://www.google.com/recaptcha/api.js?render=site-key"></script><div class="grecaptcha-badge" style="position:fixed;bottom:14px;right:0;width:256px;height:60px"><iframe title="reCAPTCHA" width="256" height="60" src="https://www.google.com/recaptcha/api2/anchor?ar=1&k=site-key&size=invisible"></iframe></div>`);
       case "/short":
         return html(`<form method="post" action="/echo-password"><input aria-label="Password" name="password" type="password" maxlength="12"><button type="submit">Save</button></form>`);
       case "/strip":
@@ -568,6 +588,8 @@ afterAll(() => {
   second.close();
 });
 
+const CLOUDFLARE_CHALLENGE = `<!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div class="main-wrapper" role="main"><div class="main-content"><h1 class="zone-name-title h1">parabank.parasoft.com</h1><h2 class="h2" id="challenge-error-title">Verification is taking longer than expected. Check your Internet connection and refresh the page if the issue persists.</h2><div id="challenge-error-text">The verification process was blocked. Possible causes: Incompatible browser extension or network configuration.</div></div></div><script>(function(){window._cf_chl_opt={cvId: '3',cZone: "parabank.parasoft.com",cType: 'managed',cRay: '8c1f2a3b4c5d6e7f'};var cpo=document.createElement('script');cpo.src='/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1?ray=8c1f2a3b4c5d6e7f';document.getElementsByTagName('head')[0].appendChild(cpo);}());</script><div class="footer" role="contentinfo"><div class="footer-inner"><div class="clearfix diagnostic-wrapper"><div class="ray-id">Ray ID: <code>8c1f2a3b4c5d6e7f</code></div></div><div class="text-center" id="footer-text">Performance &amp; security by Cloudflare</div></div></div></body></html>`;
+
 async function withBrowser(fn: (b: Browser, blocked: string[], dir: string) => Promise<void>, extra: Partial<Parameters<typeof openBrowser>[0]> = {}) {
   const blocked: string[] = [];
   const scrubber = new SecretScrubber();
@@ -652,6 +674,53 @@ describe("tools", () => {
       expect(out).toContain(origin);
       expect(out).not.toMatch(/\.yml/);
       expect(existsSync(dir) ? (await import("node:fs")).readdirSync(dir).filter((f) => f.endsWith(".yml")) : []).toEqual([]);
+    });
+  }, 60_000);
+});
+
+describe("bot protection", () => {
+  test("a bot-protection challenge is named in the tool result and kept until the page changes", async () => {
+    await withBrowser(async (b) => {
+      const met = await navigate(b, `${origin}/register-blocked`);
+      expect(JSON.stringify(met)).toContain("### Bot protection");
+      expect(JSON.stringify(met)).toContain("Cloudflare's bot-protection check");
+      expect(b.botProtection?.()).toEqual({ vendor: "Cloudflare", url: `${origin}/register-blocked` });
+      const left = await navigate(b, `${origin}/two`);
+      expect(JSON.stringify(left)).not.toContain("### Bot protection");
+      expect(b.botProtection?.()).toBeNull();
+    });
+  }, 60_000);
+
+  test("a request a single-page app makes that Cloudflare answers with a challenge is bot protection, though the page stays as it was", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/spa`);
+      const out = await b.tools.browser_click!.execute!({ element: "Save", target: refOf(await snapshot(b), "Save") }, ctx);
+      expect(JSON.stringify(out)).toContain("Cloudflare's bot-protection check");
+      expect(b.botProtection?.()).toEqual({ vendor: "Cloudflare", url: `${origin}/api/register` });
+    });
+  }, 60_000);
+
+  test("a check that lets the browser through by itself is not kept as one", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/clears-itself`);
+      expect(b.botProtection?.()).toBeNull();
+      expect(await snapshot(b)).toContain("Second page");
+    });
+  }, 60_000);
+
+  test("a Cloudflare challenge page that lets the browser through by itself is not a stop, though Cloudflare marked it as a challenge, and the person is told to look again", async () => {
+    await withBrowser(async (b) => {
+      const out = JSON.stringify(await navigate(b, `${origin}/cf-clears-itself`));
+      expect(b.botProtection?.()).toBeNull();
+      expect(out).toContain("let the browser through while Trawler waited");
+    });
+  }, 60_000);
+
+  test("an invisible reCAPTCHA on an ordinary page is not bot protection", async () => {
+    await withBrowser(async (b) => {
+      const page = await navigate(b, `${origin}/with-invisible-recaptcha`);
+      expect(JSON.stringify(page)).not.toContain("### Bot protection");
+      expect(b.botProtection?.()).toBeNull();
     });
   }, 60_000);
 });
