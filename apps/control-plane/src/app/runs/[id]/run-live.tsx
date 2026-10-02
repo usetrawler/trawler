@@ -247,7 +247,7 @@ function Outcome({ run, view }: { run: RunSummary; view: View }) {
       <div className={`${cell} border-r`}>
         <p className={`${label} text-muted`}>Dismissed by replay</p>
         <p className="mt-3.5 mb-1 text-[34px] font-bold">{report.refuted.length}</p>
-        <p className="text-[10px] text-muted">the replay did not see them</p>
+        <p className="text-[10px] text-muted">the replay did not bear them out</p>
       </div>
       <div className={cell}>
         <p className={`${label} text-muted`}>{spent.title}</p>
@@ -478,7 +478,7 @@ export function RunLive({ initial }: { initial: Data }) {
             : <p className="text-sm text-muted">This run has spent its cap, so it cannot be judged again.</p>} />
           <Section title="Inconclusive" hint="The replay could not settle it" items={report.inconclusive} focusKey={focusKey} onFocused={focused} />
           <Section title="Not judged" hint="Reported, but not replayed and judged to the end" items={report.notJudged} note detail={(f) => f.reason} focusKey={focusKey} onFocused={focused} />
-          <Section title="Refuted" hint="The replay did not see the problem" items={report.refuted} focusKey={focusKey} onFocused={focused} />
+          <Section title="Refuted" hint="The replay did not see the problem, or saw only a detail the product never promised" items={report.refuted} focusKey={focusKey} onFocused={focused} />
           <Section title="Friction" hint="Not broken, but slowed someone down" items={report.friction} />
         </div>
         {!view.live && <aside><PeopleOutcomes view={view} /></aside>}
