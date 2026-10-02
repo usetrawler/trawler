@@ -623,6 +623,19 @@ test("in a replay with several people, each person who signs up gets their own f
   expect(prompt).toContain("wherever the steps have Owen sign up with a username or another value the product allows only one account to have, use replayowenef56ab78 instead");
 });
 
+test("a replay, alone or with several people, is told to use what the product created for it in place of a number the steps name, and to stop when nothing was created", () => {
+  const alone = replayPrompt({ targetUrl: "https://bank.test/", steps: ["Register with username dana7183d6a", "Click Accounts Overview", "Click account 14010"], signUpEmail: "replay.ab12cd34@example.com" });
+  const together = replayPrompt({
+    targetUrl: "https://bank.test/", steps: ["Register", "Click account 14010"], stepPeople: ["Dana", "Owen"],
+    people: [{ name: "Dana", signUpEmail: "replay-dana.ab12cd34@example.com" }, { name: "Owen", signUpEmail: "replay-owen.ef56ab78@example.com" }],
+  });
+  for (const prompt of [alone, together]) {
+    expect(prompt).toContain("whatever the product creates while you follow the steps gets its own number or name, different from the one in the steps: an account, order or invoice number, a record's ID in a link");
+    expect(prompt).toContain("use the one it created for you instead, and say in observed which one you used and which the step named");
+    expect(prompt).toContain("If the product created nothing that could be it, that step cannot be carried out.");
+  }
+});
+
 describe("bot protection", () => {
   const challenge = { vendor: "Cloudflare", url: "https://acme.test/join" };
 
