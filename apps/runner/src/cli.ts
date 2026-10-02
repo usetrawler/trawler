@@ -150,9 +150,11 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
   const sharedDownloads = deps.env.TRAWLER_BROWSER_DOWNLOADS?.trim() || undefined;
   if (!browserLauncher && deps.env.TRAWLER_REQUIRE_EGRESS === "1") throw new UsageError("this runner must start the browser as its own user, and TRAWLER_BROWSER_LAUNCHER is not set; use the runner image");
   const egress = egressServer ? egressClient(egressServer, egressToken!) : undefined;
+  const unfinished = new Set<() => Promise<void>>();
   const betweenJobs = browserLauncher
     ? async () => {
         await (deps.cleanBrowserUser ?? cleanBrowserUser)(browserLauncher);
+        await Promise.all([...unfinished].map((finish) => finish().catch(() => undefined)));
         if (sharedDownloads) for (const dir of readdirSync(sharedDownloads)) rmSync(join(sharedDownloads, dir), { recursive: true, force: true });
       }
     : undefined;
@@ -186,7 +188,11 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
         }
       };
       const polling = session ? setInterval(() => void session.drain().then(report, () => undefined), EGRESS_POLL_MS) : undefined;
-      const finish = async () => {
+      let finished: Promise<void> | undefined;
+      const finish = () => (finished ??= finishOnce());
+      unfinished.add(finish);
+      const finishOnce = async () => {
+        unfinished.delete(finish);
         clearInterval(polling);
         rmSync(outputDir, { recursive: true, force: true });
         try {

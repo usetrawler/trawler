@@ -371,6 +371,37 @@ test("in work mode with an egress proxy, each browser gets its own proxy session
   }
 });
 
+test("in work mode, a browser whose close never settles still has its egress session closed when the job ends", async () => {
+  const egressToken = "egress-token-".padEnd(40, "x");
+  const proxy = await startEgressProxy({ token: egressToken });
+  const job = {
+    kind: "role_session", personaKey: "ana", jobId: "11111111-1111-4111-8111-111111111111", runId: "22222222-2222-4222-8222-222222222222", token: "job-token-" + "x".repeat(40),
+    config: { name: "Acme", targetUrl: "https://a.test/", description: "", allowedOrigins: ["https://a.test"], personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "x" }], accounts: [], extraHeaders: {}, secretHeaders: {} },
+    maxSteps: 10, budgetUsd: 1, agentModel: "m/agent", judgeModel: "m/judge",
+  };
+  const controlPlane = (async (url: string | URL) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/api/runner/claim") return Response.json(job);
+    if (path.endsWith("/events")) return Response.json({ cancel: false });
+    return Response.json({ ok: true });
+  }) as typeof fetch;
+  const { d } = deps({
+    env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_EGRESS_PROXY: `http://127.0.0.1:${proxy.port}`, TRAWLER_EGRESS_TOKEN: egressToken, TRAWLER_BROWSER_LAUNCHER: "/usr/local/bin/trawler-chromium" },
+    fetchImpl: controlPlane,
+    model: () => scriptedModel([toolCall("finish", { summary: "done" })]),
+    openBrowser: async () => ({ tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: () => new Promise<void>(() => {}) }),
+    cleanBrowserUser: async () => {},
+    startReporting: async () => ({ report: () => {}, maskWith: () => {}, close: async () => {} }),
+  });
+  try {
+    expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(0);
+    const health = await fetch(`http://127.0.0.1:${proxy.port}/health`, { headers: { authorization: `Bearer ${egressToken}` } });
+    expect(await health.json()).toEqual({ sessions: 0 });
+  } finally {
+    await proxy.close();
+  }
+}, 20_000);
+
 test("work refuses an egress proxy without its control token", async () => {
   const { d, err } = deps({ env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_EGRESS_PROXY: "http://127.0.0.1:9" } });
   expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(2);
