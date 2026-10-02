@@ -41,8 +41,8 @@ as_browser sh -c 'mkdir -p /tmp/left/locked /var/tmp/left /dev/shm/left && touch
 keyring_check=0
 if setpriv --reuid=browser --regid=browser --init-groups keyctl add user trawler-left secret @u >/dev/null 2>&1; then
   keyring_check=1
-  setpriv --reuid=browser --regid=browser --init-groups keyctl add user trawler-left-session secret @us >/dev/null 2>&1
-  result $? "browser can leave keys in its user and user-session keyrings, so the next check is meaningful"
+  setpriv --reuid=browser --regid=browser --init-groups sh -c 'keyctl add user trawler-left-session secret @us && keyctl session - sh -c "keyctl add user trawler-left-persistent secret \$(keyctl get_persistent @s)"' >/dev/null 2>&1
+  result $? "browser can leave keys in its user, user-session and persistent keyrings, so the next check is meaningful"
 elif [ "${TRAWLER_REQUIRE_KEYRING_CHECK:-}" = 1 ]; then
   result 1 "the keyring checks ran (the kernel or seccomp refused add_key for browser)"
 else
@@ -62,8 +62,8 @@ result $(( alive != 0 )) "cleaning ends every process the browser left running"
 ipc=$(ipcs -a 2>/dev/null | awk -v u=browser '$3 == u' | wc -l)
 result $(( ipc != 0 )) "cleaning removes the shared memory, queues and semaphores the browser left"
 if [ "$keyring_check" = 1 ]; then
-  setpriv --reuid=browser --regid=browser --init-groups sh -c 'keyctl search @u user trawler-left || keyctl search @us user trawler-left-session' >/dev/null 2>&1
-  result $(( $? == 0 )) "cleaning removes the keys the browser left in its user and user-session keyrings"
+  setpriv --reuid=browser --regid=browser --init-groups sh -c 'keyctl search @u user trawler-left || keyctl search @us user trawler-left-session || keyctl session - sh -c "keyctl search \$(keyctl get_persistent @s) user trawler-left-persistent"' >/dev/null 2>&1
+  result $(( $? == 0 )) "cleaning removes the keys the browser left in its user, user-session and persistent keyrings"
 fi
 
 rm -f /tmp/isolation-check.pids /tmp/isolation-check.go

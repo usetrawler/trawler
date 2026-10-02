@@ -9,7 +9,7 @@ clean() {
   ipcrm -a 2>/dev/null
   keyctl clear @u 2>/dev/null || keyctl invalidate @u 2>/dev/null
   keyctl clear @us 2>/dev/null || keyctl invalidate @us 2>/dev/null
-  persistent=$(keyctl get_persistent @us 2>/dev/null) && keyctl clear "$persistent" 2>/dev/null
+  keyctl session - sh -c 'p=$(keyctl get_persistent @s) && keyctl clear "$p"' >/dev/null 2>&1
   for dir in "${writable[@]}"; do
     [ -d "$dir" ] || continue
     find "$dir" -mindepth 1 -user browser -type d -exec chmod u+rwx {} + 2>/dev/null
@@ -19,7 +19,11 @@ clean() {
 
 if [ "$*" = --clean ]; then
   clean
-  if keyctl session - keyctl add user trawler-probe probe @s >/dev/null 2>&1; then echo "kernel keys reachable"; fi
+  refused=$(keyctl session - keyctl add user trawler-probe probe @s 2>&1 >/dev/null) || case "$refused" in
+    *"not permitted"* | *"not implemented"*) refused=yes ;;
+    *) refused=no ;;
+  esac
+  [ "$refused" = yes ] || echo "kernel keys reachable"
   exit 0
 fi
 home="$(mktemp -d /tmp/trawler-browser.XXXXXXXX)"

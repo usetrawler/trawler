@@ -157,7 +157,7 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
         const cleaned = await (deps.cleanBrowserUser ?? cleanBrowserUser)(browserLauncher);
         if (cleaned?.keysReachable && !keysReported) {
           keysReported = true;
-          reporting.report("the browser's user can create kernel keys on this host, so its keyrings are shared by every runner container here; the per-job clear is all that stands between jobs", {});
+          reporting.report("the browser's user can create kernel keys on this host; its user and persistent keyrings are shared with every process on the host running as that uid, concurrent jobs in other containers included, and the per-job clear does not separate them", {});
         }
         await Promise.all([...unfinished].map((finish) => finish().catch(() => undefined)));
         if (sharedDownloads) for (const dir of readdirSync(sharedDownloads)) rmSync(join(sharedDownloads, dir), { recursive: true, force: true });
