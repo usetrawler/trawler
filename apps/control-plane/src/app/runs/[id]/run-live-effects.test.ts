@@ -457,6 +457,18 @@ test("while Trawler works on the run, Not a bug says when it can be used, and a 
   fresh([true, "Half a reason"]);
   const open = NotABugButton(ask);
   expect(nodes(open).find((node) => node.type === "textarea")!.props!.value).toBe("Half a reason");
+
+  react.refs = [];
+  fresh([true, "Half a reason"]);
+  press(button(NotABugButton(ask), /^Cancel$/));
+  const focus = vi.fn();
+  fresh([false]);
+  const line = NotABugButton(ask);
+  expect(line.props!.tabIndex).toBe(-1);
+  expect(line.props!.ref).toBe(react.refs[0]);
+  react.refs[0]!.current = { focus };
+  react.effects[0]!();
+  expect(focus).toHaveBeenCalledOnce();
 });
 
 test("Undo takes the mark off that finding and hands it on to be shown where it went; a refusal or failure says why and fetches the report again", async () => {
