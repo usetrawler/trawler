@@ -583,5 +583,12 @@ test("a person is told their goals are not the product's promises, so a detail t
   expect(prompt).toMatch(/goals are what you want, written for you; they are not the product's promises/);
   expect(prompt).toMatch(/the goal is reached, and you say what was missing in its note, or report friction/);
   expect(prompt).toMatch(/defect only when the product itself promised it, in its own words, labels or documentation, or a control that should provide it does not work/);
-  expect(prompt).toMatch(/an action that does nothing or says nothing, or a result that never appears, is a defect as usual/);
+  expect(prompt).toMatch(/an action that does nothing or gives no response, a record or change that does not appear where the product shows such things, a value that contradicts what the product said, showed elsewhere or what you entered/);
+  expect(prompt).toMatch(/empty results, and input refused without saying why/);
+});
+
+test("a person keeps a value the product contradicts, such as a balance its own history does not account for, as a defect and does not explain it away", () => {
+  const prompt = rolePrompt({ persona: { id: "dana", name: "Dana", brief: "You opened an account." }, targetUrl: "https://bank.test/", goals: [{ id: "history", instruction: "You can read through the transactions listed for your new account." }], signUpEmail: "dana@example.com" });
+  expect(prompt).toMatch(/a balance its own history does not account for/);
+  expect(prompt).toMatch(/Do not explain such a thing away with a reason the product did not give/);
 });
