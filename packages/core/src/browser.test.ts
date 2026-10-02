@@ -99,6 +99,10 @@ beforeAll(async () => {
         res.setHeader("cf-mitigated", "challenge");
         res.setHeader("content-type", "text/html");
         return res.end(`<!doctype html><html><head><title>Just a moment...</title></head><body><p>Checking your browser</p><script>setTimeout(() => { location.href = "/two"; }, 1500)</script></body></html>`);
+      case "/spa-register":
+        return html(`<div id="app"><div class="register"><input aria-label="Email"><div class="cf-turnstile" style="width:300px;height:65px"></div><button type="button">Create account</button></div><div class="tools"><button type="button">Help</button></div></div>`);
+      case "/whole-page-form":
+        return html(`<form id="aspnetForm"><button type="button">Menu</button><button type="button">Search</button><button type="button">Save</button><button type="button">Cancel</button><footer><input aria-label="Newsletter"><div class="cf-turnstile" style="width:300px;height:65px"></div><button type="button">Subscribe</button></footer></form>`);
       case "/turnstile-form":
         return html(`<h1>Register</h1><form><input aria-label="Email"><div class="cf-turnstile" style="width:300px;height:65px"></div><button type="button">Register</button></form><form><input aria-label="Search"><button type="button">Search</button></form>`);
       case "/clears-itself":
@@ -731,6 +735,23 @@ describe("bot protection", () => {
       await b.tools.browser_click!.execute!({ element: "Register", target: refOf(snap, "Register") }, ctx);
       expect(b.heldByWidget?.()).toEqual({ vendor: "Cloudflare Turnstile", url: `${origin}/turnstile-form` });
       await navigate(b, `${origin}/two`);
+      expect(b.heldByWidget?.()).toBeNull();
+    });
+  }, 60_000);
+
+  test("a single-page app's register screen without a form element is held back by its widget, a focus click and a page-wide form are not", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/spa-register`);
+      let snap = await snapshot(b);
+      await b.tools.browser_click!.execute!({ element: "Email", target: refOf(snap, "Email") }, ctx);
+      expect(b.heldByWidget?.()).toBeNull();
+      await b.tools.browser_click!.execute!({ element: "Help", target: refOf(snap, "Help") }, ctx);
+      expect(b.heldByWidget?.()).toBeNull();
+      await b.tools.browser_click!.execute!({ element: "Create account", target: refOf(snap, "Create account") }, ctx);
+      expect(b.heldByWidget?.()).toMatchObject({ vendor: "Cloudflare Turnstile" });
+      await navigate(b, `${origin}/whole-page-form`);
+      snap = await snapshot(b);
+      await b.tools.browser_click!.execute!({ element: "Save", target: refOf(snap, "Save") }, ctx);
       expect(b.heldByWidget?.()).toBeNull();
     });
   }, 60_000);

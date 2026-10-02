@@ -586,11 +586,12 @@ export async function openBrowser(opts: {
     };
     const formHoldsWidget = async (name: string, input: Record<string, unknown>): Promise<boolean> => {
       if (name !== "browser_press_key" && typeof input.target === "string") {
-        return (await within(probe({ element: "target", target: input.target, function: FORM_HOLDS_WIDGET }).catch(() => false), BOT_CHECK_MS, false)) === true;
+        const action = name === "browser_click" ? "click" : "enter";
+        return (await within(probe({ element: "target", target: input.target, function: `(el) => (${FORM_HOLDS_WIDGET})(el, ${JSON.stringify(action)})` }).catch(() => false), BOT_CHECK_MS, false)) === true;
       }
       const page = actingPage();
       if (!page) return false;
-      return (await within(page.evaluate<boolean>(`(${FORM_HOLDS_WIDGET})(document.activeElement)`).catch(() => false), BOT_CHECK_MS, false)) === true;
+      return (await within(page.evaluate<boolean>(`(${FORM_HOLDS_WIDGET})(document.activeElement, "enter")`).catch(() => false), BOT_CHECK_MS, false)) === true;
     };
     const dialogOnActingPage = () => [...openDialogs].filter(([, page]) => page === actingPage()).at(-1)?.[0];
     const modalState = (dialog: Dialog) => `### Modal state\n- ${dialogLine(dialog)}: can be handled by browser_handle_dialog`;
@@ -796,7 +797,7 @@ export async function openBrowser(opts: {
         }
         blockedNavigation = null;
         mitigated = null;
-        const submits = name === "browser_click" || name === "browser_press_key" || (name === "browser_type" && safeInput.submit === true);
+        const submits = name === "browser_click" || (name === "browser_press_key" && safeInput.key === "Enter") || (name === "browser_type" && safeInput.submit === true);
         const widgetBefore = widget;
         const intoWidgetForm = submits && widgetBefore !== null && (await formHoldsWidget(name, safeInput));
         held = null;

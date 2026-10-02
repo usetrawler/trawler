@@ -81,9 +81,16 @@ const WIDGET_ORIGINS: Record<string, string[]> = {
 
 const WIDGET_SELECTOR = '.cf-turnstile, .g-recaptcha, .h-captcha, iframe[src*="challenges.cloudflare.com"], iframe[src*="/recaptcha/"], iframe[src*="hcaptcha.com"]';
 
-export const FORM_HOLDS_WIDGET = `(el) => {
-  const form = el && el.closest ? el.closest("form") : null;
-  return !!form && !!form.querySelector(${JSON.stringify(WIDGET_SELECTOR)});
+export const FORM_HOLDS_WIDGET = `(el, action) => {
+  if (!el || !el.closest) return false;
+  const controls = 'button, input[type="submit"], input[type="image"], [role="button"]';
+  if (action === "click" && !el.closest(controls)) return false;
+  return [...document.querySelectorAll(${JSON.stringify(WIDGET_SELECTOR)})].some((widget) => {
+    let scope = widget.parentElement;
+    while (scope && scope !== document.body && scope !== document.documentElement && !scope.querySelector(controls)) scope = scope.parentElement;
+    if (!scope || scope === document.body || scope === document.documentElement) return false;
+    return scope.contains(el) || (!!el.form && !el.form.contains(el) && el.form.contains(widget));
+  });
 }`;
 
 export function widgetCanLoad(vendor: string, isAllowed: (url: string) => boolean): boolean {
