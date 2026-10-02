@@ -220,6 +220,18 @@ test("a setup whose answer was lost can be asked about: working while people are
   expect(await setupProgress({ db: t.db }, { orgId: "org-x", draftId })).toEqual({ state: "gone" });
 });
 
+test("deleting the project a setup made deletes that setup too", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-gone', 'G', 'gone', now())`.execute(t.db);
+  const model = scriptedModel([text(JSON.stringify(summary)), text(JSON.stringify(people))]);
+  const draftId = await startDraft(deps(model), { orgId: "org-gone", url: "https://gone.acme.test/" });
+  await describeDraft(deps(model), { orgId: "org-gone", draftId });
+  const id = await proposeFromDraft(deps(model), { orgId: "org-gone", draftId, description: "d", features: ["Get paid"] });
+  expect(await setupProgress({ db: t.db }, { orgId: "org-gone", draftId })).toEqual({ state: "project", projectId: id });
+  await asSystem(t.db, (tx) => tx.deleteFrom("projects").where("id", "=", id).execute());
+  const { rows } = await sql<{ n: number }>`select count(*)::int as n from setup_drafts where id = ${draftId}`.execute(t.db);
+  expect(rows[0]!.n).toBe(0);
+});
+
 test("when choosing people fails, the setup can choose them again instead of looking busy", async () => {
   await sql`insert into organization (id, name, slug, "createdAt") values ('org-retry', 'R', 'retry', now())`.execute(t.db);
   const model = scriptedModel([text(JSON.stringify(summary)), text("not json"), text("still not json"), text(JSON.stringify(people))]);
