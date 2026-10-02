@@ -3,7 +3,7 @@ import { JobStopReasonSchema, JobUsageSchema, RunEventSchema } from "./event.ts"
 import { FindingSchema, ReplayObservationSchema } from "./finding.ts";
 import { ProjectConfigSchema } from "./project.ts";
 
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 export const PROTOCOL_HEADER = "x-trawler-protocol";
 export const MAX_EVENTS_PER_BATCH = 200;
 export const JOB_STOPPED = "job_stopped";
@@ -63,6 +63,16 @@ export function settleGroups(keys: string[], groups: string[][]): string[][] {
 
 export const DefectGroupsSchema = z.array(z.array(z.string().min(1).max(200)).min(1).max(MAX_GROUPED_DEFECTS)).max(MAX_GROUPED_DEFECTS);
 
+export const MAX_NOT_BUGS = 20;
+export const MAX_NOT_BUG_TITLE = 300;
+export const MAX_NOT_BUG_REASON = 500;
+
+export const NotABugSchema = z.object({
+  title: z.string().max(MAX_NOT_BUG_TITLE),
+  reason: z.string().max(MAX_NOT_BUG_REASON),
+});
+export type NotABug = z.infer<typeof NotABugSchema>;
+
 export const JobAssignmentSchema = z.object({
   jobId: z.uuid(),
   runId: z.uuid(),
@@ -75,6 +85,7 @@ export const JobAssignmentSchema = z.object({
   returning: z.boolean().optional(),
   story: z.array(StoryEntrySchema).max(MAX_STORY).optional(),
   signUpSeed: z.string().max(200).optional(),
+  notBugs: z.array(NotABugSchema).max(MAX_NOT_BUGS).optional(),
   accountRef: z.string().optional(),
   finding: FindingSchema.optional(),
   observation: ReplayObservationSchema.optional(),

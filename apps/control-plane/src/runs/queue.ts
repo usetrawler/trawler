@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "kysely";
 import { z } from "zod";
-import { DefectGroupsSchema, FindingSchema, JobUsageSchema, MAX_GROUPED_DEFECTS, settleGroups, JobStopReasonSchema, ReplayObservationSchema, RunEventSchema, SignInCheckSchema, ACCOUNT_CHECK_STEPS, trimStory, turnsOf, type DefectToGroup, type Finding, type JobStopReason, type JobUsage, type ProjectConfig, type ReplayObservation, type RunEvent, type SignInCheck, type StoryEntry, type Turn } from "@usetrawler/protocol";
+import { DefectGroupsSchema, FindingSchema, JobUsageSchema, MAX_GROUPED_DEFECTS, settleGroups, JobStopReasonSchema, ReplayObservationSchema, RunEventSchema, SignInCheckSchema, ACCOUNT_CHECK_STEPS, trimStory, turnsOf, type DefectToGroup, type Finding, type JobStopReason, type JobUsage, type NotABug, type ProjectConfig, type ReplayObservation, type RunEvent, type SignInCheck, type StoryEntry, type Turn } from "@usetrawler/protocol";
 import type { Database } from "../db/index.ts";
 import { asSystem, type Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -9,6 +9,7 @@ import { loadProjectConfig } from "../projects/projects.ts";
 import { logError } from "../server/log.ts";
 import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
+import { notBugsOf } from "./dismissals.ts";
 import { budgetLeft, monthlyBudget, RUN_TIME_LIMIT_HOURS, runsHalted } from "./limits.ts";
 import { turnSteps } from "./models.ts";
 import { ACCOUNT_REFUSED, affordableOutputTokens, capSpent, endRun, giveBackUnusedFirstRun, signUpSeedContext, type CancelReason, type ConfigSnapshot, type PaidBy } from "./runs.ts";
@@ -40,6 +41,7 @@ export interface JobAssignment {
   returning?: boolean;
   story?: StoryEntry[];
   signUpSeed?: string;
+  notBugs?: NotABug[];
   accountRef?: string;
   finding?: Finding;
   observation?: ReplayObservation;
@@ -172,6 +174,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
       const story = turn ? await storyBefore(tx, picked.run_id, picked.position, snapshot) : undefined;
       const returning = turn ? turnsOf(snapshot).slice(0, picked.position).some((t) => t.personaId === picked.persona_key) : undefined;
       const defects = picked.kind === "group" ? await defectsToGroup(tx, picked.run_id, config) : undefined;
+      const notBugs = picked.kind === "role_session" ? await notBugsOf(tx, picked.org_id, picked.project_id) : [];
       return {
         assignment: {
           jobId: picked.id,
@@ -185,6 +188,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
           finding: finding?.finding,
           observation: finding?.replay,
           ...(defects ? { defects } : {}),
+          ...(notBugs.length > 0 ? { notBugs } : {}),
           maxSteps: picked.kind === "role_session" ? (turn ? turnSteps(turn.goalIds.length, picked.max_steps) : picked.max_steps) : picked.kind === "account_check" ? Math.min(ACCOUNT_CHECK_STEPS, picked.replay_steps) : picked.replay_steps * Math.max(1, new Set(finding?.finding.by ?? []).size),
           budgetUsd: Math.max(0, Number(picked.budget_usd) - Number(picked.cost_usd)),
           agentModel: picked.agent_model,

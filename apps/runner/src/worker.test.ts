@@ -87,7 +87,7 @@ const reportsDefect = () => scriptedModel([
 test("a finding's screenshot is uploaded with the job token, as the image it is, before the job completes", async () => {
   const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" }, { uploadDelayMs: 300 });
   await workOnce(deps(url, reportsDefect(), { openBrowser: shooting }));
-  expect(seen.uploads).toEqual([{ url: `/api/jobs/${baseJob.jobId}/artifacts?kind=screenshot&finding=f1`, auth: `Bearer ${token}`, type: "image/png", protocol: "6", bytes: Buffer.from(shot.bytes) }]);
+  expect(seen.uploads).toEqual([{ url: `/api/jobs/${baseJob.jobId}/artifacts?kind=screenshot&finding=f1`, auth: `Bearer ${token}`, type: "image/png", protocol: "7", bytes: Buffer.from(shot.bytes) }]);
   expect(seen.order.slice(0, seen.order.indexOf("complete"))).toContain("artifacts answered");
   expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "finish" })]);
 });
@@ -310,7 +310,7 @@ test("a replay handed back because the runner is stopping takes and uploads no s
 test("with nothing to do, a claim comes back idle", async () => {
   const { url, seen } = await fakeControlPlane(null);
   expect(await workOnce(deps(url, scriptedModel([])))).toBe("idle");
-  expect(seen.headers[0]).toBe("6");
+  expect(seen.headers[0]).toBe("7");
   expect(seen.auth[0]).toBe("Bearer runner-" + "r".repeat(40));
 });
 
@@ -344,6 +344,13 @@ test("a turn of a team session plays its goals with the story so far, and number
   expect(prompt).toContain("you started using earlier in this session");
   const finding = seen.events.find((e) => e.type === "finding") as unknown as { finding: { id: string } };
   expect(finding.finding.id).toBe("t2f1");
+});
+
+test("a person is told what the project's team marked not a bug", async () => {
+  const { url } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana", notBugs: [{ title: "Export asks to confirm twice", reason: "Asking twice is on purpose." }] });
+  const model = scriptedModel([toolCall("goal_status", { goal: "g", status: "reached", note: "" }), toolCall("finish", { summary: "done" })]);
+  expect(await workOnce(deps(url, model))).toBe("done");
+  expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toContain('- \\"Export asks to confirm twice\\": Asking twice is on purpose.');
 });
 
 test("a failing events endpoint is retried and nothing is lost", async () => {
