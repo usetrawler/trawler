@@ -63,15 +63,19 @@ export function sessionStatus(notes: string[], goals: GoalOutcome[], step: numbe
   return `\n\n## Your scratchpad\n${pad}\n\n## Goal status\n${table}\n\nStep ${step + 1} of ${maxSteps}.${warning}`;
 }
 
+function freshUsername(signUpEmail: string): string {
+  return signUpEmail.split("@")[0]!.replace(/[^a-z0-9]/gi, "");
+}
+
 export function replayPrompt(p: { targetUrl: string; steps: string[]; accountRef?: string; signUpEmail?: string; people?: { name: string; accountRef?: string; signUpEmail?: string }[]; stepPeople?: string[] }): string {
   const together = p.people && p.stepPeople && p.people.length >= 1;
   const steps = p.steps.map((s, i) => `${i + 1}. ${together ? `(as ${p.stepPeople![i]}) ` : ""}${s}`).join("\n");
   const signIn = together
     ? `${p.people!.length > 1 ? `You act as several people, each in their own browser: ${p.people!.map((x) => x.name).join(", ")}. You start as ${p.stepPeople![0]}. Before a step marked with another person, call act_as with their name; their browser stays signed in as them.` : `You act as ${p.people![0]!.name}.`}
-${p.people!.map((x) => (x.accountRef ? `- ${x.name} has an account "${x.accountRef}". To sign in as ${x.name}, take a snapshot and call sign_in with that account and the refs of the username and password fields. You will never see the password.` : `- ${x.name} has no account. Where a step has ${x.name} type a password, use type_own_password; wherever the steps use the email address ${x.name} signed up with, use ${x.signUpEmail} instead.`)).join("\n")}`
+${p.people!.map((x) => (x.accountRef ? `- ${x.name} has an account "${x.accountRef}". To sign in as ${x.name}, take a snapshot and call sign_in with that account and the refs of the username and password fields. You will never see the password.` : `- ${x.name} has no account. Where a step has ${x.name} type a password, use type_own_password; wherever the steps use the email address ${x.name} signed up with, use ${x.signUpEmail} instead; wherever the steps have ${x.name} sign up with a username or another value the product allows only one account to have, use ${freshUsername(x.signUpEmail!)} instead, or a value like it in the form the product asks for, and use it again to sign in as ${x.name}.`)).join("\n")}`
     : p.accountRef
       ? `If a step needs you signed in, take a snapshot and call sign_in with account "${p.accountRef}" and the refs of the username and password fields. You will never see the password.`
-      : `You have no account. If a step has you type a password, fill the password fields with type_own_password instead; you will never see the password. Wherever the steps use the email address they signed up with, use ${p.signUpEmail} instead, since that one may be taken already.`;
+      : `You have no account. If a step has you type a password, fill the password fields with type_own_password instead; you will never see the password. Wherever the steps use the email address they signed up with, use ${p.signUpEmail} instead, since that one may be taken already. Wherever the steps sign up with a username or another value the product allows only one account to have, use ${freshUsername(p.signUpEmail!)} instead, or a value like it in the form the product asks for, since that one is taken already; use it again wherever a later step signs in with it.`;
   const accounts = together ? p.people!.some((x) => x.accountRef) : Boolean(p.accountRef);
   return `You are checking a web application at ${p.targetUrl}, on a fresh copy of it. ${signIn}
 
