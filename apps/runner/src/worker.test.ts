@@ -346,6 +346,13 @@ test("a turn of a team session plays its goals with the story so far, and number
   expect(finding.finding.id).toBe("t2f1");
 });
 
+test("a person is told what the project's team marked not a bug", async () => {
+  const { url } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana", notBugs: [{ title: "Export asks to confirm twice", reason: "Asking twice is on purpose." }] });
+  const model = scriptedModel([toolCall("goal_status", { goal: "g", status: "reached", note: "" }), toolCall("finish", { summary: "done" })]);
+  expect(await workOnce(deps(url, model))).toBe("done");
+  expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toContain('- \\"Export asks to confirm twice\\": Asking twice is on purpose.');
+});
+
 test("a failing events endpoint is retried and nothing is lost", async () => {
   const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" }, { failEvents: 2 });
   const model = scriptedModel([toolCall("goal_status", { goal: "g", status: "reached", note: "" }), toolCall("finish", { summary: "done" })]);

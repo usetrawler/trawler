@@ -4,7 +4,7 @@ import { expect, test, vi } from "vitest";
 import { runView } from "../../../runs/report.ts";
 import type { RunSummary } from "../../../runs/runs.ts";
 
-vi.mock("./actions.ts", () => ({ cancelRunAction: async () => true, judgeAgainAction: async () => ({}), runAgainAction: async () => ({}) }));
+vi.mock("./actions.ts", () => ({ cancelRunAction: async () => true, judgeAgainAction: async () => ({}), runAgainAction: async () => ({}), dismissFindingAction: async () => ({}), undoDismissalAction: async () => ({}) }));
 
 const { RunLive, outcome, personLine } = await import("./run-live.tsx");
 
@@ -281,3 +281,35 @@ test("a run stopped by bot protection says which check blocked Trawler and where
   expect(text(render(finished))).not.toContain("Bot protection");
 });
 
+
+test("every finding of a finished run opens to Not a bug, and none does while the run is live", () => {
+  const html = render(summary({ ...finished, findings: [...finished.findings, finding("ana:fr", "ana", { kind: "friction", title: "Hard to find Export" })] }));
+  for (const section of ["Confirmed", "Refuted", "Friction"]) {
+    const [, details] = rows(html, section)[0]!.split("</summary>");
+    expect(details).toMatch(/<div class="border-t border-line pt-3"><button type="button"[^>]*>Not a bug<\/button><\/div><\/div><\/details>/);
+  }
+  expect(render(summary({ ...live, findings: finished.findings }))).not.toContain(">Not a bug<");
+});
+
+test("a finding marked not a bug leaves its section and the counts for its own, with the reason, who and when, and Undo", () => {
+  const marked = (by: string | null) => ({ reason: "Saving twice is on purpose.", userId: "u1", at: new Date("2026-10-02T10:00:00Z"), by });
+  const html = render(summary({
+    ...finished,
+    findings: [
+      finding("ana:f1", "ana", { title: "Saving an invoice fails", verdict: "confirmed", dismissal: marked("ana@acme.test") }),
+      finding("lee:f3", "lee", { title: "Saving an invoice fails too", sameAs: "ana:f1", verdict: "confirmed" }),
+      finding("ana:f2", "ana", { title: "Export is empty", verdict: "confirmed" }),
+      finding("lee:fr", "lee", { kind: "friction", title: "Hard to find Export", dismissal: marked(null) }),
+    ],
+  }));
+  expect(head(html)).toMatch(/<h1[^>]*>1 defect confirmed by replay\.<\/h1>/);
+  expect(text(band(html))).toContain("Verified 1 of 1 reported");
+  expect(rows(html, "Confirmed").map((row) => text(row.split("</summary>")[0]!))).toEqual(["high severity 01 · Ana Export is empty o ✓ Replayed →"]);
+  expect(html).not.toMatch(/>Friction · /);
+  const [first, second] = rows(html, "Not a bug");
+  expect(text(first!.split("</summary>")[0]!)).toBe("high severity 01 · Ana, Lee Park Saving an invoice fails o →");
+  expect(text(first!.split("</details>")[1]!)).toBe("Not a bug, because: Saving twice is on purpose. Marked by ana@acme.test on 2026-10-02 10:00 UTC . Undo : Saving an invoice fails");
+  expect(first).not.toContain(">Not a bug</button>");
+  expect(text(second!.split("</details>")[1]!)).toContain("Marked by someone no longer in this workspace on");
+  expect(html).toMatch(/>Not a bug · 2<\/h2><p[^>]*>Marked not a bug by your team; later runs of this project are told so<\/p>/);
+});
