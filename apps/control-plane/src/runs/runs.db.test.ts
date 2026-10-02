@@ -230,7 +230,7 @@ describe("a whole run", () => {
     expect(seen).toEqual(["replay ana:f1", "replay ana:f2", "judge ana:f1", "judge ana:f2"]);
     const summary = (await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!;
     expect(summary.findings.find((f) => f.key === "ana:f1")).toMatchObject({ verdict: "inconclusive", replay: stopped });
-    expect(summary.botProtection).toEqual({ vendor: "Cloudflare", url: "https://app.acme.test/x", kind: "check" });
+    expect(summary.botProtection).toEqual({ vendor: "Cloudflare", url: "https://app.acme.test/x" });
   });
 
   test("a run that met no bot protection says nothing about it", async () => {

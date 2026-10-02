@@ -99,16 +99,8 @@ beforeAll(async () => {
         res.setHeader("cf-mitigated", "challenge");
         res.setHeader("content-type", "text/html");
         return res.end(`<!doctype html><html><head><title>Just a moment...</title></head><body><p>Checking your browser</p><script>setTimeout(() => { location.href = "/two"; }, 1500)</script></body></html>`);
-      case "/spa-register":
-        return html(`<div id="app"><div class="register"><input aria-label="Email"><div class="cf-turnstile" style="width:300px;height:65px"></div><button type="button">Create account</button></div><div class="tools"><button type="button">Help</button></div></div>`);
-      case "/whole-page-form":
-        return html(`<form id="aspnetForm"><button type="button">Menu</button><button type="button">Search</button><button type="button">Save</button><button type="button">Cancel</button><footer><input aria-label="Newsletter"><div class="cf-turnstile" style="width:300px;height:65px"></div><button type="button">Subscribe</button></footer></form>`);
-      case "/turnstile-form":
-        return html(`<h1>Register</h1><form><input aria-label="Email"><div class="cf-turnstile" style="width:300px;height:65px"></div><button type="button">Register</button></form><form><input aria-label="Search"><button type="button">Search</button></form>`);
       case "/clears-itself":
         return html(`<title>Just a moment...</title><p>Checking your browser</p><script>setTimeout(() => { location.href = "/two"; }, 1500)</script>`);
-      case "/hidden-turnstile":
-        return html(`<h1>Sign in</h1><div class="cf-turnstile" style="display:none"></div>`);
       case "/with-invisible-recaptcha":
         return html(`<h1>Contact us</h1><script src="https://www.google.com/recaptcha/api.js?render=site-key"></script><div class="grecaptcha-badge" style="position:fixed;bottom:14px;right:0;width:256px;height:60px"><iframe title="reCAPTCHA" width="256" height="60" src="https://www.google.com/recaptcha/api2/anchor?ar=1&k=site-key&size=invisible"></iframe></div>`);
       case "/short":
@@ -721,45 +713,6 @@ describe("bot protection", () => {
       const out = JSON.stringify(await navigate(b, `${origin}/cf-clears-itself`));
       expect(b.botProtection?.()).toBeNull();
       expect(out).toContain("let the browser through while Trawler waited");
-    });
-  }, 60_000);
-
-  test("a Turnstile on a product's form, which cannot load outside the allowed origins, stops nothing, and only sending that form counts as held back by it", async () => {
-    await withBrowser(async (b) => {
-      const out = JSON.stringify(await navigate(b, `${origin}/turnstile-form`));
-      expect(out).toContain("cannot load in this browser");
-      expect(b.botProtection?.()).toBeNull();
-      const snap = await snapshot(b);
-      await b.tools.browser_click!.execute!({ element: "Search", target: refOf(snap, "Search") }, ctx);
-      expect(b.heldByWidget?.()).toBeNull();
-      await b.tools.browser_click!.execute!({ element: "Register", target: refOf(snap, "Register") }, ctx);
-      expect(b.heldByWidget?.()).toEqual({ vendor: "Cloudflare Turnstile", url: `${origin}/turnstile-form` });
-      await navigate(b, `${origin}/two`);
-      expect(b.heldByWidget?.()).toBeNull();
-    });
-  }, 60_000);
-
-  test("a single-page app's register screen without a form element is held back by its widget, a focus click and a page-wide form are not", async () => {
-    await withBrowser(async (b) => {
-      await navigate(b, `${origin}/spa-register`);
-      let snap = await snapshot(b);
-      await b.tools.browser_click!.execute!({ element: "Email", target: refOf(snap, "Email") }, ctx);
-      expect(b.heldByWidget?.()).toBeNull();
-      await b.tools.browser_click!.execute!({ element: "Help", target: refOf(snap, "Help") }, ctx);
-      expect(b.heldByWidget?.()).toBeNull();
-      await b.tools.browser_click!.execute!({ element: "Create account", target: refOf(snap, "Create account") }, ctx);
-      expect(b.heldByWidget?.()).toMatchObject({ vendor: "Cloudflare Turnstile" });
-      await navigate(b, `${origin}/whole-page-form`);
-      snap = await snapshot(b);
-      await b.tools.browser_click!.execute!({ element: "Save", target: refOf(snap, "Save") }, ctx);
-      expect(b.heldByWidget?.()).toBeNull();
-    });
-  }, 60_000);
-
-  test("a hidden Turnstile on a sign-in page is not bot protection", async () => {
-    await withBrowser(async (b) => {
-      expect(JSON.stringify(await navigate(b, `${origin}/hidden-turnstile`))).not.toContain("### Bot protection");
-      expect(b.botProtection?.()).toBeNull();
     });
   }, 60_000);
 

@@ -6,7 +6,7 @@ import { jsonSchema, type Tool, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
 import { MAX_ARTIFACT_BYTES, MAX_URL } from "@usetrawler/protocol";
 import { asShown, longFormsOf, MASK, MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
-import { botProtection, botProtectionNote, clearedNote, COLLECT_PAGE_SIGNALS, FORM_HOLDS_WIDGET, widgetCanLoad, type BotProtection, type Detected, type PageSignals } from "./bot-protection.ts";
+import { botProtection, botProtectionNote, clearedNote, COLLECT_PAGE_SIGNALS, type BotProtection, type PageSignals } from "./bot-protection.ts";
 
 export type { BotProtection } from "./bot-protection.ts";
 import type { FieldKind } from "./session-tools.ts";
@@ -364,7 +364,6 @@ export interface Browser {
   screenshot(): Promise<Screenshot | null>;
   pageUrl(): string | null;
   botProtection?(): BotProtection | null;
-  heldByWidget?(): BotProtection | null;
   close(): Promise<void>;
 }
 
@@ -555,43 +554,30 @@ export async function openBrowser(opts: {
     const openDialogs = new Map<Dialog, Page>();
     const actingPage = () => context.pages()[0];
     let challenge: BotProtection | null = null;
-    let widget: BotProtection | null = null;
-    let held: BotProtection | null = null;
     let mitigated: string | null = null;
     context.on("response", (response) => {
       if (response.headers()["cf-mitigated"] === "challenge" && response.request().resourceType() !== "document") mitigated = response.url();
     });
-    const detect = async (): Promise<Detected | null> => {
+    const detect = async (): Promise<string | null> => {
       const page = actingPage();
       if (!page || disconnected || dialogOnActingPage() || page.url() === "about:blank") return null;
       const signals = await within(page.evaluate<PageSignals>(`(${COLLECT_PAGE_SIGNALS})()`).catch(() => null), BOT_CHECK_MS, null);
       return signals ? botProtection(signals) : null;
     };
-    const checkBotProtection = async (): Promise<{ found: Detected | null; cleared: string | null }> => {
+    const checkBotProtection = async (): Promise<{ found: string | null; cleared: string | null }> => {
       const first = await detect();
       let found = first;
-      for (let waited = 0; found?.stops && waited < BOT_SETTLE_MS; waited += BOT_SETTLE_STEP_MS) {
+      for (let waited = 0; found && waited < BOT_SETTLE_MS; waited += BOT_SETTLE_STEP_MS) {
         await new Promise((resolve) => setTimeout(resolve, BOT_SETTLE_STEP_MS));
         found = await detect();
       }
-      let at = found?.stops ? (actingPage()?.url() ?? null) : null;
-      if (!found?.stops && mitigated) {
-        found = { vendor: "Cloudflare", stops: true };
+      let at = found ? (actingPage()?.url() ?? null) : null;
+      if (!found && mitigated) {
+        found = "Cloudflare";
         at = mitigated;
       }
-      challenge = found?.stops && at ? { vendor: found.vendor, url: at.slice(0, MAX_URL) } : null;
-      const here = actingPage()?.url();
-      widget = found && !found.stops && here && !widgetCanLoad(found.vendor, isAllowed) ? { vendor: found.vendor, url: here.slice(0, MAX_URL) } : null;
-      return { found, cleared: first?.stops && !found ? first.vendor : null };
-    };
-    const formHoldsWidget = async (name: string, input: Record<string, unknown>): Promise<boolean> => {
-      if (name !== "browser_press_key" && typeof input.target === "string") {
-        const action = name === "browser_click" ? "click" : "enter";
-        return (await within(probe({ element: "target", target: input.target, function: `(el) => (${FORM_HOLDS_WIDGET})(el, ${JSON.stringify(action)})` }).catch(() => false), BOT_CHECK_MS, false)) === true;
-      }
-      const page = actingPage();
-      if (!page) return false;
-      return (await within(page.evaluate<boolean>(`(${FORM_HOLDS_WIDGET})(document.activeElement, "enter")`).catch(() => false), BOT_CHECK_MS, false)) === true;
+      challenge = found && at ? { vendor: found, url: at.slice(0, MAX_URL) } : null;
+      return { found, cleared: first && !found ? first : null };
     };
     const dialogOnActingPage = () => [...openDialogs].filter(([, page]) => page === actingPage()).at(-1)?.[0];
     const modalState = (dialog: Dialog) => `### Modal state\n- ${dialogLine(dialog)}: can be handled by browser_handle_dialog`;
@@ -797,10 +783,6 @@ export async function openBrowser(opts: {
         }
         blockedNavigation = null;
         mitigated = null;
-        const submits = name === "browser_click" || (name === "browser_press_key" && safeInput.key === "Enter") || (name === "browser_type" && safeInput.submit === true);
-        const widgetBefore = widget;
-        const intoWidgetForm = submits && widgetBefore !== null && (await formHoldsWidget(name, safeInput));
-        held = null;
         const untilADialog = async () => {
           const running = Promise.resolve(execute(safeInput, options)) as Promise<McpResult>;
           running.catch(() => {});
@@ -820,8 +802,7 @@ export async function openBrowser(opts: {
           result.content = [...(result.content ?? []), { type: "text", text: `### Blocked\n${blockedNavigation} is outside the allowed origins, so the browser did not open it. Go back or navigate to an allowed page.` }];
         }
         const { found, cleared } = await checkBotProtection();
-        if (intoWidgetForm) held = widgetBefore;
-        if (found) result.content = [...(result.content ?? []), { type: "text", text: botProtectionNote(found, widget === null) }];
+        if (found) result.content = [...(result.content ?? []), { type: "text", text: botProtectionNote(found) }];
         else if (cleared) result.content = [...(result.content ?? []), { type: "text", text: clearedNote(cleared) }];
         return scrubWithFilledValues(result);
       };
@@ -895,9 +876,6 @@ export async function openBrowser(opts: {
       },
       botProtection() {
         return challenge;
-      },
-      heldByWidget() {
-        return held;
       },
       async close() {
         const bounded = (step: Promise<unknown>) => within(step.catch(() => undefined), CLOSE_STEP_MS, undefined);

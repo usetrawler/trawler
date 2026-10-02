@@ -651,37 +651,6 @@ describe("bot protection", () => {
     expect(observation.botProtection?.url).toContain("token=");
   });
 
-  const widgetForm = () => {
-    let held: { vendor: string; url: string } | null = null;
-    const tools = {
-      ...browserTools,
-      browser_click: tool({ inputSchema: z.object({ target: z.string() }), execute: async ({ target }) => ((held = target === "register" ? { vendor: "Cloudflare Turnstile", url: "https://acme.test/join" } : null), { content: [{ type: "text", text: "clicked" }] }) }),
-      browser_navigate: tool({ inputSchema: z.object({ url: z.string() }), execute: async () => ((held = null), { content: [{ type: "text", text: "navigated" }] }) }),
-    };
-    return { tools, heldByWidget: () => held };
-  };
-
-  test("a replay that sent a form held back by a captcha that cannot load says so wherever it ends, and is never confirmed", async () => {
-    const page = widgetForm();
-    const model = scriptedModel([toolCall("browser_click", { target: "register" }), toolCall("browser_navigate", { url: "https://acme.test/login" }), report({ completed: true, observed: "Sign-in says no such user", blockedAt: null })]);
-    const { promise, events } = replay(model, { browserTools: page.tools, heldByWidget: page.heldByWidget });
-    const { observation } = await promise;
-    expect(observation.botProtection).toEqual({ vendor: "Cloudflare Turnstile", url: "https://acme.test/join" });
-    expect(observation.observed).toBe("Sign-in says no such user The replay sent a form at https://acme.test/join that holds Cloudflare Turnstile's check, which cannot load in Trawler's browser, so that form could not go through.");
-    expect(events.filter((e) => e.type === "bot_protection")).toEqual([{ type: "bot_protection", jobId: "replay:f1", vendor: "Cloudflare Turnstile", url: "https://acme.test/join", kind: "widget" }]);
-    const { promise: judged } = judgeWith(scriptedModel([verdictCall("confirmed")]), { observation });
-    expect((await judged).verdict).toBe("inconclusive");
-  });
-
-  test("clicks outside the captcha's form change nothing", async () => {
-    const page = widgetForm();
-    const model = scriptedModel([toolCall("browser_click", { target: "send" }), report({ completed: true, observed: "Clicking Send leaves the invoice as a draft", blockedAt: null })]);
-    const { promise, events } = replay(model, { browserTools: page.tools, heldByWidget: page.heldByWidget });
-    const { observation } = await promise;
-    expect(observation).toEqual({ completed: true, observed: "Clicking Send leaves the invoice as a draft", blockedAt: null });
-    expect(events.some((e) => e.type === "bot_protection")).toBe(false);
-  });
-
   test("the judge answers inconclusive for a replay stopped by bot protection, without asking the model", async () => {
     const model = scriptedModel([verdictCall("confirmed")]);
     const { promise, events } = judgeWith(model, { observation: { completed: false, observed: "stopped by Cloudflare", blockedAt: null, botProtection: challenge } });

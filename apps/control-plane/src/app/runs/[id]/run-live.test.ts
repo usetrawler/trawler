@@ -272,19 +272,12 @@ test("a confirmed defect a person filed as friction says so, and a defect they f
 });
 
 test("a run stopped by bot protection says which check blocked Trawler and where, live and finished, and links to how to let Trawler through", () => {
-  const met = { vendor: "Cloudflare", url: "https://app.acme.test/register.htm?step=2", kind: "check" as const };
+  const met = { vendor: "Cloudflare", url: "https://app.acme.test/register.htm?step=2" };
   for (const run of [summary({ ...finished, botProtection: met }), summary({ ...live, botProtection: met })]) {
     const html = render(run);
     expect(text(html)).toContain("Bot protection stopped Trawler Cloudflare's bot protection blocked Trawler's browser at /register.htm . It stops automated browsers, so what lies behind it could not be tried, and it is not reported as a defect.");
     expect(html).toContain('href="https://usetrawler.com/docs/reference/troubleshooting/#bot-protection-stopped-trawler"');
   }
   expect(text(render(finished))).not.toContain("Bot protection");
-});
-
-test("a run held back by a captcha that cannot load says which form, and points to the vendor's test keys, not to a header", () => {
-  const html = render(summary({ ...finished, botProtection: { vendor: "Cloudflare Turnstile", url: "https://app.acme.test/join", kind: "widget" } }));
-  expect(text(html)).toContain("A form at /join holds a Cloudflare Turnstile check, which cannot load in Trawler's browser, so the form could not be sent, and what lies behind it is not reported as a defect.");
-  expect(text(html)).toContain("use Cloudflare Turnstile's test keys on this staging copy, or turn the check off there.");
-  expect(text(html)).not.toContain("header");
 });
 

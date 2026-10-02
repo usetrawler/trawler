@@ -7,11 +7,8 @@ describe("botProtection", () => {
   test.each([
     ["Cloudflare", page({ title: "Just a moment...", scripts: ["https://parabank.test/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1?ray=1"] })],
     ["Cloudflare", page({ title: "Attention Required! | Cloudflare" })],
+    ["Cloudflare", page({ title: "Just a moment…" })],
     ["Cloudflare", page({ selectors: ["#challenge-form"] })],
-    ["Cloudflare Turnstile", page({ frames: [{ src: "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/turnstile/if/ov2/av0/rcv0/0/abc", visible: true }] })],
-    ["reCAPTCHA", page({ frames: [{ src: "https://www.google.com/recaptcha/api2/anchor?ar=1&k=key&size=normal", visible: true }] })],
-    ["reCAPTCHA", page({ frames: [{ src: "https://www.google.com/recaptcha/api2/bframe?hl=en&k=key", visible: true }] })],
-    ["hCaptcha", page({ frames: [{ src: "https://newassets.hcaptcha.com/captcha/v1/abc/static/hcaptcha.html#frame=checkbox&id=0", visible: true }] })],
     ["DataDome", page({ frames: [{ src: "https://geo.captcha-delivery.com/captcha/?initialCid=abc", visible: true }] })],
     ["PerimeterX", page({ selectors: ["#px-captcha"], text: "Press & Hold to confirm you are a human (and not a bot)." })],
     ["Akamai", page({ title: "Access Denied", text: "You don't have permission to access this resource. Reference #18.6f3b1d17.1727873452.2a4c" })],
@@ -19,16 +16,15 @@ describe("botProtection", () => {
     ["Imperva", page({ frames: [{ src: "https://acme.test/_Incapsula_Resource?CWUDNSAI=24&xinfo=1-2&incident_id=3", visible: true }] })],
     ["AWS WAF", page({ title: "Human Verification", scripts: ["https://abc123.edge.sdk.awswaf.com/abc123/def456/challenge.js"] })],
   ])("%s is recognised", (vendor, signals) => {
-    expect(botProtection(signals)?.vendor).toBe(vendor);
+    expect(botProtection(signals)).toBe(vendor);
   });
 
-  test("a check that is the whole page stops the person, and a widget on a product's own page does not", () => {
-    expect(botProtection(page({ title: "Just a moment…" }))).toEqual({ vendor: "Cloudflare", stops: true });
-    expect(botProtection(page({ text: "Request unsuccessful. Incapsula incident ID: 1234" }))).toEqual({ vendor: "Imperva", stops: true });
-    expect(botProtection(page({ selectors: [".cf-turnstile"] }))).toEqual({ vendor: "Cloudflare Turnstile", stops: false });
-    expect(botProtection(page({ frames: [{ src: "https://www.google.com/recaptcha/api2/anchor?k=key&size=normal", visible: true }] }))).toEqual({ vendor: "reCAPTCHA", stops: false });
-    expect(botProtection(page({ frames: [{ src: "https://newassets.hcaptcha.com/captcha/v1/abc/static/hcaptcha.html#frame=checkbox", visible: true }] }))).toEqual({ vendor: "hCaptcha", stops: false });
+  test("a captcha widget on one of the product's forms is not recognised yet", () => {
+    expect(botProtection(page({ selectors: [] , frames: [{ src: "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/turnstile/if/ov2/av0/rcv0/0/abc", visible: true }] }))).toBeNull();
+    expect(botProtection(page({ frames: [{ src: "https://www.google.com/recaptcha/api2/anchor?k=key&size=normal", visible: true }] }))).toBeNull();
+    expect(botProtection(page({ frames: [{ src: "https://newassets.hcaptcha.com/captcha/v1/abc/static/hcaptcha.html#frame=checkbox", visible: true }] }))).toBeNull();
   });
+
 
   test.each([
     ["an ordinary page", page()],

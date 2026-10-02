@@ -232,17 +232,8 @@ function BotProtectionNotice({ met }: { met: NonNullable<RunSummary["botProtecti
   return (
     <section aria-labelledby="bot-protection" className="mt-6 flex max-w-[760px] flex-col gap-2 border border-line border-l-4 border-l-warn bg-panel p-4">
       <h2 id="bot-protection" className="text-base font-bold">Bot protection stopped Trawler</h2>
-      {met.kind === "widget" ? (
-        <>
-          <p className="text-sm">A form at <span className="font-mono break-all">{where}</span> holds a {met.vendor} check, which cannot load in Trawler&apos;s browser, so the form could not be sent, and what lies behind it is not reported as a defect.</p>
-          <p className="text-sm">To let Trawler through, use {met.vendor}&apos;s test keys on this staging copy, or turn the check off there.</p>
-        </>
-      ) : (
-        <>
-          <p className="text-sm">{met.vendor}&apos;s bot protection blocked Trawler&apos;s browser at <span className="font-mono break-all">{where}</span>. It stops automated browsers, so what lies behind it could not be tried, and it is not reported as a defect.</p>
-          <p className="text-sm">To let Trawler through, turn the check off for this staging copy, or run the project with the local runner, which can send a header that a rule in {met.vendor} lets past.</p>
-        </>
-      )}
+      <p className="text-sm">{met.vendor}&apos;s bot protection blocked Trawler&apos;s browser at <span className="font-mono break-all">{where}</span>. It stops automated browsers, so what lies behind it could not be tried, and it is not reported as a defect.</p>
+      <p className="text-sm">To let Trawler through, turn the check off for this staging copy, or run the project with the local runner, which can send a header that a rule in {met.vendor} lets past.</p>
       <DocsLink page="docs/reference/troubleshooting/#bot-protection-stopped-trawler" className="text-sm underline">How to let Trawler through</DocsLink>
     </section>
   );

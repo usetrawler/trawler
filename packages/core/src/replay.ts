@@ -38,7 +38,6 @@ export interface ReplayBrowser {
   fillField: FillField;
   screenshot?: () => Promise<Screenshot | null>;
   botProtection?: () => BotProtection | null;
-  heldByWidget?: () => BotProtection | null;
   close?: () => Promise<void>;
 }
 
@@ -71,7 +70,6 @@ export async function runReplay(opts: {
   screenshot?: () => Promise<Screenshot | null>;
   keepScreenshot?: (findingId: string, shot: Screenshot) => void;
   botProtection?: () => BotProtection | null;
-  heldByWidget?: () => BotProtection | null;
   openBrowser?: () => Promise<ReplayBrowser>;
   closeTimeoutMs?: number;
 }): Promise<{ observation: ReplayObservation; usage: JobUsage }> {
@@ -87,7 +85,7 @@ export async function runReplay(opts: {
   const actors = new Map<string, Promise<Actor>>();
   const opened: ReplayBrowser[] = [];
   const open = async (id: string, first: boolean): Promise<Actor> => {
-    const browser = first ? { tools: opts.browserTools, fillField: opts.fillField, screenshot: opts.screenshot, botProtection: opts.botProtection, heldByWidget: opts.heldByWidget } : await opts.openBrowser!();
+    const browser = first ? { tools: opts.browserTools, fillField: opts.fillField, screenshot: opts.screenshot, botProtection: opts.botProtection } : await opts.openBrowser!();
     if (!first) opened.push(browser);
     const accountRef = together ? persona(id).accountRef : opts.accountRef;
     const queue = browserQueue(browser.tools);
@@ -116,7 +114,6 @@ export async function runReplay(opts: {
   const now = () => actorFor(current);
   let report: ReplayObservation | null = null;
   let stoppedAt: BotProtection | null = null;
-  let widgetMet: BotProtection | null = null;
   const report_replay = tool({
     description: "Report what you saw while following the steps. completed is true only if you carried out every step; otherwise give the number of the step you could not do as blockedAt.",
     inputSchema: z.object({ completed: z.boolean().nullish(), observed: z.string().nullish(), blockedAt: z.number().nullish() }),
@@ -143,11 +140,6 @@ export async function runReplay(opts: {
       if (met && !stoppedAt) {
         stoppedAt = met;
         emit({ type: "bot_protection", jobId, vendor: met.vendor, url: met.url });
-      }
-      const held = actor.browser.heldByWidget?.() ?? null;
-      if (held && !widgetMet && !stoppedAt) {
-        widgetMet = held;
-        emit({ type: "bot_protection", jobId, vendor: held.vendor, url: held.url, kind: "widget" });
       }
       return out;
     }),
@@ -206,11 +198,7 @@ export async function runReplay(opts: {
       largeResultChars: 4000,
     });
     const last = await now();
-    const observation: ReplayObservation = stoppedAt
-      ? opts.scrubber.scrub(stoppedByBotProtection(stoppedAt))
-      : widgetMet
-        ? opts.scrubber.scrub(heldByWidget(report ?? NO_REPORT, widgetMet))
-        : (report ?? NO_REPORT);
+    const observation: ReplayObservation = stoppedAt ? opts.scrubber.scrub(stoppedByBotProtection(stoppedAt)) : (report ?? NO_REPORT);
     const screenshot = last.browser.screenshot;
     if (screenshot && opts.keepScreenshot && outcome.stoppedBy !== "budget") {
       const shot = await screenshot().catch(() => null);
@@ -227,11 +215,6 @@ export async function runReplay(opts: {
       clearTimeout(timer);
     }));
   }
-}
-
-function heldByWidget(report: ReplayObservation, met: BotProtection): ReplayObservation {
-  const note = `The replay sent a form at ${met.url} that holds ${met.vendor}'s check, which cannot load in Trawler's browser, so that form could not go through.`;
-  return { ...report, observed: Array.from(`${report.observed} ${note}`).slice(0, MAX_OBSERVED_CODE_POINTS).join(""), botProtection: met };
 }
 
 function stoppedByBotProtection(met: BotProtection): ReplayObservation {
