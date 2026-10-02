@@ -565,4 +565,5 @@ test("a person is told their goals are not the product's promises, so a detail t
   expect(prompt).toMatch(/goals are what you want, written for you; they are not the product's promises/);
   expect(prompt).toMatch(/the goal is reached, and you say what was missing in its note, or report friction/);
   expect(prompt).toMatch(/defect only when the product itself promised it, in its own words, labels or documentation, or a control that should provide it does not work/);
+  expect(prompt).toMatch(/an action that does nothing or says nothing, or a result that never appears, is a defect as usual/);
 });

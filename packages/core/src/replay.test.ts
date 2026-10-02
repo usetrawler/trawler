@@ -474,6 +474,7 @@ describe("judge", () => {
 
 test("the judge refutes a claim that only says an expected detail is missing, unless the product promised it", () => {
   const missing = judgePrompt({ ...finding, title: "Transfer confirmation shows no new balances", observed: "The confirmation says $50.00 has been transferred, with no balances." }, { completed: true, observed: "The confirmation shows no balances.", blockedAt: null });
-  expect(missing).toMatch(/only says something the tester expected is missing .* is not a defect unless the claim or the observation shows the product promising it/);
-  expect(missing).toMatch(/answer "refuted", even when the observation agrees it is missing/);
+  expect(missing).toMatch(/not a defect unless the claim or the observation shows the product promising that detail/);
+  expect(missing).toMatch(/answer "refuted", even when it agrees the detail is absent/);
+  expect(missing).toMatch(/An action that does nothing or gives no response, a record or change that does not appear where the product shows such things, a value that contradicts what the product said or what was entered, empty results, and input refused without saying why are behaviour/);
 });
