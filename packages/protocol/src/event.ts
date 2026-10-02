@@ -22,7 +22,7 @@ export const RunEventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("finding"), finding: FindingSchema }),
   z.object({ ...base, type: z.literal("goal_status"), outcome: GoalOutcomeSchema }),
   z.object({ ...base, type: z.literal("blocked_request"), url: z.string().max(MAX_URL) }),
-  z.object({ ...base, type: z.literal("bot_protection"), vendor: z.string().min(1).max(100), url: z.string().max(MAX_URL) }),
+  z.object({ ...base, type: z.literal("bot_protection"), vendor: z.string().min(1).max(100), url: z.string().max(MAX_URL), kind: z.enum(["check", "widget"]).optional() }),
   z.object({ ...base, type: z.literal("verdict"), findingId: z.string().min(1), verdict: VerdictSchema, observed: z.string().max(8000) }),
   z.object({ ...base, type: z.literal("job_finished"), usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().max(2000).optional() }),
 ]);

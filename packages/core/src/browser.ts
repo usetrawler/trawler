@@ -6,7 +6,7 @@ import { jsonSchema, type Tool, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
 import { MAX_ARTIFACT_BYTES, MAX_URL } from "@usetrawler/protocol";
 import { asShown, longFormsOf, MASK, MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
-import { botProtection, botProtectionNote, clearedNote, COLLECT_PAGE_SIGNALS, type BotProtection, type PageSignals } from "./bot-protection.ts";
+import { botProtection, botProtectionNote, CAPTCHA_ORIGINS, CAPTCHAS_ON_PAGE, captchaNote, clearedNote, COLLECT_PAGE_SIGNALS, FORM_CAPTCHA, type BotProtection, type PageSignals } from "./bot-protection.ts";
 
 export type { BotProtection } from "./bot-protection.ts";
 import type { FieldKind } from "./session-tools.ts";
@@ -364,6 +364,7 @@ export interface Browser {
   screenshot(): Promise<Screenshot | null>;
   pageUrl(): string | null;
   botProtection?(): BotProtection | null;
+  heldByWidget?(): BotProtection | null;
   close(): Promise<void>;
 }
 
@@ -555,6 +556,25 @@ export async function openBrowser(opts: {
     const actingPage = () => context.pages()[0];
     let challenge: BotProtection | null = null;
     let mitigated: string | null = null;
+    let held: BotProtection | null = null;
+    let notedCaptchasAt: string | null = null;
+    const blockedCaptchas = Object.keys(CAPTCHA_ORIGINS).filter((vendor) => !CAPTCHA_ORIGINS[vendor]!.some((origin) => isAllowed(origin)));
+    const sendsCaptchaForm = async (name: string, input: Record<string, unknown>): Promise<string | null> => {
+      const page = actingPage();
+      if (!page || blockedCaptchas.length === 0) return null;
+      const vendors = JSON.stringify(blockedCaptchas);
+      if (name === "browser_press_key") return within(page.evaluate<string | null>(`(${FORM_CAPTCHA})(document.activeElement, "enter", ${vendors})`).catch(() => null), BOT_CHECK_MS, null);
+      if (typeof input.target !== "string") return null;
+      const action = name === "browser_click" ? "click" : "enter";
+      const found = await within(probe({ element: "target", target: input.target, function: `(el) => (${FORM_CAPTCHA})(el, ${JSON.stringify(action)}, ${vendors})` }).catch(() => null), BOT_CHECK_MS, null);
+      return typeof found === "string" ? found : null;
+    };
+    const captchasOnPage = async (): Promise<string[]> => {
+      const page = actingPage();
+      if (!page || blockedCaptchas.length === 0 || page.url() === "about:blank") return [];
+      const found = await within(page.evaluate<string[]>(`(${CAPTCHAS_ON_PAGE})(${JSON.stringify(blockedCaptchas)})`).catch(() => []), BOT_CHECK_MS, []);
+      return Array.isArray(found) ? found : [];
+    };
     context.on("response", (response) => {
       if (response.headers()["cf-mitigated"] === "challenge" && response.request().resourceType() !== "document") mitigated = response.url();
     });
@@ -783,6 +803,10 @@ export async function openBrowser(opts: {
         }
         blockedNavigation = null;
         mitigated = null;
+        const sends = name === "browser_click" || (name === "browser_press_key" && safeInput.key === "Enter") || (name === "browser_type" && safeInput.submit === true);
+        const heldUrl = actingPage()?.url() ?? null;
+        const heldBy = sends ? await sendsCaptchaForm(name, safeInput) : null;
+        held = null;
         const untilADialog = async () => {
           const running = Promise.resolve(execute(safeInput, options)) as Promise<McpResult>;
           running.catch(() => {});
@@ -802,8 +826,17 @@ export async function openBrowser(opts: {
           result.content = [...(result.content ?? []), { type: "text", text: `### Blocked\n${blockedNavigation} is outside the allowed origins, so the browser did not open it. Go back or navigate to an allowed page.` }];
         }
         const { found, cleared } = await checkBotProtection();
+        if (heldBy && heldUrl) held = { vendor: heldBy, url: heldUrl.slice(0, MAX_URL) };
         if (found) result.content = [...(result.content ?? []), { type: "text", text: botProtectionNote(found) }];
         else if (cleared) result.content = [...(result.content ?? []), { type: "text", text: clearedNote(cleared) }];
+        else {
+          const here = actingPage()?.url() ?? null;
+          const captchas = here && here !== notedCaptchasAt ? await captchasOnPage() : [];
+          if (captchas.length > 0) {
+            notedCaptchasAt = here;
+            result.content = [...(result.content ?? []), { type: "text", text: captchaNote(captchas) }];
+          }
+        }
         return scrubWithFilledValues(result);
       };
       tools[name] = {
@@ -876,6 +909,9 @@ export async function openBrowser(opts: {
       },
       botProtection() {
         return challenge;
+      },
+      heldByWidget() {
+        return held;
       },
       async close() {
         const bounded = (step: Promise<unknown>) => within(step.catch(() => undefined), CLOSE_STEP_MS, undefined);

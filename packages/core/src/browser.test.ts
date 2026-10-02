@@ -83,6 +83,16 @@ beforeAll(async () => {
         return html(`<h1>Login</h1><img src="https://blocked.example/pixel.png"><img src="https://blocked.example/other.png"><input aria-label="Email" type="text"><input aria-label="Password" type="password"><p>Welcome back</p><a href="/two">Next page</a>`);
       case "/two":
         return html(`<h1>Second page</h1>`);
+      case "/captcha-turnstile":
+        return html(`<h1>Register</h1><form><input aria-label="Email" name="email"><div class="cf-turnstile" data-sitekey="1x00000000000000000000AA"></div><button>Register</button></form><form><input aria-label="Search"><button type="button">Search</button></form><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>`);
+      case "/captcha-invisible-v2":
+        return html(`<h1>Sign in</h1><form><input aria-label="Email"><button type="button" class="g-recaptcha" data-sitekey="6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI" data-callback="onSubmit">Sign in</button></form><script src="https://www.google.com/recaptcha/api.js" async defer></script>`);
+      case "/captcha-spa-footer":
+        return html(`<div id="app"><header><button type="button">Menu</button></header><main><h1>Invoice 7</h1><button type="button">Send</button></main><footer><div class="newsletter"><input aria-label="Newsletter"><div class="cf-turnstile" data-sitekey="1x00000000000000000000AA"></div><a href="#subscribed">Subscribe</a></div></footer></div><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>`);
+      case "/captcha-div-submit":
+        return html(`<div id="app"><header><button type="button">Menu</button></header><main><h1>Invoice 7</h1><button type="button">Send</button></main><footer><div class="newsletter"><input aria-label="Newsletter"><div class="cf-turnstile" data-sitekey="1x00000000000000000000AA"></div><div class="btn" onclick="void 0">Subscribe</div></div></footer></div><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>`);
+      case "/captcha-v3-only":
+        return html(`<h1>Contact</h1><form><input aria-label="Message"><button type="button">Send message</button></form><script src="https://www.google.com/recaptcha/api.js?render=6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI"></script>`);
       case "/register-blocked":
         res.statusCode = 403;
         res.setHeader("content-type", "text/html");
@@ -722,6 +732,79 @@ describe("bot protection", () => {
       expect(JSON.stringify(page)).not.toContain("### Bot protection");
       expect(b.botProtection?.()).toBeNull();
     });
+  }, 60_000);
+});
+
+describe("captchas on forms", () => {
+  const click = (b: Browser, snap: string, label: string, role = "(?:textbox|button)") => {
+    const target = new RegExp(`${role} \\\\"${label}\\\\"[^\\n]*?\\[ref=([a-z0-9]+)\\]`).exec(snap)?.[1];
+    if (!target) throw new Error(`no ref for ${label}`);
+    return b.tools.browser_click!.execute!({ element: label, target }, ctx);
+  };
+
+  test("sending a form that holds a Turnstile which cannot load is held back by it; clicking into a field or sending another form is not", async () => {
+    await withBrowser(async (b) => {
+      const out = JSON.stringify(await navigate(b, `${origin}/captcha-turnstile`));
+      expect(out).toContain("has Cloudflare Turnstile on a form, and it cannot load in this browser");
+      expect(b.botProtection?.()).toBeNull();
+      let snap = await snapshot(b);
+      await click(b, snap, "Email");
+      expect(b.heldByWidget?.()).toBeNull();
+      await click(b, snap, "Search");
+      expect(b.heldByWidget?.()).toBeNull();
+      await click(b, snap, "Register");
+      expect(b.heldByWidget?.()).toEqual({ vendor: "Cloudflare Turnstile", url: `${origin}/captcha-turnstile` });
+      await navigate(b, `${origin}/captcha-turnstile`);
+      snap = await snapshot(b);
+      await b.tools.browser_type!.execute!({ element: "Email", target: refOf(snap, "Email"), text: "dana@example.com" }, ctx);
+      await b.tools.browser_press_key!.execute!({ key: "Enter" }, ctx);
+      expect(b.heldByWidget?.()).toMatchObject({ vendor: "Cloudflare Turnstile" });
+    });
+  }, 60_000);
+
+  test("an invisible reCAPTCHA bound to a form's button holds that button back", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/captcha-invisible-v2`);
+      await click(b, await snapshot(b), "Sign in");
+      expect(b.heldByWidget?.()).toEqual({ vendor: "reCAPTCHA", url: `${origin}/captcha-invisible-v2` });
+    });
+  }, 60_000);
+
+  test("a captcha in a single-page app's footer holds back only its own form, whose send is a link, and not the page's other buttons", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/captcha-spa-footer`);
+      const snap = await snapshot(b);
+      await click(b, snap, "Send");
+      expect(b.heldByWidget?.()).toBeNull();
+      await click(b, snap, "Menu");
+      expect(b.heldByWidget?.()).toBeNull();
+      await click(b, snap, "Subscribe", "link");
+      expect(b.heldByWidget?.()).toMatchObject({ vendor: "Cloudflare Turnstile" });
+    });
+  }, 60_000);
+
+  test("a captcha whose own send is not a control does not spread to the whole app", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/captcha-div-submit`);
+      await click(b, await snapshot(b), "Send");
+      expect(b.heldByWidget?.()).toBeNull();
+    });
+  }, 60_000);
+
+  test("a reCAPTCHA v3 loaded with no mark on any form is not recognised and holds nothing back", async () => {
+    await withBrowser(async (b) => {
+      expect(JSON.stringify(await navigate(b, `${origin}/captcha-v3-only`))).not.toContain("### Bot protection");
+      await click(b, await snapshot(b), "Send message");
+      expect(b.heldByWidget?.()).toBeNull();
+    });
+  }, 60_000);
+
+  test("a captcha whose domain is among the allowed origins is left alone", async () => {
+    await withBrowser(async (b) => {
+      expect(JSON.stringify(await navigate(b, `${origin}/captcha-turnstile`))).not.toContain("### Bot protection");
+      await click(b, await snapshot(b), "Register");
+      expect(b.heldByWidget?.()).toBeNull();
+    }, { allowedOrigins: [origin, "https://challenges.cloudflare.com"] });
   }, 60_000);
 });
 
