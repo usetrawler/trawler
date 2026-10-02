@@ -20,6 +20,7 @@ type UnjudgedFinding = View["report"]["couldNotJudge"][number];
 type DismissedFinding = View["report"]["dismissed"][number];
 type Moved = (key: string, text: string) => Promise<void>;
 type Changed = { onDone: Moved; onRefused: () => Promise<void> };
+type Outcome = { error?: string; why?: "reason" | "settled" | "other" };
 
 const POLL_MS = 2000;
 const usd = (n: number) => `$${n.toFixed(2)}`;
@@ -116,10 +117,10 @@ export function JudgeAgainButton({ runId, findingKey, judging, onDone }: { runId
   );
 }
 
-export function NotABugButton({ runId, findingKey, title, onDone, onRefused }: { runId: string; findingKey: string; title: string } & Changed) {
+export function NotABugButton({ runId, findingKey, title, working, onDone, onRefused }: { runId: string; findingKey: string; title: string; working: boolean } & Changed) {
   const [asking, setAsking] = useState(false);
   const [reason, setReason] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Outcome | null>(null);
   const [pending, start] = useTransition();
   const field = useId();
   const hint = useId();
@@ -131,15 +132,17 @@ export function NotABugButton({ runId, findingKey, title, onDone, onRefused }: {
     cancelled.current = false;
     opener.current?.focus();
   }, [asking]);
+  if (!asking && working) return <p className="text-sm text-muted">You can mark it not a bug once Trawler has finished working on this run.</p>;
   if (!asking) return <button ref={opener} type="button" onClick={() => setAsking(true)} className="h-10 w-max border border-line bg-panel px-4 text-sm hover:border-ink">Not a bug</button>;
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (pending) return;
     setError(null);
     start(async () => {
-      const result = await dismissFindingAction(runId, findingKey, reason).catch((err) => ({ error: unstable_isUnrecognizedActionError(err) ? updatedSinceOpened("Reload the page to mark it not a bug.") : "It could not be marked not a bug. Try again." }));
+      const result: Outcome = await dismissFindingAction(runId, findingKey, reason).catch((err) => ({ error: unstable_isUnrecognizedActionError(err) ? updatedSinceOpened("Reload the page to mark it not a bug.") : "It could not be marked not a bug. Try again." }));
+      if (result.error && result.why === "settled") return onDone(findingKey, `${title}: ${result.error}`);
       if (result.error) {
-        setError(result.error);
+        setError(result);
         return onRefused();
       }
       await onDone(findingKey, `${title}: marked not a bug.`);
@@ -148,12 +151,12 @@ export function NotABugButton({ runId, findingKey, title, onDone, onRefused }: {
   return (
     <form onSubmit={submit} className="flex flex-col gap-2 text-sm">
       <label htmlFor={field}>Why is it not a bug?</label>
-      <textarea id={field} required autoFocus maxLength={500} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} aria-describedby={error ? `${hint} ${problem}` : hint} aria-invalid={error ? true : undefined} className="w-full min-w-0 resize-y border border-line bg-paper px-2 py-1 text-base outline-none focus:border-ink" />
+      <textarea id={field} required autoFocus maxLength={500} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} aria-describedby={error ? `${hint} ${problem}` : hint} aria-invalid={error?.why === "reason" ? true : undefined} className="w-full min-w-0 resize-y border border-line bg-paper px-2 py-1 text-base outline-none focus:border-ink" />
       <p id={hint} className="text-muted">The people in later runs of this project are told, with your reason, and asked not to report it again.</p>
       <div className="flex flex-wrap items-center gap-3">
         <button type="submit" aria-disabled={pending || undefined} className="h-10 border border-ink px-4 hover:bg-soft aria-disabled:cursor-wait aria-disabled:opacity-60">{pending ? "Saving…" : "Mark as not a bug"}</button>
         <button type="button" onClick={() => { cancelled.current = true; setAsking(false); setError(null); }} className="h-10 px-2 text-muted hover:text-ink">Cancel</button>
-        {error && <span id={problem} role="alert" className="text-bad">{error}</span>}
+        {error && <span id={problem} role="alert" className="text-bad">{error.error}</span>}
       </div>
     </form>
   );
@@ -166,7 +169,8 @@ export function UndoNotABug({ runId, f, onDone, onRefused }: { runId: string; f:
     if (pending) return;
     setError(null);
     start(async () => {
-      const result = await undoDismissalAction(runId, f.key).catch((err) => ({ error: unstable_isUnrecognizedActionError(err) ? updatedSinceOpened("Reload the page to undo it.") : "It could not be undone. Try again." }));
+      const result: Outcome = await undoDismissalAction(runId, f.key).catch((err) => ({ error: unstable_isUnrecognizedActionError(err) ? updatedSinceOpened("Reload the page to undo it.") : "It could not be undone. Try again." }));
+      if (result.error && result.why === "settled") return onDone(f.key, `${f.title}: ${result.error}`);
       if (result.error) {
         setError(result.error);
         return onRefused();
@@ -516,7 +520,7 @@ export function RunLive({ initial }: { initial: Data }) {
 
   const host = URL.canParse(run.target) ? new URL(run.target).host : run.target;
   const { report } = view;
-  const dismiss = view.refreshes ? undefined : (f: ReportFinding) => <NotABugButton runId={run.id} findingKey={f.key} title={f.title} onDone={moved} onRefused={refresh} />;
+  const dismiss = view.live ? undefined : (f: ReportFinding) => <NotABugButton runId={run.id} findingKey={f.key} title={f.title} working={view.refreshes} onDone={moved} onRefused={refresh} />;
   const when = view.live ? run.createdAt : run.finishedAt ?? run.createdAt;
   return (
     <div className="flex flex-col">
@@ -580,7 +584,7 @@ export function RunLive({ initial }: { initial: Data }) {
           <Section title="Not judged" hint="Reported, but not replayed and judged to the end" items={report.notJudged} note detail={(f) => f.reason} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} />
           <Section title="Refuted" hint="The replay did not see the problem, or saw only a detail the product never promised" items={report.refuted} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} />
           <Section title="Friction" hint="Not broken, but slowed someone down" items={report.friction} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} />
-          <Section<DismissedFinding> title="Not a bug" hint="Marked not a bug by your team; the people in later runs of this project are told" items={report.dismissed} action={(f) => <UndoNotABug runId={run.id} f={f} onDone={moved} onRefused={refresh} />} focusKey={focusKey} reveal={reveal} onFocused={focused} />
+          <Section<DismissedFinding> title="Not a bug" hint="Marked not a bug by your team; the people in later runs of this project are told, with the reason" items={report.dismissed} action={(f) => <UndoNotABug runId={run.id} f={f} onDone={moved} onRefused={refresh} />} focusKey={focusKey} reveal={reveal} onFocused={focused} />
         </div>
         {!view.live && <aside><PeopleOutcomes view={view} /></aside>}
       </div>

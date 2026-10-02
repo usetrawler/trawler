@@ -3,7 +3,11 @@ import { MAX_NOT_BUG_REASON, MAX_NOT_BUG_TITLE, MAX_NOT_BUGS, type NotABug } fro
 import type { Tx } from "../db/tenancy.ts";
 import { isLive } from "./report.ts";
 
-export class CannotDismiss extends Error {}
+export class CannotDismiss extends Error {
+  constructor(message: string, readonly why: "reason" | "settled" | "other" = "other") {
+    super(message);
+  }
+}
 
 export function dismissalReason(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
@@ -13,7 +17,7 @@ export function dismissalReason(raw: unknown): string | null {
 
 export async function dismissFinding(tx: Tx, orgId: string, runId: string, findingKey: string, rawReason: unknown, userId: string): Promise<void> {
   const reason = dismissalReason(rawReason);
-  if (!reason) throw new CannotDismiss(`Say why it is not a bug, in at most ${MAX_NOT_BUG_REASON} characters.`);
+  if (!reason) throw new CannotDismiss(`Say why it is not a bug, in at most ${MAX_NOT_BUG_REASON} characters.`, "reason");
   const run = await tx.selectFrom("runs").select("status").where("id", "=", runId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
   if (!run) throw new CannotDismiss("This run was not found.");
   const working = await tx.selectFrom("jobs").select("id").where("run_id", "=", runId).where("status", "in", ["queued", "leased"]).executeTakeFirst();
@@ -25,12 +29,12 @@ export async function dismissFinding(tx: Tx, orgId: string, runId: string, findi
     .values({ org_id: orgId, run_id: runId, finding_key: findingKey, reason, dismissed_by: userId })
     .onConflict((oc) => oc.columns(["run_id", "finding_key"]).doNothing())
     .executeTakeFirst();
-  if (Number(added.numInsertedOrUpdatedRows ?? 0) === 0) throw new CannotDismiss("It is already marked not a bug.");
+  if (Number(added.numInsertedOrUpdatedRows ?? 0) === 0) throw new CannotDismiss("It is already marked not a bug.", "settled");
 }
 
 export async function undoDismissal(tx: Tx, orgId: string, runId: string, findingKey: string): Promise<void> {
   const removed = await tx.deleteFrom("finding_dismissals").where("org_id", "=", orgId).where("run_id", "=", runId).where("finding_key", "=", findingKey).executeTakeFirst();
-  if (Number(removed.numDeletedRows) === 0) throw new CannotDismiss("It is no longer marked not a bug.");
+  if (Number(removed.numDeletedRows) === 0) throw new CannotDismiss("It is no longer marked not a bug.", "settled");
 }
 
 const oneLine = (text: string, max: number) => text.replace(/\s+/g, " ").trim().slice(0, max).replace(/[\uD800-\uDBFF]$/, "");

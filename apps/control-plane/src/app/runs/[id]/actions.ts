@@ -52,7 +52,12 @@ export async function judgeAgainAction(runId: string, findingKey: string): Promi
 
 const isFindingKey = (key: unknown): key is string => typeof key === "string" && key.length >= 1 && key.length <= 200;
 
-export async function dismissFindingAction(runId: string, findingKey: string, reason: string): Promise<{ error?: string }> {
+export interface DismissalResult {
+  error?: string;
+  why?: CannotDismiss["why"];
+}
+
+export async function dismissFindingAction(runId: string, findingKey: string, reason: string): Promise<DismissalResult> {
   const member = await signedInMember(await headers());
   if (!member) return { error: "Sign in again." };
   const { orgId } = member;
@@ -61,13 +66,13 @@ export async function dismissFindingAction(runId: string, findingKey: string, re
     await withOrg(getDb(), orgId, (tx) => dismissFinding(tx, orgId, runId, findingKey, reason, member.userId));
     return {};
   } catch (err) {
-    if (err instanceof CannotDismiss) return { error: err.message };
+    if (err instanceof CannotDismiss) return { error: err.message, why: err.why };
     await logError("finding could not be marked not a bug", { orgId, runId, err });
     return { error: "It could not be marked not a bug. Try again." };
   }
 }
 
-export async function undoDismissalAction(runId: string, findingKey: string): Promise<{ error?: string }> {
+export async function undoDismissalAction(runId: string, findingKey: string): Promise<DismissalResult> {
   const member = await signedInMember(await headers());
   if (!member) return { error: "Sign in again." };
   const { orgId } = member;
@@ -76,7 +81,7 @@ export async function undoDismissalAction(runId: string, findingKey: string): Pr
     await withOrg(getDb(), orgId, (tx) => undoDismissal(tx, orgId, runId, findingKey));
     return {};
   } catch (err) {
-    if (err instanceof CannotDismiss) return { error: err.message };
+    if (err instanceof CannotDismiss) return { error: err.message, why: err.why };
     await logError("not a bug could not be undone", { orgId, runId, err });
     return { error: "It could not be undone. Try again." };
   }

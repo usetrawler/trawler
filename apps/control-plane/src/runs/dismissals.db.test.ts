@@ -58,10 +58,11 @@ const dismiss = (orgId: string, runId: string, key: string, reason: unknown, use
 const undo = (orgId: string, runId: string, key: string) => withOrg(t.db, orgId, (tx) => undoDismissal(tx, orgId, runId, key));
 const view = async (orgId: string, runId: string) => runView((await withOrg(t.db, orgId, (tx) => runSummary(tx, orgId, runId)))!);
 const notBugs = (projectId: string) => withOrg(t.db, "org-a", (tx) => notBugsOf(tx, "org-a", projectId));
-const refused = async (work: Promise<unknown>, message: RegExp) => {
+const refused = async (work: Promise<unknown>, message: RegExp, why: CannotDismiss["why"] = "other") => {
   const err = await work.then(() => null, (e: unknown) => e);
   expect(err).toBeInstanceOf(CannotDismiss);
   expect((err as Error).message).toMatch(message);
+  expect((err as CannotDismiss).why).toBe(why);
 };
 const stored = async (runId: string) => (await sql<{ finding_key: string; reason: string; dismissed_by: string }>`select finding_key, reason, dismissed_by from finding_dismissals where run_id = ${runId} order by finding_key`.execute(t.db)).rows;
 const markedAt = (key: string, minutesAgo: number) => asSystem(t.db, (tx) => tx.updateTable("finding_dismissals").set({ dismissed_at: new Date(Date.now() - minutesAgo * 60_000) }).where("finding_key", "=", key).execute());
@@ -98,7 +99,7 @@ describe("marking a finding not a bug", () => {
     const undone = await view("org-a", run);
     expect(undone.headline).toBe("2 defects confirmed by replay.");
     expect(undone.report.dismissed.map((f) => f.key)).toEqual(["fr"]);
-    await refused(undo("org-a", run, "f1"), /no longer marked/);
+    await refused(undo("org-a", run, "f1"), /no longer marked/, "settled");
   });
 
   test("a run whose every defect is not a bug says so, and one with only friction marked still found none", async () => {
@@ -112,11 +113,11 @@ describe("marking a finding not a bug", () => {
 
   test("needs a reason of at most 500 characters and a finding the report shows on its own, and is done once", async () => {
     const run = await finishedRun("org-a", acme, [{ key: "f1" }, { key: "f2", sameAs: "f1" }]);
-    for (const reason of ["", "   ", "x".repeat(501), 42, undefined]) await refused(dismiss("org-a", run, "f1", reason), /at most 500 characters/);
+    for (const reason of ["", "   ", "x".repeat(501), 42, undefined]) await refused(dismiss("org-a", run, "f1", reason), /at most 500 characters/, "reason");
     await refused(dismiss("org-a", run, "nope", "Intended."), /not found/);
     await refused(dismiss("org-a", run, "f2", "Intended."), /not found/);
     await dismiss("org-a", run, "f1", "x".repeat(500));
-    await refused(dismiss("org-a", run, "f1", "Again."), /already marked/);
+    await refused(dismiss("org-a", run, "f1", "Again."), /already marked/, "settled");
     expect((await stored(run)).map((d) => d.reason.length)).toEqual([500]);
   });
 
@@ -138,7 +139,7 @@ describe("marking a finding not a bug", () => {
     const run = await finishedRun("org-a", acme, [{ key: "f1" }, { key: "f2" }]);
     await refused(dismiss("org-b", run, "f1", "Mine now."), /run was not found/);
     await dismiss("org-a", run, "f1", "Intended.");
-    await refused(undo("org-b", run, "f1"), /no longer marked/);
+    await refused(undo("org-b", run, "f1"), /no longer marked/, "settled");
     expect(await stored(run)).toHaveLength(1);
     expect(await withOrg(t.db, "org-b", (tx) => tx.selectFrom("finding_dismissals").selectAll().execute())).toEqual([]);
     await expect(withOrg(t.db, "org-b", (tx) => tx.insertInto("finding_dismissals").values({ org_id: "org-a", run_id: run, finding_key: "f2", reason: "x", dismissed_by: "u9" }).execute())).rejects.toThrow(/row-level security/);

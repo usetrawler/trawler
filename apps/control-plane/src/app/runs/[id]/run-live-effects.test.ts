@@ -9,6 +9,7 @@ const react = vi.hoisted(() => ({
   started: [] as Array<Promise<unknown>>,
   refs: [] as Array<{ current: unknown }>,
   refIndex: 0,
+  ids: 0,
   again: {} as { error?: string },
 }));
 vi.mock("react", async (original) => ({
@@ -25,7 +26,7 @@ vi.mock("react", async (original) => ({
     react.refs[at] ??= { current: value };
     return react.refs[at];
   },
-  useId: () => "id",
+  useId: () => `id-${++react.ids}`,
   useTransition: () => [false, (work: () => Promise<unknown>) => { react.started.push(work()); }],
   useActionState: () => [react.again, () => {}, false],
 }));
@@ -62,7 +63,7 @@ const settle = async () => { await Promise.all(react.started); await vi.advanceT
 
 beforeEach(() => {
   vi.useFakeTimers();
-  Object.assign(react, { effects: [], setters: [], values: [], started: [], refs: [], refIndex: 0, again: {} });
+  Object.assign(react, { effects: [], setters: [], values: [], started: [], refs: [], refIndex: 0, ids: 0, again: {} });
   vi.stubGlobal("document", { hidden: false, activeElement: null, body: {} });
   for (const action of Object.values(actions)) action.mockReset();
 });
@@ -176,6 +177,7 @@ test("when a judge answers, the page says where the defect went, and moves focus
   const update = react.setters[3]!.mock.calls[0]![0] as (was: { text: string; n: number }) => { text: string; n: number };
   expect(update({ text: "", n: 4 })).toEqual({ text: "Saving fails: confirmed.", n: 5 });
   expect(react.setters[4]).toHaveBeenCalledWith("ana:f1");
+  expect(react.setters[5]).toHaveBeenCalledWith(false);
 
   (document as { activeElement: unknown }).activeElement = { id: "somewhere" };
   react.refs = [];
@@ -357,7 +359,7 @@ const fresh = (values: unknown[] = []) => Object.assign(react, { effects: [], se
 test("Not a bug asks why, sends the reason for that finding, and hands the finding on to be shown where it went", async () => {
   const moved = vi.fn(async () => {});
   const refused = vi.fn(async () => {});
-  const ask = { runId: "run-1", findingKey: "ana:f1", title: "Saving fails", onDone: moved, onRefused: refused };
+  const ask = { runId: "run-1", findingKey: "ana:f1", title: "Saving fails", working: false, onDone: moved, onRefused: refused };
   press(button(NotABugButton(ask), /^Not a bug$/));
   expect(react.setters[0]).toHaveBeenCalledWith(true);
 
@@ -370,38 +372,64 @@ test("Not a bug asks why, sends the reason for that finding, and hands the findi
   expect(refused).not.toHaveBeenCalled();
 });
 
-test("Not a bug that is refused or fails says why, ties the message to the reason, and fetches the report again", async () => {
+test("Not a bug someone else already marked, or Undo someone already undid, moves the finding to where it is and says why", async () => {
   const moved = vi.fn(async () => {});
   const refused = vi.fn(async () => {});
-  const ask = { runId: "run-1", findingKey: "ana:f1", title: "Saving fails", onDone: moved, onRefused: refused };
-  const outcomes: Array<[() => void, string]> = [
-    [() => actions.dismissFindingAction.mockResolvedValueOnce({ error: "It is already marked not a bug." }), "It is already marked not a bug."],
-    [() => actions.dismissFindingAction.mockRejectedValueOnce(new UnrecognizedActionError("Server action not found.")), "Trawler has been updated since this page opened. Reload the page to mark it not a bug."],
-    [() => actions.dismissFindingAction.mockRejectedValueOnce(new Error("offline")), "It could not be marked not a bug. Try again."],
+  actions.dismissFindingAction.mockResolvedValueOnce({ error: "It is already marked not a bug.", why: "settled" });
+  fresh([true, "Intended."]);
+  submit(NotABugButton({ runId: "run-1", findingKey: "ana:f1", title: "Saving fails", working: false, onDone: moved, onRefused: refused }));
+  await settle();
+  expect(moved).toHaveBeenLastCalledWith("ana:f1", "Saving fails: It is already marked not a bug.");
+  const f = { key: "ana:f1", title: "Saving fails", dismissal: { reason: "Intended.", userId: "u1", at: "2026-10-02T10:00:00.000Z", by: null } };
+  actions.undoDismissalAction.mockResolvedValueOnce({ error: "It is no longer marked not a bug.", why: "settled" });
+  fresh();
+  press(button(UndoNotABug({ runId: "run-1", f: f as never, onDone: moved, onRefused: refused }), /^Undo/));
+  await settle();
+  expect(moved).toHaveBeenLastCalledWith("ana:f1", "Saving fails: It is no longer marked not a bug.");
+  expect(refused).not.toHaveBeenCalled();
+});
+
+test("Not a bug that is refused or fails says why, marks the reason invalid only when the reason was refused, and fetches the report again", async () => {
+  const moved = vi.fn(async () => {});
+  const refused = vi.fn(async () => {});
+  const ask = { runId: "run-1", findingKey: "ana:f1", title: "Saving fails", working: false, onDone: moved, onRefused: refused };
+  const outcomes: Array<[() => void, object]> = [
+    [() => actions.dismissFindingAction.mockResolvedValueOnce({ error: "Say why it is not a bug, in at most 500 characters.", why: "reason" }), { error: "Say why it is not a bug, in at most 500 characters.", why: "reason" }],
+    [() => actions.dismissFindingAction.mockResolvedValueOnce({ error: "Trawler is still working on this run.", why: "other" }), { error: "Trawler is still working on this run.", why: "other" }],
+    [() => actions.dismissFindingAction.mockRejectedValueOnce(new UnrecognizedActionError("Server action not found.")), { error: "Trawler has been updated since this page opened. Reload the page to mark it not a bug." }],
+    [() => actions.dismissFindingAction.mockRejectedValueOnce(new Error("offline")), { error: "It could not be marked not a bug. Try again." }],
   ];
-  for (const [arrange, message] of outcomes) {
+  for (const [arrange, outcome] of outcomes) {
     arrange();
     fresh([true, "Intended."]);
     submit(NotABugButton(ask));
     await settle();
-    expect(react.setters[2]).toHaveBeenLastCalledWith(message);
+    expect(react.setters[2]).toHaveBeenLastCalledWith(outcome);
   }
-  expect(refused).toHaveBeenCalledTimes(3);
+  expect(refused).toHaveBeenCalledTimes(4);
   expect(moved).not.toHaveBeenCalled();
 
-  fresh([true, "Intended.", "It is already marked not a bug."]);
-  const shown = NotABugButton(ask);
-  const field = nodes(shown).find((node) => node.type === "textarea")!;
-  const alert = nodes(shown).find((node) => node.props?.role === "alert")!;
-  expect(field.props!["aria-invalid"]).toBe(true);
-  expect(String(field.props!["aria-describedby"]).split(" ")).toContain(alert.props!.id);
-  expect(text(alert)).toBe("It is already marked not a bug.");
+  const shown = (error: object) => {
+    fresh([true, "Intended.", error]);
+    const tree = NotABugButton(ask);
+    return { field: nodes(tree).find((node) => node.type === "textarea")!, alert: nodes(tree).find((node) => node.props?.role === "alert")!, hint: nodes(tree).find((node) => node.type === "p")! };
+  };
+  const bad = shown({ error: "Say why it is not a bug, in at most 500 characters.", why: "reason" });
+  expect(bad.field.props!["aria-invalid"]).toBe(true);
+  expect(bad.field.props!["aria-describedby"]).toBe(`${bad.hint.props!.id} ${bad.alert.props!.id}`);
+  expect(bad.hint.props!.id).not.toBe(bad.alert.props!.id);
+  expect(text(bad.alert)).toBe("Say why it is not a bug, in at most 500 characters.");
+  const failed = shown({ error: "It could not be marked not a bug. Try again." });
+  expect(failed.field.props!["aria-invalid"]).toBeUndefined();
+  expect(failed.field.props!["aria-describedby"]).toBe(`${failed.hint.props!.id} ${failed.alert.props!.id}`);
   fresh([true, "Intended."]);
-  expect(nodes(NotABugButton(ask)).find((node) => node.type === "textarea")!.props!["aria-invalid"]).toBeUndefined();
+  const calm = nodes(NotABugButton(ask)).find((node) => node.type === "textarea")!;
+  expect(calm.props!["aria-invalid"]).toBeUndefined();
+  expect(String(calm.props!["aria-describedby"]).split(" ")).toHaveLength(1);
 });
 
 test("Cancel closes the question without marking anything and gives the focus back to Not a bug", () => {
-  const ask = { runId: "run-1", findingKey: "ana:f1", title: "Saving fails", onDone: vi.fn(), onRefused: vi.fn() };
+  const ask = { runId: "run-1", findingKey: "ana:f1", title: "Saving fails", working: false, onDone: vi.fn(), onRefused: vi.fn() };
   react.refs = [];
   fresh([true, "Intended."]);
   press(button(NotABugButton(ask), /^Cancel$/));
@@ -420,6 +448,17 @@ test("Cancel closes the question without marking anything and gives the focus ba
   expect(actions.dismissFindingAction).not.toHaveBeenCalled();
 });
 
+test("while Trawler works on the run, Not a bug says when it can be used, and a box already open stays open with what was typed", () => {
+  const ask = { runId: "run-1", findingKey: "ana:f1", title: "Saving fails", working: true, onDone: vi.fn(), onRefused: vi.fn() };
+  fresh();
+  const closed = NotABugButton(ask);
+  expect(text(closed)).toBe("You can mark it not a bug once Trawler has finished working on this run.");
+  expect(nodes(closed).some((node) => node.type === "button")).toBe(false);
+  fresh([true, "Half a reason"]);
+  const open = NotABugButton(ask);
+  expect(nodes(open).find((node) => node.type === "textarea")!.props!.value).toBe("Half a reason");
+});
+
 test("Undo takes the mark off that finding and hands it on to be shown where it went; a refusal or failure says why and fetches the report again", async () => {
   const moved = vi.fn(async () => {});
   const refused = vi.fn(async () => {});
@@ -431,7 +470,7 @@ test("Undo takes the mark off that finding and hands it on to be shown where it 
   expect(actions.undoDismissalAction).toHaveBeenCalledWith("run-1", "ana:f1");
   expect(moved).toHaveBeenCalledWith("ana:f1", "Saving fails: no longer marked not a bug.");
   const outcomes: Array<[() => void, string]> = [
-    [() => actions.undoDismissalAction.mockResolvedValueOnce({ error: "It is no longer marked not a bug." }), "It is no longer marked not a bug."],
+    [() => actions.undoDismissalAction.mockResolvedValueOnce({ error: "This finding was not found.", why: "other" }), "This finding was not found."],
     [() => actions.undoDismissalAction.mockRejectedValueOnce(new UnrecognizedActionError("Server action not found.")), "Trawler has been updated since this page opened. Reload the page to undo it."],
     [() => actions.undoDismissalAction.mockRejectedValueOnce(new Error("offline")), "It could not be undone. Try again."],
   ];
@@ -455,6 +494,7 @@ test("a finding marked not a bug, or taken back, is fetched again, is scrolled t
   vi.stubGlobal("fetch", fetched);
   const confirmed = nodes(draw(initial)).find((node) => node.props?.title === "Confirmed")!;
   const offered = (confirmed.props!.dismiss as (f: unknown) => Node)(initial.view.report.confirmed[0]);
+  expect(offered.props!.working).toBe(false);
   await (offered.props!.onDone as Moved)("ana:f1", "Saving fails: marked not a bug.");
   expect(react.setters[0]).toHaveBeenCalledWith(next);
   expect(react.setters[5]).toHaveBeenCalledWith(true);
@@ -466,23 +506,28 @@ test("a finding marked not a bug, or taken back, is fetched again, is scrolled t
 
   const notABug = nodes(draw(next)).find((node) => node.props?.title === "Not a bug")!;
   const undo = (notABug.props!.action as (f: unknown) => Node)(next.view.report.dismissed[0]);
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(initial))));
+  const refetched = vi.fn(async () => new Response(JSON.stringify(initial)));
+  vi.stubGlobal("fetch", refetched);
   await (undo.props!.onDone as Moved)("ana:f1", "Saving fails: no longer marked not a bug.");
   expect(react.setters[0]).toHaveBeenCalledWith(initial);
   expect(react.setters[5]).toHaveBeenCalledWith(true);
   expect(react.setters[4]).toHaveBeenCalledWith("ana:f1");
   expect((react.setters[3]!.mock.calls[0]![0] as (was: { text: string; n: number }) => { text: string })({ text: "", n: 0 }).text).toBe("Saving fails: no longer marked not a bug.");
-  expect(typeof undo.props!.onRefused).toBe("function");
+  await (undo.props!.onRefused as () => Promise<void>)();
+  expect(refetched).toHaveBeenCalledTimes(2);
 });
 
-test("Not a bug is offered only once Trawler has stopped working on the run", () => {
+test("Not a bug is offered once a run has ended, and knows while Trawler still works on it", () => {
   const defect = { key: "ana:f1", personaKey: "ana", kind: "defect", goal: "g1", title: "Saving fails", observed: "o", reproduction: ["Open."], severity: "high", replay: null, verdict: "confirmed", dismissal: null };
-  const offered = (run: ReturnType<typeof data>) => nodes(draw(run)).find((node) => node.props?.title === "Confirmed")!.props!.dismiss;
+  const offered = (run: ReturnType<typeof data>) => {
+    const dismiss = nodes(draw(run)).find((node) => node.props?.title === "Confirmed")!.props!.dismiss as ((f: unknown) => Node) | undefined;
+    return dismiss && dismiss({ key: "ana:f1", title: "Saving fails" }).props!.working;
+  };
   const busy = (status: string, requested: boolean) => [{ id: "j", kind: requested ? "judge" : "role_session", status, persona_key: "ana", finding_key: requested ? "ana:f1" : null, usage: null, stopped_by: null, error: null, requested }] as RunSummary["jobs"];
-  expect(offered(data("succeeded", { findings: [defect] as RunSummary["findings"] }))).toBeTypeOf("function");
+  expect(offered(data("succeeded", { findings: [defect] as RunSummary["findings"] }))).toBe(false);
   expect(offered(data("running", { findings: [defect] as RunSummary["findings"] }))).toBeUndefined();
-  expect(offered(data("cancelled", { findings: [defect] as RunSummary["findings"], jobs: busy("leased", false) }))).toBeUndefined();
-  expect(offered(data("succeeded", { findings: [defect] as RunSummary["findings"], jobs: busy("queued", true) }))).toBeUndefined();
+  expect(offered(data("cancelled", { findings: [defect] as RunSummary["findings"], jobs: busy("leased", false) }))).toBe(true);
+  expect(offered(data("succeeded", { findings: [defect] as RunSummary["findings"], jobs: busy("queued", true) }))).toBe(true);
 });
 
 test("a finding that moved is scrolled into view as it takes the focus, and one a judge answered is not", () => {
