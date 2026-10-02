@@ -19,7 +19,7 @@ clean() {
 
 if [ "$*" = --clean ]; then
   clean
-  refused=$(keyctl session - keyctl add user trawler-probe probe @s 2>&1 >/dev/null) || case "$refused" in
+  refused=$(LC_ALL=C keyctl session - keyctl add user trawler-probe probe @s 2>&1 >/dev/null) || case "$refused" in
     *"not permitted"* | *"not implemented"*) refused=yes ;;
     *) refused=no ;;
   esac
