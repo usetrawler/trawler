@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -12,7 +12,7 @@ import { workLoop, workOnce, type WorkerDeps } from "./worker.ts";
 import { egressClient } from "./egress-client.ts";
 import type { BlockedAttempt } from "./egress-proxy.ts";
 import { startReporting, workerLog } from "./report.ts";
-import { browserUser, cleanBrowserUser } from "./browser-user.ts";
+import { cleanBrowserUser } from "./browser-user.ts";
 
 export const DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
 const SETUP_BUDGET_USD = 0.25;
@@ -150,7 +150,12 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
   const sharedDownloads = deps.env.TRAWLER_BROWSER_DOWNLOADS?.trim() || undefined;
   if (!browserLauncher && deps.env.TRAWLER_REQUIRE_EGRESS === "1") throw new UsageError("this runner must start the browser as its own user, and TRAWLER_BROWSER_LAUNCHER is not set; use the runner image");
   const egress = egressServer ? egressClient(egressServer, egressToken!) : undefined;
-  const separateUser = browserLauncher ? browserUser(() => (deps.cleanBrowserUser ?? cleanBrowserUser)(browserLauncher)) : undefined;
+  const betweenJobs = browserLauncher
+    ? async () => {
+        await (deps.cleanBrowserUser ?? cleanBrowserUser)(browserLauncher);
+        if (sharedDownloads) for (const dir of readdirSync(sharedDownloads)) rmSync(join(sharedDownloads, dir), { recursive: true, force: true });
+      }
+    : undefined;
   const stop = new AbortController();
   let egressDown = false;
   const log = workerLog(deps.env, { out: deps.out, err: deps.err });
@@ -160,12 +165,6 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
     runnerToken,
     model: (modelId, jobToken) => deps.model(modelId, jobToken, new URL("/api/llm/v1", controlPlane).toString()),
     openBrowser: async (project, { onBlocked, scrubber }) => {
-      try {
-        await separateUser?.opened();
-      } catch (err) {
-        await separateUser?.closed().catch(() => undefined);
-        throw new Error(`the browser's user could not be cleaned, so the browser was not started: ${err instanceof Error ? err.message : String(err)}`);
-      }
       const outputDir = mkdtempSync(join(tmpdir(), "trawler-work-"));
       const downloadsPath = sharedDownloads ? mkdtempSync(join(sharedDownloads, "job-")) : undefined;
       if (downloadsPath) chmodSync(downloadsPath, 0o2770);
@@ -173,7 +172,6 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
         ? await egress.open(project.allowedOrigins).catch((err) => {
             rmSync(outputDir, { recursive: true, force: true });
             if (downloadsPath) rmSync(downloadsPath, { recursive: true, force: true });
-            void separateUser?.closed().catch(() => undefined);
             egressDown = true;
             stop.abort();
             throw new Error(`the egress proxy could not open a session, so the browser was not started: ${err instanceof Error ? err.message : String(err)}`);
@@ -191,9 +189,12 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
       const finish = async () => {
         clearInterval(polling);
         rmSync(outputDir, { recursive: true, force: true });
-        if (downloadsPath) rmSync(downloadsPath, { recursive: true, force: true });
+        try {
+          if (downloadsPath) rmSync(downloadsPath, { recursive: true, force: true });
+        } catch {
+          // the job's end clears what the browser locked in here
+        }
         if (session) report(await session.close().catch(() => []));
-        await separateUser?.closed();
       };
       try {
         const browser = await deps.openBrowser({ project, outputDir, headless: true, onBlocked, scrubber, survivesSignals: true, proxy: session?.proxy, executablePath: browserLauncher, downloadsPath });
@@ -208,6 +209,7 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
     maskReportsWith: reporting.maskWith,
     fetch: deps.fetchImpl,
     secrets: [runnerToken],
+    betweenJobs,
   };
   if (egress) await egress.ready();
   if (values.once) {
