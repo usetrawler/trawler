@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
 import { JOB_STOPPED, ProjectConfigSchema, RunEventSchema, type Finding, type RunEventInput } from "@usetrawler/protocol";
 import { Budget } from "./llm.ts";
-import { judgePrompt } from "./prompts.ts";
+import { judgePrompt, replayPrompt } from "./prompts.ts";
 import { judge, runReplay } from "./replay.ts";
 import { SecretScrubber } from "./secrets.ts";
 import { proxyRefusal, scriptedModel, text, toolCall } from "./testing.ts";
@@ -153,6 +153,7 @@ describe("runReplay", () => {
     expect(filled).toEqual([`e3:${password}`, `e4:${password}`]);
     expect(password).not.toBe("hunter22-secret");
     expect(JSON.stringify(model.doGenerateCalls[0]!.prompt[0])).toMatch(/If a step has you type a password, fill the password fields with type_own_password instead; you will never see the password\. Wherever the steps use the email address they signed up with, use replay\.[0-9a-f]{8}@example\.com instead, since that one may be taken already\./);
+    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt[0])).toMatch(/Wherever the steps sign up with a username or another value the product allows only one account to have, use replay[0-9a-f]{8} instead, or a value like it in the form the product asks for, since that one is taken already; use it again wherever a later step signs in with it\./);
     const last = JSON.stringify(model.doGenerateCalls[2]!.prompt);
     expect(last).toContain("fill('•••') into e3");
     expect(last).toContain("Account created with the password •••");
@@ -611,4 +612,13 @@ describe("a replay with several people", () => {
     await base({}, log, model);
     expect(log.filter((l) => l.endsWith(":snapshot"))).toEqual(["b2:snapshot", "b1:snapshot"]);
   });
+});
+
+test("in a replay with several people, each person who signs up gets their own fresh username in place of the one in the steps", () => {
+  const prompt = replayPrompt({
+    targetUrl: "https://bank.test/", steps: ["Register with username dana.dd3c37c3", "Open the account"], stepPeople: ["Dana", "Owen"],
+    people: [{ name: "Dana", signUpEmail: "replay-dana.ab12cd34@example.com" }, { name: "Owen", signUpEmail: "replay-owen.ef56ab78@example.com" }],
+  });
+  expect(prompt).toContain("wherever the steps have Dana sign up with a username or another value the product allows only one account to have, use replaydanaab12cd34 instead");
+  expect(prompt).toContain("wherever the steps have Owen sign up with a username or another value the product allows only one account to have, use replayowenef56ab78 instead");
 });
