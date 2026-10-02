@@ -12,6 +12,7 @@ import { workLoop, workOnce, type WorkerDeps } from "./worker.ts";
 import { egressClient } from "./egress-client.ts";
 import type { BlockedAttempt } from "./egress-proxy.ts";
 import { startReporting, workerLog } from "./report.ts";
+import { browserUser, cleanBrowserUser } from "./browser-user.ts";
 
 export const DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
 const SETUP_BUDGET_USD = 0.25;
@@ -34,10 +35,11 @@ export interface CliDeps {
   err: (line: string) => void;
   model: (modelId: string, apiKey: string, baseURL?: string) => LanguageModel;
   fetchText: (url: string) => Promise<string>;
-  openBrowser: (opts: Parameters<OpenBrowser>[0] & { project: ReturnType<typeof ProjectConfigSchema.parse>; outputDir: string; headless: boolean; survivesSignals?: boolean; proxy?: { server: string }; executablePath?: string }) => ReturnType<OpenBrowser>;
+  openBrowser: (opts: Parameters<OpenBrowser>[0] & { project: ReturnType<typeof ProjectConfigSchema.parse>; outputDir: string; headless: boolean; survivesSignals?: boolean; proxy?: { server: string }; executablePath?: string; downloadsPath?: string }) => ReturnType<OpenBrowser>;
   runsRoot: string;
   fetchImpl?: typeof fetch;
   startReporting?: typeof startReporting;
+  cleanBrowserUser?: (launcher: string) => Promise<void>;
 }
 
 class UsageError extends Error {}
@@ -65,10 +67,10 @@ export const defaultDeps: CliDeps = {
   err: (line) => console.error(line),
   model: (modelId, apiKey, baseURL) => createModel({ modelId, apiKey, baseURL }),
   fetchText: fetchPage,
-  openBrowser: ({ project, outputDir, headless, onBlocked, scrubber, survivesSignals, proxy, executablePath }) =>
+  openBrowser: ({ project, outputDir, headless, onBlocked, scrubber, survivesSignals, proxy, executablePath, downloadsPath }) =>
     openBrowser({
       allowedOrigins: project.allowedOrigins, httpCredentials: project.httpCredentials, extraHeaders: project.extraHeaders,
-      secretHeaders: project.secretHeaders, outputDir, scrubber, onBlocked, headless, survivesSignals, proxy, executablePath,
+      secretHeaders: project.secretHeaders, outputDir, scrubber, onBlocked, headless, survivesSignals, proxy, executablePath, downloadsPath,
     }),
   runsRoot: "runs",
 };
@@ -145,8 +147,10 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
   if (egressServer && !egressToken) throw new UsageError("TRAWLER_EGRESS_PROXY is set without TRAWLER_EGRESS_TOKEN");
   if (!egressServer && deps.env.TRAWLER_REQUIRE_EGRESS === "1") throw new UsageError("this runner must browse through the egress proxy, and TRAWLER_EGRESS_PROXY is not set; start it with apps/runner/start.sh");
   const browserLauncher = deps.env.TRAWLER_BROWSER_LAUNCHER?.trim() || undefined;
+  const sharedDownloads = deps.env.TRAWLER_BROWSER_DOWNLOADS?.trim() || undefined;
   if (!browserLauncher && deps.env.TRAWLER_REQUIRE_EGRESS === "1") throw new UsageError("this runner must start the browser as its own user, and TRAWLER_BROWSER_LAUNCHER is not set; use the runner image");
   const egress = egressServer ? egressClient(egressServer, egressToken!) : undefined;
+  const separateUser = browserLauncher ? browserUser(() => (deps.cleanBrowserUser ?? cleanBrowserUser)(browserLauncher)) : undefined;
   const stop = new AbortController();
   let egressDown = false;
   const log = workerLog(deps.env, { out: deps.out, err: deps.err });
@@ -156,10 +160,20 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
     runnerToken,
     model: (modelId, jobToken) => deps.model(modelId, jobToken, new URL("/api/llm/v1", controlPlane).toString()),
     openBrowser: async (project, { onBlocked, scrubber }) => {
+      try {
+        await separateUser?.opened();
+      } catch (err) {
+        await separateUser?.closed().catch(() => undefined);
+        throw new Error(`the browser's user could not be cleaned, so the browser was not started: ${err instanceof Error ? err.message : String(err)}`);
+      }
       const outputDir = mkdtempSync(join(tmpdir(), "trawler-work-"));
+      const downloadsPath = sharedDownloads ? mkdtempSync(join(sharedDownloads, "job-")) : undefined;
+      if (downloadsPath) chmodSync(downloadsPath, 0o2770);
       const session = egress
         ? await egress.open(project.allowedOrigins).catch((err) => {
             rmSync(outputDir, { recursive: true, force: true });
+            if (downloadsPath) rmSync(downloadsPath, { recursive: true, force: true });
+            void separateUser?.closed().catch(() => undefined);
             egressDown = true;
             stop.abort();
             throw new Error(`the egress proxy could not open a session, so the browser was not started: ${err instanceof Error ? err.message : String(err)}`);
@@ -177,10 +191,12 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
       const finish = async () => {
         clearInterval(polling);
         rmSync(outputDir, { recursive: true, force: true });
+        if (downloadsPath) rmSync(downloadsPath, { recursive: true, force: true });
         if (session) report(await session.close().catch(() => []));
+        await separateUser?.closed();
       };
       try {
-        const browser = await deps.openBrowser({ project, outputDir, headless: true, onBlocked, scrubber, survivesSignals: true, proxy: session?.proxy, executablePath: browserLauncher });
+        const browser = await deps.openBrowser({ project, outputDir, headless: true, onBlocked, scrubber, survivesSignals: true, proxy: session?.proxy, executablePath: browserLauncher, downloadsPath });
         return { tools: browser.tools, fillField: (ref, text, kind) => browser.fillField(ref, text, kind), screenshot: () => browser.screenshot(), pageUrl: () => browser.pageUrl(), close: () => browser.close().finally(finish) };
       } catch (err) {
         await finish();

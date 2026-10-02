@@ -1,10 +1,12 @@
 #!/bin/bash
 set -u
+grep -q '^NoNewPrivs:[[:space:]]*1' /proc/self/status || exec setpriv --no-new-privs "$0" "$@"
 chrome=@CHROME@
-writable=(/tmp /var/tmp /dev/shm /run/lock /dev/mqueue)
+writable=(/tmp /var/tmp /dev/shm /run/lock /dev/mqueue /var/lib/trawler-downloads)
 
 clean() {
   kill -KILL -1 2>/dev/null
+  ipcrm -a 2>/dev/null
   for dir in "${writable[@]}"; do
     [ -d "$dir" ] || continue
     find "$dir" -mindepth 1 -user browser -type d -exec chmod u+rwx {} + 2>/dev/null
@@ -12,7 +14,10 @@ clean() {
   done
 }
 
-clean
+if [ "$*" = --clean ]; then
+  clean
+  exit 0
+fi
 home="$(mktemp -d /tmp/trawler-browser.XXXXXXXX)"
 mkdir "$home/profile" "$home/tmp"
 args=()
@@ -27,7 +32,7 @@ for arg in "$@"; do
     *) args+=("$arg") ;;
   esac
 done
-HOME="$home" TMPDIR="$home/tmp" setpriv --no-new-privs "$chrome" "${args[@]}" &
+HOME="$home" TMPDIR="$home/tmp" "$chrome" "${args[@]}" &
 child=$!
 trap 'kill -TERM "$child" 2>/dev/null' TERM INT HUP
 status=0
@@ -36,5 +41,5 @@ while :; do
   status=$?
   kill -0 "$child" 2>/dev/null || break
 done
-clean
+rm -rf "$home"
 exit "$status"

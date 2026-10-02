@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tool } from "ai";
@@ -312,6 +312,9 @@ test("work starts reporting with the runner token, reports a failed job with its
 
 test("in work mode with an egress proxy, each browser gets its own proxy session, and what the proxy refused becomes blocked requests", async () => {
   const launchers: Array<string | undefined> = [];
+  const timeline: string[] = [];
+  const downloads: Array<{ path: string; mode: string }> = [];
+  const sharedDownloads = mkdtempSync(join(tmpdir(), "shared-downloads-"));
   const egressToken = "egress-token-".padEnd(40, "x");
   const proxy = await startEgressProxy({ token: egressToken });
   const job = {
@@ -338,21 +341,27 @@ test("in work mode with an egress proxy, each browser gets its own proxy session
       socket.on("close", () => resolveTry());
     });
   const { d } = deps({
-    env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_EGRESS_PROXY: `http://127.0.0.1:${proxy.port}`, TRAWLER_EGRESS_TOKEN: egressToken, TRAWLER_BROWSER_LAUNCHER: "/usr/local/bin/trawler-chromium" },
+    env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_EGRESS_PROXY: `http://127.0.0.1:${proxy.port}`, TRAWLER_EGRESS_TOKEN: egressToken, TRAWLER_BROWSER_LAUNCHER: "/usr/local/bin/trawler-chromium", TRAWLER_BROWSER_DOWNLOADS: sharedDownloads },
     fetchImpl: controlPlane,
     model: () => scriptedModel([toolCall("goal_status", { goal: "g", status: "failed", note: "blocked" }), toolCall("finish", { summary: "done" })]),
-    openBrowser: async ({ proxy: given, executablePath }) => {
+    openBrowser: async ({ proxy: given, executablePath, downloadsPath }) => {
       proxies.push(given);
       launchers.push(executablePath);
+      timeline.push("open");
+      if (downloadsPath) downloads.push({ path: downloadsPath, mode: (statSync(downloadsPath).mode & 0o7777).toString(8) });
       await tryPrivate(given!.server);
-      return { tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => {} };
+      return { tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => void timeline.push("close") };
     },
+    cleanBrowserUser: async (launcher) => void timeline.push(`clean ${launcher}`),
     startReporting: async () => ({ report: () => {}, maskWith: () => {}, close: async () => {} }),
   });
   try {
     expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(0);
     expect(proxies).toEqual([{ server: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/) }]);
     expect(launchers).toEqual(["/usr/local/bin/trawler-chromium"]);
+    expect(timeline).toEqual(["clean /usr/local/bin/trawler-chromium", "open", "close", "clean /usr/local/bin/trawler-chromium"]);
+    expect(downloads).toEqual([{ path: expect.stringMatching(new RegExp(`^${sharedDownloads}/job-`)), mode: "2770" }]);
+    expect(existsSync(downloads[0]!.path)).toBe(false);
     expect((proxies[0] as { server: string }).server).not.toBe(`http://127.0.0.1:${proxy.port}`);
     expect(events.filter((e) => e.type === "blocked_request").map((e) => e.url)).toEqual(["https://169.254.169.254"]);
     const health = await fetch(`http://127.0.0.1:${proxy.port}/health`, { headers: { authorization: `Bearer ${egressToken}` } });
