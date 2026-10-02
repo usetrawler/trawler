@@ -213,6 +213,31 @@ describe("a whole run", () => {
     });
   });
 
+  test("a replay stopped by bot protection is judged, not handed to the next report, and the run tells which check stopped whom", async () => {
+    const run = await rolesReport(saveBroken);
+    const group = (await claimPastChecks())!;
+    await completeJob(t.db, group.token, { usage: usage(0), stoppedBy: "done", groups: [["ana:f1", "lee:f1"], ["ana:f2"]] });
+    const stopped = { completed: false, observed: "The replay could not go on: Cloudflare's bot-protection check at https://app.acme.test/x stopped it.", blockedAt: null, botProtection: { vendor: "Cloudflare", url: "https://app.acme.test/x" } };
+    const seen: string[] = [];
+    for (let job = await claimPastChecks(); job; job = await claimPastChecks()) {
+      seen.push(`${job.kind} ${job.finding!.id}`);
+      if (job.kind === "judge" && job.finding!.id === "ana:f1") expect(job.observation).toEqual(stopped);
+      seq = 0;
+      if (job.kind === "replay" && job.finding!.id === "ana:f1") await ingestEvents(t.db, job.token, [ev({ type: "bot_protection", jobId: job.jobId, vendor: "Cloudflare", url: "https://app.acme.test/x" })]);
+      if (job.kind === "judge") await ingestEvents(t.db, job.token, [ev({ type: "verdict", jobId: job.jobId, findingId: job.finding!.id, verdict: "inconclusive", observed: stopped.observed })]);
+      await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: job.kind === "judge" ? "done" : "report", observation: job.finding!.id === "ana:f1" ? stopped : { completed: true, observed: "Totals add up", blockedAt: null } });
+    }
+    expect(seen).toEqual(["replay ana:f1", "replay ana:f2", "judge ana:f1", "judge ana:f2"]);
+    const summary = (await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!;
+    expect(summary.findings.find((f) => f.key === "ana:f1")).toMatchObject({ verdict: "inconclusive", replay: stopped });
+    expect(summary.botProtection).toEqual({ vendor: "Cloudflare", url: "https://app.acme.test/x", personaKey: null, during: "replay" });
+  });
+
+  test("a run that met no bot protection says nothing about it", async () => {
+    const run = await rolesReport({});
+    expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.botProtection).toBeNull();
+  });
+
   test("once several defects are in, one group job sees them all, and only the first report of each group is replayed; the rest point at it", async () => {
     const run = await rolesReport(saveBroken);
     const group = (await claimPastChecks())!;

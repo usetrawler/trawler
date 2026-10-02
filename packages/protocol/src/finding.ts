@@ -54,5 +54,6 @@ export const ReplayObservationSchema = z.object({
   completed: z.boolean(),
   observed: z.string().max(8000),
   blockedAt: z.number().int().positive().nullable(),
+  botProtection: z.object({ vendor: z.string().min(1).max(100), url: z.string().max(MAX_URL) }).optional(),
 });
 export type ReplayObservation = z.infer<typeof ReplayObservationSchema>;

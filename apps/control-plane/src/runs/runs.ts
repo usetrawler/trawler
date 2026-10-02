@@ -294,7 +294,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   if (!run) return null;
   const snapshot = run.config_snapshot as unknown as ConfigSnapshot;
   const goalText = new Map(snapshot.goals.map((g) => [g.id, g.instruction]));
-  const [jobs, findings, goals, activity, screenshots] = await Promise.all([
+  const [jobs, findings, goals, activity, screenshots, botProtection] = await Promise.all([
     tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error", sql<boolean>`requested_by is not null`.as("requested")]).where("run_id", "=", runId).orderBy("position").execute(),
     tx.selectFrom("findings").select(["key", "persona_key", "kind", "filed_as", "goal", "title", "observed", "reproduction", "severity", "replay", "verdict", "same_as", "url", "quote", "step_people"]).where("run_id", "=", runId).orderBy("created_at").orderBy("key").execute(),
     tx.selectFrom("goal_outcomes").select(["persona_key", "goal", "status", "note"]).where("run_id", "=", runId).orderBy("persona_key").orderBy("goal").execute(),
@@ -318,6 +318,15 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
       .orderBy("a.created_at")
       .orderBy("a.id")
       .execute(),
+    tx
+      .selectFrom("run_events as e")
+      .innerJoin("jobs as j", "j.id", "e.job_id")
+      .select(["e.payload", "j.persona_key", "j.kind"])
+      .where("e.run_id", "=", runId)
+      .where("e.type", "=", "bot_protection")
+      .orderBy("e.id")
+      .limit(1)
+      .executeTakeFirst(),
   ]);
   const findingTitle = new Map(findings.map((f) => [f.key, f.title]));
   const latestScreenshot = (key: string, kind: string) => screenshots.filter((a) => a.finding_key === key && a.kind === kind).at(-1)?.id ?? null;
@@ -332,11 +341,16 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
       screenshots: { reported: latestScreenshot(f.key, "role_session"), replayed: latestScreenshot(f.key, "replay") },
     })),
     goals: goals.map((g) => ({ personaKey: g.persona_key, goal: g.goal, status: g.status, note: g.note })),
+    botProtection: botProtection ? { ...botProtectionOf(botProtection.payload as unknown as RunEvent), personaKey: botProtection.persona_key, during: botProtection.kind } : null,
     target: snapshot.targetUrl,
     personas: snapshot.personas.map((p) => ({ id: p.id, name: p.name })),
     goalTexts: snapshot.goals.map((g) => ({ id: g.id, instruction: g.instruction, ...(g.personaId ? { personaId: g.personaId } : {}) })),
     activity: activity.map((a) => ({ id: String(a.id), at: a.at, personaKey: a.persona_key, kind: a.kind, text: activityText(a.payload as unknown as RunEvent, goalText, findingTitle) })),
   };
+}
+
+function botProtectionOf(e: RunEvent): { vendor: string; url: string } {
+  return e.type === "bot_protection" ? { vendor: e.vendor, url: e.url } : { vendor: "Bot protection", url: "" };
 }
 
 export type RunSummary = NonNullable<Awaited<ReturnType<typeof runSummary>>>;
