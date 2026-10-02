@@ -47,4 +47,4 @@ jobs:
       - name: hosted Chromium runs as its own user and cannot read the runner
         run: |
           sudo sysctl -w kernel.yama.ptrace_scope=0
-          docker run --rm -e TRAWLER_REQUIRE_MEMORY_CHECK=1 -v "$PWD/apps/runner/browser:/check:ro" trawler-runner:check /check/isolation-check.sh
+          docker run --rm --security-opt seccomp=unconfined -e TRAWLER_REQUIRE_MEMORY_CHECK=1 -e TRAWLER_REQUIRE_KEYRING_CHECK=1 -v "$PWD/apps/runner/browser:/check:ro" trawler-runner:check /check/isolation-check.sh

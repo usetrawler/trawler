@@ -7,6 +7,9 @@ writable=(/tmp /var/tmp /dev/shm /run/lock /dev/mqueue /var/lib/trawler-download
 clean() {
   kill -KILL -1 2>/dev/null
   ipcrm -a 2>/dev/null
+  keyctl clear @u 2>/dev/null
+  keyctl clear @us 2>/dev/null
+  persistent=$(keyctl get_persistent @us 2>/dev/null) && keyctl clear "$persistent" 2>/dev/null
   for dir in "${writable[@]}"; do
     [ -d "$dir" ] || continue
     find "$dir" -mindepth 1 -user browser -type d -exec chmod u+rwx {} + 2>/dev/null
