@@ -125,14 +125,14 @@ export function NotABugButton({ runId, findingKey, title, working, onDone, onRef
   const field = useId();
   const hint = useId();
   const problem = useId();
-  const opener = useRef<HTMLButtonElement>(null);
+  const opener = useRef<HTMLButtonElement & HTMLParagraphElement>(null);
   const cancelled = useRef(false);
   useEffect(() => {
     if (asking || !cancelled.current) return;
     cancelled.current = false;
     opener.current?.focus();
   }, [asking]);
-  if (!asking && working) return <p className="text-sm text-muted">You can mark it not a bug once Trawler has finished working on this run.</p>;
+  if (!asking && working) return <p ref={opener} tabIndex={-1} className="text-sm text-muted outline-none">You can mark it not a bug once Trawler has finished working on this run.</p>;
   if (!asking) return <button ref={opener} type="button" onClick={() => setAsking(true)} className="h-10 w-max border border-line bg-panel px-4 text-sm hover:border-ink">Not a bug</button>;
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
