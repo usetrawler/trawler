@@ -30,6 +30,7 @@ export interface WorkerDeps {
   uploadWaitMs?: number;
   uploadTimeoutMs?: number;
   secrets?: string[];
+  betweenJobs?: () => Promise<void>;
 }
 
 const CLOSE_TIMEOUT_MS = 10_000;
@@ -359,10 +360,15 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
   let completion: JobCompletion = { usage: zeroUsage(job.agentModel), stoppedBy: "budget" };
   if (!released) {
     try {
+      await deps.betweenJobs?.().catch((err) => {
+        throw new Error(`the runner could not clear what the last job's browser left, so this job did not start: ${err instanceof Error ? err.message : String(err)}`);
+      });
       completion = await run(deps, job, events, budget, scrubber, screenshots);
       if (events.cancelled && completion.stoppedBy !== "error") completion = { ...completion, stoppedBy: "budget" };
     } catch (err) {
       completion = { usage: zeroUsage(job.agentModel), stoppedBy: "error", error: clip(scrubber.scrub(err instanceof Error ? err.message : String(err))) };
+    } finally {
+      await deps.betweenJobs?.().catch((err) => warn(`${job.kind} ${job.jobId}: what its browser left could not be cleared: ${err instanceof Error ? err.message : String(err)}`));
     }
   }
   signal?.removeEventListener("abort", handOver);

@@ -1,0 +1,2 @@
+#!/bin/sh
+exec sudo -n -C 5 -u browser -- /usr/local/libexec/trawler-chromium-as-browser "$@"

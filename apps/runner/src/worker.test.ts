@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { tool } from "ai";
 import { z } from "zod";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { PROTOCOL_HEADER } from "@usetrawler/protocol";
 import { scriptedModel, text, toolCall } from "../../../packages/core/src/testing.ts";
 import { workLoop, workOnce, type LogFields, type WorkerDeps } from "./worker.ts";
@@ -425,6 +425,44 @@ test("a browser that will not start completes the job as an error", async () => 
   const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" });
   await workOnce(deps(url, scriptedModel([]), { openBrowser: async () => { throw new Error("no chromium"); } }));
   expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "error", error: "no chromium" })]);
+});
+
+test("what the browser left is cleared before and after every job, even one that fails or whose browser never closes", async () => {
+  const order: string[] = [];
+  const job = { ...baseJob, kind: "role_session", personaKey: "ana" };
+  const finishes = scriptedModel([toolCall("goal_status", { goal: "g", status: "reached", note: "" }), toolCall("finish", { summary: "done" })]);
+  const opening = (close: () => Promise<void>) => async () => (order.push("open"), { tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close });
+  const betweenJobs = async () => void order.push("clean");
+  let cp = await fakeControlPlane(job);
+  await workOnce(deps(cp.url, finishes, { openBrowser: opening(async () => void order.push("close")), betweenJobs }));
+  expect(order).toEqual(["clean", "open", "close", "clean"]);
+  order.length = 0;
+  server?.close();
+  cp = await fakeControlPlane(job);
+  await workOnce(deps(cp.url, scriptedModel([]), { openBrowser: async () => { throw new Error("no chromium"); }, betweenJobs }));
+  expect(order).toEqual(["clean", "clean"]);
+  order.length = 0;
+  server?.close();
+  cp = await fakeControlPlane(job);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const done = workOnce(deps(cp.url, scriptedModel([toolCall("finish", { summary: "done" })]), { openBrowser: opening(() => new Promise(() => {})), betweenJobs }));
+    await vi.waitFor(() => expect(order).toContain("open"));
+    await vi.advanceTimersByTimeAsync(10_000);
+    vi.useRealTimers();
+    await done;
+  } finally {
+    vi.useRealTimers();
+  }
+  expect(order).toEqual(["clean", "open", "clean"]);
+});
+
+test("a job whose browser's leftovers cannot be cleared first does not start, and completes as an error", async () => {
+  const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" });
+  let opened = false;
+  await workOnce(deps(url, scriptedModel([]), { openBrowser: async () => { opened = true; throw new Error("unreachable"); }, betweenJobs: async () => { throw new Error("sudo: a password is required"); } }));
+  expect(opened).toBe(false);
+  expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "error", error: expect.stringContaining("could not clear what the last job's browser left, so this job did not start: sudo: a password is required") })]);
 });
 
 test("a long quiet job keeps its lease with empty heartbeat batches", async () => {

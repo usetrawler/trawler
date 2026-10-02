@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tool } from "ai";
@@ -311,6 +311,10 @@ test("work starts reporting with the runner token, reports a failed job with its
 });
 
 test("in work mode with an egress proxy, each browser gets its own proxy session, and what the proxy refused becomes blocked requests", async () => {
+  const launchers: Array<string | undefined> = [];
+  const timeline: string[] = [];
+  const downloads: Array<{ path: string; mode: string }> = [];
+  const sharedDownloads = mkdtempSync(join(tmpdir(), "shared-downloads-"));
   const egressToken = "egress-token-".padEnd(40, "x");
   const proxy = await startEgressProxy({ token: egressToken });
   const job = {
@@ -337,19 +341,27 @@ test("in work mode with an egress proxy, each browser gets its own proxy session
       socket.on("close", () => resolveTry());
     });
   const { d } = deps({
-    env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_EGRESS_PROXY: `http://127.0.0.1:${proxy.port}`, TRAWLER_EGRESS_TOKEN: egressToken },
+    env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_EGRESS_PROXY: `http://127.0.0.1:${proxy.port}`, TRAWLER_EGRESS_TOKEN: egressToken, TRAWLER_BROWSER_LAUNCHER: "/usr/local/bin/trawler-chromium", TRAWLER_BROWSER_DOWNLOADS: sharedDownloads },
     fetchImpl: controlPlane,
     model: () => scriptedModel([toolCall("goal_status", { goal: "g", status: "failed", note: "blocked" }), toolCall("finish", { summary: "done" })]),
-    openBrowser: async ({ proxy: given }) => {
+    openBrowser: async ({ proxy: given, executablePath, downloadsPath }) => {
       proxies.push(given);
+      launchers.push(executablePath);
+      timeline.push("open");
+      if (downloadsPath) downloads.push({ path: downloadsPath, mode: (statSync(downloadsPath).mode & 0o7777).toString(8) });
       await tryPrivate(given!.server);
-      return { tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => {} };
+      return { tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => void timeline.push("close") };
     },
+    cleanBrowserUser: async (launcher) => void timeline.push(`clean ${launcher}`),
     startReporting: async () => ({ report: () => {}, maskWith: () => {}, close: async () => {} }),
   });
   try {
     expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(0);
     expect(proxies).toEqual([{ server: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/) }]);
+    expect(launchers).toEqual(["/usr/local/bin/trawler-chromium"]);
+    expect(timeline).toEqual(["clean /usr/local/bin/trawler-chromium", "open", "close", "clean /usr/local/bin/trawler-chromium"]);
+    expect(downloads).toEqual([{ path: expect.stringMatching(new RegExp(`^${sharedDownloads}/job-`)), mode: "2770" }]);
+    expect(existsSync(downloads[0]!.path)).toBe(false);
     expect((proxies[0] as { server: string }).server).not.toBe(`http://127.0.0.1:${proxy.port}`);
     expect(events.filter((e) => e.type === "blocked_request").map((e) => e.url)).toEqual(["https://169.254.169.254"]);
     const health = await fetch(`http://127.0.0.1:${proxy.port}/health`, { headers: { authorization: `Bearer ${egressToken}` } });
@@ -358,6 +370,37 @@ test("in work mode with an egress proxy, each browser gets its own proxy session
     await proxy.close();
   }
 });
+
+test("in work mode, a browser whose close never settles still has its egress session closed when the job ends", async () => {
+  const egressToken = "egress-token-".padEnd(40, "x");
+  const proxy = await startEgressProxy({ token: egressToken });
+  const job = {
+    kind: "role_session", personaKey: "ana", jobId: "11111111-1111-4111-8111-111111111111", runId: "22222222-2222-4222-8222-222222222222", token: "job-token-" + "x".repeat(40),
+    config: { name: "Acme", targetUrl: "https://a.test/", description: "", allowedOrigins: ["https://a.test"], personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "x" }], accounts: [], extraHeaders: {}, secretHeaders: {} },
+    maxSteps: 10, budgetUsd: 1, agentModel: "m/agent", judgeModel: "m/judge",
+  };
+  const controlPlane = (async (url: string | URL) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/api/runner/claim") return Response.json(job);
+    if (path.endsWith("/events")) return Response.json({ cancel: false });
+    return Response.json({ ok: true });
+  }) as typeof fetch;
+  const { d } = deps({
+    env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_EGRESS_PROXY: `http://127.0.0.1:${proxy.port}`, TRAWLER_EGRESS_TOKEN: egressToken, TRAWLER_BROWSER_LAUNCHER: "/usr/local/bin/trawler-chromium" },
+    fetchImpl: controlPlane,
+    model: () => scriptedModel([toolCall("finish", { summary: "done" })]),
+    openBrowser: async () => ({ tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: () => new Promise<void>(() => {}) }),
+    cleanBrowserUser: async () => {},
+    startReporting: async () => ({ report: () => {}, maskWith: () => {}, close: async () => {} }),
+  });
+  try {
+    expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(0);
+    const health = await fetch(`http://127.0.0.1:${proxy.port}/health`, { headers: { authorization: `Bearer ${egressToken}` } });
+    expect(await health.json()).toEqual({ sessions: 0 });
+  } finally {
+    await proxy.close();
+  }
+}, 20_000);
 
 test("work refuses an egress proxy without its control token", async () => {
   const { d, err } = deps({ env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_EGRESS_PROXY: "http://127.0.0.1:9" } });
@@ -401,6 +444,12 @@ test.each([[[]], [["--once"]]])("a work runner whose egress proxy has gone hands
   expect(browsers).toBe(0);
   expect(handedBack).toEqual([`/api/jobs/${job.jobId}/release`]);
   expect(err.join("\n")).toContain("stopped: the egress proxy is not answering");
+});
+
+test("a runner that must browse through the egress proxy refuses to work without the launcher that starts the browser as its own user", async () => {
+  const { d, err } = deps({ env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_REQUIRE_EGRESS: "1", TRAWLER_EGRESS_PROXY: "http://127.0.0.1:9", TRAWLER_EGRESS_TOKEN: "e".repeat(40) } });
+  expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(2);
+  expect(err.join("\n")).toMatch(/start the browser as its own user, and TRAWLER_BROWSER_LAUNCHER is not set/);
 });
 
 test("a runner that must browse through the egress proxy refuses to work without one", async () => {
