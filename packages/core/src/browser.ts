@@ -6,6 +6,7 @@ import { jsonSchema, type Tool, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
 import { MAX_ARTIFACT_BYTES } from "@usetrawler/protocol";
 import { asShown, longFormsOf, MASK, MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
+import { botProtection, botProtectionNote, COLLECT_PAGE_SIGNALS, type PageSignals } from "./bot-protection.ts";
 import type { FieldKind } from "./session-tools.ts";
 
 export const BROWSER_TOOLS = [
@@ -40,6 +41,7 @@ const MAX_HELD_FIELDS = 20;
 const KEYS_SAFE_ON_SECRETS = new Set(["Enter", "Tab", "Shift+Tab", "Escape"]);
 const FOCUS_CHECK_MS = 2000;
 const HANDLE_READ_MS = 500;
+const BOT_CHECK_MS = 1500;
 const CLOSE_STEP_MS = 2000;
 const FILLED_READ_MS = 5000;
 const FIELD_GONE = /Execution context was destroyed|Target page, context or browser has been closed|frame was detached|not attached to the DOM/i;
@@ -352,11 +354,17 @@ export interface Screenshot {
   contentType: "image/png";
 }
 
+export interface BotProtection {
+  vendor: string;
+  url: string;
+}
+
 export interface Browser {
   tools: ToolSet;
   fillField(ref: string, text: string, kind: FieldKind): Promise<string>;
   screenshot(): Promise<Screenshot | null>;
   pageUrl(): string | null;
+  botProtection?(): BotProtection | null;
   close(): Promise<void>;
 }
 
@@ -546,6 +554,14 @@ export async function openBrowser(opts: {
     const onNextDialog = new Set<(dialog: Dialog) => void>();
     const openDialogs = new Map<Dialog, Page>();
     const actingPage = () => context.pages()[0];
+    let challenge: BotProtection | null = null;
+    const checkBotProtection = async (): Promise<BotProtection | null> => {
+      const page = actingPage();
+      if (!page || disconnected || dialogOnActingPage() || page.url() === "about:blank") return (challenge = null);
+      const signals = await within(page.evaluate<PageSignals>(`(${COLLECT_PAGE_SIGNALS})()`).catch(() => null), BOT_CHECK_MS, null);
+      const vendor = signals ? botProtection(signals) : null;
+      return (challenge = vendor ? { vendor, url: page.url() } : null);
+    };
     const dialogOnActingPage = () => [...openDialogs].filter(([, page]) => page === actingPage()).at(-1)?.[0];
     const modalState = (dialog: Dialog) => `### Modal state\n- ${dialogLine(dialog)}: can be handled by browser_handle_dialog`;
     context.on("page", (page) => {
@@ -767,6 +783,8 @@ export async function openBrowser(opts: {
         if (blockedNavigation) {
           result.content = [...(result.content ?? []), { type: "text", text: `### Blocked\n${blockedNavigation} is outside the allowed origins, so the browser did not open it. Go back or navigate to an allowed page.` }];
         }
+        const met = await checkBotProtection();
+        if (met) result.content = [...(result.content ?? []), { type: "text", text: botProtectionNote(met.vendor) }];
         return scrubWithFilledValues(result);
       };
       tools[name] = {
@@ -836,6 +854,9 @@ export async function openBrowser(opts: {
       pageUrl() {
         const page = actingPage();
         return !page || disconnected || page.url() === "about:blank" ? null : page.url();
+      },
+      botProtection() {
+        return challenge;
       },
       async close() {
         const bounded = (step: Promise<unknown>) => within(step.catch(() => undefined), CLOSE_STEP_MS, undefined);
