@@ -10,6 +10,8 @@ import { setModelKey } from "../credentials/credentials.ts";
 import { createProject, loadProjectConfig, ProjectNotFound, replacePlan } from "../projects/projects.ts";
 import { cancelLiveRuns, cancelRun, CannotJudgeAgain, judgeAgain, NeedsAccount, RunNotFound, runSummary, startRun, type StartRunOptions } from "./runs.ts";
 import { dismissFinding, undoDismissal } from "./dismissals.ts";
+import { runView } from "./report.ts";
+import { workspaceRuns } from "../projects/overview.ts";
 import { claimJob, completeJob, ingestEvents, InvalidJobToken, llmCallFor, LlmRefused, recordLlmUsage, releaseJob } from "./queue.ts";
 
 const t = await testDb();
@@ -157,6 +159,7 @@ describe("a whole run", () => {
 
     async function rolesWithGoals(verdictFor: string) {
       await drain();
+      await withOrg(t.db, "org-a", (tx) => setModelKey(tx, "org-a", { provider: "openrouter", key: `sk-or-v1-${"a".repeat(40)}` }, "u1", keys));
       const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
       const ana = (await claimPastChecks())!;
       seq = 0;
@@ -171,12 +174,56 @@ describe("a whole run", () => {
         seen.push(`${job.kind} ${job.finding?.id}`);
         if (job.kind === "replay") expect(job.finding).toMatchObject({ kind: "defect", title: "Balance has no history" });
         seq = 0;
+        if (job.kind === "judge" && verdictFor === "none") {
+          await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "error", error: "No output generated." });
+          continue;
+        }
         if (job.kind === "judge") await ingestEvents(t.db, job.token, [ev({ type: "verdict", jobId: job.jobId, findingId: job.finding!.id, verdict: verdictFor, observed: "No transactions found" })]);
         await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: job.kind === "judge" ? "done" : "report", observation: { completed: true, observed: "No transactions found", blockedAt: null } });
       }
       expect(seen).toEqual(["replay ana:f1", "judge ana:f1"]);
       return (await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!;
     }
+
+    const judgedAgain = async (runId: string, verdict: string) => {
+      await withOrg(t.db, "org-a", (tx) => judgeAgain(tx, "org-a", runId, "ana:f1", "u2", keys));
+      const job = (await claimJob(t.db, keys))!;
+      expect(job).toMatchObject({ kind: "judge", finding: { id: "ana:f1" } });
+      seq = 0;
+      await ingestEvents(t.db, job.token, [ev({ type: "verdict", jobId: job.jobId, findingId: "ana:f1", verdict, observed: "No transactions found" })]);
+      await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: "done" });
+      return runView((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", runId)))!);
+    };
+    const keys_ = (items: Array<{ key: string }>) => items.map((f) => f.key);
+    const historyOf = async (runId: string) => (await withOrg(t.db, "org-a", (tx) => workspaceRuns(tx, "org-a", { projectId: project }))).runs.find((r) => r.id === runId)!;
+
+    test("whose judge gave no verdict can be judged again, and moves to Confirmed when it is confirmed", async () => {
+      const summary = await rolesWithGoals("none");
+      const before = runView(summary);
+      expect(keys_(before.report.couldNotJudge)).toEqual(["ana:f1"]);
+      expect(before.report.couldNotJudge[0]).toMatchObject({ action: "judge_again", replayedAsDefect: true, reason: "Model error: No output generated." });
+      expect(keys_(before.report.friction)).toEqual(["ana:f2", "lee:f1"]);
+      expect([before.reported, before.headline]).toEqual([0, "No defects found."]);
+      expect(await historyOf(summary.id)).toMatchObject({ confirmed: 0, unchecked: false });
+
+      const after = await judgedAgain(summary.id, "confirmed");
+      expect(keys_(after.report.confirmed)).toEqual(["ana:f1"]);
+      expect(after.report.confirmed[0]!.replayedAsDefect).toBe(true);
+      expect(after.report.couldNotJudge).toEqual([]);
+      expect([after.reported, after.headline]).toEqual([1, "1 defect confirmed by replay."]);
+      expect(await historyOf(summary.id)).toMatchObject({ confirmed: 1, unchecked: false });
+    });
+
+    test("judged again and not borne out, it goes back to Friction", async () => {
+      for (const verdict of ["inconclusive", "refuted"]) {
+        const summary = await rolesWithGoals("none");
+        const after = await judgedAgain(summary.id, verdict);
+        expect(keys_(after.report.friction)).toEqual(["ana:f1", "ana:f2", "lee:f1"]);
+        expect(after.report.friction[0]!.replayedAsDefect).toBe(false);
+        expect([after.report.couldNotJudge, after.report.inconclusive, after.report.refuted]).toEqual([[], [], []]);
+        expect(after.reported).toBe(0);
+      }
+    });
 
     test("is replayed and judged, and once confirmed it is a defect that says the person filed it as friction", async () => {
       const summary = await rolesWithGoals("confirmed");

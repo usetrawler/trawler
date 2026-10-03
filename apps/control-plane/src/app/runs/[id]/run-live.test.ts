@@ -334,3 +334,17 @@ test("the bot protection notice shows a masked page readably, and no page when t
   expect(masked).toContain("Cloudflare's bot protection blocked Trawler's browser at /reset/••• . It stops");
   expect(text(render(summary({ ...finished, botProtection: { vendor: "Cloudflare", url: "" } })))).toContain("Cloudflare's bot protection blocked Trawler's browser. It stops");
 });
+
+test("friction replayed as a possible defect whose judge gave no verdict can be judged again, says why it was replayed, and is not counted as reported", () => {
+  const html = render(summary({
+    ...finished,
+    jobs: [...finished.jobs, job("judge", "failed", { finding_key: "ana:fr", error: "No output generated." })],
+    findings: [finished.findings[0]!, finding("ana:fr", "ana", { kind: "friction", filedAs: "friction", title: "Balance has no history", replay: { completed: true, observed: "No transactions.", blockedAt: null } }), finding("lee:fr", "lee", { kind: "friction", title: "Menu is hard to find" })],
+  }));
+  const [row] = rows(html, "Could not be judged");
+  expect(text(row!.split("</summary>")[0]!)).toBe("high severity 01 · Ana Balance has no history Failed: No output generated. →");
+  expect(row).toContain("Ana filed this as friction on a goal they did not reach, so Trawler replayed it too.");
+  expect(row).toMatch(/<button type="button"[^>]*>Judge again<\/button>/);
+  expect(rows(html, "Friction").map((r) => text(r.split("</summary>")[0]!))).toEqual(["high severity 01 · Lee Park Menu is hard to find o →"]);
+  expect(text(band(html))).toContain("Verified 1 of 1 reported");
+});
