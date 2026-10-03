@@ -280,7 +280,7 @@ describe("a report that matches a finding marked not a bug", () => {
     expect(shown.headline).toBe("Every reported defect was marked not a bug.");
   });
 
-  test("a single defect is checked against the list, while a project without marks skips straight to its replay; a mark from another project is never applied", async () => {
+  test("a single defect is checked against the list, while a project without marks skips straight to its replay; a mark from another project or a malformed one is never applied", async () => {
     const project = await newProject();
     const source = await finishedRun("org-a", project, [{ key: "pc", title: "Postcode refused" }]);
     await dismiss("org-a", source, "pc", "Intended.");

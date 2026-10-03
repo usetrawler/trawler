@@ -35,9 +35,9 @@ function replayFailedBecause(job: Job): string {
   return job.stopped_by === "error" && MODEL_FAULT.test(detail) ? `The replay hit a model error: ${detail}` : `The replay failed: ${detail}`;
 }
 
-function notJudgedReason(f: Finding, runLive: boolean, failedReplay: Job | undefined, grouping: boolean): string {
+function notJudgedReason(f: Finding, runLive: boolean, failedReplay: Job | undefined, grouping: boolean, soleDefect: boolean): string {
   if (failedReplay) return replayFailedBecause(failedReplay);
-  if (grouping) return "Checking whether others found the same defect.";
+  if (grouping) return soleDefect ? "Checking it against the findings marked not a bug." : "Checking whether others found the same defect.";
   const replay = f.replay as { completed: boolean; blockedAt: number | null } | null;
   if (replay && !replay.completed && replay.blockedAt === null) return "The fresh agent could not follow the steps far enough to report.";
   if (replay) return runLive ? "Waiting for the judge." : "The run ended before it was judged.";
@@ -136,7 +136,7 @@ export function runView(s: RunSummary) {
       reason: judgingAgain(f) ? "Judging again…" : whyNotJudged(lastJudge(f)!, s.status, s.cancelReason, capSpent),
       action: (judgingAgain(f) ? "judging" : live ? "after_run" : capSpent ? "cap_spent" : "judge_again") as JudgeAgainState,
     })),
-    notJudged: settled.filter((f) => !f.verdict).map((f) => ({ ...withPersona(f), reason: notJudgedReason(f, live, failedReplay(f), grouping) })),
+    notJudged: settled.filter((f) => !f.verdict).map((f) => ({ ...withPersona(f), reason: notJudgedReason(f, live, failedReplay(f), grouping, defects.length === 1) })),
     friction: s.findings.filter((f) => f.kind === "friction" && !f.dismissal && !candidatesToJudge.includes(f)).map(withPersona),
     dismissed: dismissed.map((f) => ({ ...withPersona(f), dismissal: f.dismissal! })),
   };
