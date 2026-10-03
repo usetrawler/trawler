@@ -665,7 +665,7 @@ test("a person is told to look at the page as a picture, and that a picture that
   const prompt = rolePrompt({ persona, targetUrl: "https://bank.test/", goals, signUpEmail: "dana@example.com", look: true });
   expect(prompt).toContain("To see the page as a picture, call look_at_page");
   expect(prompt).toContain("You see the picture on the next turn only, so note what you need from it.");
-  expect(prompt).toMatch(/a picture that does not match its item, the same picture where different ones belong, or text covered or cut off so it cannot be read/);
+  expect(prompt).toContain("Something you see is a defect like any other when the product shows it wrongly, for example a picture that does not match its item, the same picture where different ones belong, or text covered or cut off so it cannot be read.");
   for (const off of [{}, { look: false }]) expect(rolePrompt({ persona, targetUrl: "https://bank.test/", goals, signUpEmail: "dana@example.com", ...off })).not.toContain("look_at_page");
 });
 
@@ -704,6 +704,14 @@ describe("looking at the page", () => {
     expect(imagesIn(model, 1)).toHaveLength(1);
     expect((imagesIn(model, 1)[0] as { data: { data: string } }).data.data).toBe(Buffer.from([2]).toString("base64"));
     for (const call of [2, 3, 4]) expect(imagesIn(model, call)).toHaveLength(0);
+  });
+
+  test("a picture is not sent again after the model gave an empty reply and was nudged", async () => {
+    const model = scriptedModel([toolCall("look_at_page", {}), [], toolCall("browser_snapshot", {}), reached("sign-up"), reached("invoice"), finish]);
+    await run(model, { look: true, screenshot }).promise;
+    expect(imagesIn(model, 1)).toHaveLength(1);
+    expect(imagesIn(model, 2)).toHaveLength(0);
+    expect(JSON.stringify(model.doGenerateCalls[2]!.prompt)).toContain("the picture of the page is no longer shown");
   });
 
   test("the look tool and its guidance are offered only with look on and a way to take a screenshot", async () => {

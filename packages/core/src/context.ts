@@ -1,4 +1,4 @@
-import type { AssistantModelMessage, FilePart, ModelMessage, ToolResultPart } from "ai";
+import type { AssistantModelMessage, FilePart, ModelMessage, ToolResultPart, UserModelMessage } from "ai";
 
 export const PICTURE_GONE = "[the picture of the page is no longer shown; look at the page again to see it as it is now]";
 
@@ -50,16 +50,15 @@ function textIn(output: ToolResultPart["output"]): string {
   return output.type === "content" ? output.value.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("\n") : "";
 }
 
+const isPictureMessage = (m: ModelMessage): m is UserModelMessage => m.role === "user" && Array.isArray(m.content) && m.content.some((p) => p.type === "file" && p.mediaType.startsWith("image"));
+
 export function showUnreadPictures(messages: ModelMessage[]): ModelMessage[] {
-  const lastAssistant = messages.findLastIndex((m) => m.role === "assistant");
+  const latest = messages.findLastIndex((m) => !isPictureMessage(m));
   let newest: [number, number] = [-1, -1];
-  messages.forEach((m, mi) => {
-    if (m.role === "tool" && mi > lastAssistant) m.content.forEach((p, pi) => { if (p.type === "tool-result" && picturesIn(p.output).length > 0) newest = [mi, pi]; });
-  });
+  const unread = messages[latest];
+  if (unread?.role === "tool") unread.content.forEach((p, pi) => { if (p.type === "tool-result" && picturesIn(p.output).length > 0) newest = [latest, pi]; });
   return messages.flatMap((m, mi): ModelMessage[] => {
-    if (m.role === "user" && mi < lastAssistant && Array.isArray(m.content) && m.content.some((p) => p.type === "file" && p.mediaType.startsWith("image"))) {
-      return [{ ...m, content: [{ type: "text", text: PICTURE_GONE }] }];
-    }
+    if (isPictureMessage(m) && mi < latest) return [{ ...m, content: [{ type: "text", text: PICTURE_GONE }] }];
     if (m.role !== "tool" || !m.content.some((p) => p.type === "tool-result" && picturesIn(p.output).length > 0)) return [m];
     const shown: FilePart[] = [];
     const content = m.content.map((p, pi) => {
