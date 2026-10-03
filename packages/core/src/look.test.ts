@@ -48,4 +48,13 @@ describe("look_at_page", () => {
     for (let i = 0; i < MAX_LOOKS; i++) expect((await look(dflt)).model).toMatchObject({ type: "content" });
     expect((await look(dflt)).model).toMatchObject({ type: "text", value: expect.stringMatching(/^rejected: .* 10 times/) });
   });
+
+  test("looks called together in one turn are taken one at a time, so the cap still holds", async () => {
+    let taken = 0;
+    const t = lookTool({ maxLooks: 2, screenshot: async () => (taken++, await new Promise((r) => setTimeout(r, 5)), shot) });
+    const outputs = await Promise.all([1, 2, 3, 4].map(() => look(t)));
+    expect(outputs.filter((o) => o.model.type === "content")).toHaveLength(2);
+    expect(outputs.filter((o) => o.model.type === "text" && String(o.model.value).startsWith("rejected:"))).toHaveLength(2);
+    expect(taken).toBe(2);
+  });
 });

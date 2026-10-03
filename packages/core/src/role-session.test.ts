@@ -696,6 +696,16 @@ describe("looking at the page", () => {
     expect(JSON.stringify(model.doGenerateCalls[2]!.prompt)).toContain("the picture of the page is no longer shown");
   });
 
+  test("two looks in one turn send one picture, and a picture is not sent again after the model answered in text and was nudged", async () => {
+    let n = 0;
+    const numbered = async () => ({ bytes: new Uint8Array([++n]), contentType: "image/png" as const });
+    const model = scriptedModel([[toolCall("look_at_page", {}), toolCall("look_at_page", {})], text("Nice page."), toolCall("browser_snapshot", {}), reached("sign-up"), reached("invoice"), finish]);
+    await run(model, { look: true, screenshot: numbered }).promise;
+    expect(imagesIn(model, 1)).toHaveLength(1);
+    expect((imagesIn(model, 1)[0] as { data: { data: string } }).data.data).toBe(Buffer.from([2]).toString("base64"));
+    for (const call of [2, 3, 4]) expect(imagesIn(model, call)).toHaveLength(0);
+  });
+
   test("the look tool and its guidance are offered only with look on and a way to take a screenshot", async () => {
     const without = scriptedModel([reached("sign-up"), reached("invoice"), finish]);
     await run(without, { screenshot }).promise;

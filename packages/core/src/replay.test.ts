@@ -651,6 +651,10 @@ describe("a replay with several people", () => {
         expect(model.doGenerateCalls[0]!.tools!.map((t) => t.name)).not.toContain("look_at_page");
         expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).not.toContain("look_at_page");
       }
+      const noScreenshot = scriptedModel([done]);
+      await base({ look: true, screenshot: undefined }, log, noScreenshot);
+      expect(noScreenshot.doGenerateCalls[0]!.tools!.map((t) => t.name)).not.toContain("look_at_page");
+      expect(JSON.stringify(noScreenshot.doGenerateCalls[0]!.prompt)).not.toContain("look_at_page");
       const on = scriptedModel([done]);
       await base({ look: true }, log, on);
       expect(on.doGenerateCalls[0]!.tools!.map((t) => t.name)).toContain("look_at_page");

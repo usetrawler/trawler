@@ -249,3 +249,15 @@ test("a picture already moved into a user message, once read, is replaced by a n
   expect(later.some((m) => m.role === "user" && typeof m.content !== "string" && m.content.some((p) => p.type === "file"))).toBe(false);
   expect(showUnreadPictures(moved)).toEqual(moved);
 });
+
+test("of two pictures the model has not read yet, only the newer is sent, and the older is replaced by the note", () => {
+  const both: ModelMessage = { role: "tool", content: [(picture("1") as { content: ToolResultPart[] }).content[0]!, (picture("2") as { content: ToolResultPart[] }).content[0]!] };
+  const out = showUnreadPictures([SEEN, both]);
+  const parts = (out[1] as { content: ToolResultPart[] }).content;
+  expect(parts[0]!.output).toEqual({ type: "text", value: PICTURE_GONE });
+  expect(parts[1]!.output).toEqual({ type: "text", value: "Here is the page." });
+  expect(out[2]).toEqual({ role: "user", content: [{ type: "file", data: PNG, mediaType: "image/png" }] });
+  const apart = showUnreadPictures([SEEN, picture("1"), picture("2")]);
+  expect(outputOf(apart[1])).toEqual({ type: "text", value: PICTURE_GONE });
+  expect(apart.map((m) => m.role)).toEqual(["assistant", "tool", "tool", "user"]);
+});
