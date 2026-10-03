@@ -215,6 +215,7 @@ export function createAuth(options: AuthOptions) {
     baseURL: options.baseURL,
     database: options.pool,
     emailAndPassword: { enabled: false },
+    advanced: { ipAddress: { ipAddressHeaders: ["x-real-ip"] } },
     account: { encryptOAuthTokens: true },
     socialProviders: {
       ...(options.github ? { github: options.github } : {}),
