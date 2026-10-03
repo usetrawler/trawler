@@ -171,6 +171,7 @@ export async function runReplay(opts: {
     const screenshot = actor.browser.screenshot;
     return screenshot ? actor.queue.run(screenshot) : null;
   });
+  const look = opts.look === true && opts.screenshot !== undefined;
   const lookAtCurrentPage = lookTool({ screenshot: pictureOfCurrentPage });
   const browserTools = Object.fromEntries(Object.entries(first.queue.tools).map(([name, t]) => [name, delegate(name, t)]));
   const tools: ToolSet = {
@@ -179,15 +180,15 @@ export async function runReplay(opts: {
     report_replay,
     ...(ownDefinition ? { type_own_password: delegate("type_own_password", ownDefinition) } : {}),
     ...(together && known.length > 1 ? { act_as } : {}),
-    ...(opts.look ? { [LOOK_TOOL]: lookAtCurrentPage } : {}),
+    ...(look ? { [LOOK_TOOL]: lookAtCurrentPage } : {}),
   };
   const instructions = together
     ? replayPrompt({
         targetUrl: opts.project.targetUrl, steps: opts.finding.reproduction,
         people: known.map((id) => ({ name: persona(id).name, accountRef: persona(id).accountRef, signUpEmail: persona(id).accountRef ? undefined : madeUpEmail(`replay-${id}`) })),
-        stepPeople: opts.finding.by!.map((id) => persona(id).name), look: opts.look,
+        stepPeople: opts.finding.by!.map((id) => persona(id).name), look,
       })
-    : replayPrompt({ targetUrl: opts.project.targetUrl, steps: opts.finding.reproduction, accountRef: opts.accountRef, signUpEmail: opts.accountRef ? undefined : madeUpEmail("replay"), look: opts.look });
+    : replayPrompt({ targetUrl: opts.project.targetUrl, steps: opts.finding.reproduction, accountRef: opts.accountRef, signUpEmail: opts.accountRef ? undefined : madeUpEmail("replay"), look });
   const usage = emptyUsage(opts.modelId);
 
   emit({ type: "job_started", jobId, kind: "replay" });

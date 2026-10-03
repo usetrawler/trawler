@@ -52,19 +52,23 @@ function textIn(output: ToolResultPart["output"]): string {
 
 export function showUnreadPictures(messages: ModelMessage[]): ModelMessage[] {
   const lastAssistant = messages.findLastIndex((m) => m.role === "assistant");
+  let newest: [number, number] = [-1, -1];
+  messages.forEach((m, mi) => {
+    if (m.role === "tool" && mi > lastAssistant) m.content.forEach((p, pi) => { if (p.type === "tool-result" && picturesIn(p.output).length > 0) newest = [mi, pi]; });
+  });
   return messages.flatMap((m, mi): ModelMessage[] => {
     if (m.role === "user" && mi < lastAssistant && Array.isArray(m.content) && m.content.some((p) => p.type === "file" && p.mediaType.startsWith("image"))) {
       return [{ ...m, content: [{ type: "text", text: PICTURE_GONE }] }];
     }
     if (m.role !== "tool" || !m.content.some((p) => p.type === "tool-result" && picturesIn(p.output).length > 0)) return [m];
-    const unread = mi > lastAssistant;
     const shown: FilePart[] = [];
-    const content = m.content.map((p) => {
+    const content = m.content.map((p, pi) => {
       if (p.type !== "tool-result") return p;
       const pictures = picturesIn(p.output);
       if (pictures.length === 0) return p;
-      if (unread) shown.push(...pictures);
-      return { ...p, output: { type: "text" as const, value: unread ? textIn(p.output) : PICTURE_GONE } };
+      const latest = mi === newest[0] && pi === newest[1];
+      if (latest) shown.push(...pictures);
+      return { ...p, output: { type: "text" as const, value: latest ? textIn(p.output) : PICTURE_GONE } };
     });
     return shown.length > 0 ? [{ ...m, content }, { role: "user", content: shown }] : [{ ...m, content }];
   });
