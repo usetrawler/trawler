@@ -246,11 +246,11 @@ describe("proposeProject", () => {
     expect(usage.steps).toBe(1);
   });
 
-  test("the setup call limits how long the model thinks and carries a time limit", async () => {
+  test("choosing the people does not let the model think, and every try carries a time limit", async () => {
     const model = scriptedModel([text(JSON.stringify(proposal))]);
     await propose(model).promise;
     const call = model.doGenerateCalls[0]!;
-    expect(call.providerOptions?.openrouter).toMatchObject({ reasoning: { effort: "low" }, provider: { require_parameters: true } });
+    expect(call.providerOptions?.openrouter).toMatchObject({ reasoning: { enabled: false }, provider: { require_parameters: true } });
     expect(call.abortSignal).toBeInstanceOf(AbortSignal);
   });
 
@@ -348,6 +348,7 @@ describe("describeProduct", () => {
     const { summary: got, usage } = await describeProduct({ model, modelId: "mock", budget: new Budget(1), product });
     expect(got).toEqual({ name: "Acme", description: "A pitch board.", signUp: "open", features: [{ title: "Submit a pitch", summary: "Founders send a pitch." }, { title: "Review pitches", summary: "Reviewers approve." }] });
     expect(usage.steps).toBe(1);
+    expect(model.doGenerateCalls[0]!.providerOptions?.openrouter).toMatchObject({ reasoning: { effort: "low" } });
     const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
     expect(prompt).toContain("Acme lets founders submit pitches");
     expect(prompt).toMatch(/most central first/);

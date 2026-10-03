@@ -17,7 +17,8 @@ export const MAX_DESCRIPTION_CHARS = 2000;
 const SETUP_OUTPUT_TOKENS = 16_000;
 const SETUP_REPLIES = 2;
 const SETUP_TRY_MS = 60_000;
-const SETUP_REASONING = { effort: "low" } as const;
+const THINKS_A_LITTLE = { effort: "low" } as const;
+const DOES_NOT_THINK = { enabled: false } as const;
 
 const MAX_HTML_CHARS = 2_000_000;
 const DROPPED_ELEMENTS = new Set(["script", "style", "noscript", "svg", "template"]);
@@ -166,7 +167,7 @@ function timedOut(err: unknown): boolean {
   return false;
 }
 
-async function askOnce<T>(opts: { model: LanguageModel; budget: Budget; tryMs?: number }, schema: z.ZodType<T>, prompt: string, usage: JobUsage): Promise<{ answer: T | null; finishReason?: string }> {
+async function askOnce<T>(opts: { model: LanguageModel; budget: Budget; tryMs?: number }, schema: z.ZodType<T>, prompt: string, usage: JobUsage, reasoning: typeof THINKS_A_LITTLE | typeof DOES_NOT_THINK): Promise<{ answer: T | null; finishReason?: string }> {
   let result;
   try {
     result = await generateText({
@@ -175,7 +176,7 @@ async function askOnce<T>(opts: { model: LanguageModel; budget: Budget; tryMs?: 
       prompt,
       maxOutputTokens: SETUP_OUTPUT_TOKENS,
       abortSignal: AbortSignal.timeout(opts.tryMs ?? SETUP_TRY_MS),
-      providerOptions: { openrouter: { reasoning: SETUP_REASONING, provider: { require_parameters: true } } },
+      providerOptions: { openrouter: { reasoning, provider: { require_parameters: true } } },
       onStepEnd: (step) => void tallyStep(usage, opts.budget, step),
     });
   } catch (err) {
@@ -191,7 +192,7 @@ async function askOnce<T>(opts: { model: LanguageModel; budget: Budget; tryMs?: 
   }
 }
 
-async function ask<T>(opts: { model: LanguageModel; modelId: string; budget: Budget; tryMs?: number }, schema: z.ZodType<T>, prompt: string, problemsOf: (answer: T) => string[] = () => []): Promise<{ answer: T; usage: JobUsage }> {
+async function ask<T>(opts: { model: LanguageModel; modelId: string; budget: Budget; tryMs?: number }, schema: z.ZodType<T>, prompt: string, problemsOf: (answer: T) => string[] = () => [], reasoning: typeof THINKS_A_LITTLE | typeof DOES_NOT_THINK = THINKS_A_LITTLE): Promise<{ answer: T; usage: JobUsage }> {
   if (opts.budget.exceeded) throw spent();
   const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
   let answer: T | null = null;
@@ -203,7 +204,7 @@ async function ask<T>(opts: { model: LanguageModel; modelId: string; budget: Bud
     while (answer === null && tries < SETUP_REPLIES && !opts.budget.exceeded) {
       tries++;
       try {
-        ({ answer, finishReason } = await askOnce(opts, schema, asking, usage));
+        ({ answer, finishReason } = await askOnce(opts, schema, asking, usage, reasoning));
       } catch (err) {
         if (flawed === null) throw err;
         break;
@@ -393,7 +394,7 @@ export async function proposePeople(opts: {
   const features = opts.features.map((f) => clip(f, MAX_FEATURE_CHARS)).filter(Boolean).slice(0, MAX_CHOSEN_FEATURES);
   if (features.length === 0) throw new RangeError("choose at least one feature");
   const signUp = opts.signUp ?? "unclear";
-  const { answer, usage } = await ask(opts, PeopleSchema, setupPrompt({ ...opts.product, context: { description, features, signUp } }), (a) => teamProblems(a, opts.name));
+  const { answer, usage } = await ask(opts, PeopleSchema, setupPrompt({ ...opts.product, context: { description, features, signUp } }), (a) => teamProblems(a, opts.name), DOES_NOT_THINK);
   const plan = planFrom(opts.product, { name: opts.name, description }, answer.personas, answer.playOrder ?? []);
   return { ...plan, signsIn: signUp === "closed" ? plan.project.personas.map((p) => p.id) : plan.signsIn, usage };
 }
@@ -411,6 +412,6 @@ export async function proposeProject(opts: {
   const focus = opts.focus?.trim() ? clip(opts.focus, MAX_FOCUS_CHARS) : undefined;
   if (opts.budget.exceeded) throw spent();
   const product = await readProduct(opts);
-  const { answer, usage } = await ask(opts, ProposalSchema, setupPrompt({ ...product, focus }), (a) => teamProblems(a, a.name));
+  const { answer, usage } = await ask(opts, ProposalSchema, setupPrompt({ ...product, focus }), (a) => teamProblems(a, a.name), DOES_NOT_THINK);
   return { project: planFrom(product, { name: answer.name, description: clip(answer.description, 600) }, answer.personas, answer.playOrder ?? []).project, usage };
 }
