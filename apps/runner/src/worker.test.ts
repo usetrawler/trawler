@@ -100,6 +100,36 @@ test("a replay uploads a screenshot of where it ended", async () => {
   expect(seen.order.slice(0, seen.order.indexOf("complete"))).toContain("artifacts answered");
 });
 
+const namesOfTools = (model: ReturnType<typeof scriptedModel>) => model.doGenerateCalls[0]!.tools!.map((t) => t.name);
+
+test.each([[true, true], [false, false], [undefined, false]])("a role session can look at the page as a picture only when the runner is set to (look %j: %s)", async (look, offered) => {
+  const { url } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" });
+  const model = scriptedModel([toolCall("look_at_page", {}), toolCall("goal_status", { goal: "g", status: "reached", note: "" }), toolCall("finish", { summary: "done" })]);
+  await workOnce(deps(url, model, { openBrowser: shooting, ...(look === undefined ? {} : { look: () => look }) }));
+  expect(namesOfTools(model).includes("look_at_page")).toBe(offered);
+  expect(JSON.stringify(model.doGenerateCalls[0]!.prompt).includes("call look_at_page")).toBe(offered);
+  const pictures = model.doGenerateCalls[1]?.prompt.some((m) => m.role === "user" && m.content.some((p) => p.type === "file")) ?? false;
+  expect(pictures).toBe(offered);
+});
+
+test.each([[true, true], [false, false], [undefined, false]])("a replay can look at the page as a picture only when the runner is set to (look %j: %s)", async (look, offered) => {
+  const finding = { id: "ana:f1", kind: "defect", goal: "g", title: "Broken", observed: "500", reproduction: ["Open /", "Click Save"], severity: "high" };
+  const { url } = await fakeControlPlane({ ...baseJob, kind: "replay", finding });
+  const model = scriptedModel([toolCall("look_at_page", {}), toolCall("report_replay", { completed: true, observed: "Internal Server Error", blockedAt: null })]);
+  await workOnce(deps(url, model, { openBrowser: shooting, ...(look === undefined ? {} : { look: () => look }) }));
+  expect(namesOfTools(model).includes("look_at_page")).toBe(offered);
+  expect(JSON.stringify(model.doGenerateCalls[0]!.prompt).includes("call look_at_page, then call report_replay")).toBe(offered);
+});
+
+test("whether people may look is decided by the job's target address", async () => {
+  const { url } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" });
+  const asked: string[] = [];
+  const model = scriptedModel([toolCall("goal_status", { goal: "g", status: "reached", note: "" }), toolCall("finish", { summary: "done" })]);
+  await workOnce(deps(url, model, { openBrowser: shooting, look: (target) => (asked.push(target), target === "https://a.test/") }));
+  expect(asked).toEqual(["https://a.test/"]);
+  expect(namesOfTools(model)).toContain("look_at_page");
+});
+
 const within = async (condition: () => boolean, ms = 10_000) => {
   const started = Date.now();
   while (!condition()) {

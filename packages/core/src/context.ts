@@ -1,4 +1,6 @@
-import type { AssistantModelMessage, ModelMessage, ToolResultPart } from "ai";
+import type { AssistantModelMessage, FilePart, ModelMessage, ToolResultPart, UserModelMessage } from "ai";
+
+export const PICTURE_GONE = "[the picture of the page is no longer shown; look at the page again to see it as it is now]";
 
 function size(part: ToolResultPart): number {
   const o = part.output;
@@ -36,6 +38,38 @@ export function pruneMessages(messages: ModelMessage[], opts: { keepLargeResults
           : p,
       ),
     };
+  });
+}
+
+function picturesIn(output: ToolResultPart["output"]): FilePart[] {
+  if (output.type !== "content") return [];
+  return output.value.flatMap((p) => (p.type === "file" && p.mediaType.startsWith("image") ? [{ type: "file" as const, data: p.data, mediaType: p.mediaType }] : []));
+}
+
+function textIn(output: ToolResultPart["output"]): string {
+  return output.type === "content" ? output.value.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("\n") : "";
+}
+
+const isPictureMessage = (m: ModelMessage): m is UserModelMessage => m.role === "user" && Array.isArray(m.content) && m.content.some((p) => p.type === "file" && p.mediaType.startsWith("image"));
+
+export function showUnreadPictures(messages: ModelMessage[]): ModelMessage[] {
+  const latest = messages.findLastIndex((m) => !isPictureMessage(m));
+  let newest: [number, number] = [-1, -1];
+  const unread = messages[latest];
+  if (unread?.role === "tool") unread.content.forEach((p, pi) => { if (p.type === "tool-result" && picturesIn(p.output).length > 0) newest = [latest, pi]; });
+  return messages.flatMap((m, mi): ModelMessage[] => {
+    if (isPictureMessage(m) && mi < latest) return [{ ...m, content: [{ type: "text", text: PICTURE_GONE }] }];
+    if (m.role !== "tool" || !m.content.some((p) => p.type === "tool-result" && picturesIn(p.output).length > 0)) return [m];
+    const shown: FilePart[] = [];
+    const content = m.content.map((p, pi) => {
+      if (p.type !== "tool-result") return p;
+      const pictures = picturesIn(p.output);
+      if (pictures.length === 0) return p;
+      const isNewest = mi === newest[0] && pi === newest[1];
+      if (isNewest) shown.push(...pictures);
+      return { ...p, output: { type: "text" as const, value: isNewest ? textIn(p.output) : PICTURE_GONE } };
+    });
+    return shown.length > 0 ? [{ ...m, content }, { role: "user", content: shown }] : [{ ...m, content }];
   });
 }
 

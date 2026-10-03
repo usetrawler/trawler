@@ -27,7 +27,9 @@ const USAGE = `Usage:
 
   trawler-runner work --control-plane https://app.usetrawler.com [--once]
 
-Set OPENROUTER_API_KEY for setup and run. work needs only TRAWLER_RUNNER_TOKEN: its model calls go through the control plane.`;
+Set OPENROUTER_API_KEY for setup and run. work needs only TRAWLER_RUNNER_TOKEN: its model calls go through the control plane.
+Set TRAWLER_LOOK=1 for run or work to let people and replays see the page as a picture, or to a comma-separated list of
+target origins to allow it only for those products (experimental; the model must take images).`;
 
 export interface CliDeps {
   env: Record<string, string | undefined>;
@@ -74,6 +76,16 @@ export const defaultDeps: CliDeps = {
     }),
   runsRoot: "runs",
 };
+
+export function lookFor(value: string | undefined): (targetUrl: string) => boolean {
+  if (value === undefined || value === "" || value === "0") return () => false;
+  if (value === "1") return () => true;
+  const origins = value.split(",").map((part) => part.trim());
+  const bad = origins.find((o) => !URL.canParse(o) || !/^https?:$/.test(new URL(o).protocol));
+  if (bad !== undefined) throw new UsageError(`TRAWLER_LOOK must be 1, 0 or a comma-separated list of target origins such as https://shop.example, got ${JSON.stringify(bad)}`);
+  const allowed = new Set(origins.map((o) => new URL(o).origin));
+  return (targetUrl) => URL.canParse(targetUrl) && allowed.has(new URL(targetUrl).origin);
+}
 
 function positiveNumber(name: string, value: string | undefined, fallback: number, integer = false): number {
   if (value === undefined) return fallback;
@@ -142,6 +154,7 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
   if (protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(hostname)) throw new UsageError("work sends the runner token, so --control-plane must use https unless it is on this machine");
   const runnerToken = deps.env.TRAWLER_RUNNER_TOKEN?.trim();
   if (!runnerToken) throw new UsageError("TRAWLER_RUNNER_TOKEN is not set");
+  const look = lookFor(deps.env.TRAWLER_LOOK);
   const egressServer = deps.env.TRAWLER_EGRESS_PROXY?.trim();
   const egressToken = deps.env.TRAWLER_EGRESS_TOKEN?.trim();
   if (egressServer && !egressToken) throw new UsageError("TRAWLER_EGRESS_PROXY is set without TRAWLER_EGRESS_TOKEN");
@@ -171,6 +184,7 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
     controlPlane,
     runnerToken,
     model: (modelId, jobToken) => deps.model(modelId, jobToken, new URL("/api/llm/v1", controlPlane).toString()),
+    look,
     openBrowser: async (project, { onBlocked, scrubber }) => {
       const outputDir = mkdtempSync(join(tmpdir(), "trawler-work-"));
       const downloadsPath = sharedDownloads ? mkdtempSync(join(sharedDownloads, "job-")) : undefined;
@@ -252,6 +266,7 @@ async function run(args: string[], deps: CliDeps, apiKey: () => string): Promise
   const budgetUsd = positiveNumber("budget", values.budget, 5);
   const maxSteps = positiveNumber("max-steps", values["max-steps"], 120, true);
   const replaySteps = positiveNumber("replay-steps", values["replay-steps"], 40, true);
+  const look = lookFor(deps.env.TRAWLER_LOOK);
   const project = readProject(values.config);
   const scrubber = SecretScrubber.forProject(project);
   const key = apiKey();
@@ -263,7 +278,7 @@ async function run(args: string[], deps: CliDeps, apiKey: () => string): Promise
   try {
     summary = await localRun({
     project, agentModel: deps.model(agentModelId, key), agentModelId, judgeModel: deps.model(judgeModelId, key), judgeModelId,
-    budgetUsd, maxSteps, replaySteps,
+    budgetUsd, maxSteps, replaySteps, look: look(project.targetUrl),
     emit: (e) => {
       runDir.emit(e);
       progress(deps.err, e);

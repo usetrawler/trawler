@@ -612,6 +612,55 @@ describe("a replay with several people", () => {
     await base({}, log, model);
     expect(log.filter((l) => l.endsWith(":snapshot"))).toEqual(["b2:snapshot", "b1:snapshot"]);
   });
+
+  describe("looking at the page", () => {
+    const shotOf = (n: number) => ({ bytes: new Uint8Array([n]), contentType: "image/png" as const });
+    const imageSent = (model: ReturnType<typeof scriptedModel>, call: number) =>
+      model.doGenerateCalls[call]!.prompt.flatMap((m) => (m.role === "user" ? m.content.filter((p) => p.type === "file") : [])).map((p) => (p as { data: { data: string } }).data.data);
+    const done = report({ completed: true, observed: "ok", blockedAt: null });
+
+    test("the picture is of the page of whoever is acting, so after a switch it is the other person's browser", async () => {
+      const log: string[] = [];
+      const model = scriptedModel([toolCall("look_at_page", {}), toolCall("act_as", { person: "Marco" }), toolCall("look_at_page", {}), done]);
+      await base({ look: true, screenshot: async () => shotOf(1), openBrowser: async () => ({ ...browserFor("b2", log), screenshot: async () => (log.push("b2:screenshot"), shotOf(2)) }) }, log, model);
+      expect(imageSent(model, 1)).toEqual([Buffer.from([1]).toString("base64")]);
+      expect(imageSent(model, 3).at(-1)).toBe(Buffer.from([2]).toString("base64"));
+      expect(log.filter((l) => l.endsWith(":screenshot"))).toContain("b2:screenshot");
+    });
+
+    test("a person whose browser cannot take a screenshot gets a note in text", async () => {
+      const log: string[] = [];
+      const model = scriptedModel([toolCall("act_as", { person: "Marco" }), toolCall("look_at_page", {}), done]);
+      await base({ look: true, openBrowser: async () => ({ ...browserFor("b2", log), screenshot: undefined }) }, log, model);
+      expect(imageSent(model, 2)).toEqual([]);
+      expect(JSON.stringify(model.doGenerateCalls[2]!.prompt)).toContain("failed: the page could not be pictured just now");
+    });
+
+    test("the picture waits for a browser call in the same step, so it shows the page after it", async () => {
+      const log: string[] = [];
+      const model = scriptedModel([[toolCall("browser_snapshot", {}), toolCall("look_at_page", {})], done]);
+      await base({ look: true, screenshot: async () => (log.push("b1:shot"), shotOf(1)) }, log, model);
+      expect(log.filter((l) => l === "b1:snapshot" || l === "b1:shot")).toEqual(["b1:snapshot", "b1:shot"]);
+    });
+
+    test("without look the replay has no look_at_page tool and is not told about it", async () => {
+      const log: string[] = [];
+      for (const over of [{}, { look: false }]) {
+        const model = scriptedModel([done]);
+        await base({ ...over, screenshot: async () => shotOf(1) }, log, model);
+        expect(model.doGenerateCalls[0]!.tools!.map((t) => t.name)).not.toContain("look_at_page");
+        expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).not.toContain("look_at_page");
+      }
+      const noScreenshot = scriptedModel([done]);
+      await base({ look: true, screenshot: undefined }, log, noScreenshot);
+      expect(noScreenshot.doGenerateCalls[0]!.tools!.map((t) => t.name)).not.toContain("look_at_page");
+      expect(JSON.stringify(noScreenshot.doGenerateCalls[0]!.prompt)).not.toContain("look_at_page");
+      const on = scriptedModel([done]);
+      await base({ look: true }, log, on);
+      expect(on.doGenerateCalls[0]!.tools!.map((t) => t.name)).toContain("look_at_page");
+      expect(JSON.stringify(on.doGenerateCalls[0]!.prompt)).toContain("call look_at_page, then call report_replay");
+    });
+  });
 });
 
 test("in a replay with several people, each person who signs up gets their own fresh username in place of the one in the steps", () => {
@@ -633,6 +682,24 @@ test("a replay, alone or with several people, is told to use what the product cr
     expect(prompt).toContain("whatever the product creates while you follow the steps gets its own number or name, different from the one in the steps: an account, order or invoice number, a record's ID in a link");
     expect(prompt).toContain("If the one a step names is there, use it as written. If it is not there and an earlier step had the product create one that could be it, use the one created on this copy instead, and say in observed which one you used and which the step named.");
     expect(prompt).toContain("If the product created nothing that could be it, that step cannot be carried out.");
+  }
+});
+
+test("a replay told it can look is asked to call look_at_page before report_replay and to describe how the page looks, alone or with several people", () => {
+  const alone = { targetUrl: "https://bank.test/", steps: ["Click Accounts Overview"], signUpEmail: "replay.ab12cd34@example.com" };
+  const together = {
+    targetUrl: "https://bank.test/", steps: ["Register", "Click account 14010"], stepPeople: ["Dana", "Owen"],
+    people: [{ name: "Dana", signUpEmail: "replay-dana.ab12cd34@example.com" }, { name: "Owen", signUpEmail: "replay-owen.ef56ab78@example.com" }],
+  };
+  for (const p of [alone, together]) {
+    const prompt = replayPrompt({ ...p, look: true });
+    expect(prompt).toContain("To see the page as a picture, call look_at_page");
+    expect(prompt).toContain("When you have done the last step, call look_at_page, then call report_replay with completed true and describe exactly what the page showed, how it looks as well as what it says: its pictures, and anything covered, cut off or out of place.");
+    expect(prompt).not.toContain("Something you see is a defect");
+    for (const off of [replayPrompt(p), replayPrompt({ ...p, look: false })]) {
+      expect(off).not.toContain("look_at_page");
+      expect(off).toContain("When you have done the last step, call report_replay with completed true and describe exactly what the page showed. Report only what you saw");
+    }
   }
 });
 
