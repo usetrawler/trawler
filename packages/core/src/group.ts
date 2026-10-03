@@ -1,6 +1,6 @@
 import { generateText, tool, type LanguageModel } from "ai";
 import { z } from "zod";
-import { DefectGroupsSchema, MAX_GROUPED_DEFECTS, settleGroups, type DefectToGroup, type JobStopReason, type JobUsage, type NotABug, type RunEventInput } from "@usetrawler/protocol";
+import { DefectGroupsSchema, settleGroups, type DefectToGroup, type JobStopReason, type JobUsage, type NotABug, type RunEventInput } from "@usetrawler/protocol";
 import { type Budget, failureMessage, stoppedByRun, tallyStep } from "./llm.ts";
 import { groupPrompt } from "./prompts.ts";
 import { emitSafely, emptyUsage } from "./replay.ts";
@@ -9,9 +9,10 @@ import type { SecretScrubber } from "./secrets.ts";
 const GROUP_OUTPUT_TOKENS = 8000;
 const GROUP_REPLIES = 2;
 
+const NotABugMatch = z.object({ id: z.string(), item: z.number().int() });
 const Answer = z.object({
   groups: DefectGroupsSchema,
-  notBugs: z.array(z.object({ id: z.string().min(1).max(200), item: z.number().int().positive() })).max(MAX_GROUPED_DEFECTS).optional(),
+  notBugs: z.array(NotABugMatch.nullable().catch(null)).optional().catch(undefined),
 });
 type Answer = z.infer<typeof Answer>;
 
@@ -28,8 +29,10 @@ function answerInText(reply: string): Answer | null {
 function knownNotBugs(answer: Answer, defects: DefectToGroup[], notBugs: NotABug[]): Array<{ key: string; ref: string }> {
   const keys = new Set(defects.map((d) => d.key));
   const matched = new Map<string, string>();
-  for (const { id, item } of answer.notBugs ?? []) {
-    const ref = notBugs[item - 1]?.ref;
+  for (const match of answer.notBugs ?? []) {
+    if (!match) continue;
+    const { id, item } = match;
+    const ref = item > 0 ? notBugs[item - 1]?.ref : undefined;
     if (keys.has(id) && ref && !matched.has(id)) matched.set(id, ref);
   }
   return [...matched].map(([key, ref]) => ({ key, ref }));

@@ -103,7 +103,7 @@ describe("known non-bugs", () => {
     { title: "Totals are rounded to whole dollars", reason: "Prices are whole dollars by design.", ref: "run-4/f2" },
   ];
 
-  test("are listed for the model with each reason, as data, with the clause the people get, and matches come back with the mark they refer to", async () => {
+  test("are listed for the model with each reason, as data, with what is not a match, and matches come back with the mark they refer to", async () => {
     const model = scriptedModel([toolCall("report_groups", { groups: [["t0f1", "t1f1"], ["t1f2"]], notBugs: [{ id: "t1f2", item: 2 }] })]);
     const { knownNotBugs, groups } = await groupWith(model, { notBugs }).promise;
     expect(groups).toEqual([["t0f1", "t1f1"], ["t1f2"]]);
@@ -120,6 +120,17 @@ describe("known non-bugs", () => {
     const answer = { groups: [["t0f1"], ["t1f1"], ["t1f2"]], notBugs: [{ id: "nobody", item: 1 }, { id: "t0f1", item: 9 }, { id: "t1f1", item: 1 }, { id: "t1f1", item: 2 }, { id: "t1f2", item: 3 }] };
     const { knownNotBugs } = await groupWith(scriptedModel([toolCall("report_groups", answer)]), { notBugs: [...notBugs, { title: "No mark", reason: "x" }] }).promise;
     expect(knownNotBugs).toEqual([{ key: "t1f1", ref: "run-3/f1" }]);
+  });
+
+  test("a malformed match is dropped without losing the groups or the other matches", async () => {
+    const answer = { groups: [["t0f1", "t1f1"], ["t1f2"]], notBugs: [{ id: "t0f1", item: 0 }, { id: "t0f1", item: "1" }, "t1f1", { id: "t1f2", item: 2 }] };
+    const result = await groupWith(scriptedModel([toolCall("report_groups", answer)]), { notBugs }).promise;
+    expect(result.stoppedBy).toBe("done");
+    expect(result.groups).toEqual([["t0f1", "t1f1"], ["t1f2"]]);
+    expect(result.knownNotBugs).toEqual([{ key: "t1f2", ref: "run-4/f2" }]);
+    const notAList = await groupWith(scriptedModel([text(JSON.stringify({ groups: [["t0f1", "t1f1"], ["t1f2"]], notBugs: "t1f2" }))]), { notBugs }).promise;
+    expect(notAList.groups).toEqual([["t0f1", "t1f1"], ["t1f2"]]);
+    expect(notAList.knownNotBugs).toEqual([]);
   });
 
   test("are read from a JSON answer too, and without a list nothing is asked or matched", async () => {
