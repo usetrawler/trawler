@@ -321,3 +321,10 @@ test("a finding marked not a bug leaves its section and the counts for its own, 
   expect(html).toMatch(/>Not a bug · 2<\/h2><p[^>]*>Marked not a bug by your team; the people in later runs of this project are told, with the reason<\/p>/);
   expect(first).toMatch(/<span class="min-w-0 wrap-anywhere text-muted">Marked by ana@acme.test/);
 });
+
+test("each person beside a finished run's findings links to what they did", () => {
+  const html = render(finished);
+  expect(html).toMatch(/<a href="#trail-ana"[^>]*>What they did<span class="sr-only">: Ana<\/span><\/a>/);
+  expect(html).toMatch(/<a href="#trail-lee"[^>]*>What they did<span class="sr-only">: Lee Park<\/span><\/a>/);
+  expect(html).toMatch(/<li id="trail-ana"/);
+});
