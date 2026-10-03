@@ -106,3 +106,15 @@ test("the Start panel links to the terms and the privacy notice, whether or not 
     expect(html).toContain('href="https://usetrawler.com/privacy/"');
   }
 });
+
+test("an account the beta list will refuse is told so in place of the offer and the fields, and cannot press Start", () => {
+  const message = "Hosted runs are in private beta. Write to contact@usetrawler.com to get access.";
+  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: true, authorisedBefore: false, firstRunOnUs: true, closedBeta: message }));
+  const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  expect(text).toContain(`Start · Acme Invoices ${message}`);
+  expect(html).toMatch(/<button type="submit" disabled="" aria-describedby="start-blocked"/);
+  expect(text).not.toContain("Your first run is on Trawler.");
+  expect(html).not.toContain('name="apiKey"');
+  expect(html).not.toContain('name="authorised"');
+  expect(html).not.toContain('name="onUs"');
+});

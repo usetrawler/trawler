@@ -12,6 +12,7 @@ import { FIRST_RUN_ON_US } from "../../../runs/models.ts";
 import { firstRunOnUsLeft, projectRunState, refusalToStart, RunInProgress, TooManyPeople } from "../../../runs/runs.ts";
 import { workspacePlan } from "../../../runs/plans.ts";
 import { projectForEditing } from "../../../projects/projects.ts";
+import { betaRefusal } from "../../../server/beta.ts";
 import { canManageBilling, signedInMember } from "../../../server/auth.ts";
 import { getDb } from "../../../server/db.ts";
 import { readEnv } from "../../../server/env.ts";
@@ -66,6 +67,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           firstRunOnUs={onUsLeft}
           workspacePlan={plan}
           startRefusal={refusal ? { message: refusal.message, ...(refusal instanceof RunInProgress ? { activeRun: refusal.run } : {}) } : undefined}
+          closedBeta={betaRefusal(member.email) ?? undefined}
         />
       </div>
     </AppShell>
