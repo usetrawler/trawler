@@ -1,7 +1,7 @@
 import { generateText, isStepCount, tool, type ModelMessage } from "ai";
 import { z } from "zod";
 import { expect, test } from "vitest";
-import { pruneMessages } from "./context.ts";
+import { dropOldReasoning, pruneMessages } from "./context.ts";
 import { scriptedModel, text, toolCall } from "./testing.ts";
 
 function result(id: string, toolName: string, value: string): ModelMessage {
@@ -124,4 +124,44 @@ test("in a real agent loop the model sees one full snapshot, the latest", async 
   const resultIds = prompt.flatMap((m) => (m.role === "tool" ? m.content.filter((p) => p.type === "tool-result").map((p) => p.toolCallId) : []));
   expect(callIds).toEqual(["call-1", "call-2", "call-3"]);
   expect(resultIds).toEqual(callIds);
+});
+
+const thinking = (n: number): ModelMessage => ({
+  role: "assistant",
+  providerOptions: { openrouter: { reasoning_details: [{ type: "reasoning.text", text: `step ${n}` }], annotations: [] }, other: { keep: true } },
+  content: [
+    { type: "reasoning", text: `thought ${n}`, providerOptions: { openrouter: { reasoning_details: [{ type: "reasoning.text", text: `step ${n}` }] } } },
+    { type: "text", text: `said ${n}` },
+    { type: "tool-call", toolCallId: `call-${n}`, toolName: "browser_click", input: { target: `e${n}` }, providerOptions: { openrouter: { reasoning_details: [{ type: "reasoning.text", text: `step ${n}` }] } } },
+  ],
+});
+
+test("reasoning of all but the last steps is dropped, with what the provider would send back, and everything else is kept", () => {
+  const msgs: ModelMessage[] = [{ role: "system", content: "sys" }, { role: "user", content: "go" }];
+  for (let n = 1; n <= 4; n++) msgs.push(thinking(n), result(`call-${n}`, "browser_click", "ok"));
+  const pruned = dropOldReasoning(msgs, 2);
+  const shown = JSON.stringify(pruned);
+  for (const n of [1, 2]) {
+    expect(shown).not.toContain(`thought ${n}`);
+    expect(shown).not.toContain(`"step ${n}"`);
+  }
+  for (const n of [3, 4]) {
+    expect(shown).toContain(`thought ${n}`);
+    expect(pruned[2 * n]).toEqual(msgs[2 * n]);
+  }
+  const first = pruned[2] as Extract<ModelMessage, { role: "assistant" }>;
+  expect(first.providerOptions).toEqual({ openrouter: { annotations: [] }, other: { keep: true } });
+  expect((first.content as Array<{ type: string }>).map((p) => p.type)).toEqual(["text", "tool-call"]);
+  const calls = pruned.flatMap((m) => (m.role === "assistant" && typeof m.content !== "string" ? m.content.filter((p) => p.type === "tool-call").map((p) => (p as { toolCallId: string }).toolCallId) : []));
+  const results = pruned.flatMap((m) => (m.role === "tool" ? m.content.map((p) => (p as { toolCallId: string }).toolCallId) : []));
+  expect(calls).toEqual(["call-1", "call-2", "call-3", "call-4"]);
+  expect(results).toEqual(calls);
+  expect(pruned.filter((m) => m.role !== "assistant")).toEqual(msgs.filter((m) => m.role !== "assistant"));
+});
+
+test("a conversation with no more steps than kept, or plain text replies, is left alone", () => {
+  const msgs: ModelMessage[] = [{ role: "user", content: "go" }, thinking(1), result("call-1", "browser_click", "ok"), thinking(2)];
+  expect(dropOldReasoning(msgs, 2)).toBe(msgs);
+  const plain: ModelMessage[] = [{ role: "assistant", content: "hello" }, { role: "assistant", content: "again" }, thinking(3)];
+  expect(dropOldReasoning(plain, 1).slice(0, 2)).toEqual(plain.slice(0, 2));
 });

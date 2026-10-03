@@ -3,11 +3,11 @@ import { z } from "zod";
 import { describe, expect, test } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
 import { JOB_STOPPED, ProjectConfigSchema, RunEventSchema, type RunEventInput } from "@usetrawler/protocol";
-import { Budget } from "./llm.ts";
+import { Budget, createModel } from "./llm.ts";
 import { rolePrompt, sessionStatus } from "./prompts.ts";
 import { runRoleSession } from "./role-session.ts";
 import { SecretScrubber } from "./secrets.ts";
-import { proxyRefusal, scriptedModel, text, toolCall } from "./testing.ts";
+import { proxyRefusal, reasoning, scriptedModel, text, toolCall } from "./testing.ts";
 
 const project = ProjectConfigSchema.parse({
   name: "Acme",
@@ -530,6 +530,45 @@ describe("runRoleSession", () => {
     expect(steps.slice(0, 3).map((s) => s.url)).toEqual([undefined, "https://acme.test/invoices?draft=1", "https://acme.test/reset-password/%E2%80%A2%E2%80%A2%E2%80%A2?token=%E2%80%A2%E2%80%A2%E2%80%A2&note=•••"]);
     expect(JSON.stringify(events)).not.toContain("hunter22-secret");
     for (const s of steps) expect(RunEventSchema.safeParse({ ...s, seq: 1, at: new Date().toISOString() }).success).toBe(true);
+  });
+
+  test("the model sees its reasoning from the last two steps only, and every earlier tool call still with its result", async () => {
+    const model = scriptedModel([[reasoning("first thought"), look], [reasoning("second thought"), look], [reasoning("third thought"), reached("sign-up")], [reasoning("fourth thought"), reached("invoice")], finish]);
+    await run(model).promise;
+    const fourth = JSON.stringify(model.doGenerateCalls[3]!.prompt);
+    expect(fourth).not.toContain("first thought");
+    expect(fourth).toContain("second thought");
+    expect(fourth).toContain("third thought");
+    const prompt = model.doGenerateCalls[4]!.prompt;
+    const calls = prompt.flatMap((m) => (m.role === "assistant" ? m.content.flatMap((p) => (p.type === "tool-call" ? [p.toolCallId] : [])) : []));
+    const results = prompt.flatMap((m) => (m.role === "tool" ? m.content.flatMap((p) => (p.type === "tool-result" ? [p.toolCallId] : [])) : []));
+    expect(calls).toEqual(["call-1", "call-2", "call-3", "call-4"]);
+    expect(results).toEqual(calls);
+    expect(JSON.stringify(prompt)).not.toMatch(/first thought|second thought/);
+  });
+
+  test("what reaches OpenRouter carries the reasoning and its details of the last two steps only", async () => {
+    const replies = [["browser_snapshot", {}], ["browser_snapshot", {}], ["goal_status", { goal: "sign-up", status: "reached", note: "" }], ["goal_status", { goal: "invoice", status: "reached", note: "" }], ["finish", { summary: "done" }]] as const;
+    const bodies: Array<{ messages: Array<{ role: string; reasoning?: string; reasoning_details?: Array<{ text: string }>; tool_calls?: Array<{ id: string }> }> }> = [];
+    const fetch = (async (_url: string, init: { body: string }) => {
+      const n = bodies.push(JSON.parse(init.body));
+      const [name, args] = replies[n - 1]!;
+      return new Response(JSON.stringify({
+        id: `r${n}`, model: "m", created: 0, object: "chat.completion",
+        choices: [{ index: 0, finish_reason: "tool_calls", message: { role: "assistant", content: null, reasoning: `thought ${n}`, reasoning_details: [{ type: "reasoning.text", text: `thought ${n}`, format: "unknown" }], tool_calls: [{ id: `call-${n}`, type: "function", function: { name, arguments: JSON.stringify(args) } }] } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, cost: 0.001 },
+      }), { headers: { "content-type": "application/json" } });
+    }) as unknown as typeof globalThis.fetch;
+    await run(scriptedModel([]), { model: createModel({ modelId: "m", apiKey: "k", fetch }) }).promise;
+    const sentBack = (body: (typeof bodies)[number]) => body.messages.filter((m) => m.role === "assistant").map((m) => [m.tool_calls?.[0]?.id, m.reasoning ?? null, (m.reasoning_details ?? []).map((d) => d.text)]);
+    expect(sentBack(bodies[4]!)).toEqual([
+      ["call-1", null, []],
+      ["call-2", null, []],
+      ["call-3", "thought 3", ["thought 3"]],
+      ["call-4", "thought 4", ["thought 4"]],
+    ]);
+    const results = bodies[4]!.messages.filter((m) => m.role === "tool").map((m) => (m as unknown as { tool_call_id: string }).tool_call_id);
+    expect(results).toEqual(["call-1", "call-2", "call-3", "call-4"]);
   });
 
   test("tells the persona who they are, where to go and which goals to try", async () => {

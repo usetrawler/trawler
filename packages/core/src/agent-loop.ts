@@ -1,12 +1,13 @@
 import { generateText, type LanguageModel, type ModelMessage, type StepResult, type ToolSet } from "ai";
 import type { JobUsage, StopReason } from "@usetrawler/protocol";
-import { pruneMessages } from "./context.ts";
+import { dropOldReasoning, pruneMessages } from "./context.ts";
 import { type Budget, failureMessage, stoppedByRun, tallyStep } from "./llm.ts";
 import type { SecretScrubber } from "./secrets.ts";
 
 const MAX_SILENT_TURNS = 3;
 const MAX_CUT_OFFS = 3;
 const MAX_BROWSER_CRASHES = 3;
+const REASONING_STEPS_KEPT = 2;
 const CUT_OFF = "Your reply was cut off before this tool ran. Call one tool at a time.";
 const CUT_OFF_TEXT = "Your reply was cut off. Plain text does nothing; call one tool at a time.";
 
@@ -94,7 +95,7 @@ export async function runAgentLoop(opts: {
         stopWhen: [done, ({ steps }) => steps.at(-1)?.finishReason === "length"],
         prepareStep: async ({ messages }) => ({
           instructions: opts.scrubber.scrub(opts.instructions()),
-          messages: opts.scrubber.scrub(pruneMessages(messages, { keepLargeResults: 1, largeResultChars: opts.largeResultChars ?? 1500 })),
+          messages: opts.scrubber.scrub(pruneMessages(dropOldReasoning(messages, REASONING_STEPS_KEPT), { keepLargeResults: 1, largeResultChars: opts.largeResultChars ?? 1500 })),
         }),
         onStepEnd: (step) => {
           const cost = tallyStep(usage, opts.budget, step);
