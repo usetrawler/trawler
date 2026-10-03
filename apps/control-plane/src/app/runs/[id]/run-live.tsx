@@ -600,7 +600,7 @@ export function RunLive({ initial, closedBeta }: { initial: Data; closedBeta?: s
           <Section title="Not judged" hint="Reported, but not replayed and judged to the end" items={report.notJudged} note detail={(f) => f.reason} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} />
           <Section title="Refuted" hint="The replay did not see the problem, or saw only a detail the product never promised" items={report.refuted} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} />
           <Section title="Friction" hint="Not broken, but slowed someone down" items={report.friction} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} />
-          <Section<DismissedFinding> title="Not a bug" hint="Marked not a bug by your team; the people in later runs of this project are told, with the reason" items={report.dismissed} action={(f) => <UndoNotABug runId={run.id} f={f} onDone={moved} onRefused={refresh} />} focusKey={focusKey} reveal={reveal} onFocused={focused} />
+          <Section<DismissedFinding> title="Not a bug" hint="Marked not a bug by your team, or by Trawler for a repeat of one; the people in later runs of this project are told, with the reason" items={report.dismissed} action={(f) => <UndoNotABug runId={run.id} f={f} onDone={moved} onRefused={refresh} />} focusKey={focusKey} reveal={reveal} onFocused={focused} />
         </div>
         {!view.live && <aside><PeopleOutcomes view={view} /></aside>}
       </div>
