@@ -554,8 +554,8 @@ export function RunLive({ initial, closedBeta }: { initial: Data; closedBeta?: s
           </div>
         )}
       </div>
-      {!view.live && closedBeta && <p className="mt-3 max-w-md self-end border-l-2 border-warn pl-3 text-sm max-wide:self-start">{closedBeta}</p>}
       {!view.live && again.error && <div className="mt-3 flex wide:justify-end"><RunAgainError again={again} /></div>}
+      {!view.live && closedBeta && <p className="mt-3 max-w-md self-end border-l-2 border-warn pl-3 text-sm max-wide:self-start">{closedBeta}</p>}
       {run.botProtection && <BotProtectionNotice met={run.botProtection} />}
 
       {view.live ? (
