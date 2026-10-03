@@ -455,7 +455,7 @@ function PeopleOutcomes({ view }: { view: View }) {
   );
 }
 
-export function RunLive({ initial }: { initial: Data }) {
+export function RunLive({ initial, closedBeta }: { initial: Data; closedBeta?: string }) {
   const [data, setData] = useState(initial);
   const [stale, setStale] = useState(false);
   const [gone, setGone] = useState(false);
@@ -550,10 +550,11 @@ export function RunLive({ initial }: { initial: Data }) {
         ) : (
           <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
             <a href={`/projects/${run.projectId}#start`} className={`${secondary} w-full md:w-auto`}>Start another run</a>
-            <RunAgainButton runId={run.id} again={again} />
+            {!closedBeta && <RunAgainButton runId={run.id} again={again} />}
           </div>
         )}
       </div>
+      {!view.live && closedBeta && <p className="mt-3 max-w-md self-end border-l-2 border-warn pl-3 text-sm max-wide:self-start">{closedBeta}</p>}
       {!view.live && again.error && <div className="mt-3 flex wide:justify-end"><RunAgainError again={again} /></div>}
       {run.botProtection && <BotProtectionNotice met={run.botProtection} />}
 
@@ -587,7 +588,8 @@ export function RunLive({ initial }: { initial: Data }) {
         <div className="flex min-w-0 flex-col gap-8">
           <Section title="Confirmed" hint="A fresh agent reproduced it and the judge agreed" items={report.confirmed} mark="✓ Replayed" empty={view.live ? "Nothing confirmed yet." : "No defect was confirmed."} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} />
           <Section<UnjudgedFinding> title="Could not be judged" hint="The judge gave no verdict; the replay is kept" items={report.couldNotJudge} note detail={(f) => (f.action === "judging" ? undefined : f.reason)} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} action={(f) =>
-            f.action === "judge_again" || f.action === "judging" ? <JudgeAgainButton runId={run.id} findingKey={f.key} judging={f.action === "judging"} onDone={refresh} />
+            f.action === "judge_again" && closedBeta ? <p className="text-sm text-muted">{closedBeta}</p>
+            : f.action === "judge_again" || f.action === "judging" ? <JudgeAgainButton runId={run.id} findingKey={f.key} judging={f.action === "judging"} onDone={refresh} />
             : f.action === "after_run" ? <p className="text-sm text-muted">You can judge it again after the run, if its cap has room left.</p>
             : <p className="text-sm text-muted">This run has spent its cap, so it cannot be judged again.</p>} />
           <Section title="Inconclusive" hint="The replay could not settle it" items={report.inconclusive} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} />

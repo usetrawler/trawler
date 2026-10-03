@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
 type Member = { userId: string; name: string; email: string; orgId: string; orgName: string; role: string };
-const state = vi.hoisted(() => ({ access: { signedIn: false } as unknown, asked: [] as Array<[string | null, string]>, shells: [] as unknown[] }));
+const state = vi.hoisted(() => ({ access: { signedIn: false } as unknown, asked: [] as Array<[string | null, string]>, shells: [] as unknown[], beta: undefined as string[] | undefined, live: [] as Array<Record<string, unknown>> }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({
@@ -18,7 +18,8 @@ vi.mock("../../../server/shell.ts", () => ({
   },
 }));
 vi.mock("../../../runs/report.ts", () => ({ runView: () => ({}) }));
-vi.mock("./run-live.tsx", () => ({ RunLive: () => null }));
+vi.mock("./run-live.tsx", () => ({ RunLive: (props: Record<string, unknown>) => { state.live.push(props); return null; } }));
+vi.mock("../../../server/env.ts", () => ({ readEnv: () => (state.beta ? { betaEmails: state.beta } : {}) }));
 
 const { default: RunPage } = await import("./page.tsx");
 const ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
@@ -29,6 +30,8 @@ beforeEach(() => {
   state.access = { signedIn: false };
   state.asked = [];
   state.shells = [];
+  state.beta = undefined;
+  state.live = [];
 });
 
 test("a visitor who is not signed in, or no longer belongs to the workspace, is sent to sign in", async () => {
@@ -75,4 +78,15 @@ test("a run asked for by its id or by its number without the padding moves for g
   state.access = { signedIn: true, member, run: null };
   await expect(open("0018")).rejects.toMatchObject({ notFound: true });
   expect(state.shells).toEqual([]);
+});
+
+test("while the beta list is set, the run page tells an account outside it, and not one on it, or anyone without a list", async () => {
+  state.access = { signedIn: true, member, run: { id: ID, projectId: "p1", number: 17 } };
+  state.beta = ["lee@acme.test"];
+  renderToStaticMarkup(await open("0017"));
+  state.beta = ["lee@acme.test", "ana@acme.test"];
+  renderToStaticMarkup(await open("0017"));
+  state.beta = undefined;
+  renderToStaticMarkup(await open("0017"));
+  expect(state.live.map((p) => p.closedBeta)).toEqual(["Hosted runs are in private beta. Write to contact@usetrawler.com to get access.", undefined, undefined]);
 });
