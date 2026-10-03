@@ -8,7 +8,7 @@ import { Keyring } from "../lib/secrets.ts";
 import { createProject } from "../projects/projects.ts";
 import { workspaceRuns } from "../projects/overview.ts";
 import { CannotDismiss, dismissFinding, notBugsOf, undoDismissal } from "./dismissals.ts";
-import { claimJob } from "./queue.ts";
+import { claimJob, completeJob, ingestEvents } from "./queue.ts";
 import { runView } from "./report.ts";
 import { runSummary, startRun } from "./runs.ts";
 
@@ -157,7 +157,7 @@ describe("later runs", () => {
     await markedAt("z-old", 1);
     await dismiss("org-a", await finishedRun("org-a", other, [{ key: "o1", title: "Other project's" }]), "o1", "Not this project.");
     await dismiss("org-b", await finishedRun("org-b", theirs, [{ key: "t1", title: "Another workspace's" }]), "t1", "Not this workspace.");
-    const expected = [{ title: "Menu on the left", reason: "Our users expect it there." }, { title: "Export asks twice", reason: "Asking twice is on purpose." }];
+    const expected = [{ title: "Menu on the left", reason: "Our users expect it there.", ref: `${before}/a-new` }, { title: "Export asks twice", reason: "Asking twice is on purpose.", ref: `${before}/z-old` }];
     expect(await notBugs(project)).toEqual(expected);
 
     await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
@@ -169,8 +169,9 @@ describe("later runs", () => {
   test("the same title and reason marked in several runs is told once, the newest 20 are kept, and each is one line within its limit", async () => {
     const project = await newProject();
     await dismiss("org-a", await finishedRun("org-a", project, [{ key: "r1", title: "Export asks twice" }]), "r1", "On purpose.");
-    await dismiss("org-a", await finishedRun("org-a", project, [{ key: "r2", title: "Export asks twice" }]), "r2", "On purpose.");
-    expect(await notBugs(project)).toEqual([{ title: "Export asks twice", reason: "On purpose." }]);
+    const second = await finishedRun("org-a", project, [{ key: "r2", title: "Export asks twice" }]);
+    await dismiss("org-a", second, "r2", "On purpose.");
+    expect(await notBugs(project)).toEqual([{ title: "Export asks twice", reason: "On purpose.", ref: `${second}/r2` }]);
 
     const long = await finishedRun("org-a", project, [{ key: "long", title: `A\ntitle   ${"t".repeat(400)}` }]);
     await dismiss("org-a", long, "long", `Two\n\nlines ${"r".repeat(480)}`);
@@ -204,4 +205,106 @@ test("the run history counts neither a dismissed confirmed defect nor a dismisse
   expect(await line()).toMatchObject({ confirmed: 0, unchecked: true });
   await dismiss("org-a", run, "f3", "Intended.");
   expect(await line()).toMatchObject({ confirmed: 0, unchecked: false });
+});
+
+describe("a report that matches a finding marked not a bug", () => {
+  const usage = { model: "m", inputTokens: 1, outputTokens: 1, costUsd: 0, steps: 1 };
+  const defect = (id: string, title: string) => ({ id, kind: "defect", goal: "g", title, observed: "o", reproduction: ["Open /checkout", "Type the postcode"], severity: "high" });
+
+  async function runWith(project: string, findings: Array<ReturnType<typeof defect>>, match: (keys: string[], ref: string) => Array<{ key: string; ref: string }>, group: (keys: string[]) => string[][] = (keys) => keys.map((k) => [k]), observe: (replay: number) => { completed: boolean; observed: string; blockedAt: null } = () => ({ completed: true, observed: "Same.", blockedAt: null })) {
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
+    const seen: string[] = [];
+    let replays = 0;
+    for (let job = await claimJob(t.db, keys); job; job = await claimJob(t.db, keys)) {
+      seen.push(job.kind);
+      if (job.kind === "role_session") {
+        await ingestEvents(t.db, job.token, findings.map((f, i) => ({ type: "finding", jobId: job.jobId, seq: i + 1, at: new Date().toISOString(), finding: f })) as never);
+        await completeJob(t.db, job.token, { usage, stoppedBy: "finish" });
+      } else if (job.kind === "group") {
+        expect(job.notBugs?.length).toBeGreaterThan(0);
+        const keysToGroup = job.defects!.map((d) => d.key);
+        await completeJob(t.db, job.token, { usage, stoppedBy: "done", groups: group(keysToGroup), knownNotBugs: match(keysToGroup, job.notBugs![0]!.ref!) });
+      } else if (job.kind === "replay") {
+        await completeJob(t.db, job.token, { usage, stoppedBy: "report", observation: observe(replays++) });
+      } else if (job.kind === "judge") {
+        await ingestEvents(t.db, job.token, [{ type: "verdict", jobId: job.jobId, seq: 1, at: new Date().toISOString(), findingId: job.finding!.id, verdict: "confirmed", observed: "Same." }] as never);
+        await completeJob(t.db, job.token, { usage, stoppedBy: "done" });
+      } else await completeJob(t.db, job.token, { usage, stoppedBy: "done" });
+    }
+    return { runId: run.id, seen };
+  }
+
+  test("is marked not a bug by Trawler with the earlier mark's reason and a link to it, still replayed and judged, and left out of the counts; another defect counts; undoing the earlier mark undoes it too", async () => {
+    const project = await newProject();
+    const source = await finishedRun("org-a", project, [{ key: "pc", title: "Postcode refused" }]);
+    await dismiss("org-a", source, "pc", "We deliver to a fixed list of postcodes.");
+    const sourceNumber = (await asSystem(t.db, (tx) => tx.selectFrom("runs").select("number").where("id", "=", source).executeTakeFirstOrThrow())).number;
+
+    const { runId, seen } = await runWith(project, [defect("f1", "Checkout refuses my postcode"), defect("f2", "Pay does nothing")], (keys, ref) => [{ key: keys.find((k) => k.endsWith("f1"))!, ref }]);
+    expect(seen.filter((k) => k !== "role_session")).toEqual(["group", "replay", "replay", "judge", "judge"]);
+    const shown = await view("org-a", runId);
+    expect(shown.headline).toBe("1 defect confirmed by replay.");
+    expect(shown.report.confirmed.map((f) => f.title)).toEqual(["Pay does nothing"]);
+    expect(shown.report.dismissed.map((f) => [f.title, f.verdict, f.dismissal.reason, f.dismissal.userId, f.dismissal.matched])).toEqual([
+      ["Checkout refuses my postcode", "confirmed", "We deliver to a fixed list of postcodes.", "trawler", { runNumber: sourceNumber, findingKey: "pc" }],
+    ]);
+    expect((await notBugs(project)).map((n) => n.ref)).toEqual([`${source}/pc`]);
+
+    await undo("org-a", source, "pc");
+    const after = await view("org-a", runId);
+    expect(after.report.dismissed).toEqual([]);
+    expect(after.report.confirmed.map((f) => f.title)).toEqual(["Checkout refuses my postcode", "Pay does nothing"]);
+    expect(after.headline).toBe("2 defects confirmed by replay.");
+    expect(await notBugs(project)).toEqual([]);
+  });
+
+  test("a match on a report grouped under another marks the group's first report, which the reader sees", async () => {
+    const project = await newProject();
+    const source = await finishedRun("org-a", project, [{ key: "pc", title: "Postcode refused" }]);
+    await dismiss("org-a", source, "pc", "Intended.");
+    const { runId } = await runWith(project, [defect("f1", "Postcode refused"), defect("f2", "Postcode refused too")], (keys, ref) => [{ key: keys[1]!, ref }], (keys) => [keys]);
+    const shown = await view("org-a", runId);
+    expect(shown.report.dismissed.map((f) => [f.title, f.sameReports.map((r) => r.title)])).toEqual([["Postcode refused", ["Postcode refused too"]]]);
+    expect(shown.headline).toBe("Every reported defect was marked not a bug.");
+  });
+
+  test("when the group's first report cannot be followed, Trawler's mark moves with the group to the report replayed instead", async () => {
+    const project = await newProject();
+    const source = await finishedRun("org-a", project, [{ key: "pc", title: "Postcode refused" }]);
+    await dismiss("org-a", source, "pc", "Intended.");
+    const lost = { completed: false, observed: "Could not find the postcode field.", blockedAt: null };
+    const { runId, seen } = await runWith(project, [defect("f1", "Postcode refused"), defect("f2", "Postcode refused too")], (keys, ref) => [{ key: keys[0]!, ref }], (keys) => [keys], (n) => (n === 0 ? lost : { completed: true, observed: "Same.", blockedAt: null }));
+    expect(seen.filter((k) => k !== "role_session")).toEqual(["group", "replay", "replay", "judge"]);
+    const shown = await view("org-a", runId);
+    expect(shown.report.dismissed.map((f) => [f.title, f.dismissal.userId, f.sameReports.map((r) => r.title)])).toEqual([["Postcode refused too", "trawler", ["Postcode refused"]]]);
+    expect(shown.headline).toBe("Every reported defect was marked not a bug.");
+  });
+
+  test("a single defect is checked against the list, while a project without marks skips straight to its replay; a mark from another project or a malformed one is never applied", async () => {
+    const project = await newProject();
+    const source = await finishedRun("org-a", project, [{ key: "pc", title: "Postcode refused" }]);
+    await dismiss("org-a", source, "pc", "Intended.");
+    const single = await runWith(project, [defect("f1", "Postcode refused again")], (keys, ref) => [{ key: keys[0]!, ref }]);
+    expect(single.seen.filter((k) => k !== "role_session")).toEqual(["group", "replay", "judge"]);
+    expect((await view("org-a", single.runId)).headline).toBe("Every reported defect was marked not a bug.");
+
+    const otherProject = await newProject();
+    const elsewhere = await finishedRun("org-a", otherProject, [{ key: "x", title: "Elsewhere" }]);
+    await dismiss("org-a", elsewhere, "x", "Not here.");
+    const foreign = await runWith(project, [defect("f1", "Postcode refused once more")], (keys) => [{ key: keys[0]!, ref: `${elsewhere}/x` }]);
+    expect((await view("org-a", foreign.runId)).report.dismissed).toEqual([]);
+    const malformed = await runWith(project, [defect("f1", "Postcode refused yet again")], (keys) => [{ key: keys[0]!, ref: "not-a-run/pc" }]);
+    expect(malformed.seen.filter((k) => k !== "role_session")).toEqual(["group", "replay", "judge"]);
+    expect((await view("org-a", malformed.runId)).report.dismissed).toEqual([]);
+
+    const clean = await newProject();
+    await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", clean, keys, options));
+    const kinds: string[] = [];
+    for (let job = await claimJob(t.db, keys); job; job = await claimJob(t.db, keys)) {
+      kinds.push(job.kind);
+      if (job.kind === "role_session") await ingestEvents(t.db, job.token, [{ type: "finding", jobId: job.jobId, seq: 1, at: new Date().toISOString(), finding: defect("f1", "Pay does nothing") }] as never);
+      await completeJob(t.db, job.token, { usage, stoppedBy: job.kind === "replay" ? "report" : "done", ...(job.kind === "replay" ? { observation: { completed: true, observed: "x", blockedAt: null } } : {}) });
+    }
+    expect(kinds).toEqual(["role_session", "replay", "judge"]);
+  });
 });

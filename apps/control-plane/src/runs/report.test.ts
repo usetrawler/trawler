@@ -345,6 +345,11 @@ test("while the defects are being grouped the replay stage is already under way,
   expect(view.report.notJudged.map((f) => f.reason)).toEqual(["Checking whether others found the same defect.", "Checking whether others found the same defect."]);
 });
 
+test("while a run's only defect is checked against the findings marked not a bug, it says so, and friction to replay as a defect waits for its replay", () => {
+  const view = runView(summary({ jobs: [job("role_session", "succeeded", { persona_key: "ana" }), job("group", "leased")], findings: [finding("ana:f1", "ana"), finding("ana:f2", "ana", { kind: "defect", filedAs: "friction" })] }));
+  expect(view.report.notJudged.map((f) => f.reason)).toEqual(["Checking it against the findings marked not a bug.", "Waiting for its replay."]);
+});
+
 test("a run stopped while or right after the defects were grouped, before any replay, shows the replay stage as skipped", () => {
   const view = runView(summary({ status: "cancelled", jobs: [job("role_session", "succeeded", { persona_key: "ana" }), job("role_session", "succeeded", { persona_key: "lee" }), job("group", "succeeded")], findings: [finding("ana:f1", "ana"), finding("lee:f1", "lee")] }));
   expect(view.stages.map((s) => s.state)).toEqual(["done", "skipped", "skipped", "done"]);

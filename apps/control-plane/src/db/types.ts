@@ -73,6 +73,8 @@ export interface FindingDismissals {
   dismissed_at: Generated<Timestamp>;
   dismissed_by: string;
   finding_key: string;
+  matched_finding_key: string | null;
+  matched_run_id: string | null;
   org_id: string;
   reason: string;
   run_id: string;

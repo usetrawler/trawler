@@ -1,5 +1,6 @@
 import { withOrg } from "../db/tenancy.ts";
 import { runIdByNumber, runSummary, type RunSummary } from "../runs/runs.ts";
+import { TRAWLER } from "../runs/dismissals.ts";
 import { getAuth, signedInMember, type Member } from "./auth.ts";
 import { getDb } from "./db.ts";
 
@@ -15,7 +16,7 @@ export async function runIdFor(orgId: string, ref: string): Promise<string | nul
 }
 
 async function withDismissersNamed(orgId: string, run: RunSummary): Promise<RunSummary> {
-  const ids = [...new Set(run.findings.flatMap((f) => (f.dismissal ? [f.dismissal.userId] : [])))];
+  const ids = [...new Set(run.findings.flatMap((f) => (f.dismissal && f.dismissal.userId !== TRAWLER ? [f.dismissal.userId] : [])))];
   if (ids.length === 0) return run;
   const auth = getAuth();
   const email = new Map(await Promise.all(ids.map(async (id) => [id, await auth.memberEmail(orgId, id)] as const)));

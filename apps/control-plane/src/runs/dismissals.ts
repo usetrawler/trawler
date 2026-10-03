@@ -1,5 +1,5 @@
-import { sql } from "kysely";
 import { MAX_NOT_BUG_REASON, MAX_NOT_BUG_TITLE, MAX_NOT_BUGS, type NotABug } from "@usetrawler/protocol";
+import { z } from "zod";
 import type { Tx } from "../db/tenancy.ts";
 import { isLive } from "./report.ts";
 
@@ -37,20 +37,49 @@ export async function undoDismissal(tx: Tx, orgId: string, runId: string, findin
   if (Number(removed.numDeletedRows) === 0) throw new CannotDismiss("It is no longer marked not a bug.", "settled");
 }
 
+export const TRAWLER = "trawler";
+
+const notBugRef = (runId: string, findingKey: string) => `${runId}/${findingKey}`;
+
+export async function markKnownNotBugs(tx: Tx, run: { orgId: string; runId: string; projectId: string }, matches: Array<{ key: string; ref: string }>): Promise<void> {
+  for (const { key, ref } of matches) {
+    const slash = ref.indexOf("/");
+    if (slash < 1 || !z.uuid().safeParse(ref.slice(0, slash)).success) continue;
+    const source = await tx
+      .selectFrom("finding_dismissals as d")
+      .innerJoin("runs as r", "r.id", "d.run_id")
+      .select(["d.run_id", "d.finding_key", "d.reason"])
+      .where("d.org_id", "=", run.orgId)
+      .where("r.project_id", "=", run.projectId)
+      .where("d.run_id", "=", ref.slice(0, slash))
+      .where("d.finding_key", "=", ref.slice(slash + 1))
+      .where("d.matched_run_id", "is", null)
+      .executeTakeFirst();
+    if (!source || source.run_id === run.runId) continue;
+    await tx
+      .insertInto("finding_dismissals")
+      .values({ org_id: run.orgId, run_id: run.runId, finding_key: key, reason: source.reason, dismissed_by: TRAWLER, matched_run_id: source.run_id, matched_finding_key: source.finding_key })
+      .onConflict((oc) => oc.columns(["run_id", "finding_key"]).doNothing())
+      .execute();
+  }
+}
+
 const oneLine = (text: string, max: number) => text.replace(/\s+/g, " ").trim().slice(0, max).replace(/[\uD800-\uDBFF]$/, "");
 
 export async function notBugsOf(tx: Tx, orgId: string, projectId: string): Promise<NotABug[]> {
-  const rows = await tx
+  const newest = tx
     .selectFrom("finding_dismissals as d")
     .innerJoin("runs as r", "r.id", "d.run_id")
     .innerJoin("findings as f", (j) => j.onRef("f.run_id", "=", "d.run_id").onRef("f.key", "=", "d.finding_key"))
-    .select(["f.title", "d.reason", sql<Date>`max(d.dismissed_at)`.as("latest")])
+    .select(["f.title", "d.reason", "d.run_id", "d.finding_key", "d.dismissed_at"])
+    .distinctOn(["f.title", "d.reason"])
     .where("d.org_id", "=", orgId)
     .where("r.project_id", "=", projectId)
-    .groupBy(["f.title", "d.reason"])
-    .orderBy("latest", "desc")
+    .where("d.matched_run_id", "is", null)
     .orderBy("f.title")
-    .limit(MAX_NOT_BUGS)
-    .execute();
-  return rows.map((r) => ({ title: oneLine(r.title, MAX_NOT_BUG_TITLE), reason: oneLine(r.reason, MAX_NOT_BUG_REASON) }));
+    .orderBy("d.reason")
+    .orderBy("d.dismissed_at", "desc")
+    .as("n");
+  const rows = await tx.selectFrom(newest).selectAll().orderBy("dismissed_at", "desc").orderBy("title").limit(MAX_NOT_BUGS).execute();
+  return rows.map((r) => ({ title: oneLine(r.title, MAX_NOT_BUG_TITLE), reason: oneLine(r.reason, MAX_NOT_BUG_REASON), ref: notBugRef(r.run_id, r.finding_key) }));
 }

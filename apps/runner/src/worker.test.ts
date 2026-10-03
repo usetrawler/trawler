@@ -87,7 +87,7 @@ const reportsDefect = () => scriptedModel([
 test("a finding's screenshot is uploaded with the job token, as the image it is, before the job completes", async () => {
   const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" }, { uploadDelayMs: 300 });
   await workOnce(deps(url, reportsDefect(), { openBrowser: shooting }));
-  expect(seen.uploads).toEqual([{ url: `/api/jobs/${baseJob.jobId}/artifacts?kind=screenshot&finding=f1`, auth: `Bearer ${token}`, type: "image/png", protocol: "7", bytes: Buffer.from(shot.bytes) }]);
+  expect(seen.uploads).toEqual([{ url: `/api/jobs/${baseJob.jobId}/artifacts?kind=screenshot&finding=f1`, auth: `Bearer ${token}`, type: "image/png", protocol: "8", bytes: Buffer.from(shot.bytes) }]);
   expect(seen.order.slice(0, seen.order.indexOf("complete"))).toContain("artifacts answered");
   expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "finish" })]);
 });
@@ -310,7 +310,7 @@ test("a replay handed back because the runner is stopping takes and uploads no s
 test("with nothing to do, a claim comes back idle", async () => {
   const { url, seen } = await fakeControlPlane(null);
   expect(await workOnce(deps(url, scriptedModel([])))).toBe("idle");
-  expect(seen.headers[0]).toBe("7");
+  expect(seen.headers[0]).toBe("8");
   expect(seen.auth[0]).toBe("Bearer runner-" + "r".repeat(40));
 });
 
@@ -406,6 +406,21 @@ test("a group job groups the run's defects without a browser and completes with 
   await workOnce(deps(failed.url, scriptedModel([text("no idea"), text("still none")])));
   expect(failed.seen.completions).toEqual([expect.objectContaining({ stoppedBy: "error", error: "the model did not group the defects (2 tries)" })]);
   expect(failed.seen.completions[0]).not.toHaveProperty("groups");
+});
+
+test("a group job with the project's known non-bugs sends back the reports that match one, with the mark they refer to, and none when nothing matches", async () => {
+  const defects = [{ key: "ana:f1", person: "Ana", goal: "g", title: "Postcode refused", observed: "o", reproduction: ["a"] }];
+  const notBugs = [{ title: "Postcode field rejects its own placeholder example", reason: "We deliver to a fixed list.", ref: "run-3/ana:f2" }];
+  const matched = await fakeControlPlane({ ...baseJob, kind: "group", defects, notBugs });
+  const model = scriptedModel([toolCall("report_groups", { groups: [["ana:f1"]], notBugs: [{ id: "ana:f1", item: 1 }] })]);
+  await workOnce(deps(matched.url, model));
+  expect(matched.seen.completions).toEqual([expect.objectContaining({ stoppedBy: "done", groups: [["ana:f1"]], knownNotBugs: [{ key: "ana:f1", ref: "run-3/ana:f2" }] })]);
+  expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toContain("We deliver to a fixed list.");
+  await new Promise<void>((r) => server!.close(() => r()));
+  server = undefined;
+  const plain = await fakeControlPlane({ ...baseJob, kind: "group", defects, notBugs });
+  await workOnce(deps(plain.url, scriptedModel([toolCall("report_groups", { groups: [["ana:f1"]] })])));
+  expect(plain.seen.completions[0]).not.toHaveProperty("knownNotBugs");
 });
 
 test("an account check signs in once and completes with what the product said, never with the password", async () => {

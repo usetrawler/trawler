@@ -134,7 +134,20 @@ Answer "confirmed" only if the observation shows the behaviour the claim is abou
 Give your answer by calling report_verdict. If you cannot call it, reply with nothing but the JSON {"verdict": "<your answer>"}.`;
 }
 
-export function groupPrompt(defects: DefectToGroup[]): string {
+function knownNotBugsToMatch(notBugs: NotABug[], tag: string): string {
+  if (notBugs.length === 0) return "";
+  return `
+
+The team behind this product looked at these reports from earlier runs and said they are not bugs, each with their reason:
+
+<not-bugs-${tag}>
+${notBugs.map((n, i) => `${i + 1}. "${n.title}": ${n.reason}`).join("\n")}
+</not-bugs-${tag}>
+
+For each report above that describes the same thing as one of these, the same behaviour in the same place, give its id and that item's number in notBugs. A report that looks like one of them but goes wrong in a way their reason does not cover is not a match, and neither is a different wrong behaviour on the same page. If you are not sure, leave it out.`;
+}
+
+export function groupPrompt(defects: DefectToGroup[], notBugs: NotABug[] = []): string {
   const tag = randomUUID().replaceAll("-", "");
   const reports = defects
     .map((d) => `id: ${d.key}\nfound by: ${d.person}\ngoal: ${d.goal}\ntitle: ${d.title}\nwhat they saw: ${d.observed}\nsteps:\n${d.reproduction.map((s, i) => `${i + 1}. ${s}`).join("\n")}`)
@@ -148,8 +161,8 @@ ${reports}
 
 Group the reports that describe the same defect: the same wrong behaviour in the same place of the product (the same field, page or action), even when different people got there through different steps and described it in different words.
 Do not group reports only because they are on the same page, concern the same feature, or are the same kind of problem. Two different wrong behaviours are two defects, and so is the same behaviour in two different places. If you are not sure two reports are the same defect, keep them apart.
-Every id must be in exactly one group. A report that matches no other is a group of its own.
-Give your answer by calling report_groups. If you cannot call it, reply with nothing but the JSON {"groups": [["<id>", "<id>"], ["<id>"]]}.`;
+Every id must be in exactly one group. A report that matches no other is a group of its own.${knownNotBugsToMatch(notBugs, tag)}
+Give your answer by calling report_groups. If you cannot call it, reply with nothing but the JSON {"groups": [["<id>", "<id>"], ["<id>"]]${notBugs.length > 0 ? ', "notBugs": [{"id": "<id>", "item": <number>}]' : ""}}.`;
 }
 
 function websiteFence(p: { page: string; docs?: string }) {

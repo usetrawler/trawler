@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState, useTransition } from "
 import type { runView, StageState, PersonaState } from "../../../runs/report.ts";
 import type { RunSummary } from "../../../runs/runs.ts";
 import { findingAnchor } from "../../../runs/finding-anchor.ts";
-import { runStatusLabel } from "../../../runs/status.ts";
+import { runPath, runStatusLabel, runTitle } from "../../../runs/status.ts";
 import { initials } from "../../../components/initials.ts";
 import { DocsLink } from "../../../components/docs-link.tsx";
 import { LocalTime } from "../../../components/local-time.tsx";
@@ -183,7 +183,11 @@ export function UndoNotABug({ runId, f, onDone, onRefused }: { runId: string; f:
     <div className="flex flex-col gap-2 text-sm">
       <p className="break-words"><span className="text-muted">Not a bug, because: </span>{f.dismissal.reason}</p>
       <div className="flex flex-wrap items-center gap-3">
-        <span className="min-w-0 wrap-anywhere text-muted">Marked by {f.dismissal.by ?? "someone no longer in this workspace"} on <LocalTime iso={new Date(f.dismissal.at).toISOString()} />.</span>
+        {f.dismissal.matched ? (
+          <span className="min-w-0 wrap-anywhere text-muted">Marked by Trawler: it matches a finding marked not a bug in <a href={`${runPath(f.dismissal.matched.runNumber)}#${findingAnchor(f.dismissal.matched.findingKey)}`} className="underline underline-offset-4 hover:text-ink">{runTitle(f.dismissal.matched.runNumber)}</a>.</span>
+        ) : (
+          <span className="min-w-0 wrap-anywhere text-muted">Marked by {f.dismissal.by ?? "someone no longer in this workspace"} on <LocalTime iso={new Date(f.dismissal.at).toISOString()} />.</span>
+        )}
         <button type="button" aria-disabled={pending || undefined} onClick={undo} className="h-10 border border-line bg-panel px-4 hover:border-ink aria-disabled:cursor-wait aria-disabled:opacity-60">{pending ? "Undoing…" : "Undo"}<span className="sr-only">: {f.title}</span></button>
         {error && <span role="alert" className="text-bad">{error}</span>}
       </div>
@@ -596,7 +600,7 @@ export function RunLive({ initial, closedBeta }: { initial: Data; closedBeta?: s
           <Section title="Not judged" hint="Reported, but not replayed and judged to the end" items={report.notJudged} note detail={(f) => f.reason} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} />
           <Section title="Refuted" hint="The replay did not see the problem, or saw only a detail the product never promised" items={report.refuted} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} />
           <Section title="Friction" hint="Not broken, but slowed someone down" items={report.friction} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} />
-          <Section<DismissedFinding> title="Not a bug" hint="Marked not a bug by your team; the people in later runs of this project are told, with the reason" items={report.dismissed} action={(f) => <UndoNotABug runId={run.id} f={f} onDone={moved} onRefused={refresh} />} focusKey={focusKey} reveal={reveal} onFocused={focused} />
+          <Section<DismissedFinding> title="Not a bug" hint="Marked not a bug by your team, or by Trawler for a repeat of one; the people in later runs of this project are told, with the reason" items={report.dismissed} action={(f) => <UndoNotABug runId={run.id} f={f} onDone={moved} onRefused={refresh} />} focusKey={focusKey} reveal={reveal} onFocused={focused} />
         </div>
         {!view.live && <aside><PeopleOutcomes view={view} /></aside>}
       </div>

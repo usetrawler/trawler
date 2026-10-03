@@ -299,7 +299,7 @@ test("every finding of a finished run opens to Not a bug, in every section, and 
 });
 
 test("a finding marked not a bug leaves its section and the counts for its own, with the reason, who and when, and Undo", () => {
-  const marked = (by: string | null) => ({ reason: "Saving twice is on purpose.", userId: "u1", at: new Date("2026-10-02T10:00:00Z"), by });
+  const marked = (by: string | null) => ({ reason: "Saving twice is on purpose.", userId: "u1", at: new Date("2026-10-02T10:00:00Z"), by, matched: null });
   const html = render(summary({
     ...finished,
     findings: [
@@ -318,7 +318,7 @@ test("a finding marked not a bug leaves its section and the counts for its own, 
   expect(text(first!.split("</details>")[1]!)).toBe("Not a bug, because: Saving twice is on purpose. Marked by ana@acme.test on 2026-10-02 10:00 UTC . Undo : Saving an invoice fails");
   expect(first).not.toContain(">Not a bug</button>");
   expect(text(second!.split("</details>")[1]!)).toContain("Marked by someone no longer in this workspace on");
-  expect(html).toMatch(/>Not a bug · 2<\/h2><p[^>]*>Marked not a bug by your team; the people in later runs of this project are told, with the reason<\/p>/);
+  expect(html).toMatch(/>Not a bug · 2<\/h2><p[^>]*>Marked not a bug by your team, or by Trawler for a repeat of one; the people in later runs of this project are told, with the reason<\/p>/);
   expect(first).toMatch(/<span class="min-w-0 wrap-anywhere text-muted">Marked by ana@acme.test/);
 });
 
@@ -367,4 +367,16 @@ test("an account the beta list will refuse is told so in place of Run again and 
   const [beingJudged] = rows(renderToStaticMarkup(createElement(RunLive, { initial: JSON.parse(JSON.stringify({ run: judging, view: runView(judging) })), closedBeta: message })), "Could not be judged");
   expect(beingJudged).toContain("Judging again…");
   expect(beingJudged).not.toContain(message);
+});
+
+test("a finding Trawler marked not a bug says so and links to the earlier mark it matches, with Undo", () => {
+  const html = render(summary({
+    ...finished,
+    findings: [finding("ana:f1", "ana", { title: "Checkout refuses my postcode", verdict: "confirmed", dismissal: { reason: "We deliver to a fixed list.", userId: "trawler", at: new Date("2026-10-03T10:00:00Z"), by: null, matched: { runNumber: 3, findingKey: "lee:f2" } } })],
+  }));
+  const [row] = rows(html, "Not a bug");
+  expect(row).toContain('Marked by Trawler: it matches a finding marked not a bug in <a href="/runs/0003#finding-lee%3Af2" class="underline underline-offset-4 hover:text-ink">Run 0003</a>.');
+  expect(row).toContain("Not a bug, because: </span>We deliver to a fixed list.");
+  expect(row).toMatch(/>Undo<span class="sr-only">/);
+  expect(row).not.toContain("someone no longer in this workspace");
 });

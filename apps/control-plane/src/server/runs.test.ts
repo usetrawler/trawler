@@ -56,3 +56,11 @@ test("who marked a finding not a bug is named by their email in the run's worksp
   expect(access.signedIn && access.run?.findings.map((f) => f.dismissal?.by)).toEqual(["ana@acme.test", undefined, "ana@acme.test", null]);
   expect(state.emailsAsked).toEqual(["org-2/u1", "org-2/u-gone"]);
 });
+
+test("a finding Trawler marked is not looked up as a member", async () => {
+  state.member = { userId: "u1", email: "ana@acme.test", orgId: "org-2", orgName: "Acme", role: "member" };
+  state.findings = [{ key: "f1", dismissal: { reason: "Intended.", userId: "trawler", at: "2026-10-03T10:00:00.000Z", by: null } }];
+  const access = await runFor(request(), RUN);
+  expect(access.signedIn && access.run?.findings[0]?.dismissal?.by).toBeNull();
+  expect(state.emailsAsked).toEqual([]);
+});
