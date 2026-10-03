@@ -18,7 +18,11 @@ export function proxyRefusal(message: string, type: string | null = null) {
   return new APICallError({ message, url: "https://cp.test/api/llm/v1/chat/completions", requestBodyValues: {}, statusCode: 402, data: { error: { code: 402, message, type } } });
 }
 
-type Part = ReturnType<typeof toolCall> | ReturnType<typeof text>;
+export function reasoning(t: string) {
+  return { type: "reasoning" as const, text: t, providerMetadata: { openrouter: { reasoning_details: [{ type: "reasoning.text", text: t }] } } };
+}
+
+type Part = ReturnType<typeof toolCall> | ReturnType<typeof text> | ReturnType<typeof reasoning>;
 
 export function scriptedModel(responses: Array<Part | Part[] | Error>, costPerStep = 0.001) {
   let callNo = 0;

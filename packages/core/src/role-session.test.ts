@@ -7,7 +7,7 @@ import { Budget } from "./llm.ts";
 import { rolePrompt, sessionStatus } from "./prompts.ts";
 import { runRoleSession } from "./role-session.ts";
 import { SecretScrubber } from "./secrets.ts";
-import { proxyRefusal, scriptedModel, text, toolCall } from "./testing.ts";
+import { proxyRefusal, reasoning, scriptedModel, text, toolCall } from "./testing.ts";
 
 const project = ProjectConfigSchema.parse({
   name: "Acme",
@@ -530,6 +530,21 @@ describe("runRoleSession", () => {
     expect(steps.slice(0, 3).map((s) => s.url)).toEqual([undefined, "https://acme.test/invoices?draft=1", "https://acme.test/reset-password/%E2%80%A2%E2%80%A2%E2%80%A2?token=%E2%80%A2%E2%80%A2%E2%80%A2&note=•••"]);
     expect(JSON.stringify(events)).not.toContain("hunter22-secret");
     for (const s of steps) expect(RunEventSchema.safeParse({ ...s, seq: 1, at: new Date().toISOString() }).success).toBe(true);
+  });
+
+  test("the model sees its reasoning from the last two steps only, and every earlier tool call still with its result", async () => {
+    const model = scriptedModel([[reasoning("first thought"), look], [reasoning("second thought"), look], [reasoning("third thought"), reached("sign-up")], [reasoning("fourth thought"), reached("invoice")], finish]);
+    await run(model).promise;
+    const fourth = JSON.stringify(model.doGenerateCalls[3]!.prompt);
+    expect(fourth).not.toContain("first thought");
+    expect(fourth).toContain("second thought");
+    expect(fourth).toContain("third thought");
+    const prompt = model.doGenerateCalls[4]!.prompt;
+    const calls = prompt.flatMap((m) => (m.role === "assistant" ? m.content.flatMap((p) => (p.type === "tool-call" ? [p.toolCallId] : [])) : []));
+    const results = prompt.flatMap((m) => (m.role === "tool" ? m.content.flatMap((p) => (p.type === "tool-result" ? [p.toolCallId] : [])) : []));
+    expect(calls).toEqual(["call-1", "call-2", "call-3", "call-4"]);
+    expect(results).toEqual(calls);
+    expect(JSON.stringify(prompt)).not.toMatch(/first thought|second thought/);
   });
 
   test("tells the persona who they are, where to go and which goals to try", async () => {
