@@ -246,6 +246,36 @@ describe("proposeProject", () => {
     expect(usage.steps).toBe(1);
   });
 
+  test("the setup call limits how long the model thinks and carries a time limit", async () => {
+    const model = scriptedModel([text(JSON.stringify(proposal))]);
+    await propose(model).promise;
+    const call = model.doGenerateCalls[0]!;
+    expect(call.providerOptions?.openrouter).toMatchObject({ reasoning: { effort: "low" }, provider: { require_parameters: true } });
+    expect(call.abortSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  test("a try that hangs is cut at the time limit and asked again", async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV4({
+      doGenerate: async ({ abortSignal }) => {
+        if (calls++ === 0) return await new Promise<never>((_, reject) => abortSignal?.addEventListener("abort", () => reject(abortSignal.reason)));
+        return answered(JSON.stringify(proposal)) as never;
+      },
+    });
+    const { project, usage } = await propose(model, { tryMs: 30 }).promise;
+    expect(project.name).toBe("Acme");
+    expect(model.doGenerateCalls).toHaveLength(2);
+    expect(usage.steps).toBe(1);
+  });
+
+  test("two tries that hang end with a readable reason", async () => {
+    const model = new MockLanguageModelV4({
+      doGenerate: ({ abortSignal }) => new Promise<never>((_, reject) => abortSignal?.addEventListener("abort", () => reject(abortSignal.reason))),
+    });
+    await expect(propose(model, { tryMs: 20 }).promise).rejects.toThrow(/the setup model did not answer in time \(2 tries\)/);
+    expect(model.doGenerateCalls).toHaveLength(2);
+  });
+
   test("a reply without a usable plan is asked for once more", async () => {
     const unusable = [
       cutOff([thought, { type: "text", text: JSON.stringify(proposal).slice(0, 200) }]),

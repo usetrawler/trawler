@@ -16,6 +16,8 @@ export const MAX_FEATURE_CHARS = 300;
 export const MAX_DESCRIPTION_CHARS = 2000;
 const SETUP_OUTPUT_TOKENS = 16_000;
 const SETUP_REPLIES = 2;
+const SETUP_TRY_MS = 60_000;
+const SETUP_REASONING = { effort: "low" } as const;
 
 const MAX_HTML_CHARS = 2_000_000;
 const DROPPED_ELEMENTS = new Set(["script", "style", "noscript", "svg", "template"]);
@@ -154,11 +156,17 @@ export class SetupModelFailed extends Error {}
 function noPlan(finishReason: string | undefined, tries: number): string {
   const count = tries === 1 ? "1 try" : `${tries} tries`;
   if (finishReason === "length") return `the setup model ran out of room before it finished the plan (${count})`;
+  if (finishReason === "timeout") return `the setup model did not answer in time (${count})`;
   if (finishReason === "content-filter") return `the provider's content filter stopped the setup model before it finished the plan (${count})`;
   return `the setup model gave no usable plan (${count})`;
 }
 
-async function askOnce<T>(opts: { model: LanguageModel; budget: Budget }, schema: z.ZodType<T>, prompt: string, usage: JobUsage): Promise<{ answer: T | null; finishReason?: string }> {
+function timedOut(err: unknown): boolean {
+  for (let e = err, depth = 0; e instanceof Error && depth < 5; e = e.cause, depth++) if (e.name === "TimeoutError") return true;
+  return false;
+}
+
+async function askOnce<T>(opts: { model: LanguageModel; budget: Budget; tryMs?: number }, schema: z.ZodType<T>, prompt: string, usage: JobUsage): Promise<{ answer: T | null; finishReason?: string }> {
   let result;
   try {
     result = await generateText({
@@ -166,11 +174,13 @@ async function askOnce<T>(opts: { model: LanguageModel; budget: Budget }, schema
       output: Output.object({ schema }),
       prompt,
       maxOutputTokens: SETUP_OUTPUT_TOKENS,
-      providerOptions: { openrouter: { provider: { require_parameters: true } } },
+      abortSignal: AbortSignal.timeout(opts.tryMs ?? SETUP_TRY_MS),
+      providerOptions: { openrouter: { reasoning: SETUP_REASONING, provider: { require_parameters: true } } },
       onStepEnd: (step) => void tallyStep(usage, opts.budget, step),
     });
   } catch (err) {
     if (NoObjectGeneratedError.isInstance(err)) return { answer: null, finishReason: err.finishReason };
+    if (timedOut(err)) return { answer: null, finishReason: "timeout" };
     throw err;
   }
   try {
@@ -181,7 +191,7 @@ async function askOnce<T>(opts: { model: LanguageModel; budget: Budget }, schema
   }
 }
 
-async function ask<T>(opts: { model: LanguageModel; modelId: string; budget: Budget }, schema: z.ZodType<T>, prompt: string, problemsOf: (answer: T) => string[] = () => []): Promise<{ answer: T; usage: JobUsage }> {
+async function ask<T>(opts: { model: LanguageModel; modelId: string; budget: Budget; tryMs?: number }, schema: z.ZodType<T>, prompt: string, problemsOf: (answer: T) => string[] = () => []): Promise<{ answer: T; usage: JobUsage }> {
   if (opts.budget.exceeded) throw spent();
   const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
   let answer: T | null = null;
@@ -241,7 +251,7 @@ export interface ProductSummary {
   features: { title: string; summary: string }[];
 }
 
-export async function describeProduct(opts: { model: LanguageModel; modelId: string; budget: Budget; product: ProductPage }): Promise<{ summary: ProductSummary; usage: JobUsage }> {
+export async function describeProduct(opts: { model: LanguageModel; modelId: string; budget: Budget; tryMs?: number; product: ProductPage }): Promise<{ summary: ProductSummary; usage: JobUsage }> {
   const { answer, usage } = await ask(opts, SummarySchema, describePrompt(opts.product));
   const seen = new Set<string>();
   const features = answer.features
@@ -372,6 +382,7 @@ export async function proposePeople(opts: {
   model: LanguageModel;
   modelId: string;
   budget: Budget;
+  tryMs?: number;
   product: ProductPage;
   name: string;
   description: string;
@@ -394,6 +405,7 @@ export async function proposeProject(opts: {
   docsUrl?: string;
   focus?: string;
   budget: Budget;
+  tryMs?: number;
   fetchText: (url: string) => Promise<string>;
 }): Promise<{ project: ProjectConfig; usage: JobUsage }> {
   const focus = opts.focus?.trim() ? clip(opts.focus, MAX_FOCUS_CHARS) : undefined;
