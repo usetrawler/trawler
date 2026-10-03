@@ -105,8 +105,8 @@ export function OnUs({ range, goalsPerTurn, personas }: { range: PriceRange | nu
   );
 }
 
-export function StartRun({ projectId, projectName, personas, goalsPerTurn = Array.from({ length: personas }, () => 1), keyHint: savedHint, canManageKey, authorisedBefore, firstRunOnUs, blocked, refusal, onStarting }: {
-  projectId: string; projectName: string; personas: number; goalsPerTurn?: number[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; firstRunOnUs?: boolean; blocked?: string; refusal?: StartRefusal; onStarting?: (starting: boolean) => void;
+export function StartRun({ projectId, projectName, personas, goalsPerTurn = Array.from({ length: personas }, () => 1), keyHint: savedHint, canManageKey, authorisedBefore, firstRunOnUs, blocked, refusal, closedBeta, onStarting }: {
+  projectId: string; projectName: string; personas: number; goalsPerTurn?: number[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; firstRunOnUs?: boolean; blocked?: string; refusal?: StartRefusal; closedBeta?: string; onStarting?: (starting: boolean) => void;
 }) {
   const [state, action, pending] = useActionState<StartState, FormData>(startTheRun, {});
   const keyHint = state.keyHint ?? savedHint;
@@ -133,7 +133,7 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
     setPayingOwn(own);
   };
   const tooManyForUs = Boolean(firstRunOnUs) && personas > FIRST_RUN_ON_US.maxPeople;
-  const onUs = Boolean(firstRunOnUs) && !tooManyForUs && !payingOwn;
+  const onUs = Boolean(firstRunOnUs) && !tooManyForUs && !payingOwn && !closedBeta;
   const backToReplace = useRef(false);
 
   const typingKey = !keyHint || replacingKey;
@@ -142,7 +142,7 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
   const noKey = !onUs && !keyHint && !canManageKey ? "Ask an owner or admin of this workspace to add a model key." : undefined;
 
   useEffect(() => {
-    if (onUs) return;
+    if (onUs || closedBeta) return;
     if (typingKey && (!provider || (provider === "custom" && !/^https:\/\/.+/.test(baseUrl)))) {
       setList(null);
       return;
@@ -195,6 +195,18 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
   const notice = refusal && shownError !== refusal.message ? refusal : null;
   const estimate = price ? estimateUsd(range?.low ?? price, goalsPerTurn, range?.high ?? price) : null;
   const label = provider && provider !== "custom" ? PROVIDER_LABEL[provider] : null;
+
+  if (closedBeta) {
+    return (
+      <form id="start" onSubmit={(e) => e.preventDefault()} className="flex flex-col gap-5 border border-line bg-panel p-5">
+        <p className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Start · <span className="text-ink">{projectName}</span></p>
+        <p id="start-blocked" className="border-l-2 border-warn pl-3 text-sm">{closedBeta}</p>
+        <div className="flex justify-end">
+          <Submit blocked={closedBeta} pending={false} noticed={false} checksKey={false} />
+        </div>
+      </form>
+    );
+  }
 
   return (
     <form

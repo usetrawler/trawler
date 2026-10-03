@@ -87,3 +87,11 @@ describe("PlanWorkspace", () => {
     expect(at(5, { plan: "team", limits: { projects: 3, runsPerDay: 30, people: 12 } })).not.toContain('id="start-blocked"');
   });
 });
+
+describe("the beta list", () => {
+  it("passes the refusal of an account outside it to the Start panel", () => {
+    const message = "Hosted runs are in private beta. Write to contact@usetrawler.com to get access.";
+    const html = renderToStaticMarkup(createElement(PlanWorkspace, { projectId: "p1", projectName: "Acme", initialPersonas: [{ id: "ana", name: "Ana", brief: "b", signsIn: false }], initialGoals: [{ id: "g", instruction: "Get in.", personaId: "ana" }], initialAccounts: [], keyHint: null, canManageKey: true, authorisedBefore: false, closedBeta: message }));
+    expect(html).toContain(`<p id="start-blocked" class="border-l-2 border-warn pl-3 text-sm">${message}</p>`);
+  });
+});

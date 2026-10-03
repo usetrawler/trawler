@@ -7,7 +7,7 @@ const state = vi.hoisted(() => ({
   runs: 0, counted: [] as Array<[string, string]>, tenants: [] as string[], shells: [] as string[], planned: [] as Array<Record<string, unknown>>,
   runState: { paused: false, liveRun: null } as { paused: boolean; liveRun: { id: string; number: number } | null },
   refusal: null as Error | null,
-  platformKey: true, onUsLeft: true, refusalFor: [] as unknown[], people: 0,
+  platformKey: true, onUsLeft: true, refusalFor: [] as unknown[], people: 0, beta: undefined as string[] | undefined,
 }));
 const ID = vi.hoisted(() => "0f8fad5b-d9cb-469f-a165-70867728950e");
 const FREE = vi.hoisted(() => ({ plan: "free" as const, limits: { projects: 1, runsPerDay: 3, people: 4 } }));
@@ -40,7 +40,7 @@ vi.mock("../../../projects/overview.ts", async (original) => ({
   hostOf: (await original<typeof import("../../../projects/overview.ts")>()).hostOf,
   projectRunCount: async (_tx: unknown, orgId: string, id: string) => { state.counted.push([orgId, id]); return state.runs; },
 }));
-vi.mock("../../../server/env.ts", () => ({ readEnv: () => ({ openRouterUrl: "https://openrouter.test/api/v1", ...(state.platformKey ? { setup: { apiKey: "sk-or-v1-" + "p".repeat(40), model: "m" } } : {}) }) }));
+vi.mock("../../../server/env.ts", () => ({ readEnv: () => ({ openRouterUrl: "https://openrouter.test/api/v1", ...(state.platformKey ? { setup: { apiKey: "sk-or-v1-" + "p".repeat(40), model: "m" } } : {}), ...(state.beta ? { betaEmails: state.beta } : {}) }) }));
 vi.mock("../../../runs/runs.ts", async (original) => ({
   RunInProgress: (await original<typeof import("../../../runs/runs.ts")>()).RunInProgress,
   TooManyPeople: (await original<typeof import("../../../runs/runs.ts")>()).TooManyPeople,
@@ -67,6 +67,19 @@ beforeEach(() => {
   state.onUsLeft = true;
   state.refusalFor = [];
   state.people = 0;
+  state.beta = undefined;
+});
+
+test("while the beta list is set, an account outside it is told so on the Start panel before Start, and one on it, or any account without a list, is not", async () => {
+  state.beta = ["lee@acme.test"];
+  await render();
+  state.beta = ["lee@acme.test", "ana@acme.test"];
+  await render();
+  state.member = { ...state.member!, email: "Ana@Acme.test" };
+  await render();
+  state.beta = undefined;
+  await render();
+  expect(state.planned.map((props) => props.closedBeta)).toEqual(["Hosted runs are in private beta. Write to contact@usetrawler.com to get access.", undefined, undefined, undefined]);
 });
 
 test("the Start panel offers the first run on Trawler while the workspace has not used it and this server can pay; refusals are judged for the run the panel will start", async () => {
