@@ -27,7 +27,8 @@ const USAGE = `Usage:
 
   trawler-runner work --control-plane https://app.usetrawler.com [--once]
 
-Set OPENROUTER_API_KEY for setup and run. work needs only TRAWLER_RUNNER_TOKEN: its model calls go through the control plane.`;
+Set OPENROUTER_API_KEY for setup and run. work needs only TRAWLER_RUNNER_TOKEN: its model calls go through the control plane.
+Set TRAWLER_LOOK=1 for run or work to let people and replays see the page as a picture (experimental).`;
 
 export interface CliDeps {
   env: Record<string, string | undefined>;
@@ -171,6 +172,7 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
     controlPlane,
     runnerToken,
     model: (modelId, jobToken) => deps.model(modelId, jobToken, new URL("/api/llm/v1", controlPlane).toString()),
+    look: deps.env.TRAWLER_LOOK === "1",
     openBrowser: async (project, { onBlocked, scrubber }) => {
       const outputDir = mkdtempSync(join(tmpdir(), "trawler-work-"));
       const downloadsPath = sharedDownloads ? mkdtempSync(join(sharedDownloads, "job-")) : undefined;
@@ -263,7 +265,7 @@ async function run(args: string[], deps: CliDeps, apiKey: () => string): Promise
   try {
     summary = await localRun({
     project, agentModel: deps.model(agentModelId, key), agentModelId, judgeModel: deps.model(judgeModelId, key), judgeModelId,
-    budgetUsd, maxSteps, replaySteps,
+    budgetUsd, maxSteps, replaySteps, look: deps.env.TRAWLER_LOOK === "1",
     emit: (e) => {
       runDir.emit(e);
       progress(deps.err, e);

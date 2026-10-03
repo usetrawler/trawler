@@ -8,7 +8,7 @@ const TOOL_LABEL: Record<string, string> = {
   browser_navigate: "Opened a page", browser_navigate_back: "Went back", browser_snapshot: "Read the page", browser_click: "Clicked",
   browser_type: "Typed", browser_hover: "Hovered", browser_select_option: "Chose an option", browser_press_key: "Pressed a key",
   browser_wait_for: "Waited", browser_handle_dialog: "Answered a dialog", browser_file_upload: "Closed a file picker",
-  sign_in: "Signed in", type_own_password: "Typed their password", finish: "Finished",
+  sign_in: "Signed in", type_own_password: "Typed their password", look_at_page: "Looked at the page", finish: "Finished",
 };
 const OWN_ENTRY = new Set(["note", "submit_finding", "goal_status"]);
 

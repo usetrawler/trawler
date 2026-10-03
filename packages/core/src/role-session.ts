@@ -7,6 +7,7 @@ import { rolePrompt, sessionStatus } from "./prompts.ts";
 import type { SecretScrubber } from "./secrets.ts";
 import { findingUrl, madeUpEmail, madeUpPassword, newSessionState, noteBotProtection, ownPasswordTool, sessionTools, type FillField } from "./session-tools.ts";
 import type { BotProtection } from "./bot-protection.ts";
+import { LOOK_TOOL, lookTool } from "./look.ts";
 
 const NUDGE = "Every turn must call a tool; plain text does nothing. Continue with the goals, and call finish once every goal has a status.";
 
@@ -32,6 +33,7 @@ export async function runRoleSession(opts: {
   returning?: boolean;
   notBugs?: NotABug[];
   jobId?: string;
+  look?: boolean;
 }): Promise<{ result: RoleResult; usage: JobUsage }> {
   if (!Number.isInteger(opts.maxSteps) || opts.maxSteps < 1) throw new RangeError(`maxSteps must be a positive integer, got ${opts.maxSteps}`);
   const jobId = opts.jobId ?? `role:${opts.persona.id}`;
@@ -52,8 +54,10 @@ export async function runRoleSession(opts: {
         if (shot) keepScreenshot(findingId, shot);
       }
     : undefined;
+  const look: ToolSet = opts.look && screenshot ? { [LOOK_TOOL]: lookTool({ screenshot: () => queue.run(screenshot) }) } : {};
   const tools = {
     ...queue.tools,
+    ...look,
     ...sessionTools({
       state,
       accounts: opts.project.accounts.filter((a) => a.ref === opts.persona.accountRef),
@@ -68,7 +72,7 @@ export async function runRoleSession(opts: {
     persona: opts.persona, targetUrl: opts.project.targetUrl, docsUrl: opts.project.docsUrl,
     goals, accountRef: opts.persona.accountRef,
     signUpEmail: opts.persona.accountRef ? undefined : madeUpEmail(opts.persona.id, seed),
-    story: opts.story, returning: opts.returning, notBugs: opts.notBugs,
+    story: opts.story, returning: opts.returning, notBugs: opts.notBugs, look: LOOK_TOOL in look,
     others: opts.project.personas.filter((p) => p.id !== opts.persona.id).map((p) => p.name),
   });
   const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };

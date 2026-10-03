@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { DefectToGroup, Finding, Goal, GoalOutcome, NotABug, Persona, ReplayObservation, StoryEntry } from "@usetrawler/protocol";
 
+const LOOKING = "browser_snapshot gives the page's text, not how it looks. To see the page as a picture, call look_at_page: when you reach a page you will work on, and whenever how it looks matters, such as its pictures, its layout, or something covered, cut off or out of place. You see the picture on the next turn only, so note what you need from it.";
+
 function storyLine(e: StoryEntry): string {
   if (e.goal && e.status) return `- ${e.name} ${e.status === "reached" ? "reached" : "did not reach"} the goal "${e.goal}"${e.text ? `: ${e.text}` : ""}`;
   return `- ${e.name} noted: ${e.text}`;
@@ -36,7 +38,7 @@ function othersSteps(self: string, others: string[]): string {
 `;
 }
 
-export function rolePrompt(p: { persona: Persona; targetUrl: string; docsUrl?: string; goals: Goal[]; accountRef?: string; signUpEmail?: string; story?: StoryEntry[]; returning?: boolean; others?: string[]; notBugs?: NotABug[] }): string {
+export function rolePrompt(p: { persona: Persona; targetUrl: string; docsUrl?: string; goals: Goal[]; accountRef?: string; signUpEmail?: string; story?: StoryEntry[]; returning?: boolean; others?: string[]; notBugs?: NotABug[]; look?: boolean }): string {
   const goalLines = p.goals.map((g, i) => `${i + 1}. [${g.id}] ${g.instruction}`).join("\n");
   const signIn = p.accountRef
     ? `You have an account "${p.accountRef}". To sign in, take a snapshot, then call sign_in with the account and the refs of the username and password fields. You will never see the password.`
@@ -52,7 +54,9 @@ ${goalLines}
 
 Every turn must call a tool; plain text does nothing.
 Use browser_snapshot to see the page; actions such as clicking do not return the page. To act on an element, pass its ref from the latest snapshot (for example e12) as target. Older page results are removed from your view, so write anything you need to remember with note.
-Do not give up on a goal the moment it is awkward, and do not keep going once you are convinced it cannot be done. Keep an eye on the step count and leave enough steps for every goal. After each goal call goal_status with reached or failed.
+${p.look ? `${LOOKING}
+Something you see is a defect like any other when the product shows it wrongly, for example a picture that does not match its item, the same picture where different ones belong, or text covered or cut off so it cannot be read.
+` : ""}Do not give up on a goal the moment it is awkward, and do not keep going once you are convinced it cannot be done. Keep an eye on the step count and leave enough steps for every goal. After each goal call goal_status with reached or failed.
 Your goals are what you want, written for you; they are not the product's promises. When the product gets you the outcome but not a detail your goal mentioned, the goal is reached, and you say what was missing in its note, or report friction. Missing something is a defect only when the product itself promised it, in its own words, labels or documentation, or a control that should provide it does not work. This is only about a detail of an outcome you got. These are behaviour and a defect as usual: an action that does nothing or gives no response, a record or change that does not appear where the product shows such things, a value that contradicts what the product said, showed elsewhere or what you entered (for example a balance its own history does not account for), empty results, and input refused without saying why. Do not explain such a thing away with a reason the product did not give.
 
 Record findings with submit_finding the moment you see them, not at the end. Give each one a quote: one sentence, as you would tell a friend how it felt.
@@ -78,7 +82,7 @@ function freshUsername(signUpEmail: string): string {
   return signUpEmail.split("@")[0]!.replace(/[^a-z0-9]/gi, "");
 }
 
-export function replayPrompt(p: { targetUrl: string; steps: string[]; accountRef?: string; signUpEmail?: string; people?: { name: string; accountRef?: string; signUpEmail?: string }[]; stepPeople?: string[] }): string {
+export function replayPrompt(p: { targetUrl: string; steps: string[]; accountRef?: string; signUpEmail?: string; people?: { name: string; accountRef?: string; signUpEmail?: string }[]; stepPeople?: string[]; look?: boolean }): string {
   const together = p.people && p.stepPeople && p.people.length >= 1;
   const steps = p.steps.map((s, i) => `${i + 1}. ${together ? `(as ${p.stepPeople![i]}) ` : ""}${s}`).join("\n");
   const signIn = together
@@ -97,9 +101,10 @@ On this fresh copy, whatever the product creates while you follow the steps gets
 
 Every turn must call a tool; plain text does nothing.
 Use browser_snapshot to see the page; actions such as clicking do not return the page. To act on an element, pass its ref from the latest snapshot (for example e12) as target.
-Do not guess at what you are supposed to find and do not explore beyond the steps.
+${p.look ? `${LOOKING}
+` : ""}Do not guess at what you are supposed to find and do not explore beyond the steps.
 If one of the numbered steps cannot be carried out, for example a button that is not there or a page that does not exist, stop and call report_replay with completed false, that step's number as blockedAt, and what the page showed instead.
-${accounts ? "If the product refuses the account's username or password when you sign in, stop and call report_replay with completed false, that step as blockedAt, and say in observed that the product refused the stored test account's credentials.\n" : ""}When you have done the last step, call report_replay with completed true and describe exactly what the page showed. Report only what you saw; you are not being asked whether anything is wrong.`;
+${accounts ? "If the product refuses the account's username or password when you sign in, stop and call report_replay with completed false, that step as blockedAt, and say in observed that the product refused the stored test account's credentials.\n" : ""}When you have done the last step, ${p.look ? "call look_at_page, then " : ""}call report_replay with completed true and describe exactly what the page showed${p.look ? ", how it looks as well as what it says: its pictures, and anything covered, cut off or out of place" : ""}. Report only what you saw; you are not being asked whether anything is wrong.`;
 }
 
 export function accountCheckPrompt(p: { targetUrl: string; accountRef: string }): string {

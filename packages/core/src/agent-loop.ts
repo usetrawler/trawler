@@ -1,6 +1,6 @@
 import { generateText, type LanguageModel, type ModelMessage, type StepResult, type ToolSet } from "ai";
 import type { JobUsage, StopReason } from "@usetrawler/protocol";
-import { dropOldReasoning, pruneMessages } from "./context.ts";
+import { dropOldReasoning, pruneMessages, showUnreadPictures } from "./context.ts";
 import { type Budget, failureMessage, stoppedByRun, tallyStep } from "./llm.ts";
 import type { SecretScrubber } from "./secrets.ts";
 
@@ -95,7 +95,7 @@ export async function runAgentLoop(opts: {
         stopWhen: [done, ({ steps }) => steps.at(-1)?.finishReason === "length"],
         prepareStep: async ({ messages }) => ({
           instructions: opts.scrubber.scrub(opts.instructions()),
-          messages: opts.scrubber.scrub(pruneMessages(dropOldReasoning(messages, REASONING_STEPS_KEPT), { keepLargeResults: 1, largeResultChars: opts.largeResultChars ?? 1500 })),
+          messages: opts.scrubber.scrub(pruneMessages(dropOldReasoning(showUnreadPictures(messages), REASONING_STEPS_KEPT), { keepLargeResults: 1, largeResultChars: opts.largeResultChars ?? 1500 })),
         }),
         onStepEnd: (step) => {
           const cost = tallyStep(usage, opts.budget, step);

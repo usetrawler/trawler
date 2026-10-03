@@ -19,6 +19,7 @@ export async function localRun(opts: {
   replaySteps: number;
   emit: (e: RunEventInput) => void;
   openBrowser: OpenBrowser;
+  look?: boolean;
 }): Promise<RunSummary> {
   const startedAt = new Date().toISOString();
   const budget = new Budget(opts.budgetUsd);
@@ -105,6 +106,7 @@ export async function localRun(opts: {
         newFindingId: () => `f${++findingNo}`, pageUrl: () => b.pageUrl(), botProtection: () => b.botProtection?.() ?? null,
         goalIds: turn.goalIds, story: trimStory(story), signUpSeed, jobId,
         returning: turns.slice(0, i).some((t) => t.personaId === persona.id),
+        ...(opts.look ? { look: true, screenshot: () => b.screenshot() } : {}),
       }),
     ).catch((err): { result: RoleResult; usage: ReturnType<typeof noUsage> } => {
       const error = failure(scrubber, err);
@@ -131,7 +133,8 @@ export async function localRun(opts: {
       const replayed = await withBrowser(`replay:${finding.id}`, scrubber, (b) =>
         runReplay({
           model: opts.agentModel, modelId: opts.agentModelId, finding, project: opts.project, accountRef,
-          browserTools: b.tools, fillField: b.fillField, botProtection: () => b.botProtection?.() ?? null, scrubber, budget, maxSteps: opts.replaySteps * Math.max(1, new Set(finding.by ?? []).size), emit: opts.emit,
+          browserTools: b.tools, fillField: b.fillField, botProtection: () => b.botProtection?.() ?? null, scrubber, budget,
+          ...(opts.look ? { look: true, screenshot: () => b.screenshot() } : {}), maxSteps: opts.replaySteps * Math.max(1, new Set(finding.by ?? []).size), emit: opts.emit,
           openBrowser: () => opts.openBrowser({ scrubber, onBlocked: (url) => { try { opts.emit(scrubber.scrub({ type: "blocked_request", jobId: `replay:${finding.id}`, url: url.slice(0, MAX_URL) })); } catch { return; } } }),
         }),
       ).catch((err) => {

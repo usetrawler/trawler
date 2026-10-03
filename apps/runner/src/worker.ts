@@ -31,6 +31,7 @@ export interface WorkerDeps {
   uploadTimeoutMs?: number;
   secrets?: string[];
   betweenJobs?: () => Promise<void>;
+  look?: boolean;
 }
 
 const CLOSE_TIMEOUT_MS = 10_000;
@@ -255,7 +256,7 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
         model: deps.model(job.agentModel, job.token), modelId: job.agentModel, persona, project: config, browserTools: b.tools, fillField: b.fillField,
         scrubber, budget, maxSteps: job.maxSteps, emit: events.emit, newFindingId: () => (job.turn ? `t${job.turn}f${++n}` : `f${++n}`),
         screenshot: () => b.screenshot(), keepScreenshot: screenshots.keep, pageUrl: () => b.pageUrl(), botProtection: () => b.botProtection?.() ?? null,
-        goalIds: job.goalIds, story: job.story, signUpSeed: job.signUpSeed, returning: job.returning, notBugs: job.notBugs,
+        goalIds: job.goalIds, story: job.story, signUpSeed: job.signUpSeed, returning: job.returning, notBugs: job.notBugs, look: deps.look,
       }),
     );
     return { usage, stoppedBy: result.stoppedBy, ...(result.error ? { error: clip(result.error) } : {}) };
@@ -272,7 +273,7 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
       runReplay({
         model: deps.model(job.agentModel, job.token), modelId: job.agentModel, finding, project: config, accountRef: job.accountRef,
         browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: job.maxSteps, emit: events.emit,
-        screenshot: () => b.screenshot(), keepScreenshot: screenshots.keep, botProtection: () => b.botProtection?.() ?? null,
+        screenshot: () => b.screenshot(), keepScreenshot: screenshots.keep, botProtection: () => b.botProtection?.() ?? null, look: deps.look,
         openBrowser: () => deps.openBrowser(config, { scrubber, onBlocked: (url) => events.emit(scrubber.scrub({ type: "blocked_request", jobId: job.jobId, url: url.slice(0, MAX_URL) })) }),
       }),
     );

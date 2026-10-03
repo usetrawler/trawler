@@ -7,6 +7,7 @@ import { judgePrompt, replayPrompt } from "./prompts.ts";
 import type { Screenshot } from "./browser.ts";
 import type { BotProtection } from "./bot-protection.ts";
 import type { SecretScrubber } from "./secrets.ts";
+import { LOOK_TOOL, lookTool } from "./look.ts";
 import { findingUrl, madeUpEmail, newSessionState, ownPasswordTool, sessionTools, type FillField } from "./session-tools.ts";
 
 const NO_REPORT: ReplayObservation = { completed: false, observed: "the replay session wrote no report", blockedAt: null };
@@ -72,6 +73,7 @@ export async function runReplay(opts: {
   botProtection?: () => BotProtection | null;
   openBrowser?: () => Promise<ReplayBrowser>;
   closeTimeoutMs?: number;
+  look?: boolean;
 }): Promise<{ observation: ReplayObservation; usage: JobUsage }> {
   onlyDefects(opts.finding, "replayed");
   if (!Number.isInteger(opts.maxSteps) || opts.maxSteps < 1) throw new RangeError(`maxSteps must be a positive integer, got ${opts.maxSteps}`);
@@ -164,6 +166,12 @@ export async function runReplay(opts: {
       return `you are now ${persona(id).name}, in their own browser; take a browser_snapshot`;
     }),
   });
+  const pictureOfCurrentPage = () => inOrder(async () => {
+    const actor = track(await now());
+    const screenshot = actor.browser.screenshot;
+    return screenshot ? actor.queue.run(screenshot) : null;
+  });
+  const lookAtCurrentPage = lookTool({ screenshot: pictureOfCurrentPage });
   const browserTools = Object.fromEntries(Object.entries(first.queue.tools).map(([name, t]) => [name, delegate(name, t)]));
   const tools: ToolSet = {
     ...browserTools,
@@ -171,14 +179,15 @@ export async function runReplay(opts: {
     report_replay,
     ...(ownDefinition ? { type_own_password: delegate("type_own_password", ownDefinition) } : {}),
     ...(together && known.length > 1 ? { act_as } : {}),
+    ...(opts.look ? { [LOOK_TOOL]: lookAtCurrentPage } : {}),
   };
   const instructions = together
     ? replayPrompt({
         targetUrl: opts.project.targetUrl, steps: opts.finding.reproduction,
         people: known.map((id) => ({ name: persona(id).name, accountRef: persona(id).accountRef, signUpEmail: persona(id).accountRef ? undefined : madeUpEmail(`replay-${id}`) })),
-        stepPeople: opts.finding.by!.map((id) => persona(id).name),
+        stepPeople: opts.finding.by!.map((id) => persona(id).name), look: opts.look,
       })
-    : replayPrompt({ targetUrl: opts.project.targetUrl, steps: opts.finding.reproduction, accountRef: opts.accountRef, signUpEmail: opts.accountRef ? undefined : madeUpEmail("replay") });
+    : replayPrompt({ targetUrl: opts.project.targetUrl, steps: opts.finding.reproduction, accountRef: opts.accountRef, signUpEmail: opts.accountRef ? undefined : madeUpEmail("replay"), look: opts.look });
   const usage = emptyUsage(opts.modelId);
 
   emit({ type: "job_started", jobId, kind: "replay" });
