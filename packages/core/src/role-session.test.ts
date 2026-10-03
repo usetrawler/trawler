@@ -625,6 +625,15 @@ describe("bot protection", () => {
   const blockedSignUp = { kind: "defect", goal: "sign-up", title: "Registration is blocked by a Cloudflare challenge (403)", observed: "The register POST returns 403 and Just a moment...", reproduction: ["Open https://acme.test/register.htm", "Click Register"], severity: "high" };
   const realDefect = { kind: "defect", goal: "invoice", title: "Send button does nothing", observed: "Clicking Send leaves the invoice as a draft", reproduction: ["Open https://acme.test/invoices/1", "Click Send"], severity: "high" };
 
+  test("the address of a check is recorded as a finding's page is, with token-like path parts masked and no fragment", async () => {
+    const model = scriptedModel([look, reached("sign-up"), reached("invoice"), finish]);
+    const met = { vendor: "Cloudflare", url: "https://acme.test/reset-password/abcdefgh12345678?__cf_chl_tk=abc123xyz&next=1#frag" };
+    const { promise, events } = run(model, { botProtection: () => met });
+    await promise;
+    const [noted] = events.filter((e) => e.type === "bot_protection") as Array<Extract<RunEventInput, { type: "bot_protection" }>>;
+    expect(noted!.url).toBe("https://acme.test/reset-password/%E2%80%A2%E2%80%A2%E2%80%A2?__cf_chl_tk=abc123xyz&next=1");
+  });
+
   test("a person on a bot-protection check cannot report it, the run hears of it once, and once off that page their findings are theirs to make", async () => {
     let current: typeof challenge | null = challenge;
     const model = scriptedModel([

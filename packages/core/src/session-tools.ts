@@ -296,5 +296,5 @@ export function ownPasswordTool(opts: { state: SessionState; fillField: FillFiel
 export function noteBotProtection(state: SessionState, met: BotProtection | null, emit: (e: RunEventInput) => void, jobId: string): void {
   if (!met || state.botProtection) return;
   state.botProtection = met;
-  emit({ type: "bot_protection", jobId, vendor: met.vendor, url: met.url });
+  emit({ type: "bot_protection", jobId, vendor: met.vendor, url: findingUrl(met.url) ?? "" });
 }

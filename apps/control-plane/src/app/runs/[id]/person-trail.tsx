@@ -81,7 +81,7 @@ export function TrailView({ trail, loadingEarlier, onEarlier, focusEntry }: { tr
             {trail.turns.length > 1 && <h3 className={`${label} text-muted`}>Turn {t.number}</h3>}
             {entries.length > 0 && (
               <ol className="flex flex-col gap-1 border-l border-line pl-3">
-                {entries.map((e) => <li key={e.id} ref={e.id === focusEntry ? focusRef : undefined} tabIndex={e.id === focusEntry ? -1 : undefined} className="outline-none"><Entry e={e} /></li>)}
+                {entries.map((e) => <li key={e.id} ref={e.id === focusEntry ? focusRef : undefined} tabIndex={e.id === focusEntry ? -1 : undefined} className="focus-visible:outline-2 focus-visible:outline-ink"><Entry e={e} /></li>)}
               </ol>
             )}
             <p className={endTone(t)}>{turnEnd(t)}</p>
@@ -97,9 +97,12 @@ export function PersonTrail({ runId, person, live, pulse }: { runId: string; per
   const [trail, setTrail] = useState<Trail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [earlier, setEarlier] = useState(false);
+  const [earlierFailed, setEarlierFailed] = useState(false);
   const [focusEntry, setFocusEntry] = useState<number | null>(null);
   const latest = useRef(0);
   const settled = useRef(false);
+  const shown = useRef(false);
+  const summary = useRef<HTMLElement>(null);
   const details = useRef<HTMLDetailsElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const anchor = trailAnchor(person.id);
@@ -108,23 +111,27 @@ export function PersonTrail({ runId, person, live, pulse }: { runId: string; per
 
   const load = useCallback(async (retry = false) => {
     const request = ++latest.current;
-    if (retry) setError(null);
+    if (retry) {
+      setError(null);
+      body.current?.focus();
+    }
     try {
       const res = await fetch(address, { cache: "no-store" });
       if (res.status === 401) return window.location.assign("/sign-in");
       if (!res.ok) throw new Error(String(res.status));
       const got = (await res.json()) as Trail;
       if (request !== latest.current) return;
+      shown.current = true;
       setTrail((had) => mergeNewest(had, got));
       setError(null);
-      if (retry) body.current?.focus();
     } catch {
-      if (request === latest.current) setError(failed);
+      if (request === latest.current && !shown.current) setError(failed);
     }
   }, [address, failed]);
 
   const loadEarlier = useCallback(async (before: number) => {
     setEarlier(true);
+    setEarlierFailed(false);
     try {
       const res = await fetch(`${address}?before=${before}`, { cache: "no-store" });
       if (res.status === 401) return window.location.assign("/sign-in");
@@ -133,7 +140,7 @@ export function PersonTrail({ runId, person, live, pulse }: { runId: string; per
       setTrail((had) => mergeEarlier(had, got, before));
       setFocusEntry(got.entries.find(shownEntry)?.id ?? null);
     } catch {
-      setError(failed);
+      setEarlierFailed(true);
     } finally {
       setEarlier(false);
     }
@@ -147,28 +154,38 @@ export function PersonTrail({ runId, person, live, pulse }: { runId: string; per
 
   useEffect(() => {
     const openWhenAddressed = () => {
-      if (window.location.hash === `#${anchor}` && details.current) details.current.open = true;
+      if (window.location.hash !== `#${anchor}` || !details.current) return;
+      details.current.open = true;
+      summary.current?.focus();
     };
     openWhenAddressed();
     window.addEventListener("hashchange", openWhenAddressed);
     return () => window.removeEventListener("hashchange", openWhenAddressed);
   }, [anchor]);
 
+  const keepInAddress = (isOpen: boolean) => {
+    setOpen(isOpen);
+    if (isOpen && window.location.hash !== `#${anchor}`) window.history.replaceState(null, "", `#${anchor}`);
+    else if (!isOpen && window.location.hash === `#${anchor}`) window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  };
   return (
     <li id={anchor} className="border-b border-line last:border-b-0">
-      <details ref={details} onToggle={(e) => setOpen(e.currentTarget.open)} className="group">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-[17px] [&::-webkit-details-marker]:hidden">
+      <details ref={details} onToggle={(e) => keepInAddress(e.currentTarget.open)} className="group">
+        <summary ref={summary} className="flex cursor-pointer list-none items-center justify-between gap-4 p-[17px] [&::-webkit-details-marker]:hidden">
           <strong className="break-words">{person.name}</strong>
           <b aria-hidden className="transition-transform group-open:rotate-90">→</b>
         </summary>
-        <div ref={body} tabIndex={-1} className="border-t border-line p-[17px] outline-none">
+        <div ref={body} tabIndex={-1} className="border-t border-line p-[17px] focus-visible:outline-2 focus-visible:outline-ink">
           {error ? (
             <div className="flex flex-wrap items-center gap-3 text-sm">
               <span role="alert" className="text-bad">{error}</span>
               <button type="button" onClick={() => void load(true)} className="h-10 border border-line bg-panel px-4 hover:border-ink">Try again</button>
             </div>
           ) : trail ? (
-            <TrailView trail={trail} loadingEarlier={earlier} onEarlier={() => void loadEarlier(trail.olderThan!)} focusEntry={focusEntry} />
+            <>
+              {earlierFailed && <p role="alert" className="mb-3 text-sm text-bad">Earlier steps could not be loaded. Choose Show earlier to try again.</p>}
+              <TrailView trail={trail} loadingEarlier={earlier} onEarlier={() => void loadEarlier(trail.olderThan!)} focusEntry={focusEntry} />
+            </>
           ) : (
             open && <p role="status" className="text-sm text-muted">Loading…</p>
           )}

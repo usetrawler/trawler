@@ -36,8 +36,8 @@ const turns = [{ id: "t1", number: 1, status: "succeeded", stoppedBy: "finish", 
 const page = { turns, entries: [{ id: 50, turn: "t1", at: "", kind: "note", text: "Hi." }], olderThan: 50 };
 const earlierPage = { turns, entries: [{ id: 3, turn: "t1", at: "", kind: "step", step: 1, tool: "note", page: null }, { id: 4, turn: "t1", at: "", kind: "note", text: "Old." }], olderThan: null };
 const ana = { id: "ana b", name: "Ana" };
-const STATE = { open: 0, trail: 1, error: 2, earlier: 3, focusEntry: 4 };
-const REF = { details: 2, body: 3 };
+const STATE = { open: 0, trail: 1, error: 2, earlier: 3, earlierFailed: 4, focusEntry: 5 };
+const REF = { shown: 2, summary: 3, details: 4, body: 5 };
 let fetched: ReturnType<typeof vi.fn>;
 const draw = (values: unknown[], live = false, pulse: unknown = 0) => {
   Object.assign(react, { effects: [], setters: [], refIndex: 0, values });
@@ -53,7 +53,7 @@ beforeEach(() => {
   fetched = vi.fn(async () => new Response(JSON.stringify(page)));
   vi.stubGlobal("fetch", fetched);
   listeners.clear();
-  vi.stubGlobal("window", { location: { assign: vi.fn(), hash: "" }, addEventListener: (type: string, fn: () => void) => listeners.set(type, fn), removeEventListener: vi.fn() });
+  vi.stubGlobal("window", { location: { assign: vi.fn(), hash: "", pathname: "/runs/0001", search: "" }, history: { replaceState: vi.fn() }, addEventListener: (type: string, fn: () => void) => listeners.set(type, fn), removeEventListener: vi.fn() });
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -143,7 +143,7 @@ test("the entry a page of earlier steps starts with takes the focus and stays fo
   expect(focus).toHaveBeenCalledOnce();
 });
 
-test("a failed load says so with Try again, which clears the message while it tries and moves the focus into the trail when it works", async () => {
+test("a first load that fails says so with Try again, which moves the focus into the trail and clears the message while it tries", async () => {
   fetched.mockResolvedValueOnce(new Response("{}", { status: 500 }));
   draw([true]);
   loadEffect().run();
@@ -155,9 +155,31 @@ test("a failed load says so with Try again, which clears the message while it tr
   react.refs[REF.body]!.current = { focus };
   (nodes(failed).find((n) => n.type === "button")!.props!.onClick as () => void)();
   expect(react.setters[STATE.error]).toHaveBeenNthCalledWith(1, null);
+  expect(focus).toHaveBeenCalledOnce();
   await flush();
   expect(fetched).toHaveBeenCalledTimes(2);
-  expect(focus).toHaveBeenCalledOnce();
+});
+
+test("once a trail is shown, a live update that fails leaves it in place, and a failed Show earlier says so beside it", async () => {
+  draw([true], true);
+  loadEffect().run();
+  await flush();
+  fetched.mockResolvedValueOnce(new Response("{}", { status: 502 }));
+  draw([true, page], true, "next");
+  loadEffect().run();
+  await flush();
+  expect(react.setters[STATE.error]).not.toHaveBeenCalledWith("Ana's trail could not be loaded.");
+
+  fetched.mockResolvedValueOnce(new Response("{}", { status: 502 }));
+  const tree = draw([true, page], true);
+  (nodes(tree).find((n) => n.type === TrailView)!.props!.onEarlier as () => void)();
+  expect(react.setters[STATE.earlierFailed]).toHaveBeenNthCalledWith(1, false);
+  await flush();
+  expect(react.setters[STATE.earlierFailed]).toHaveBeenLastCalledWith(true);
+  expect(react.setters[STATE.trail]).not.toHaveBeenCalled();
+  const said = draw([true, page, null, false, true]);
+  expect(nodes(said).find((n) => n.props?.role === "alert")!.props!.children).toBe("Earlier steps could not be loaded. Choose Show earlier to try again.");
+  expect(nodes(said).some((n) => n.type === TrailView)).toBe(true);
 });
 
 test("a lost session goes to sign-in, and an answer overtaken by a newer request is dropped", async () => {
@@ -182,16 +204,32 @@ test("a lost session goes to sign-in, and an answer overtaken by a newer request
   expect(overtaken).not.toHaveBeenCalled();
 });
 
-test("a link to a person's trail opens it", () => {
+test("a link to a person's trail opens it and moves the focus to it, and closing the trail takes it out of the address so the link works again", () => {
   const tree = draw([]);
   expect(nodes(tree).find((n) => n.type === "li")!.props!.id).toBe("trail-ana%20b");
   const details = { open: false };
+  const focus = vi.fn();
   react.refs[REF.details]!.current = details;
-  (window as unknown as { location: { hash: string } }).location.hash = "#trail-ana%20b";
+  react.refs[REF.summary]!.current = { focus };
+  const location = (window as unknown as { location: { hash: string } }).location;
+  location.hash = "#trail-ana%20b";
   react.effects[1]!.run();
   expect(details.open).toBe(true);
+  expect(focus).toHaveBeenCalledOnce();
   details.open = false;
-  (window as unknown as { location: { hash: string } }).location.hash = "#trail-lee";
+  location.hash = "#trail-lee";
   listeners.get("hashchange")!();
   expect(details.open).toBe(false);
+
+  const toggle = (open: boolean) => (nodes(draw([])).find((n) => n.type === "details")!.props!.onToggle as (e: { currentTarget: { open: boolean } }) => void)({ currentTarget: { open } });
+  const replace = (window as unknown as { history: { replaceState: ReturnType<typeof vi.fn> } }).history.replaceState;
+  location.hash = "";
+  toggle(true);
+  expect(replace).toHaveBeenLastCalledWith(null, "", "#trail-ana%20b");
+  location.hash = "#trail-ana%20b";
+  toggle(false);
+  expect(replace).toHaveBeenLastCalledWith(null, "", "/runs/0001");
+  location.hash = "#trail-lee";
+  toggle(false);
+  expect(replace).toHaveBeenCalledTimes(2);
 });
