@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "kysely";
 import { z } from "zod";
-import { DefectGroupsSchema, FindingSchema, JobUsageSchema, MAX_GROUPED_DEFECTS, settleGroups, JobStopReasonSchema, ReplayObservationSchema, RunEventSchema, SignInCheckSchema, ACCOUNT_CHECK_STEPS, trimStory, turnsOf, type DefectToGroup, type Finding, type JobStopReason, type JobUsage, type NotABug, type ProjectConfig, type ReplayObservation, type RunEvent, type SignInCheck, type StoryEntry, type Turn } from "@usetrawler/protocol";
+import { DefectGroupsSchema, FindingSchema, JobCompletionSchema, JobUsageSchema, MAX_GROUPED_DEFECTS, settleGroups, JobStopReasonSchema, ReplayObservationSchema, RunEventSchema, SignInCheckSchema, ACCOUNT_CHECK_STEPS, trimStory, turnsOf, type DefectToGroup, type Finding, type JobStopReason, type JobUsage, type NotABug, type ProjectConfig, type ReplayObservation, type RunEvent, type SignInCheck, type StoryEntry, type Turn } from "@usetrawler/protocol";
 import type { Database } from "../db/index.ts";
 import { asSystem, type Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -9,7 +9,7 @@ import { loadProjectConfig } from "../projects/projects.ts";
 import { logError } from "../server/log.ts";
 import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
-import { notBugsOf } from "./dismissals.ts";
+import { markKnownNotBugs, notBugsOf } from "./dismissals.ts";
 import { budgetLeft, monthlyBudget, RUN_TIME_LIMIT_HOURS, runsHalted } from "./limits.ts";
 import { turnSteps } from "./models.ts";
 import { ACCOUNT_REFUSED, affordableOutputTokens, capSpent, endRun, giveBackUnusedFirstRun, signUpSeedContext, type CancelReason, type ConfigSnapshot, type PaidBy } from "./runs.ts";
@@ -59,6 +59,7 @@ export interface JobResult {
   observation?: ReplayObservation;
   signIn?: SignInCheck;
   groups?: string[][];
+  knownNotBugs?: Array<{ key: string; ref: string }>;
 }
 
 export class ForeignEvents extends Error {
@@ -174,7 +175,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
       const story = turn ? await storyBefore(tx, picked.run_id, picked.position, snapshot) : undefined;
       const returning = turn ? turnsOf(snapshot).slice(0, picked.position).some((t) => t.personaId === picked.persona_key) : undefined;
       const defects = picked.kind === "group" ? await defectsToGroup(tx, picked.run_id, config) : undefined;
-      const notBugs = picked.kind === "role_session" ? await notBugsOf(tx, picked.org_id, picked.project_id) : [];
+      const notBugs = picked.kind === "role_session" || picked.kind === "group" ? await notBugsOf(tx, picked.org_id, picked.project_id) : [];
       return {
         assignment: {
           jobId: picked.id,
@@ -503,7 +504,7 @@ export async function recordLlmUsage(db: Database, call: LlmCall, usage: { model
 
 const noReport = (o?: ReplayObservation) => !o || (!o.completed && o.blockedAt === null && !o.botProtection);
 
-const JobResultSchema = z.object({ usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().max(2000).optional(), observation: ReplayObservationSchema.optional(), signIn: SignInCheckSchema.optional(), groups: DefectGroupsSchema.optional() });
+const JobResultSchema = z.object({ usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().max(2000).optional(), observation: ReplayObservationSchema.optional(), signIn: SignInCheckSchema.optional(), groups: DefectGroupsSchema.optional(), knownNotBugs: JobCompletionSchema.shape.knownNotBugs });
 
 async function refusal(tx: Tx, runId: string, accountRef: string, observed: string): Promise<string> {
   const run = await tx.selectFrom("runs").select("config_snapshot").where("id", "=", runId).executeTakeFirstOrThrow();
@@ -558,7 +559,9 @@ async function planNext(tx: Tx, job: { run_id: string; org_id: string; kind: str
       await tx.updateTable("runs").set({ sign_up_seed: null }).where("id", "=", job.run_id).execute();
       const candidates = await frictionToCheck(tx, job.run_id);
       const defects = await reportedDefectsOf(tx, job.run_id).select("key").execute();
-      if (defects.length >= 2 && defects.length <= MAX_GROUPED_DEFECTS) await tx.insertInto("jobs").values({ org_id: job.org_id, run_id: job.run_id, kind: "group", position: next }).execute();
+      const { project_id } = await tx.selectFrom("runs").select("project_id").where("id", "=", job.run_id).executeTakeFirstOrThrow();
+      const checkKnown = defects.length === 1 && (await notBugsOf(tx, job.org_id, project_id)).length > 0;
+      if ((defects.length >= 2 || checkKnown) && defects.length <= MAX_GROUPED_DEFECTS) await tx.insertInto("jobs").values({ org_id: job.org_id, run_id: job.run_id, kind: "group", position: next }).execute();
       else await queueReplays(tx, job, next, [...defects.map((d) => d.key), ...candidates]);
     }
   } else if (job.kind === "group") {
@@ -567,6 +570,12 @@ async function planNext(tx: Tx, job: { run_id: string; org_id: string; kind: str
     const firstReported = groups.map((group) => group.toSorted((a, b) => keys.indexOf(a) - keys.indexOf(b)));
     for (const [representative, ...same] of firstReported) {
       if (same.length) await tx.updateTable("findings").set({ same_as: representative, updated_at: new Date() }).where("run_id", "=", job.run_id).where("key", "in", same).execute();
+    }
+    if (result.knownNotBugs?.length && result.stoppedBy !== "error") {
+      const { project_id } = await tx.selectFrom("runs").select("project_id").where("id", "=", job.run_id).executeTakeFirstOrThrow();
+      const representativeOf = (key: string) => firstReported.find((group) => group.includes(key))?.[0];
+      const matches = result.knownNotBugs.flatMap((m) => { const key = representativeOf(m.key); return key ? [{ key, ref: m.ref }] : []; });
+      await markKnownNotBugs(tx, { orgId: job.org_id, runId: job.run_id, projectId: project_id }, matches);
     }
     const candidates = (await defectsOf(tx, job.run_id).select("key").where("filed_as", "=", "friction").execute()).map((d) => d.key);
     await queueReplays(tx, job, next, [...keys.filter((key) => firstReported.some((group) => group[0] === key)), ...candidates]);

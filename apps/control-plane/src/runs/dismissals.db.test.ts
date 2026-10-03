@@ -157,7 +157,7 @@ describe("later runs", () => {
     await markedAt("z-old", 1);
     await dismiss("org-a", await finishedRun("org-a", other, [{ key: "o1", title: "Other project's" }]), "o1", "Not this project.");
     await dismiss("org-b", await finishedRun("org-b", theirs, [{ key: "t1", title: "Another workspace's" }]), "t1", "Not this workspace.");
-    const expected = [{ title: "Menu on the left", reason: "Our users expect it there." }, { title: "Export asks twice", reason: "Asking twice is on purpose." }];
+    const expected = [{ title: "Menu on the left", reason: "Our users expect it there.", ref: `${before}/a-new` }, { title: "Export asks twice", reason: "Asking twice is on purpose.", ref: `${before}/z-old` }];
     expect(await notBugs(project)).toEqual(expected);
 
     await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
@@ -169,8 +169,9 @@ describe("later runs", () => {
   test("the same title and reason marked in several runs is told once, the newest 20 are kept, and each is one line within its limit", async () => {
     const project = await newProject();
     await dismiss("org-a", await finishedRun("org-a", project, [{ key: "r1", title: "Export asks twice" }]), "r1", "On purpose.");
-    await dismiss("org-a", await finishedRun("org-a", project, [{ key: "r2", title: "Export asks twice" }]), "r2", "On purpose.");
-    expect(await notBugs(project)).toEqual([{ title: "Export asks twice", reason: "On purpose." }]);
+    const second = await finishedRun("org-a", project, [{ key: "r2", title: "Export asks twice" }]);
+    await dismiss("org-a", second, "r2", "On purpose.");
+    expect(await notBugs(project)).toEqual([{ title: "Export asks twice", reason: "On purpose.", ref: `${second}/r2` }]);
 
     const long = await finishedRun("org-a", project, [{ key: "long", title: `A\ntitle   ${"t".repeat(400)}` }]);
     await dismiss("org-a", long, "long", `Two\n\nlines ${"r".repeat(480)}`);

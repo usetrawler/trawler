@@ -327,9 +327,17 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
       .orderBy("e.id")
       .limit(1)
       .executeTakeFirst(),
-    tx.selectFrom("finding_dismissals").select(["finding_key", "reason", "dismissed_by", "dismissed_at"]).where("run_id", "=", runId).execute(),
+    tx
+      .selectFrom("finding_dismissals as d")
+      .leftJoin("runs as m", "m.id", "d.matched_run_id")
+      .select(["d.finding_key", "d.reason", "d.dismissed_by", "d.dismissed_at", "d.matched_finding_key", "m.number as matched_run_number"])
+      .where("d.run_id", "=", runId)
+      .execute(),
   ]);
-  const dismissal = new Map(dismissals.map((d) => [d.finding_key, { reason: d.reason, userId: d.dismissed_by, at: d.dismissed_at, by: null as string | null }]));
+  const dismissal = new Map(dismissals.map((d) => [d.finding_key, {
+    reason: d.reason, userId: d.dismissed_by, at: d.dismissed_at, by: null as string | null,
+    matched: d.matched_finding_key !== null && d.matched_run_number !== null ? { runNumber: d.matched_run_number, findingKey: d.matched_finding_key } : null,
+  }]));
   const findingTitle = new Map(findings.map((f) => [f.key, f.title]));
   const latestScreenshot = (key: string, kind: string) => screenshots.filter((a) => a.finding_key === key && a.kind === kind).at(-1)?.id ?? null;
   return {

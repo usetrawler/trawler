@@ -299,7 +299,7 @@ test("every finding of a finished run opens to Not a bug, in every section, and 
 });
 
 test("a finding marked not a bug leaves its section and the counts for its own, with the reason, who and when, and Undo", () => {
-  const marked = (by: string | null) => ({ reason: "Saving twice is on purpose.", userId: "u1", at: new Date("2026-10-02T10:00:00Z"), by });
+  const marked = (by: string | null) => ({ reason: "Saving twice is on purpose.", userId: "u1", at: new Date("2026-10-02T10:00:00Z"), by, matched: null });
   const html = render(summary({
     ...finished,
     findings: [
