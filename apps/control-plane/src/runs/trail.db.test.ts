@@ -51,9 +51,10 @@ test("a person's trail lists their turns and what they did, each step with its p
     { type: "step", step: 2, tool: "browser_snapshot", costUsd: 0.01 },
     { type: "note", text: "The Send button is greyed out." },
     { type: "blocked_request", url: "https://tracker.example/pixel.gif?id=9" },
-    { type: "bot_protection", vendor: "Cloudflare", url: "https://app.acme.test/login" },
+    { type: "bot_protection", vendor: "Cloudflare", url: "https://app.acme.test/login?__cf_chl_tk=abc123&next=/reset?token=zzz" },
     { type: "finding", finding: { id: "f1", kind: "defect", goal: "send", title: "Send does nothing", observed: "o", reproduction: ["Open /invoices"], severity: "high" } },
     { type: "goal_status", outcome: { goal: "send", status: "failed", note: "Send never worked." } },
+    { type: "goal_status", outcome: { goal: "gone", status: "not_attempted", note: "" } },
     { type: "job_finished", usage: { model: "m", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 2 }, stoppedBy: "finish" },
   ]);
   await events(runId, second, [{ type: "step", step: 1, tool: "browser_click", costUsd: 0.01, url: "https://elsewhere.test/x" }]);
@@ -61,7 +62,7 @@ test("a person's trail lists their turns and what they did, each step with its p
 
   const got = (await trail(runId, "ana"))!;
   expect(got.turns.map(({ id, ...turn }) => ({ ...turn, mine: id === ana || id === second }))).toEqual([
-    { number: 1, status: "succeeded", stoppedBy: "finish", error: null, entries: 7, mine: true },
+    { number: 1, status: "succeeded", stoppedBy: "finish", error: null, entries: 8, mine: true },
     { number: 2, status: "failed", stoppedBy: "error", error: "the browser failed 3 times in a row", entries: 1, mine: true },
   ]);
   expect(got.entries.map(({ id, at, ...e }) => e)).toEqual([
@@ -72,11 +73,13 @@ test("a person's trail lists their turns and what they did, each step with its p
     { turn: ana, kind: "bot_protection", vendor: "Cloudflare", page: "/login" },
     { turn: ana, kind: "finding", findingKind: "defect", title: "Send does nothing" },
     { turn: ana, kind: "goal", status: "failed", goal: "Send an invoice.", note: "Send never worked." },
+    { turn: ana, kind: "goal", status: "not_attempted", goal: "gone", note: "" },
     { turn: second, kind: "step", step: 1, tool: "browser_click", page: "elsewhere.test/x" },
   ]);
   expect(got.olderThan).toBeNull();
   expect(JSON.stringify(got)).not.toContain("Lee's own note.");
   expect(JSON.stringify(got)).not.toContain("reproduction");
+  expect(JSON.stringify(got)).not.toMatch(/abc123|zzz/);
 });
 
 test("a long trail comes newest first in pages, each in order, until nothing earlier is left", async () => {
@@ -92,6 +95,14 @@ test("a long trail comes newest first in pages, each in order, until nothing ear
   expect(steps(last)).toEqual(Array.from({ length: 10 }, (_, i) => i + 1));
   expect(last.olderThan).toBeNull();
   expect(last.turns[0]!.entries).toBe(2 * TRAIL_PAGE + 10);
+});
+
+test("a trail of exactly one page has nothing earlier", async () => {
+  const { runId, ana } = await finishedRun();
+  await events(runId, ana, Array.from({ length: TRAIL_PAGE }, (_, i) => ({ type: "note", text: String(i) })));
+  const got = (await trail(runId, "ana"))!;
+  expect(got.entries).toHaveLength(TRAIL_PAGE);
+  expect(got.olderThan).toBeNull();
 });
 
 test("another workspace, an unknown run or a person the run never had gets no trail", async () => {

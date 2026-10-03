@@ -4,10 +4,26 @@ import type { Trail, TrailEntry, TrailTurn } from "../../../runs/trail.ts";
 
 const label = "font-mono text-[10px] uppercase";
 
-export function mergeTrail(had: Trail | null, got: Trail, earlier: boolean): Trail {
-  if (!had) return got;
-  const byId = new Map([...had.entries, ...got.entries].map((e) => [e.id, e]));
-  return { turns: got.turns, entries: [...byId.values()].sort((a, b) => a.id - b.id), olderThan: earlier ? got.olderThan : had.olderThan };
+const TOOL_LABEL: Record<string, string> = {
+  browser_navigate: "Opened a page", browser_navigate_back: "Went back", browser_snapshot: "Read the page", browser_click: "Clicked",
+  browser_type: "Typed", browser_hover: "Hovered", browser_select_option: "Chose an option", browser_press_key: "Pressed a key",
+  browser_wait_for: "Waited", browser_handle_dialog: "Answered a dialog", browser_file_upload: "Closed a file picker",
+  sign_in: "Signed in", type_own_password: "Typed their password", finish: "Finished",
+};
+const OWN_ENTRY = new Set(["note", "submit_finding", "goal_status"]);
+
+export const trailAnchor = (personId: string) => `trail-${encodeURIComponent(personId)}`;
+
+export function mergeNewest(had: Trail | null, got: Trail): Trail {
+  if (!had || got.olderThan === null || had.entries.length === 0) return got;
+  const oldestGot = got.entries[0]?.id ?? got.olderThan;
+  if (had.entries.at(-1)!.id < oldestGot) return got;
+  return { turns: got.turns, entries: [...had.entries.filter((e) => e.id < oldestGot), ...got.entries], olderThan: had.olderThan };
+}
+
+export function mergeEarlier(had: Trail | null, got: Trail, before: number): Trail | null {
+  if (!had || had.olderThan !== before) return had;
+  return { turns: had.turns, entries: [...got.entries.filter((e) => e.id < before), ...had.entries], olderThan: got.olderThan };
 }
 
 export function turnEnd(t: TrailTurn): string {
@@ -17,18 +33,21 @@ export function turnEnd(t: TrailTurn): string {
   if (t.status === "cancelled") return t.entries === 0 ? "Did not start: the run stopped first." : "Stopped before the end of this turn.";
   if (t.stoppedBy === "max_steps") return "Used all the steps this turn had.";
   if (t.stoppedBy === "budget") return "Stopped: the run's cap ran out or the run was stopped.";
-  if (t.stoppedBy === "error") return `Stopped: ${t.error ?? "no reason was recorded"}`;
   return "Finished this turn.";
 }
+
+const endTone = (t: TrailTurn) => (t.status === "failed" ? "text-bad" : (t.status === "succeeded" && t.stoppedBy === "finish") || t.status === "queued" || t.status === "leased" ? "text-muted" : "text-warn");
 
 function Entry({ e }: { e: TrailEntry }) {
   switch (e.kind) {
     case "step":
-      return <><span className="font-mono text-[11px] text-muted">Step {e.step}</span> <span className="font-mono text-[12px]">{e.tool ?? "no tool"}</span>{e.page && <span className="font-mono text-[12px] text-muted"> · {e.page}</span>}</>;
+      return <><span className="font-mono text-[11px] text-muted">Step {e.step}</span> {e.tool ? TOOL_LABEL[e.tool] ?? e.tool : "No tool"}{e.page && <span className="font-mono text-[12px] text-muted"> · {e.page}</span>}</>;
     case "note":
       return <><span className="text-muted">Noted: </span>{e.text}</>;
-    case "goal":
-      return <><span aria-hidden className={e.status === "reached" ? "text-ok" : "text-warn"}>{e.status === "reached" ? "✓ " : "✕ "}</span><span className="text-muted">{e.status === "reached" ? "Reached: " : "Did not reach: "}</span>{e.goal}{e.note && <span className="text-muted"> — {e.note}</span>}</>;
+    case "goal": {
+      const [mark, said, tone] = e.status === "reached" ? ["✓ ", "Reached: ", "text-ok"] : e.status === "failed" ? ["✕ ", "Did not reach: ", "text-warn"] : ["· ", "Left without an answer: ", "text-muted"];
+      return <><span aria-hidden className={tone}>{mark}</span><span className="text-muted">{said}</span>{e.goal}{e.note && <span className="text-muted"> — {e.note}</span>}</>;
+    }
     case "finding":
       return <><span className="text-muted">{e.findingKind === "defect" ? "Reported a defect: " : "Noted friction: "}</span>{e.title}</>;
     case "blocked":
@@ -38,9 +57,17 @@ function Entry({ e }: { e: TrailEntry }) {
   }
 }
 
-export function TrailView({ trail, loadingEarlier, onEarlier }: { trail: Trail; loadingEarlier: boolean; onEarlier: () => void }) {
+const shownEntry = (e: TrailEntry) => !(e.kind === "step" && e.tool && OWN_ENTRY.has(e.tool));
+
+export function TrailView({ trail, loadingEarlier, onEarlier, focusEntry, onFocused }: { trail: Trail; loadingEarlier: boolean; onEarlier: () => void; focusEntry?: number | null; onFocused?: () => void }) {
+  const focusRef = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (focusEntry == null) return;
+    focusRef.current?.focus();
+    onFocused?.();
+  }, [focusEntry, onFocused]);
   if (trail.turns.length === 0) return <p className="text-sm text-muted">No turn has started yet.</p>;
-  const firstLoaded = trail.entries.length === 0 ? (trail.olderThan === null ? 0 : trail.turns.length) : trail.turns.findIndex((t) => t.id === trail.entries[0]!.turn);
+  const firstLoaded = trail.olderThan === null || trail.entries.length === 0 ? 0 : trail.turns.findIndex((t) => t.id === trail.entries[0]!.turn);
   const shown = trail.turns.slice(Math.max(0, firstLoaded));
   return (
     <div className="flex flex-col gap-4 text-sm wrap-anywhere">
@@ -50,13 +77,17 @@ export function TrailView({ trail, loadingEarlier, onEarlier }: { trail: Trail; 
         </button>
       )}
       {shown.map((t) => {
-        const entries = trail.entries.filter((e) => e.turn === t.id);
+        const entries = trail.entries.filter((e) => e.turn === t.id && shownEntry(e));
         return (
-          <section key={t.id} aria-label={trail.turns.length > 1 ? `Turn ${t.number}` : undefined} className="flex flex-col gap-1.5">
-            {trail.turns.length > 1 && <h4 className={`${label} text-muted`}>Turn {t.number}</h4>}
-            {entries.length > 0 && <ol className="flex flex-col gap-1 border-l border-line pl-3">{entries.map((e) => <li key={e.id}><Entry e={e} /></li>)}</ol>}
-            <p className={t.status === "failed" ? "text-bad" : "text-muted"}>{turnEnd(t)}</p>
-          </section>
+          <div key={t.id} className="flex flex-col gap-1.5">
+            {trail.turns.length > 1 && <h3 className={`${label} text-muted`}>Turn {t.number}</h3>}
+            {entries.length > 0 && (
+              <ol className="flex flex-col gap-1 border-l border-line pl-3">
+                {entries.map((e) => <li key={e.id} ref={e.id === focusEntry ? focusRef : undefined} tabIndex={e.id === focusEntry ? -1 : undefined} className="outline-none"><Entry e={e} /></li>)}
+              </ol>
+            )}
+            <p className={endTone(t)}>{turnEnd(t)}</p>
+          </div>
         );
       })}
     </div>
@@ -67,48 +98,82 @@ export function PersonTrail({ runId, person, live, pulse }: { runId: string; per
   const [open, setOpen] = useState(false);
   const [trail, setTrail] = useState<Trail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState<"newest" | "earlier" | null>(null);
+  const [earlier, setEarlier] = useState(false);
+  const [focusEntry, setFocusEntry] = useState<number | null>(null);
   const latest = useRef(0);
-  const load = useCallback(async (before?: number) => {
+  const settled = useRef(false);
+  const details = useRef<HTMLDetailsElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  const anchor = trailAnchor(person.id);
+  const address = `/api/runs/${runId}/people/${encodeURIComponent(person.id)}/trail`;
+  const failed = `${person.name}'s trail could not be loaded.`;
+
+  const load = useCallback(async (retry = false) => {
     const request = ++latest.current;
-    setLoading(before === undefined ? "newest" : "earlier");
+    if (retry) setError(null);
     try {
-      const res = await fetch(`/api/runs/${runId}/people/${encodeURIComponent(person.id)}/trail${before === undefined ? "" : `?before=${before}`}`, { cache: "no-store" });
+      const res = await fetch(address, { cache: "no-store" });
       if (res.status === 401) return window.location.assign("/sign-in");
       if (!res.ok) throw new Error(String(res.status));
       const got = (await res.json()) as Trail;
       if (request !== latest.current) return;
-      setTrail((had) => mergeTrail(had, got, before !== undefined));
+      setTrail((had) => mergeNewest(had, got));
       setError(null);
+      if (retry) body.current?.focus();
     } catch {
-      if (request === latest.current) setError(`${person.name}'s trail could not be loaded.`);
-    } finally {
-      if (request === latest.current) setLoading(null);
+      if (request === latest.current) setError(failed);
     }
-  }, [runId, person.id, person.name]);
-  const settled = useRef(false);
+  }, [address, failed]);
+
+  const loadEarlier = useCallback(async (before: number) => {
+    setEarlier(true);
+    try {
+      const res = await fetch(`${address}?before=${before}`, { cache: "no-store" });
+      if (res.status === 401) return window.location.assign("/sign-in");
+      if (!res.ok) throw new Error(String(res.status));
+      const got = (await res.json()) as Trail;
+      setTrail((had) => mergeEarlier(had, got, before));
+      setFocusEntry(got.entries.find(shownEntry)?.id ?? null);
+    } catch {
+      setError(failed);
+    } finally {
+      setEarlier(false);
+    }
+  }, [address, failed]);
+
   useEffect(() => {
     if (!open || settled.current) return;
     settled.current = !live;
     void load();
   }, [open, live, pulse, load]);
+
+  useEffect(() => {
+    const openWhenAddressed = () => {
+      if (window.location.hash === `#${anchor}` && details.current) details.current.open = true;
+    };
+    openWhenAddressed();
+    window.addEventListener("hashchange", openWhenAddressed);
+    return () => window.removeEventListener("hashchange", openWhenAddressed);
+  }, [anchor]);
+
+  const focused = useCallback(() => setFocusEntry(null), []);
   return (
-    <li className="border-b border-line last:border-b-0">
-      <details onToggle={(e) => setOpen(e.currentTarget.open)} className="group">
+    <li id={anchor} className="border-b border-line last:border-b-0">
+      <details ref={details} onToggle={(e) => setOpen(e.currentTarget.open)} className="group">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-[17px] [&::-webkit-details-marker]:hidden">
           <strong className="break-words">{person.name}</strong>
           <b aria-hidden className="transition-transform group-open:rotate-90">→</b>
         </summary>
-        <div className="border-t border-line p-[17px]">
+        <div ref={body} tabIndex={-1} className="border-t border-line p-[17px] outline-none">
           {error ? (
             <div className="flex flex-wrap items-center gap-3 text-sm">
               <span role="alert" className="text-bad">{error}</span>
-              <button type="button" onClick={() => void load()} className="h-10 border border-line bg-panel px-4 hover:border-ink">Try again</button>
+              <button type="button" onClick={() => void load(true)} className="h-10 border border-line bg-panel px-4 hover:border-ink">Try again</button>
             </div>
           ) : trail ? (
-            <TrailView trail={trail} loadingEarlier={loading === "earlier"} onEarlier={() => void load(trail.olderThan!)} />
+            <TrailView trail={trail} loadingEarlier={earlier} onEarlier={() => void loadEarlier(trail.olderThan!)} focusEntry={focusEntry} onFocused={focused} />
           ) : (
-            <p role="status" className="text-sm text-muted">Loading…</p>
+            open && <p role="status" className="text-sm text-muted">Loading…</p>
           )}
         </div>
       </details>
@@ -122,7 +187,7 @@ export function Trails({ runId, people, live, pulse }: { runId: string; people: 
     <section aria-labelledby={id} className="flex flex-col">
       <div className="pb-3">
         <h2 id={id} className={`${label} text-action-ink`}>What each person did</h2>
-        <p className="mt-[3px] text-[11px] text-muted">Each step with the page it ended on, their notes, goals and findings, in order</p>
+        <p className="mt-[3px] text-[11px] text-muted">Every step and the page it ended on, with notes, goals and findings, in order</p>
       </div>
       <ul className="border border-line bg-panel">{people.map((p) => <PersonTrail key={p.id} runId={runId} person={p} live={live} pulse={pulse} />)}</ul>
     </section>

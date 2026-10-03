@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 const react = vi.hoisted(() => ({
-  effects: [] as Array<() => void | (() => void)>,
+  effects: [] as Array<{ run: () => void | (() => void); deps: unknown[] | undefined }>,
   setters: [] as Array<ReturnType<typeof import("vitest").vi.fn>>,
   values: [] as unknown[],
   refs: [] as Array<{ current: unknown }>,
@@ -14,7 +14,7 @@ vi.mock("react", async (original) => ({
     react.setters.push(set);
     return [react.values.length ? react.values.shift() : initial, set];
   },
-  useEffect: (effect: () => void | (() => void)) => { react.effects.push(effect); },
+  useEffect: (run: () => void | (() => void), deps?: unknown[]) => { react.effects.push({ run, deps }); },
   useCallback: (fn: unknown) => fn,
   useRef: (value: unknown) => {
     const at = react.refIndex++;
@@ -24,7 +24,7 @@ vi.mock("react", async (original) => ({
   useId: () => "id",
 }));
 
-const { PersonTrail } = await import("./person-trail.tsx");
+const { PersonTrail, TrailView } = await import("./person-trail.tsx");
 
 type Node = { type?: unknown; props?: Record<string, unknown> & { children?: unknown } };
 const nodes = (node: unknown): Node[] => {
@@ -32,21 +32,28 @@ const nodes = (node: unknown): Node[] => {
   if (!node || typeof node !== "object") return [];
   return [node as Node, ...nodes((node as Node).props?.children)];
 };
-const page = { turns: [{ id: "t1", number: 1, status: "succeeded", stoppedBy: "finish", error: null, entries: 70 }], entries: [{ id: 50, turn: "t1", at: "", kind: "note", text: "Hi." }], olderThan: 50 };
+const turns = [{ id: "t1", number: 1, status: "succeeded", stoppedBy: "finish", error: null, entries: 70 }];
+const page = { turns, entries: [{ id: 50, turn: "t1", at: "", kind: "note", text: "Hi." }], olderThan: 50 };
+const earlierPage = { turns, entries: [{ id: 3, turn: "t1", at: "", kind: "step", step: 1, tool: "note", page: null }, { id: 4, turn: "t1", at: "", kind: "note", text: "Old." }], olderThan: null };
 const ana = { id: "ana b", name: "Ana" };
+const STATE = { open: 0, trail: 1, error: 2, earlier: 3, focusEntry: 4 };
+const REF = { details: 2, body: 3 };
 let fetched: ReturnType<typeof vi.fn>;
-const draw = (values: unknown[], live = false) => {
+const draw = (values: unknown[], live = false, pulse: unknown = 0) => {
   Object.assign(react, { effects: [], setters: [], refIndex: 0, values });
-  return PersonTrail({ runId: "run-1", person: ana, live, pulse: 0 });
+  return PersonTrail({ runId: "run-1", person: ana, live, pulse });
 };
+const loadEffect = () => react.effects[0]!;
 const flush = () => vi.advanceTimersByTimeAsync(0);
+const listeners = new Map<string, () => void>();
 
 beforeEach(() => {
   vi.useFakeTimers();
   Object.assign(react, { effects: [], setters: [], values: [], refs: [], refIndex: 0 });
   fetched = vi.fn(async () => new Response(JSON.stringify(page)));
   vi.stubGlobal("fetch", fetched);
-  vi.stubGlobal("window", { location: { assign: vi.fn() } });
+  listeners.clear();
+  vi.stubGlobal("window", { location: { assign: vi.fn(), hash: "" }, addEventListener: (type: string, fn: () => void) => listeners.set(type, fn), removeEventListener: vi.fn() });
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -55,71 +62,105 @@ afterEach(() => {
 
 test("a closed trail loads nothing; opening it loads the newest page once a run has ended", async () => {
   const closed = draw([]);
-  react.effects[0]!();
+  loadEffect().run();
   expect(fetched).not.toHaveBeenCalled();
+  expect(nodes(closed).some((n) => n.props?.role === "status")).toBe(false);
   const details = nodes(closed).find((n) => n.type === "details")!;
   (details.props!.onToggle as (e: { currentTarget: { open: boolean } }) => void)({ currentTarget: { open: true } });
-  expect(react.setters[0]).toHaveBeenCalledWith(true);
+  expect(react.setters[STATE.open]).toHaveBeenCalledWith(true);
 
-  draw([true]);
-  react.effects[0]!();
+  const opening = draw([true]);
+  expect(nodes(opening).find((n) => n.props?.role === "status")).toBeTruthy();
+  loadEffect().run();
   await flush();
   expect(fetched).toHaveBeenCalledWith("/api/runs/run-1/people/ana%20b/trail", { cache: "no-store" });
-  const merge = react.setters[1]!.mock.calls[0]![0] as (had: unknown) => unknown;
-  expect(merge(null)).toEqual(page);
-  expect(react.setters[3]).toHaveBeenNthCalledWith(1, "newest");
-  expect(react.setters[3]).toHaveBeenLastCalledWith(null);
+  expect((react.setters[STATE.trail]!.mock.calls[0]![0] as (had: unknown) => unknown)(null)).toEqual(page);
 
   draw([true, page]);
-  react.effects[0]!();
+  loadEffect().run();
   await flush();
   expect(fetched).toHaveBeenCalledOnce();
 });
 
-test("while the run is live an open trail loads again on every update, and once more when the run ends", async () => {
+test("while the run is live an open trail loads again on every update of the page, and once more when the run ends", async () => {
+  draw([true, page], true, "pulse-1");
+  expect(loadEffect().deps).toEqual(expect.arrayContaining([true, true, "pulse-1"]));
   for (let i = 0; i < 3; i++) {
-    draw([true, page], true);
-    react.effects[0]!();
+    draw([true, page], true, `pulse-${i}`);
+    loadEffect().run();
     await flush();
   }
   expect(fetched).toHaveBeenCalledTimes(3);
-  draw([true, page], false);
-  react.effects[0]!();
-  await flush();
-  draw([true, page], false);
-  react.effects[0]!();
-  await flush();
+  for (let i = 0; i < 2; i++) {
+    draw([true, page], false, "pulse-end");
+    loadEffect().run();
+    await flush();
+  }
   expect(fetched).toHaveBeenCalledTimes(4);
 });
 
-test("Show earlier asks for the page before the cursor and joins it", async () => {
+test("Show earlier asks for the page before the cursor, joins it in front, and moves the focus to the first entry it added", async () => {
   const tree = draw([true, page]);
-  const view = nodes(tree).find((n) => typeof n.type === "function" && n.props?.onEarlier)!;
+  const view = nodes(tree).find((n) => n.type === TrailView)!;
+  fetched.mockResolvedValueOnce(new Response(JSON.stringify(earlierPage)));
   (view.props!.onEarlier as () => void)();
+  expect(react.setters[STATE.earlier]).toHaveBeenCalledWith(true);
   await flush();
   expect(fetched).toHaveBeenCalledWith("/api/runs/run-1/people/ana%20b/trail?before=50", { cache: "no-store" });
-  expect(react.setters[3]).toHaveBeenNthCalledWith(1, "earlier");
-  const merge = react.setters[1]!.mock.calls[0]![0] as (had: unknown) => { olderThan: unknown };
-  expect(merge({ ...page, olderThan: 77 }).olderThan).toBe(50);
+  const merge = react.setters[STATE.trail]!.mock.calls[0]![0] as (had: unknown) => { entries: Array<{ id: number }>; olderThan: unknown };
+  expect(merge(page).entries.map((e) => e.id)).toEqual([3, 4, 50]);
+  expect(merge(page).olderThan).toBeNull();
+  expect(react.setters[STATE.focusEntry]).toHaveBeenCalledWith(4);
+  expect(react.setters[STATE.earlier]).toHaveBeenLastCalledWith(false);
 });
 
-test("a failed load says so with Try again, a lost session goes to sign-in, and an answer overtaken by a newer request is dropped", async () => {
+test("an earlier page still lands while a live update loads the newest one", async () => {
+  const tree = draw([true, page], true);
+  const view = nodes(tree).find((n) => n.type === TrailView)!;
+  let release!: (r: Response) => void;
+  fetched.mockImplementationOnce(() => new Promise<Response>((resolve) => { release = resolve; }));
+  (view.props!.onEarlier as () => void)();
+  const setTrail = react.setters[STATE.trail]!;
+  loadEffect().run();
+  await flush();
+  release(new Response(JSON.stringify(earlierPage)));
+  await flush();
+  expect(setTrail).toHaveBeenCalledTimes(2);
+});
+
+test("the trail a step tells to take the focus gets it", () => {
+  const focus = vi.fn();
+  const focused = vi.fn();
+  Object.assign(react, { effects: [], setters: [], refIndex: 0, refs: [{ current: { focus } }] });
+  const tree = TrailView({ trail: earlierPage as never, loadingEarlier: false, onEarlier: () => {}, focusEntry: 4, onFocused: focused });
+  const item = nodes(tree).find((n) => n.type === "li" && n.props?.tabIndex === -1)!;
+  expect(item.props!.ref).toBe(react.refs[0]);
+  react.effects[0]!.run();
+  expect(focus).toHaveBeenCalledOnce();
+  expect(focused).toHaveBeenCalledOnce();
+});
+
+test("a failed load says so with Try again, which clears the message while it tries and moves the focus into the trail when it works", async () => {
   fetched.mockResolvedValueOnce(new Response("{}", { status: 500 }));
   draw([true]);
-  react.effects[0]!();
+  loadEffect().run();
   await flush();
-  expect(react.setters[2]).toHaveBeenLastCalledWith("Ana's trail could not be loaded.");
+  expect(react.setters[STATE.error]).toHaveBeenLastCalledWith("Ana's trail could not be loaded.");
   const failed = draw([true, null, "Ana's trail could not be loaded."]);
   expect(nodes(failed).find((n) => n.props?.role === "alert")).toBeTruthy();
-  const retry = nodes(failed).find((n) => n.type === "button")!;
-  (retry.props!.onClick as () => void)();
+  const focus = vi.fn();
+  react.refs[REF.body]!.current = { focus };
+  (nodes(failed).find((n) => n.type === "button")!.props!.onClick as () => void)();
+  expect(react.setters[STATE.error]).toHaveBeenNthCalledWith(1, null);
   await flush();
   expect(fetched).toHaveBeenCalledTimes(2);
+  expect(focus).toHaveBeenCalledOnce();
+});
 
+test("a lost session goes to sign-in, and an answer overtaken by a newer request is dropped", async () => {
   fetched.mockResolvedValueOnce(new Response("{}", { status: 401 }));
-  react.refs = [];
   draw([true]);
-  react.effects[0]!();
+  loadEffect().run();
   await flush();
   expect((window as unknown as { location: { assign: ReturnType<typeof vi.fn> } }).location.assign).toHaveBeenCalledWith("/sign-in");
 
@@ -127,13 +168,27 @@ test("a failed load says so with Try again, a lost session goes to sign-in, and 
   fetched.mockImplementationOnce(() => new Promise<Response>((resolve) => { release = resolve; }));
   react.refs = [];
   draw([true], true);
-  react.effects[0]!();
-  const overtaken = react.setters[1]!;
+  loadEffect().run();
+  const overtaken = react.setters[STATE.trail]!;
   draw([true], true);
-  react.effects[0]!();
+  loadEffect().run();
   await flush();
-  expect(react.setters[1]).toHaveBeenCalledOnce();
+  expect(react.setters[STATE.trail]).toHaveBeenCalledOnce();
   release(new Response(JSON.stringify(page)));
   await flush();
   expect(overtaken).not.toHaveBeenCalled();
+});
+
+test("a link to a person's trail opens it", () => {
+  const tree = draw([]);
+  expect(nodes(tree).find((n) => n.type === "li")!.props!.id).toBe("trail-ana%20b");
+  const details = { open: false };
+  react.refs[REF.details]!.current = details;
+  (window as unknown as { location: { hash: string } }).location.hash = "#trail-ana%20b";
+  react.effects[1]!.run();
+  expect(details.open).toBe(true);
+  details.open = false;
+  (window as unknown as { location: { hash: string } }).location.hash = "#trail-lee";
+  listeners.get("hashchange")!();
+  expect(details.open).toBe(false);
 });

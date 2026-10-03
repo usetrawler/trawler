@@ -36,6 +36,12 @@ test("a trail is read in the member's own workspace, newest page or before a cur
   expect(state.tenants).toEqual(["org-2", "org-2"]);
 });
 
+test("a member of another workspace asking for the same run number finds nothing", async () => {
+  state.member = { orgId: "org-9", userId: "u9" };
+  expect((await get("0007", "ana")).status).toBe(404);
+  expect(state.asked).toEqual([]);
+});
+
 test("an unknown run or person, or a malformed cursor or person, is not found", async () => {
   state.member = { orgId: "org-2", userId: "u1" };
   expect((await get("0008", "ana")).status).toBe(404);

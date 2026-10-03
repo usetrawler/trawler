@@ -11,7 +11,7 @@ import { LocalTime } from "../../../components/local-time.tsx";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { cancelRunAction, dismissFindingAction, judgeAgainAction, undoDismissalAction } from "./actions.ts";
 import { FindingScreenshots } from "./finding-screenshots.tsx";
-import { Trails } from "./person-trail.tsx";
+import { trailAnchor, Trails } from "./person-trail.tsx";
 import { RunAgainButton, RunAgainError, useRunAgain } from "./run-again-button.tsx";
 
 type View = ReturnType<typeof runView>;
@@ -437,6 +437,7 @@ function PeopleOutcomes({ view }: { view: View }) {
                   </ul>
                 </details>
                 {(p.defects > 0 || p.friction > 0) && <span className="mt-1 block">{plural(p.defects, "defect report", "defect reports")} · {plural(p.friction, "friction", "frictions")}</span>}
+                <a href={`#${trailAnchor(p.id)}`} className="mt-1 inline-block underline underline-offset-4 hover:text-ink">What they did<span className="sr-only">: {p.name}</span></a>
               </div>
             </li>
           );

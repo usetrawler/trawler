@@ -9,7 +9,7 @@ const TRAIL_TYPES = ["step", "note", "goal_status", "finding", "blocked_request"
 export type TrailEntry = { id: number; turn: string; at: string } & (
   | { kind: "step"; step: number; tool: string | null; page: string | null }
   | { kind: "note"; text: string }
-  | { kind: "goal"; status: "reached" | "failed"; goal: string; note: string }
+  | { kind: "goal"; status: "reached" | "failed" | "not_attempted"; goal: string; note: string }
   | { kind: "finding"; findingKind: "defect" | "friction"; title: string }
   | { kind: "blocked"; address: string }
   | { kind: "bot_protection"; vendor: string; page: string | null }
@@ -31,6 +31,7 @@ export interface Trail {
 }
 
 const hostOf = (address: string) => (URL.canParse(address) ? new URL(address).host : address);
+const pathOf = (address: string) => (URL.canParse(address) ? new URL(address).pathname : null);
 
 function entryOf(row: { id: string; job_id: string; at: Date; payload: unknown }, target: string, goalText: Map<string, string>): TrailEntry | null {
   const e = row.payload as RunEvent;
@@ -38,10 +39,10 @@ function entryOf(row: { id: string; job_id: string; at: Date; payload: unknown }
   switch (e.type) {
     case "step": return { ...base, kind: "step", step: e.step, tool: e.tool, page: pageLabel(e.url ?? null, target) };
     case "note": return { ...base, kind: "note", text: e.text };
-    case "goal_status": return { ...base, kind: "goal", status: e.outcome.status === "reached" ? "reached" : "failed", goal: goalText.get(e.outcome.goal) ?? e.outcome.goal, note: e.outcome.note ?? "" };
+    case "goal_status": return { ...base, kind: "goal", status: e.outcome.status, goal: goalText.get(e.outcome.goal) ?? e.outcome.goal, note: e.outcome.note ?? "" };
     case "finding": return { ...base, kind: "finding", findingKind: e.finding.kind, title: e.finding.title };
     case "blocked_request": return { ...base, kind: "blocked", address: hostOf(e.url) };
-    case "bot_protection": return { ...base, kind: "bot_protection", vendor: e.vendor, page: pageLabel(e.url, target) };
+    case "bot_protection": return { ...base, kind: "bot_protection", vendor: e.vendor, page: pathOf(e.url) };
     default: return null;
   }
 }
