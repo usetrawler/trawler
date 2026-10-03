@@ -32,7 +32,7 @@ function knownNotBugs(answer: Answer, defects: DefectToGroup[], notBugs: NotABug
   for (const match of answer.notBugs ?? []) {
     if (!match) continue;
     const { id, item } = match;
-    const ref = item > 0 ? notBugs[item - 1]?.ref : undefined;
+    const ref = notBugs[item - 1]?.ref;
     if (keys.has(id) && ref && !matched.has(id)) matched.set(id, ref);
   }
   return [...matched].map(([key, ref]) => ({ key, ref }));
