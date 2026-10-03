@@ -3,7 +3,7 @@ import { z } from "zod";
 import { describe, expect, test } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
 import { JOB_STOPPED, ProjectConfigSchema, RunEventSchema, type RunEventInput } from "@usetrawler/protocol";
-import { Budget } from "./llm.ts";
+import { Budget, createModel } from "./llm.ts";
 import { rolePrompt, sessionStatus } from "./prompts.ts";
 import { runRoleSession } from "./role-session.ts";
 import { SecretScrubber } from "./secrets.ts";
@@ -545,6 +545,30 @@ describe("runRoleSession", () => {
     expect(calls).toEqual(["call-1", "call-2", "call-3", "call-4"]);
     expect(results).toEqual(calls);
     expect(JSON.stringify(prompt)).not.toMatch(/first thought|second thought/);
+  });
+
+  test("what reaches OpenRouter carries the reasoning and its details of the last two steps only", async () => {
+    const replies = [["browser_snapshot", {}], ["browser_snapshot", {}], ["goal_status", { goal: "sign-up", status: "reached", note: "" }], ["goal_status", { goal: "invoice", status: "reached", note: "" }], ["finish", { summary: "done" }]] as const;
+    const bodies: Array<{ messages: Array<{ role: string; reasoning?: string; reasoning_details?: Array<{ text: string }>; tool_calls?: Array<{ id: string }> }> }> = [];
+    const fetch = (async (_url: string, init: { body: string }) => {
+      const n = bodies.push(JSON.parse(init.body));
+      const [name, args] = replies[n - 1]!;
+      return new Response(JSON.stringify({
+        id: `r${n}`, model: "m", created: 0, object: "chat.completion",
+        choices: [{ index: 0, finish_reason: "tool_calls", message: { role: "assistant", content: null, reasoning: `thought ${n}`, reasoning_details: [{ type: "reasoning.text", text: `thought ${n}`, format: "unknown" }], tool_calls: [{ id: `call-${n}`, type: "function", function: { name, arguments: JSON.stringify(args) } }] } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, cost: 0.001 },
+      }), { headers: { "content-type": "application/json" } });
+    }) as unknown as typeof globalThis.fetch;
+    await run(scriptedModel([]), { model: createModel({ modelId: "m", apiKey: "k", fetch }) }).promise;
+    const sentBack = (body: (typeof bodies)[number]) => body.messages.filter((m) => m.role === "assistant").map((m) => [m.tool_calls?.[0]?.id, m.reasoning ?? null, (m.reasoning_details ?? []).map((d) => d.text)]);
+    expect(sentBack(bodies[4]!)).toEqual([
+      ["call-1", null, []],
+      ["call-2", null, []],
+      ["call-3", "thought 3", ["thought 3"]],
+      ["call-4", "thought 4", ["thought 4"]],
+    ]);
+    const results = bodies[4]!.messages.filter((m) => m.role === "tool").map((m) => (m as unknown as { tool_call_id: string }).tool_call_id);
+    expect(results).toEqual(["call-1", "call-2", "call-3", "call-4"]);
   });
 
   test("tells the persona who they are, where to go and which goals to try", async () => {
