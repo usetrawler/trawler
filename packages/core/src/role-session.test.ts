@@ -659,6 +659,77 @@ test("a person keeps a value the product contradicts, such as a balance its own 
   expect(prompt).toMatch(/Do not explain such a thing away with a reason the product did not give/);
 });
 
+test("a person is told to look at the page as a picture, and that a picture that does not match, or text covered or cut off, is a defect, only when they can", () => {
+  const persona = { id: "dana", name: "Dana", brief: "You opened an account." };
+  const goals = [{ id: "history", instruction: "You can read the transactions." }];
+  const prompt = rolePrompt({ persona, targetUrl: "https://bank.test/", goals, signUpEmail: "dana@example.com", look: true });
+  expect(prompt).toContain("To see the page as a picture, call look_at_page");
+  expect(prompt).toContain("You see the picture on the next turn only, so note what you need from it.");
+  expect(prompt).toMatch(/a picture that does not match its item, the same picture where different ones belong, or text covered or cut off so it cannot be read/);
+  for (const off of [{}, { look: false }]) expect(rolePrompt({ persona, targetUrl: "https://bank.test/", goals, signUpEmail: "dana@example.com", ...off })).not.toContain("look_at_page");
+});
+
+describe("looking at the page", () => {
+  const png = new Uint8Array([137, 80, 78, 71]);
+  const screenshot = async () => ({ bytes: png, contentType: "image/png" as const });
+  const imagesIn = (model: ReturnType<typeof scriptedModel>, call: number) =>
+    model.doGenerateCalls[call]!.prompt.flatMap((m) => (m.role === "user" ? m.content.filter((p) => p.type === "file") : []));
+  const toolNames = (model: ReturnType<typeof scriptedModel>) => model.doGenerateCalls[0]!.tools!.map((t) => t.name);
+
+  test("the page is pictured for the model on the turn after it looks, as an image in a user message after the result", async () => {
+    const model = scriptedModel([toolCall("look_at_page", {}), reached("sign-up"), reached("invoice"), finish]);
+    await run(model, { look: true, screenshot }).promise;
+    expect(toolNames(model)).toContain("look_at_page");
+    expect(imagesIn(model, 0)).toHaveLength(0);
+    const after = model.doGenerateCalls[1]!.prompt;
+    expect(after.map((m) => m.role).slice(-2)).toEqual(["tool", "user"]);
+    expect(after.at(-1)).toMatchObject({ content: [{ type: "file", mediaType: "image/png", data: { type: "data", data: Buffer.from(png).toString("base64") } }] });
+    expect(JSON.stringify(after.at(-2))).toContain("the picture follows");
+  });
+
+  test.fails("the picture is not shown again on the turns after that", async () => {
+    const model = scriptedModel([toolCall("look_at_page", {}), toolCall("browser_snapshot", {}), reached("sign-up"), reached("invoice"), finish]);
+    await run(model, { look: true, screenshot }).promise;
+    expect(imagesIn(model, 1)).toHaveLength(1);
+    expect(imagesIn(model, 2)).toHaveLength(0);
+    expect(imagesIn(model, 4)).toHaveLength(0);
+    expect(JSON.stringify(model.doGenerateCalls[2]!.prompt)).toContain("the picture of the page is no longer shown");
+  });
+
+  test("the look tool and its guidance are offered only with look on and a way to take a screenshot", async () => {
+    const without = scriptedModel([reached("sign-up"), reached("invoice"), finish]);
+    await run(without, { screenshot }).promise;
+    const noScreenshot = scriptedModel([reached("sign-up"), reached("invoice"), finish]);
+    await run(noScreenshot, { look: true }).promise;
+    const off = scriptedModel([reached("sign-up"), reached("invoice"), finish]);
+    await run(off, { look: false, screenshot }).promise;
+    for (const model of [without, noScreenshot, off]) {
+      expect(toolNames(model)).not.toContain("look_at_page");
+      expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).not.toContain("look_at_page");
+    }
+    const on = scriptedModel([reached("sign-up"), reached("invoice"), finish]);
+    await run(on, { look: true, screenshot }).promise;
+    expect(JSON.stringify(on.doGenerateCalls[0]!.prompt)).toContain("call look_at_page");
+  });
+
+  test("a screenshot is taken between browser calls, not during one", async () => {
+    const log: string[] = [];
+    const slowly = async (name: string) => { log.push(`${name}-start`); await new Promise((r) => setTimeout(r, 20)); log.push(`${name}-end`); };
+    const click = tool({ inputSchema: z.object({}), execute: async () => (await slowly("click"), "ok") });
+    const model = scriptedModel([[toolCall("browser_click", {}), toolCall("look_at_page", {})], reached("sign-up"), reached("invoice"), finish]);
+    await run(model, { look: true, browserTools: { ...browserTools, browser_click: click }, screenshot: async () => (await slowly("shot"), { bytes: png, contentType: "image/png" }) }).promise;
+    expect(log).toEqual(["click-start", "click-end", "shot-start", "shot-end"]);
+  });
+
+  test("a page that cannot be pictured is a note in text, not a failure of the session", async () => {
+    const model = scriptedModel([toolCall("look_at_page", {}), reached("sign-up"), reached("invoice"), finish]);
+    const { result } = await run(model, { look: true, screenshot: async () => null }).promise;
+    expect(result.stoppedBy).toBe("finish");
+    expect(imagesIn(model, 1)).toHaveLength(0);
+    expect(JSON.stringify(model.doGenerateCalls[1]!.prompt)).toContain("failed: the page could not be pictured just now");
+  });
+});
+
 describe("bot protection", () => {
   const challenge = { vendor: "Cloudflare", url: "https://acme.test/register.htm" };
   const blockedSignUp = { kind: "defect", goal: "sign-up", title: "Registration is blocked by a Cloudflare challenge (403)", observed: "The register POST returns 403 and Just a moment...", reproduction: ["Open https://acme.test/register.htm", "Click Register"], severity: "high" };

@@ -36,6 +36,11 @@ test("a trail shows each step with its tool and page, notes, goals, findings and
   expect(html).not.toContain("<section");
 });
 
+test("a step in which the person looked at the page as a picture is labelled so", () => {
+  const html = view({ turns: [turn("t1", 1)], entries: [{ id: 1, turn: "t1", at: "", kind: "step", step: 1, tool: "look_at_page", page: "/invoices/new" }], olderThan: null });
+  expect(text(html)).toBe("Step 1 Looked at the page · /invoices/new Finished this turn.");
+});
+
 test("once everything is loaded, a turn that ended before it did anything still shows with its error", () => {
   const html = view({ turns: [turn("t1", 1, { entries: 0, status: "failed", stoppedBy: "error", error: "the browser could not start" }), turn("t2", 2)], entries: [{ id: 3, turn: "t2", at: "", kind: "note", text: "Second try." }], olderThan: null });
   expect(text(html)).toBe("Turn 1 Could not finish: the browser could not start Turn 2 Noted: Second try. Finished this turn.");

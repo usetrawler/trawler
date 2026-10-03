@@ -1,7 +1,7 @@
-import { generateText, isStepCount, tool, type ModelMessage } from "ai";
+import { generateText, isStepCount, tool, type ModelMessage, type ToolResultPart } from "ai";
 import { z } from "zod";
 import { expect, test } from "vitest";
-import { dropOldReasoning, pruneMessages } from "./context.ts";
+import { dropOldReasoning, PICTURE_GONE, pruneMessages, showUnreadPictures } from "./context.ts";
 import { scriptedModel, text, toolCall } from "./testing.ts";
 
 function result(id: string, toolName: string, value: string): ModelMessage {
@@ -164,4 +164,80 @@ test("a conversation with no more steps than kept, or plain text replies, is lef
   expect(dropOldReasoning(msgs, 2)).toBe(msgs);
   const plain: ModelMessage[] = [{ role: "assistant", content: "hello" }, { role: "assistant", content: "again" }, thinking(3)];
   expect(dropOldReasoning(plain, 1).slice(0, 2)).toEqual(plain.slice(0, 2));
+});
+
+const PNG = { type: "data" as const, data: "iVBORw0KGgo=" };
+function picture(id: string, toolName = "look_at_page"): ModelMessage {
+  return {
+    role: "tool",
+    content: [{ type: "tool-result", toolCallId: id, toolName, output: { type: "content", value: [{ type: "text", text: "Here is the page." }, { type: "file", data: PNG, mediaType: "image/png" }] } }],
+  };
+}
+const SEEN: ModelMessage = { role: "assistant", content: [{ type: "tool-call", toolCallId: "1", toolName: "look_at_page", input: {} }] };
+
+test("a picture the model has not read yet reaches it as text in the result and the image in a user message right after", () => {
+  const msgs: ModelMessage[] = [{ role: "user", content: "go" }, SEEN, picture("1")];
+  const out = showUnreadPictures(msgs);
+  expect(out).toHaveLength(4);
+  expect(out.slice(0, 2)).toEqual(msgs.slice(0, 2));
+  expect(outputOf(out[2])).toEqual({ type: "text", value: "Here is the page." });
+  expect(out[3]).toEqual({ role: "user", content: [{ type: "file", data: PNG, mediaType: "image/png" }] });
+});
+
+test("a picture the model has read, because it answered after it, is replaced by a note and no image is sent", () => {
+  const msgs: ModelMessage[] = [{ role: "user", content: "go" }, SEEN, picture("1"), READ, result("2", "browser_snapshot", "page")];
+  const out = showUnreadPictures(msgs);
+  expect(out).toHaveLength(msgs.length);
+  expect(outputOf(out[2])).toEqual({ type: "text", value: PICTURE_GONE });
+  expect(out.some((m) => m.role === "user" && typeof m.content !== "string" && m.content.some((p) => p.type === "file"))).toBe(false);
+  expect(out[4]).toBe(msgs[4]);
+});
+
+test("messages without a picture are untouched, and the input is not mutated", () => {
+  const msgs: ModelMessage[] = [{ role: "system", content: "sys" }, { role: "user", content: "go" }, result("1", "browser_snapshot", big), READ];
+  const out = showUnreadPictures(msgs);
+  expect(out).toEqual(msgs);
+  out.forEach((m, i) => expect(m).toBe(msgs[i]));
+  const withPicture: ModelMessage[] = [SEEN, picture("1")];
+  const copy = structuredClone(withPicture);
+  showUnreadPictures(withPicture);
+  expect(withPicture).toEqual(copy);
+});
+
+test("a tool message holding a picture and another result keeps the other result as it was", () => {
+  const both: ModelMessage = { role: "tool", content: [(result("2", "note", "noted") as { content: ToolResultPart[] }).content[0]!, (picture("1") as { content: ToolResultPart[] }).content[0]!] };
+  const out = showUnreadPictures([SEEN, both]);
+  expect(out).toHaveLength(3);
+  const parts = (out[1] as { content: ToolResultPart[] }).content;
+  expect(parts[0]).toEqual((both as { content: ToolResultPart[] }).content[0]);
+  expect(parts[1]!.output).toEqual({ type: "text", value: "Here is the page." });
+  expect(out[2]).toEqual({ role: "user", content: [{ type: "file", data: PNG, mediaType: "image/png" }] });
+  const read = showUnreadPictures([SEEN, both, READ]);
+  expect(read).toHaveLength(3);
+  expect((read[1] as { content: ToolResultPart[] }).content[1]!.output).toEqual({ type: "text", value: PICTURE_GONE });
+});
+
+test("a content result with only text, or with a file that is not an image, is left as it is", () => {
+  const pdf: ModelMessage = { role: "tool", content: [{ type: "tool-result", toolCallId: "1", toolName: "browser_navigate", output: { type: "content", value: [{ type: "file", data: PNG, mediaType: "application/pdf" }] } }] };
+  const textual: ModelMessage = { role: "tool", content: [{ type: "tool-result", toolCallId: "2", toolName: "browser_click", output: { type: "content", value: [{ type: "text", text: "clicked" }] } }] };
+  const out = showUnreadPictures([SEEN, pdf, textual]);
+  expect(out[1]).toBe(pdf);
+  expect(out[2]).toBe(textual);
+});
+
+test("in a real agent loop the model gets the picture as an image on the turn after it is taken", async () => {
+  const pictureTool = tool({
+    inputSchema: z.object({}),
+    execute: async () => "pic",
+    toModelOutput: () => ({ type: "content", value: [{ type: "text", text: "shown" }, { type: "file", data: PNG, mediaType: "image/png" }] }),
+  });
+  const model = scriptedModel([toolCall("look", {}), text("done")]);
+  await generateText({
+    model, prompt: "go", tools: { look: pictureTool }, stopWhen: isStepCount(10),
+    prepareStep: async ({ messages }) => ({ messages: showUnreadPictures(messages) }),
+  });
+  const prompt = model.doGenerateCalls[1]!.prompt;
+  expect(prompt.map((m) => m.role)).toEqual(["user", "assistant", "tool", "user"]);
+  expect(prompt[2]).toMatchObject({ content: [{ output: { type: "text", value: "shown" } }] });
+  expect(prompt[3]).toMatchObject({ content: [{ type: "file", mediaType: "image/png", data: PNG }] });
 });

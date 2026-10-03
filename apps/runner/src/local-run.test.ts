@@ -87,6 +87,34 @@ test("the replay signs in with the account of the persona that found the defect"
   expect(replayResults).not.toMatch(/unknown account/);
 });
 
+test.each([[true, true], [false, false], [undefined, false]])("people and replays can look at the page as a picture only when the run is set to (look %j: %s)", async (looks, offered) => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+  const open: OpenBrowser = async () => ({ tools: seeing, fillField: async () => "typed", screenshot: async () => ({ bytes: png, contentType: "image/png" as const }), pageUrl: () => null, close: async () => {} });
+  const agent = scriptedModel([signedIn,
+    look,
+    toolCall("submit_finding", { kind: "defect", goal: "g", title: "Broken", observed: "o", reproduction: ["a", "b"], severity: "high" }),
+    toolCall("look_at_page", {}),
+    ...finished("p1 done"),
+    ...finished("p2 done"),
+    toolCall("look_at_page", {}),
+    toolCall("report_replay", { completed: true, observed: "It broke", blockedAt: null }),
+  ]);
+  await localRun({
+    project, agentModel: agent, agentModelId: "a", judgeModel: scriptedModel([text(JSON.stringify({ verdict: "confirmed" }))]), judgeModelId: "j", budgetUsd: 5, maxSteps: 10, replaySteps: 10,
+    emit: () => {}, openBrowser: open, ...(looks === undefined ? {} : { look: looks }),
+  });
+  const withTool = (name: string) => agent.doGenerateCalls.filter((c) => c.tools!.some((t) => t.name === name));
+  const offeredLook = (name: string) => withTool(name).every((c) => c.tools!.some((t) => t.name === "look_at_page"));
+  expect(withTool("finish").length).toBeGreaterThan(0);
+  expect(withTool("report_replay").length).toBeGreaterThan(0);
+  expect(offeredLook("finish")).toBe(offered);
+  expect(offeredLook("report_replay")).toBe(offered);
+  expect(withTool("report_sign_in").some((c) => c.tools!.some((t) => t.name === "look_at_page"))).toBe(false);
+  const shown = (name: string) => withTool(name).some((c) => c.prompt.some((m) => m.role === "user" && m.content.some((p) => p.type === "file")));
+  expect(shown("finish")).toBe(offered);
+  expect(shown("report_replay")).toBe(offered);
+});
+
 test("stops scheduling once the budget is spent", async () => {
   const agent = scriptedModel([signedIn, toolCall("finish", { summary: "x" })], 2.5);
   const browsers = fakeBrowsers();
