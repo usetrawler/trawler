@@ -76,7 +76,8 @@ export function runView(s: RunSummary) {
   const unjudged = (f: Finding) => { const j = lastJudge(f); return !!j && gaveNoVerdict(j, f.verdict); };
   const defects = s.findings.filter((f) => f.kind === "defect" && !f.sameAs && !f.dismissal);
   const dismissed = s.findings.filter((f) => !f.sameAs && f.dismissal);
-  const rejudging = defects.some(judgingAgain);
+  const candidatesToJudge = s.findings.filter((f) => f.filedAs === "friction" && f.kind === "friction" && !f.sameAs && !f.dismissal && (judgingAgain(f) || unjudged(f)));
+  const rejudging = [...defects, ...candidatesToJudge].some(judgingAgain);
   const use = stage(byKind("role_session"), live);
   const grouping = live && byKind("group").some((j) => OPEN.has(j.status));
   const replay = grouping ? "active" : stage(byKind("replay"), live);
@@ -119,12 +120,12 @@ export function runView(s: RunSummary) {
   const withPersona = (f: Finding) => {
     const same = s.findings.filter((other) => other.sameAs === f.key);
     return {
-    ...f, ...reported(f), severity: worst([f, ...same]),
+    ...f, ...reported(f), severity: worst([f, ...same]), replayedAsDefect: f.filedAs === "friction" && (f.verdict === "confirmed" || candidatesToJudge.includes(f)),
       sameReports: same.map((other) => ({ key: other.key, title: other.title, observed: other.observed, screenshots: other.screenshots, ...reported(other) })),
     };
   };
   const capSpent = outOfBudget(s);
-  const unsettled = defects.filter((f) => judgingAgain(f) || unjudged(f));
+  const unsettled = s.findings.filter((f) => candidatesToJudge.includes(f) || (defects.includes(f) && (judgingAgain(f) || unjudged(f))));
   const settled = defects.filter((f) => !unsettled.includes(f));
   const report = {
     confirmed: settled.filter((f) => f.verdict === "confirmed").map(withPersona),
@@ -136,7 +137,7 @@ export function runView(s: RunSummary) {
       action: (judgingAgain(f) ? "judging" : live ? "after_run" : capSpent ? "cap_spent" : "judge_again") as JudgeAgainState,
     })),
     notJudged: settled.filter((f) => !f.verdict).map((f) => ({ ...withPersona(f), reason: notJudgedReason(f, live, failedReplay(f), grouping) })),
-    friction: s.findings.filter((f) => f.kind === "friction" && !f.dismissal).map(withPersona),
+    friction: s.findings.filter((f) => f.kind === "friction" && !f.dismissal && !candidatesToJudge.includes(f)).map(withPersona),
     dismissed: dismissed.map((f) => ({ ...withPersona(f), dismissal: f.dismissal! })),
   };
 
@@ -144,7 +145,7 @@ export function runView(s: RunSummary) {
   const goalsTotal = s.personas.reduce((sum, p) => sum + goalsFor(s.goalTexts, p.id).length, 0);
   const replaysAllFailed = defects.length > 0 && defects.every((f) => failedReplay(f));
   const refreshes = live || s.jobs.some((j) => j.status === "leased" || (j.status === "queued" && j.requested));
-  return { live, rejudging, refreshes, stages, personas, report, goalsReached, goalsTotal, headline: headline(s, report.confirmed.length, defects.length, replaysAllFailed, dismissed.some((f) => f.kind === "defect")) };
+  return { live, rejudging, refreshes, stages, personas, report, reported: defects.length, goalsReached, goalsTotal, headline: headline(s, report.confirmed.length, defects.length, replaysAllFailed, dismissed.some((f) => f.kind === "defect")) };
 }
 
 const STOPPED_BECAUSE: Record<CancelReason, string> = {
