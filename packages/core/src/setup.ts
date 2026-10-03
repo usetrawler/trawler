@@ -16,9 +16,8 @@ export const MAX_FEATURE_CHARS = 300;
 export const MAX_DESCRIPTION_CHARS = 2000;
 const SETUP_OUTPUT_TOKENS = 16_000;
 const SETUP_REPLIES = 2;
-type Way = { reasoning?: { enabled: false }; tryMs: number };
-const DESCRIBING: Way = { tryMs: 120_000 };
-const CHOOSING_PEOPLE: Way = { reasoning: { enabled: false }, tryMs: 60_000 };
+type Way = { reasoning: { enabled: false }; tryMs: number };
+const SETUP_WAY: Way = { reasoning: { enabled: false }, tryMs: 60_000 };
 
 const MAX_HTML_CHARS = 2_000_000;
 const DROPPED_ELEMENTS = new Set(["script", "style", "noscript", "svg", "template"]);
@@ -176,7 +175,7 @@ async function askOnce<T>(opts: { model: LanguageModel; budget: Budget; tryMs?: 
       prompt,
       maxOutputTokens: SETUP_OUTPUT_TOKENS,
       abortSignal: AbortSignal.timeout(opts.tryMs ?? way.tryMs),
-      providerOptions: { openrouter: { ...(way.reasoning ? { reasoning: way.reasoning } : {}), provider: { require_parameters: true } } },
+      providerOptions: { openrouter: { reasoning: way.reasoning, provider: { require_parameters: true } } },
       onStepEnd: (step) => void tallyStep(usage, opts.budget, step),
     });
   } catch (err) {
@@ -253,7 +252,7 @@ export interface ProductSummary {
 }
 
 export async function describeProduct(opts: { model: LanguageModel; modelId: string; budget: Budget; tryMs?: number; product: ProductPage }): Promise<{ summary: ProductSummary; usage: JobUsage }> {
-  const { answer, usage } = await ask(opts, SummarySchema, describePrompt(opts.product), DESCRIBING);
+  const { answer, usage } = await ask(opts, SummarySchema, describePrompt(opts.product), SETUP_WAY);
   const seen = new Set<string>();
   const features = answer.features
     .map((f) => ({ title: clip(f.title, MAX_FEATURE_TITLE), summary: clip(f.summary, 300) }))
@@ -394,7 +393,7 @@ export async function proposePeople(opts: {
   const features = opts.features.map((f) => clip(f, MAX_FEATURE_CHARS)).filter(Boolean).slice(0, MAX_CHOSEN_FEATURES);
   if (features.length === 0) throw new RangeError("choose at least one feature");
   const signUp = opts.signUp ?? "unclear";
-  const { answer, usage } = await ask(opts, PeopleSchema, setupPrompt({ ...opts.product, context: { description, features, signUp } }), CHOOSING_PEOPLE, (a) => teamProblems(a, opts.name));
+  const { answer, usage } = await ask(opts, PeopleSchema, setupPrompt({ ...opts.product, context: { description, features, signUp } }), SETUP_WAY, (a) => teamProblems(a, opts.name));
   const plan = planFrom(opts.product, { name: opts.name, description }, answer.personas, answer.playOrder ?? []);
   return { ...plan, signsIn: signUp === "closed" ? plan.project.personas.map((p) => p.id) : plan.signsIn, usage };
 }
@@ -412,6 +411,6 @@ export async function proposeProject(opts: {
   const focus = opts.focus?.trim() ? clip(opts.focus, MAX_FOCUS_CHARS) : undefined;
   if (opts.budget.exceeded) throw spent();
   const product = await readProduct(opts);
-  const { answer, usage } = await ask(opts, ProposalSchema, setupPrompt({ ...product, focus }), CHOOSING_PEOPLE, (a) => teamProblems(a, a.name));
+  const { answer, usage } = await ask(opts, ProposalSchema, setupPrompt({ ...product, focus }), SETUP_WAY, (a) => teamProblems(a, a.name));
   return { project: planFrom(product, { name: answer.name, description: clip(answer.description, 600) }, answer.personas, answer.playOrder ?? []).project, usage };
 }
