@@ -265,9 +265,12 @@ test("work hands the browser's screenshots and page address to the job, so a fin
   expect(finding?.finding?.url).toBe("https://a.test/save?token=%E2%80%A2%E2%80%A2%E2%80%A2");
 });
 
-const LOOK_VALUES: Array<[string | undefined, boolean]> = [["1", true], [undefined, false], ["0", false], ["true", false], ["", false], [" 1", false]];
+const LOOK_VALUES: Array<[string | undefined, boolean]> = [
+  ["1", true], [undefined, false], ["0", false], ["", false],
+  ["https://a.test", true], ["https://other.test, https://a.test/shop", true], ["https://other.test", false], ["http://a.test", false],
+];
 
-test.each(LOOK_VALUES)("work lets people look at the page as a picture only when TRAWLER_LOOK is 1 (%j: %s)", async (value, looks) => {
+test.each(LOOK_VALUES)("work lets people look at the page as a picture when TRAWLER_LOOK is 1 or names the target's origin (%j: %s)", async (value, looks) => {
   const job = {
     kind: "role_session", personaKey: "ana", jobId: "11111111-1111-4111-8111-111111111111", runId: "22222222-2222-4222-8222-222222222222", token: "job-token-" + "x".repeat(40),
     config: { name: "Acme", targetUrl: "https://a.test/", description: "", allowedOrigins: ["https://a.test"], personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "x" }], accounts: [], extraHeaders: {}, secretHeaders: {} },
@@ -292,7 +295,7 @@ test.each(LOOK_VALUES)("work lets people look at the page as a picture only when
   expect(JSON.stringify(agent.doGenerateCalls[0]!.prompt).includes("call look_at_page")).toBe(looks);
 });
 
-test.each(LOOK_VALUES)("run lets people look at the page as a picture only when TRAWLER_LOOK is 1 (%j: %s)", async (value, looks) => {
+test.each(LOOK_VALUES)("run lets people look at the page as a picture when TRAWLER_LOOK is 1 or names the target's origin (%j: %s)", async (value, looks) => {
   const dir = mkdtempSync(join(tmpdir(), "cfg-"));
   writeFileSync(join(dir, "p.yaml"), YAML.stringify({ name: "A", targetUrl: "https://a.test", personas: [{ id: "p", name: "P", brief: "b" }], goals: [{ id: "g", instruction: "x" }] }));
   const agent = scriptedModel([toolCall("goal_status", { goal: "g", status: "reached", note: "" }), toolCall("finish", { summary: "done" })]);
@@ -303,6 +306,17 @@ test.each(LOOK_VALUES)("run lets people look at the page as a picture only when 
   });
   expect(await runCli(["run", "--config", join(dir, "p.yaml")], d)).toBe(0);
   expect(agent.doGenerateCalls[0]!.tools!.map((t) => t.name).includes("look_at_page")).toBe(looks);
+});
+
+test.each(["true", " 1", "a.test", "https://a.test,", "ftp://a.test"])("work and run refuse a TRAWLER_LOOK that is neither 1, 0 nor a list of origins (%j)", async (value) => {
+  const dir = mkdtempSync(join(tmpdir(), "cfg-"));
+  writeFileSync(join(dir, "p.yaml"), YAML.stringify({ name: "A", targetUrl: "https://a.test", personas: [{ id: "p", name: "P", brief: "b" }], goals: [{ id: "g", instruction: "x" }] }));
+  let browsers = 0;
+  const { d, err } = deps({ env: { OPENROUTER_API_KEY: "sk-test", TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_LOOK: value }, openBrowser: async () => { browsers++; throw new Error("no browser"); } });
+  expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(2);
+  expect(await runCli(["run", "--config", join(dir, "p.yaml")], d)).toBe(2);
+  expect(err.join("\n")).toContain("TRAWLER_LOOK must be 1, 0 or a comma-separated list of target origins");
+  expect(browsers).toBe(0);
 });
 
 test("work refuses to send the runner token over plain http to another machine", async () => {
