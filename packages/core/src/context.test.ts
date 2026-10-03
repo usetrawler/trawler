@@ -241,3 +241,11 @@ test("in a real agent loop the model gets the picture as an image on the turn af
   expect(prompt[2]).toMatchObject({ content: [{ output: { type: "text", value: "shown" } }] });
   expect(prompt[3]).toMatchObject({ content: [{ type: "file", mediaType: "image/png", data: PNG }] });
 });
+
+test("a picture already moved into a user message, once read, is replaced by a note; an unread one is kept", () => {
+  const moved = showUnreadPictures([{ role: "user", content: "go" }, SEEN, picture("1")]);
+  const later = showUnreadPictures([...moved, READ, result("2", "browser_snapshot", "page")]);
+  expect(later[3]).toEqual({ role: "user", content: [{ type: "text", text: PICTURE_GONE }] });
+  expect(later.some((m) => m.role === "user" && typeof m.content !== "string" && m.content.some((p) => p.type === "file"))).toBe(false);
+  expect(showUnreadPictures(moved)).toEqual(moved);
+});

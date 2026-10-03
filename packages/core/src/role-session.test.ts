@@ -687,7 +687,7 @@ describe("looking at the page", () => {
     expect(JSON.stringify(after.at(-2))).toContain("the picture follows");
   });
 
-  test.fails("the picture is not shown again on the turns after that", async () => {
+  test("the picture is not shown again on the turns after that", async () => {
     const model = scriptedModel([toolCall("look_at_page", {}), toolCall("browser_snapshot", {}), reached("sign-up"), reached("invoice"), finish]);
     await run(model, { look: true, screenshot }).promise;
     expect(imagesIn(model, 1)).toHaveLength(1);
