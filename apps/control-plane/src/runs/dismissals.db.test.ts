@@ -212,7 +212,7 @@ describe("a report that matches a finding marked not a bug", () => {
   const usage = { model: "m", inputTokens: 1, outputTokens: 1, costUsd: 0, steps: 1 };
   const defect = (id: string, title: string) => ({ id, kind: "defect", goal: "g", title, observed: "o", reproduction: ["Open /checkout", "Type the postcode"], severity: "high" });
 
-  async function runWith(project: string, findings: Array<ReturnType<typeof defect>>, match: (keys: string[], ref: string) => Array<{ key: string; ref: string }>) {
+  async function runWith(project: string, findings: Array<ReturnType<typeof defect>>, match: (keys: string[], ref: string) => Array<{ key: string; ref: string }>, group: (keys: string[]) => string[][] = (keys) => keys.map((k) => [k])) {
     const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, options));
     const seen: string[] = [];
     for (let job = await claimJob(t.db, keys); job; job = await claimJob(t.db, keys)) {
@@ -223,7 +223,7 @@ describe("a report that matches a finding marked not a bug", () => {
       } else if (job.kind === "group") {
         expect(job.notBugs?.length).toBeGreaterThan(0);
         const keysToGroup = job.defects!.map((d) => d.key);
-        await completeJob(t.db, job.token, { usage, stoppedBy: "done", groups: keysToGroup.map((k) => [k]), knownNotBugs: match(keysToGroup, job.notBugs![0]!.ref!) });
+        await completeJob(t.db, job.token, { usage, stoppedBy: "done", groups: group(keysToGroup), knownNotBugs: match(keysToGroup, job.notBugs![0]!.ref!) });
       } else if (job.kind === "replay") {
         await completeJob(t.db, job.token, { usage, stoppedBy: "report", observation: { completed: true, observed: "Same.", blockedAt: null } });
       } else if (job.kind === "judge") {
@@ -256,6 +256,16 @@ describe("a report that matches a finding marked not a bug", () => {
     expect(after.report.confirmed.map((f) => f.title)).toEqual(["Checkout refuses my postcode", "Pay does nothing"]);
     expect(after.headline).toBe("2 defects confirmed by replay.");
     expect(await notBugs(project)).toEqual([]);
+  });
+
+  test("a match on a report grouped under another marks the group's first report, which the reader sees", async () => {
+    const project = await newProject();
+    const source = await finishedRun("org-a", project, [{ key: "pc", title: "Postcode refused" }]);
+    await dismiss("org-a", source, "pc", "Intended.");
+    const { runId } = await runWith(project, [defect("f1", "Postcode refused"), defect("f2", "Postcode refused too")], (keys, ref) => [{ key: keys[1]!, ref }], (keys) => [keys]);
+    const shown = await view_("org-a", runId);
+    expect(shown.report.dismissed.map((f) => [f.title, f.sameReports.map((r) => r.title)])).toEqual([["Postcode refused", ["Postcode refused too"]]]);
+    expect(shown.headline).toBe("Every reported defect was marked not a bug.");
   });
 
   test("a single defect is checked against the list, while a project without marks skips straight to its replay; a mark from another project is never applied", async () => {
