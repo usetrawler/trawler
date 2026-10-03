@@ -360,4 +360,11 @@ test("an account the beta list will refuse is told so in place of Run again and 
   expect(unjudged).not.toContain(">Judge again</button>");
   expect(unjudged).toContain(`<p class="text-sm text-muted">${message}</p>`);
   expect(render(run)).toMatch(/>Run again/);
+
+  const liveRun = summary({ ...live, findings: finished.findings });
+  expect(renderToStaticMarkup(createElement(RunLive, { initial: JSON.parse(JSON.stringify({ run: liveRun, view: runView(liveRun) })), closedBeta: message }))).not.toContain(message);
+  const judging = summary({ ...finished, jobs: [...finished.jobs, job("judge", "queued", { finding_key: "x:d4", requested: true })], findings: [...finished.findings, finding("x:d4", "ana", { title: "Export is empty" })] });
+  const [beingJudged] = rows(renderToStaticMarkup(createElement(RunLive, { initial: JSON.parse(JSON.stringify({ run: judging, view: runView(judging) })), closedBeta: message })), "Could not be judged");
+  expect(beingJudged).toContain("Judging again…");
+  expect(beingJudged).not.toContain(message);
 });
