@@ -252,7 +252,9 @@ export interface ProductSummary {
 }
 
 export async function describeProduct(opts: { model: LanguageModel; modelId: string; budget: Budget; tryMs?: number; product: ProductPage }): Promise<{ summary: ProductSummary; usage: JobUsage }> {
-  const { answer, usage } = await ask(opts, SummarySchema, describePrompt(opts.product), SETUP_WAY);
+  const { answer, usage } = await ask(opts, SummarySchema, describePrompt(opts.product), SETUP_WAY, (a) =>
+    a.features.some((f) => f.title.trim()) ? [] : ["the list of features was empty: give at least one feature, inferred from the page's title and address when its text is thin"],
+  );
   const seen = new Set<string>();
   const features = answer.features
     .map((f) => ({ title: clip(f.title, MAX_FEATURE_TITLE), summary: clip(f.summary, 300) }))

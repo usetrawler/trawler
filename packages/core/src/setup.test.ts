@@ -342,6 +342,17 @@ describe("proposeProject", () => {
 const product = { url: "https://app.acme.test/", page: "Acme lets founders submit pitches and reviewers approve them." };
 
 describe("describeProduct", () => {
+  test("a thin page that first gets no features is asked again, and the second answer is used", async () => {
+    const empty = { name: "Acme", description: "A pitch board.", signUp: "unclear", features: [] };
+    const second = { ...empty, features: [{ title: "Sign in to Acme", summary: "Open the product with an account." }] };
+    const model = scriptedModel([text(JSON.stringify(empty)), text(JSON.stringify(second))]);
+    const { summary, usage } = await describeProduct({ model, modelId: "mock", budget: new Budget(1), product: { url: "https://app.acme.test/", page: "Acme" } });
+    expect(summary.features.map((f) => f.title)).toEqual(["Sign in to Acme"]);
+    expect(model.doGenerateCalls).toHaveLength(2);
+    expect(JSON.stringify(model.doGenerateCalls[1]!.prompt)).toContain("inferred from the page's title and address");
+    expect(usage.steps).toBe(2);
+  });
+
   test("names the product, describes it and lists its features, most central first", async () => {
     const summary = { name: "Acme", description: "A pitch board.", signUp: "open", features: [{ title: " Submit a pitch ", summary: "Founders send a pitch." }, { title: "Review pitches", summary: "Reviewers approve." }, { title: "submit a pitch", summary: "dup" }, { title: " ", summary: "empty" }] };
     const model = scriptedModel([text(JSON.stringify(summary))]);
