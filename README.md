@@ -23,7 +23,7 @@
 
 <p align="center">
   <a href="https://github.com/usetrawler/trawler/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/usetrawler/trawler/actions/workflows/ci.yml/badge.svg?branch=main"></a>
-  <a href="#use-it-in-the-app"><img alt="Hosted runs: private beta" src="https://img.shields.io/badge/hosted_runs-private_beta-B03711"></a>
+  <a href="#use-it-in-the-app"><img alt="Hosted runs: free to start" src="https://img.shields.io/badge/hosted_runs-free_to_start-B03711"></a>
   <img alt="Node.js 24 or later" src="https://img.shields.io/badge/node-%E2%89%A5_24-17191C">
   <a href="#licence"><img alt="Licence: Apache-2.0 and FSL-1.1-ALv2" src="https://img.shields.io/badge/licence-Apache--2.0_%2B_FSL--1.1--ALv2-2C4A57"></a>
 </p>
@@ -73,7 +73,7 @@ The details are in [Security and data](https://usetrawler.com/docs/reference/sec
 ## Use it in the app
 
 > [!NOTE]
-> Hosted runs are in a private beta. Anyone can sign in, analyse a product and edit its plan; starting a run needs an email address on the beta list — write to [contact@usetrawler.com](mailto:contact@usetrawler.com?subject=Trawler%20private%20beta).
+> Hosted runs are open to anyone who signs in. Your workspace's first run is on Trawler's model, with no key needed; after that runs use your own model key. The Free plan takes 1 project and 3 hosted runs a day — see [pricing](https://usetrawler.com/pricing/).
 
 1. Open [app.usetrawler.com](https://app.usetrawler.com) and choose **Continue with GitHub** or **Continue with Google** — Trawler has no passwords of its own. Your first sign-in creates your workspace, unless your email address already has an invitation to one.
 2. Put the address of the page a new user would open first into **Product URL** and, if you like, a few words such as *the new team-invite flow* into **Anything specific to test?** Then choose **Analyse product**.
@@ -194,7 +194,7 @@ In case you go looking:
 - handing runs from the app to a runner inside your own network;
 - reaching staging behind basic auth or a secret header from the app — the local runner covers private addresses and protected staging today.
 
-Hosted runs stay in a private beta until Trawler can verify that you control the product you point it at. The runner is not published as a package yet; you run it from a checkout.
+The runner is not published as a package yet; you run it from a checkout.
 
 ## Inside this repository
 
