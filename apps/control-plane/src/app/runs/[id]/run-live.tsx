@@ -11,6 +11,7 @@ import { LocalTime } from "../../../components/local-time.tsx";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { cancelRunAction, dismissFindingAction, judgeAgainAction, undoDismissalAction } from "./actions.ts";
 import { FindingScreenshots } from "./finding-screenshots.tsx";
+import { Trails } from "./person-trail.tsx";
 import { RunAgainButton, RunAgainError, useRunAgain } from "./run-again-button.tsx";
 
 type View = ReturnType<typeof runView>;
@@ -588,6 +589,7 @@ export function RunLive({ initial }: { initial: Data }) {
         </div>
         {!view.live && <aside><PeopleOutcomes view={view} /></aside>}
       </div>
+      <div className="mt-8"><Trails runId={run.id} people={run.personas} live={view.live} pulse={data} /></div>
     </div>
   );
 }

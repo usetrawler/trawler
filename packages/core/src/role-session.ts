@@ -5,7 +5,7 @@ import { browserQueue, runAgentLoop } from "./agent-loop.ts";
 import type { Budget } from "./llm.ts";
 import { rolePrompt, sessionStatus } from "./prompts.ts";
 import type { SecretScrubber } from "./secrets.ts";
-import { madeUpEmail, madeUpPassword, newSessionState, noteBotProtection, ownPasswordTool, sessionTools, type FillField } from "./session-tools.ts";
+import { findingUrl, madeUpEmail, madeUpPassword, newSessionState, noteBotProtection, ownPasswordTool, sessionTools, type FillField } from "./session-tools.ts";
 import type { BotProtection } from "./bot-protection.ts";
 
 const NUDGE = "Every turn must call a tool; plain text does nothing. Continue with the goals, and call finish once every goal has a status.";
@@ -85,7 +85,10 @@ export async function runRoleSession(opts: {
     usage,
     finished: () => state.finished !== null,
     crashed: queue.crashed,
-    onStep: (step, costUsd) => emit({ type: "step", jobId, step: usage.steps, tool: step.toolCalls[0]?.toolName ?? null, costUsd }),
+    onStep: (step, costUsd) => {
+      const url = findingUrl(opts.pageUrl?.());
+      emit({ type: "step", jobId, step: usage.steps, tool: step.toolCalls[0]?.toolName ?? null, costUsd, ...(url ? { url } : {}) });
+    },
   });
 
   const result: RoleResult = opts.scrubber.scrub({

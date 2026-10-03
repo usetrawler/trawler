@@ -17,7 +17,7 @@ const base = { seq: z.number().int().positive().max(2_147_483_647), at: z.iso.da
 
 export const RunEventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("job_started"), kind: z.enum(["account_check", "role_session", "group", "replay", "judge", "setup"]) }),
-  z.object({ ...base, type: z.literal("step"), step: z.number().int().positive(), tool: z.string().max(100).nullable(), costUsd: z.number().nonnegative().max(1000) }),
+  z.object({ ...base, type: z.literal("step"), step: z.number().int().positive(), tool: z.string().max(100).nullable(), costUsd: z.number().nonnegative().max(1000), url: z.string().max(MAX_URL).optional() }),
   z.object({ ...base, type: z.literal("note"), text: z.string().max(MAX_NOTE) }),
   z.object({ ...base, type: z.literal("finding"), finding: FindingSchema }),
   z.object({ ...base, type: z.literal("goal_status"), outcome: GoalOutcomeSchema }),
