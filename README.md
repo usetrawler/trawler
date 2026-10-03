@@ -23,7 +23,7 @@
 
 <p align="center">
   <a href="https://github.com/usetrawler/trawler/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/usetrawler/trawler/actions/workflows/ci.yml/badge.svg?branch=main"></a>
-  <a href="#use-it-in-the-app"><img alt="Hosted runs: private beta" src="https://img.shields.io/badge/hosted_runs-private_beta-B03711"></a>
+  <a href="#use-it-in-the-app"><img alt="Hosted runs: free to start" src="https://img.shields.io/badge/hosted_runs-free_to_start-B03711"></a>
   <img alt="Node.js 24 or later" src="https://img.shields.io/badge/node-%E2%89%A5_24-17191C">
   <a href="#licence"><img alt="Licence: Apache-2.0 and FSL-1.1-ALv2" src="https://img.shields.io/badge/licence-Apache--2.0_%2B_FSL--1.1--ALv2-2C4A57"></a>
 </p>
@@ -64,7 +64,7 @@ It is not a scripted test suite, a load test or a security scan. The people deci
 - **Credentials.** Test account passwords are typed by Trawler, not the model, and only into a real password field on an allowed origin. Every password and secret a run knows about is masked as `•••` in what the model reads and what the run records — except a password shorter than 8 characters, which is typed the same way and hidden in its own field, but too short to mask reliably anywhere else, so it shows wherever your product itself displays it.
 - **Reach.** A browser limited to your product's own origins — every other request is stopped before it is sent — and a handful of tools: no shell, no file system, no uploads, no JavaScript in the page.
 - **Spend.** In the app, a run is estimated before you start and capped while it runs: $2 by default, $50 at most. A model with no known price, such as one on an OpenAI-compatible service, gets no estimate, and its run stops after 3 million tokens. Only through OpenRouter, which reports each call's cost, is it held to the dollar cap as well, so watch your provider's billing. The local runner caps a run at `--budget`, $5 unless you set it. Either way, the last call can take a run slightly past its cap.
-- **Your key.** Runs in the app are billed to your workspace's own key — OpenRouter, OpenAI, Anthropic, Google or any OpenAI-compatible service. Trawler adds nothing on top, and setting up a project in the app costs you nothing.
+- **Your key.** Runs in the app, except your workspace's first, are billed to your workspace's own key — OpenRouter, OpenAI, Anthropic, Google or any OpenAI-compatible service. Trawler adds nothing on top, and setting up a project in the app costs you nothing.
 - **Isolation.** The model key and passwords are encrypted at rest, runners never hold the model key, and the database itself keeps each workspace's rows from every other.
 - **Execution.** Hosted at app.usetrawler.com, or entirely on your own machine with the runner in this repository.
 
@@ -73,12 +73,12 @@ The details are in [Security and data](https://usetrawler.com/docs/reference/sec
 ## Use it in the app
 
 > [!NOTE]
-> Hosted runs are in a private beta. Anyone can sign in, analyse a product and edit its plan; starting a run needs an email address on the beta list — write to [contact@usetrawler.com](mailto:contact@usetrawler.com?subject=Trawler%20private%20beta).
+> Hosted runs are open to anyone who signs in. Your workspace's first run is on Trawler's model, with no key needed; after that runs use your own model key. The Free plan includes 1 project and 3 hosted runs a day — see [pricing](https://usetrawler.com/pricing/).
 
 1. Open [app.usetrawler.com](https://app.usetrawler.com) and choose **Continue with GitHub** or **Continue with Google** — Trawler has no passwords of its own. Your first sign-in creates your workspace, unless your email address already has an invitation to one.
 2. Put the address of the page a new user would open first into **Product URL** and, if you like, a few words such as *the new team-invite flow* into **Anything specific to test?** Then choose **Analyse product**.
 3. Review the plan. The people under **These people will try it** and the goals under **What they want to get done** are yours to rename, rewrite, add to or trim. If your product needs an account, choose **Your product needs sign-in? Add a test account**, add one with **Add account**, and pick it under **Signs in as** for each person who should use it. Choose **Save plan** to keep your changes.
-4. Scroll to the **Start** panel at the bottom of the plan page. The first time, an owner or admin of the workspace pastes an API key from your model provider. Pick a model (one is filled in for you) and read the estimate. Then set **Hard cap (USD)**, tick the box confirming that you are authorised to test the product and that it is not a production system with real people's data, and choose **Start run**.
+4. Scroll to the **Start** panel at the bottom of the plan page. Your workspace's first run is on Trawler and asks for no key: tick the box confirming that you are authorised to test the product and that it is not a production system with real people's data, and choose **Start run**. For later runs, an owner or admin of the workspace pastes an API key from your model provider the first time. Pick a model (one is filled in for you), read the estimate, set **Hard cap (USD)** and choose **Start run**.
 5. Follow the run: cost against the cap, goals reached and a card for each person. You can close the tab; the run keeps going.
 6. Read the report. **Confirmed** comes first: the defects a fresh agent reproduced and the judge agreed with.
 
@@ -194,7 +194,7 @@ In case you go looking:
 - handing runs from the app to a runner inside your own network;
 - reaching staging behind basic auth or a secret header from the app — the local runner covers private addresses and protected staging today.
 
-Hosted runs stay in a private beta until Trawler can verify that you control the product you point it at. The runner is not published as a package yet; you run it from a checkout.
+The runner is not published as a package yet; you run it from a checkout.
 
 ## Inside this repository
 
