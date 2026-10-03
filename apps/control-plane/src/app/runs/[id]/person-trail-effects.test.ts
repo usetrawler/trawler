@@ -36,7 +36,7 @@ const turns = [{ id: "t1", number: 1, status: "succeeded", stoppedBy: "finish", 
 const page = { turns, entries: [{ id: 50, turn: "t1", at: "", kind: "note", text: "Hi." }], olderThan: 50 };
 const earlierPage = { turns, entries: [{ id: 3, turn: "t1", at: "", kind: "step", step: 1, tool: "note", page: null }, { id: 4, turn: "t1", at: "", kind: "note", text: "Old." }], olderThan: null };
 const ana = { id: "ana b", name: "Ana" };
-const STATE = { open: 0, trail: 1, error: 2, earlier: 3, earlierFailed: 4, focusEntry: 5 };
+const STATE = { open: 0, trail: 1, error: 2, earlier: 3, earlierFailed: 4, behind: 5, focusEntry: 6 };
 const REF = { shown: 2, summary: 3, details: 4, body: 5 };
 let fetched: ReturnType<typeof vi.fn>;
 const draw = (values: unknown[], live = false, pulse: unknown = 0) => {
@@ -232,4 +232,26 @@ test("a link to a person's trail opens it and moves the focus to it, and closing
   location.hash = "#trail-lee";
   toggle(false);
   expect(replace).toHaveBeenCalledTimes(2);
+});
+
+test("when the last load after a run ends fails, the trail says its end could not be loaded, offers Try again, and loads again when reopened", async () => {
+  draw([true, page], true);
+  loadEffect().run();
+  await flush();
+  fetched.mockResolvedValueOnce(new Response("{}", { status: 503 }));
+  draw([true, page], false);
+  loadEffect().run();
+  await flush();
+  expect(react.setters[STATE.behind]).toHaveBeenLastCalledWith(true);
+  expect(react.setters[STATE.error]).not.toHaveBeenCalledWith("Ana's trail could not be loaded.");
+  const behind = draw([true, page, null, false, false, true]);
+  const alert = nodes(behind).find((n) => n.props?.role === "alert")!;
+  expect(alert.props!.children).toEqual(["The end of ", "Ana", "'s trail could not be loaded."]);
+  (nodes(behind).find((n) => n.type === "button" && n.props?.children === "Try again")!.props!.onClick as () => void)();
+  await flush();
+  expect(react.setters[STATE.behind]).toHaveBeenLastCalledWith(false);
+  draw([true, page], false);
+  loadEffect().run();
+  await flush();
+  expect(fetched).toHaveBeenCalledTimes(4);
 });

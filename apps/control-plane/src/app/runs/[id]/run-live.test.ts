@@ -328,3 +328,9 @@ test("each person beside a finished run's findings links to what they did", () =
   expect(html).toMatch(/<a href="#trail-lee"[^>]*>What they did<span class="sr-only">: Lee Park<\/span><\/a>/);
   expect(html).toMatch(/<li id="trail-ana"/);
 });
+
+test("the bot protection notice shows a masked page readably, and no page when there is none", () => {
+  const masked = text(render(summary({ ...finished, botProtection: { vendor: "Cloudflare", url: "https://app.acme.test/reset/%E2%80%A2%E2%80%A2%E2%80%A2?x=1" } })));
+  expect(masked).toContain("Cloudflare's bot protection blocked Trawler's browser at /reset/••• . It stops");
+  expect(text(render(summary({ ...finished, botProtection: { vendor: "Cloudflare", url: "" } })))).toContain("Cloudflare's bot protection blocked Trawler's browser. It stops");
+});

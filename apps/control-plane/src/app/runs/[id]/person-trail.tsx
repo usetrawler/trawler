@@ -98,6 +98,7 @@ export function PersonTrail({ runId, person, live, pulse }: { runId: string; per
   const [error, setError] = useState<string | null>(null);
   const [earlier, setEarlier] = useState(false);
   const [earlierFailed, setEarlierFailed] = useState(false);
+  const [behind, setBehind] = useState(false);
   const [focusEntry, setFocusEntry] = useState<number | null>(null);
   const latest = useRef(0);
   const settled = useRef(false);
@@ -124,8 +125,14 @@ export function PersonTrail({ runId, person, live, pulse }: { runId: string; per
       shown.current = true;
       setTrail((had) => mergeNewest(had, got));
       setError(null);
+      setBehind(false);
     } catch {
-      if (request === latest.current && !shown.current) setError(failed);
+      if (request !== latest.current) return;
+      if (!shown.current) setError(failed);
+      else if (settled.current) {
+        settled.current = false;
+        setBehind(true);
+      }
     }
   }, [address, failed]);
 
@@ -144,7 +151,7 @@ export function PersonTrail({ runId, person, live, pulse }: { runId: string; per
     } finally {
       setEarlier(false);
     }
-  }, [address, failed]);
+  }, [address]);
 
   useEffect(() => {
     if (!open || settled.current) return;
@@ -183,6 +190,12 @@ export function PersonTrail({ runId, person, live, pulse }: { runId: string; per
             </div>
           ) : trail ? (
             <>
+              {behind && (
+                <div className="mb-3 flex flex-wrap items-center gap-3 text-sm">
+                  <span role="alert" className="text-bad">The end of {person.name}&apos;s trail could not be loaded.</span>
+                  <button type="button" onClick={() => void load(true)} className="h-10 border border-line bg-panel px-4 hover:border-ink">Try again</button>
+                </div>
+              )}
               {earlierFailed && <p role="alert" className="mb-3 text-sm text-bad">Earlier steps could not be loaded. Choose Show earlier to try again.</p>}
               <TrailView trail={trail} loadingEarlier={earlier} onEarlier={() => void loadEarlier(trail.olderThan!)} focusEntry={focusEntry} />
             </>
