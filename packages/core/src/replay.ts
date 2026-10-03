@@ -7,7 +7,7 @@ import { judgePrompt, replayPrompt } from "./prompts.ts";
 import type { Screenshot } from "./browser.ts";
 import type { BotProtection } from "./bot-protection.ts";
 import type { SecretScrubber } from "./secrets.ts";
-import { madeUpEmail, newSessionState, ownPasswordTool, sessionTools, type FillField } from "./session-tools.ts";
+import { findingUrl, madeUpEmail, newSessionState, ownPasswordTool, sessionTools, type FillField } from "./session-tools.ts";
 
 const NO_REPORT: ReplayObservation = { completed: false, observed: "the replay session wrote no report", blockedAt: null };
 const NUDGE = "Every turn must call a tool; plain text does nothing. Carry on with the steps, and call report_replay when you are done or blocked.";
@@ -139,7 +139,7 @@ export async function runReplay(opts: {
       const met = actor.browser.botProtection?.() ?? null;
       if (met && !stoppedAt) {
         stoppedAt = met;
-        emit({ type: "bot_protection", jobId, vendor: met.vendor, url: met.url });
+        emit({ type: "bot_protection", jobId, vendor: met.vendor, url: findingUrl(met.url) ?? "" });
       }
       return out;
     }),

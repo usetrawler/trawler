@@ -11,6 +11,7 @@ import { LocalTime } from "../../../components/local-time.tsx";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { cancelRunAction, dismissFindingAction, judgeAgainAction, undoDismissalAction } from "./actions.ts";
 import { FindingScreenshots } from "./finding-screenshots.tsx";
+import { trailAnchor, Trails } from "./person-trail.tsx";
 import { RunAgainButton, RunAgainError, useRunAgain } from "./run-again-button.tsx";
 
 type View = ReturnType<typeof runView>;
@@ -306,12 +307,20 @@ function spentOf(run: RunSummary, live: boolean) {
   return { title: live ? "Live cost" : "Cost", value: usd(run.costUsd), of: `${live ? `of ${usd(run.budgetUsd)} cap` : `cap was ${usd(run.budgetUsd)}`}${payer}`, share: Math.min(100, run.budgetUsd > 0 ? (run.costUsd / run.budgetUsd) * 100 : 0) };
 }
 
+function readablePath(path: string): string {
+  try {
+    return decodeURI(path);
+  } catch {
+    return path;
+  }
+}
+
 function BotProtectionNotice({ met }: { met: NonNullable<RunSummary["botProtection"]> }) {
-  const where = URL.canParse(met.url) ? new URL(met.url).pathname : met.url;
+  const where = URL.canParse(met.url) ? readablePath(new URL(met.url).pathname) : null;
   return (
     <section aria-labelledby="bot-protection" className="mt-6 flex max-w-[760px] flex-col gap-2 border border-line border-l-4 border-l-warn bg-panel p-4">
       <h2 id="bot-protection" className="text-base font-bold">Bot protection stopped Trawler</h2>
-      <p className="text-sm">{met.vendor}&apos;s bot protection blocked Trawler&apos;s browser at <span className="font-mono break-all">{where}</span>. It stops automated browsers, so what lies behind it could not be tried, and it is not reported as a defect.</p>
+      <p className="text-sm">{met.vendor}&apos;s bot protection blocked Trawler&apos;s browser{where && <> at <span className="font-mono break-all">{where}</span></>}. It stops automated browsers, so what lies behind it could not be tried, and it is not reported as a defect.</p>
       <p className="text-sm">To let Trawler through, turn the check off for this staging copy, or run the project with the local runner, which can send a header that a rule in {met.vendor} lets past.</p>
       <DocsLink page="docs/reference/troubleshooting/#bot-protection-stopped-trawler" className="text-sm underline">How to let Trawler through</DocsLink>
     </section>
@@ -436,6 +445,7 @@ function PeopleOutcomes({ view }: { view: View }) {
                   </ul>
                 </details>
                 {(p.defects > 0 || p.friction > 0) && <span className="mt-1 block">{plural(p.defects, "defect report", "defect reports")} · {plural(p.friction, "friction", "frictions")}</span>}
+                <a href={`#${trailAnchor(p.id)}`} className="mt-1 inline-block underline underline-offset-4 hover:text-ink">What they did<span className="sr-only">: {p.name}</span></a>
               </div>
             </li>
           );
@@ -588,6 +598,7 @@ export function RunLive({ initial }: { initial: Data }) {
         </div>
         {!view.live && <aside><PeopleOutcomes view={view} /></aside>}
       </div>
+      <div className="mt-8"><Trails runId={run.id} people={run.personas} live={view.live} pulse={data} /></div>
     </div>
   );
 }

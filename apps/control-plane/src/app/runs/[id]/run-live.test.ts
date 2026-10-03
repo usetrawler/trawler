@@ -321,3 +321,16 @@ test("a finding marked not a bug leaves its section and the counts for its own, 
   expect(html).toMatch(/>Not a bug · 2<\/h2><p[^>]*>Marked not a bug by your team; the people in later runs of this project are told, with the reason<\/p>/);
   expect(first).toMatch(/<span class="min-w-0 wrap-anywhere text-muted">Marked by ana@acme.test/);
 });
+
+test("each person beside a finished run's findings links to what they did", () => {
+  const html = render(finished);
+  expect(html).toMatch(/<a href="#trail-ana"[^>]*>What they did<span class="sr-only">: Ana<\/span><\/a>/);
+  expect(html).toMatch(/<a href="#trail-lee"[^>]*>What they did<span class="sr-only">: Lee Park<\/span><\/a>/);
+  expect(html).toMatch(/<li id="trail-ana"/);
+});
+
+test("the bot protection notice shows a masked page readably, and no page when there is none", () => {
+  const masked = text(render(summary({ ...finished, botProtection: { vendor: "Cloudflare", url: "https://app.acme.test/reset/%E2%80%A2%E2%80%A2%E2%80%A2?x=1" } })));
+  expect(masked).toContain("Cloudflare's bot protection blocked Trawler's browser at /reset/••• . It stops");
+  expect(text(render(summary({ ...finished, botProtection: { vendor: "Cloudflare", url: "" } })))).toContain("Cloudflare's bot protection blocked Trawler's browser. It stops");
+});

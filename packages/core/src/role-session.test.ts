@@ -520,6 +520,18 @@ describe("runRoleSession", () => {
     expect(sessionStatus([], [], 108, 120)).toMatch(/Only 12 steps left/);
   });
 
+  test("each step records the page it ended on, with secrets and token-like parts masked, and none before a page is open", async () => {
+    const model = scriptedModel([look, look, look, reached("sign-up"), reached("invoice"), finish]);
+    const pages = [null, "https://acme.test/invoices?draft=1#top", "https://acme.test/reset-password/abcdefgh12345678?token=xyz&note=hunter22-secret"];
+    let call = 0;
+    const { events, promise } = run(model, { pageUrl: () => pages[Math.min(call++, pages.length - 1)] ?? null });
+    await promise;
+    const steps = events.filter((e) => e.type === "step") as Array<Extract<RunEventInput, { type: "step" }>>;
+    expect(steps.slice(0, 3).map((s) => s.url)).toEqual([undefined, "https://acme.test/invoices?draft=1", "https://acme.test/reset-password/%E2%80%A2%E2%80%A2%E2%80%A2?token=%E2%80%A2%E2%80%A2%E2%80%A2&note=•••"]);
+    expect(JSON.stringify(events)).not.toContain("hunter22-secret");
+    for (const s of steps) expect(RunEventSchema.safeParse({ ...s, seq: 1, at: new Date().toISOString() }).success).toBe(true);
+  });
+
   test("tells the persona who they are, where to go and which goals to try", async () => {
     const model = scriptedModel([reached("sign-up"), reached("invoice"), finish]);
     await run(model).promise;
@@ -612,6 +624,15 @@ describe("bot protection", () => {
   const challenge = { vendor: "Cloudflare", url: "https://acme.test/register.htm" };
   const blockedSignUp = { kind: "defect", goal: "sign-up", title: "Registration is blocked by a Cloudflare challenge (403)", observed: "The register POST returns 403 and Just a moment...", reproduction: ["Open https://acme.test/register.htm", "Click Register"], severity: "high" };
   const realDefect = { kind: "defect", goal: "invoice", title: "Send button does nothing", observed: "Clicking Send leaves the invoice as a draft", reproduction: ["Open https://acme.test/invoices/1", "Click Send"], severity: "high" };
+
+  test("the address of a check is recorded as a finding's page is, with token-like path parts masked and no fragment", async () => {
+    const model = scriptedModel([look, reached("sign-up"), reached("invoice"), finish]);
+    const met = { vendor: "Cloudflare", url: "https://acme.test/reset-password/abcdefgh12345678?__cf_chl_tk=abc123xyz&next=1#frag" };
+    const { promise, events } = run(model, { botProtection: () => met });
+    await promise;
+    const [noted] = events.filter((e) => e.type === "bot_protection") as Array<Extract<RunEventInput, { type: "bot_protection" }>>;
+    expect(noted!.url).toBe("https://acme.test/reset-password/%E2%80%A2%E2%80%A2%E2%80%A2?__cf_chl_tk=abc123xyz&next=1");
+  });
 
   test("a person on a bot-protection check cannot report it, the run hears of it once, and once off that page their findings are theirs to make", async () => {
     let current: typeof challenge | null = challenge;
