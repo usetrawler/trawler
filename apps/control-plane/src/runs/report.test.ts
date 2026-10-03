@@ -370,3 +370,16 @@ test("a report's steps name who did each one when the finding records it, and st
   const view = runView(summary({ status: "succeeded", findings: [finding("ana:f1", "ana", { verdict: "confirmed", reproduction: ["Invite Lee", "Open the invite"], stepPeople: ["ana", "lee"] })] }));
   expect(view.report.confirmed[0]!.reproduction).toEqual(["Ana: Invite Lee", "Lee: Open the invite"]);
 });
+
+test("friction being judged again keeps the judge stage active, and friction marked not a bug is only under Not a bug", () => {
+  const candidate = finding("ana:fr", "ana", { kind: "friction", filedAs: "friction", replay: { completed: true, observed: "x", blockedAt: null } } as never);
+  const judging = runView(summary({ status: "succeeded", finishedAt: new Date(), jobs: [job("role_session", "succeeded", { persona_key: "ana" }), job("judge", "queued", { finding_key: "ana:fr", requested: true })], findings: [candidate] }));
+  expect(judging.rejudging).toBe(true);
+  expect(judging.stages.find((s) => s.label === "Judge")!.state).toBe("active");
+  expect(judging.report.couldNotJudge.map((f) => [f.key, f.action])).toEqual([["ana:fr", "judging"]]);
+
+  const marked = runView(summary({ status: "succeeded", finishedAt: new Date(), jobs: [job("judge", "failed", { finding_key: "ana:fr", error: "No output generated." })], findings: [{ ...candidate, dismissal: { reason: "Intended.", userId: "u1", at: new Date(), by: null } } as never] }));
+  expect(marked.report.couldNotJudge).toEqual([]);
+  expect(marked.report.friction).toEqual([]);
+  expect(marked.report.dismissed.map((f) => f.key)).toEqual(["ana:fr"]);
+});

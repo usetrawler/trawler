@@ -193,7 +193,7 @@ export function UndoNotABug({ runId, f, onDone, onRefused }: { runId: string; f:
 
 function judgedText(report: View["report"], key: string): string {
   const sections: Array<[string, Array<{ key: string; title: string }>]> = [
-    ["confirmed", report.confirmed], ["refuted", report.refuted], ["inconclusive", report.inconclusive], ["could not be judged", report.couldNotJudge], ["not judged", report.notJudged], ["marked not a bug", report.dismissed],
+    ["confirmed", report.confirmed], ["refuted", report.refuted], ["inconclusive", report.inconclusive], ["could not be judged", report.couldNotJudge], ["not judged", report.notJudged], ["kept as friction", report.friction], ["marked not a bug", report.dismissed],
   ];
   for (const [label, items] of sections) {
     const found = items.find((f) => f.key === key);
@@ -243,7 +243,7 @@ export function FindingRow({ f, n, mark, note, detail, action, dismiss, focus, r
         </summary>
         <div className="flex flex-col gap-3 border-t border-line p-[17px] text-sm wrap-anywhere">
           <p>{f.sameReports.length > 0 ? <><strong>{f.personaName}</strong><span className="text-muted">, while trying to: </span></> : <span className="text-muted">While trying to: </span>}{f.goalText}</p>
-          {f.filedAs === "friction" && f.verdict === "confirmed" && <p className="text-muted">{f.personaName} filed this as friction on a goal they did not reach, so Trawler replayed it too.</p>}
+          {f.replayedAsDefect && <p className="text-muted">{f.personaName} filed this as friction on a goal they did not reach, so Trawler replayed it too.</p>}
           <div>
             <p className="mb-1 text-muted">Steps</p>
             <ol className="list-decimal pl-5 break-words">{f.reproduction.map((step, i) => <li key={i}>{step}</li>)}</ol>
@@ -330,7 +330,7 @@ function BotProtectionNotice({ met }: { met: NonNullable<RunSummary["botProtecti
 function Outcome({ run, view }: { run: RunSummary; view: View }) {
   const { people, goals } = outcome(view);
   const { report } = view;
-  const reported = report.confirmed.length + report.refuted.length + report.inconclusive.length + report.couldNotJudge.length + report.notJudged.length;
+  const reported = view.reported;
   const spent = spentOf(run, false);
   const cell = "p-5 border-line";
   const id = useId();
