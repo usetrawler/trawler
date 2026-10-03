@@ -115,3 +115,15 @@ test("the first run on Trawler reads its model's price for the estimate, and lis
   expect(actions.priceRangeAction).toHaveBeenCalledWith("deepseek/deepseek-v4.1-flash");
   expect(setRanged).toHaveBeenCalledWith({ modelId: "deepseek/deepseek-v4.1-flash", range });
 });
+
+test("a panel the beta list closes asks the server for neither models nor prices, with a saved key or with the first run left", async () => {
+  for (const firstRunOnUs of [false, true]) {
+    react.effects = [];
+    react.setters = [];
+    StartRun({ projectId: "p1", projectName: "Acme", personas: 2, keyHint, canManageKey: true, authorisedBefore: true, firstRunOnUs, closedBeta: "Hosted runs are in private beta. Write to contact@usetrawler.com to get access." });
+    for (const effect of react.effects) effect();
+  }
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(actions.modelsForKeyAction).not.toHaveBeenCalled();
+  expect(actions.priceRangeAction).not.toHaveBeenCalled();
+});

@@ -113,6 +113,7 @@ test("an account the beta list will refuse is told so in place of the offer and 
   const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
   expect(text).toContain(`Start · Acme Invoices ${message}`);
   expect(html).toMatch(/<button type="submit" disabled="" aria-describedby="start-blocked"/);
+  expect(html).toContain(`<p id="start-blocked" class="border-l-2 border-warn pl-3 text-sm">${message}</p>`);
   expect(text).not.toContain("Your first run is on Trawler.");
   expect(html).not.toContain('name="apiKey"');
   expect(html).not.toContain('name="authorised"');

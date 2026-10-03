@@ -133,7 +133,7 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
     setPayingOwn(own);
   };
   const tooManyForUs = Boolean(firstRunOnUs) && personas > FIRST_RUN_ON_US.maxPeople;
-  const onUs = Boolean(firstRunOnUs) && !tooManyForUs && !payingOwn;
+  const onUs = Boolean(firstRunOnUs) && !tooManyForUs && !payingOwn && !closedBeta;
   const backToReplace = useRef(false);
 
   const typingKey = !keyHint || replacingKey;
@@ -142,7 +142,7 @@ export function StartRun({ projectId, projectName, personas, goalsPerTurn = Arra
   const noKey = !onUs && !keyHint && !canManageKey ? "Ask an owner or admin of this workspace to add a model key." : undefined;
 
   useEffect(() => {
-    if (onUs) return;
+    if (onUs || closedBeta) return;
     if (typingKey && (!provider || (provider === "custom" && !/^https:\/\/.+/.test(baseUrl)))) {
       setList(null);
       return;
