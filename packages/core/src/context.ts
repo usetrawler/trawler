@@ -65,9 +65,9 @@ export function showUnreadPictures(messages: ModelMessage[]): ModelMessage[] {
       if (p.type !== "tool-result") return p;
       const pictures = picturesIn(p.output);
       if (pictures.length === 0) return p;
-      const latest = mi === newest[0] && pi === newest[1];
-      if (latest) shown.push(...pictures);
-      return { ...p, output: { type: "text" as const, value: latest ? textIn(p.output) : PICTURE_GONE } };
+      const isNewest = mi === newest[0] && pi === newest[1];
+      if (isNewest) shown.push(...pictures);
+      return { ...p, output: { type: "text" as const, value: isNewest ? textIn(p.output) : PICTURE_GONE } };
     });
     return shown.length > 0 ? [{ ...m, content }, { role: "user", content: shown }] : [{ ...m, content }];
   });
