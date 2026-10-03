@@ -128,16 +128,19 @@ test("an earlier page still lands while a live update loads the newest one", asy
   expect(setTrail).toHaveBeenCalledTimes(2);
 });
 
-test("the trail a step tells to take the focus gets it", () => {
+test("the entry a page of earlier steps starts with takes the focus and stays focusable, so the focus is not dropped", () => {
   const focus = vi.fn();
-  const focused = vi.fn();
   Object.assign(react, { effects: [], setters: [], refIndex: 0, refs: [{ current: { focus } }] });
-  const tree = TrailView({ trail: earlierPage as never, loadingEarlier: false, onEarlier: () => {}, focusEntry: 4, onFocused: focused });
+  const tree = TrailView({ trail: earlierPage as never, loadingEarlier: false, onEarlier: () => {}, focusEntry: 4 });
   const item = nodes(tree).find((n) => n.type === "li" && n.props?.tabIndex === -1)!;
   expect(item.props!.ref).toBe(react.refs[0]);
+  expect(react.effects[0]!.deps).toEqual([4]);
   react.effects[0]!.run();
   expect(focus).toHaveBeenCalledOnce();
-  expect(focused).toHaveBeenCalledOnce();
+  Object.assign(react, { effects: [], refIndex: 0 });
+  TrailView({ trail: earlierPage as never, loadingEarlier: false, onEarlier: () => {} });
+  react.effects[0]!.run();
+  expect(focus).toHaveBeenCalledOnce();
 });
 
 test("a failed load says so with Try again, which clears the message while it tries and moves the focus into the trail when it works", async () => {

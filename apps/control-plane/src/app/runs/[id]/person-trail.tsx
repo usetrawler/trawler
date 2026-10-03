@@ -59,13 +59,11 @@ function Entry({ e }: { e: TrailEntry }) {
 
 const shownEntry = (e: TrailEntry) => !(e.kind === "step" && e.tool && OWN_ENTRY.has(e.tool));
 
-export function TrailView({ trail, loadingEarlier, onEarlier, focusEntry, onFocused }: { trail: Trail; loadingEarlier: boolean; onEarlier: () => void; focusEntry?: number | null; onFocused?: () => void }) {
+export function TrailView({ trail, loadingEarlier, onEarlier, focusEntry }: { trail: Trail; loadingEarlier: boolean; onEarlier: () => void; focusEntry?: number | null }) {
   const focusRef = useRef<HTMLLIElement>(null);
   useEffect(() => {
-    if (focusEntry == null) return;
-    focusRef.current?.focus();
-    onFocused?.();
-  }, [focusEntry, onFocused]);
+    if (focusEntry != null) focusRef.current?.focus();
+  }, [focusEntry]);
   if (trail.turns.length === 0) return <p className="text-sm text-muted">No turn has started yet.</p>;
   const firstLoaded = trail.olderThan === null || trail.entries.length === 0 ? 0 : trail.turns.findIndex((t) => t.id === trail.entries[0]!.turn);
   const shown = trail.turns.slice(Math.max(0, firstLoaded));
@@ -156,7 +154,6 @@ export function PersonTrail({ runId, person, live, pulse }: { runId: string; per
     return () => window.removeEventListener("hashchange", openWhenAddressed);
   }, [anchor]);
 
-  const focused = useCallback(() => setFocusEntry(null), []);
   return (
     <li id={anchor} className="border-b border-line last:border-b-0">
       <details ref={details} onToggle={(e) => setOpen(e.currentTarget.open)} className="group">
@@ -171,7 +168,7 @@ export function PersonTrail({ runId, person, live, pulse }: { runId: string; per
               <button type="button" onClick={() => void load(true)} className="h-10 border border-line bg-panel px-4 hover:border-ink">Try again</button>
             </div>
           ) : trail ? (
-            <TrailView trail={trail} loadingEarlier={earlier} onEarlier={() => void loadEarlier(trail.olderThan!)} focusEntry={focusEntry} onFocused={focused} />
+            <TrailView trail={trail} loadingEarlier={earlier} onEarlier={() => void loadEarlier(trail.olderThan!)} focusEntry={focusEntry} />
           ) : (
             open && <p role="status" className="text-sm text-muted">Loading…</p>
           )}
