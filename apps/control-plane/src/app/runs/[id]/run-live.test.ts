@@ -368,3 +368,15 @@ test("an account the beta list will refuse is told so in place of Run again and 
   expect(beingJudged).toContain("Judging again…");
   expect(beingJudged).not.toContain(message);
 });
+
+test("a finding Trawler marked not a bug says so and links to the earlier mark it matches, with Undo", () => {
+  const html = render(summary({
+    ...finished,
+    findings: [finding("ana:f1", "ana", { title: "Checkout refuses my postcode", verdict: "confirmed", dismissal: { reason: "We deliver to a fixed list.", userId: "trawler", at: new Date("2026-10-03T10:00:00Z"), by: null, matched: { runNumber: 3, findingKey: "lee:f2" } } })],
+  }));
+  const [row] = rows(html, "Not a bug");
+  expect(row).toContain('Marked by Trawler: it matches a finding marked not a bug in <a href="/runs/0003#finding-lee%3Af2" class="underline underline-offset-4 hover:text-ink">Run 0003</a>.');
+  expect(row).toContain("Not a bug, because: </span>We deliver to a fixed list.");
+  expect(row).toMatch(/>Undo<span class="sr-only">/);
+  expect(row).not.toContain("someone no longer in this workspace");
+});
