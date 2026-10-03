@@ -558,7 +558,7 @@ test("a finding that moved is scrolled into view as it takes the focus, and one 
 });
 
 test("when friction judged again is not borne out, the page says it was kept as friction", () => {
-  const candidate = { key: "ana:fr", personaKey: "ana", kind: "friction", filedAs: "friction", goal: "g1", title: "Balance has no history", observed: "o", reproduction: ["Open."], severity: "medium", replay: { completed: true, observed: "x", blockedAt: null } };
+  const candidate = { key: "ana:fr", personaKey: "ana", kind: "friction", filedAs: "friction" as const, goal: "g1", title: "Balance has no history", observed: "o", reproduction: ["Open."], severity: "medium", replay: { completed: true, observed: "x", blockedAt: null } };
   const judge = (status: string) => ({ id: `judge-${status}`, kind: "judge", status, persona_key: null, finding_key: "ana:fr", usage: null, stopped_by: null, error: null, requested: true });
   draw(data("succeeded", { jobs: [judge("queued")] as RunSummary["jobs"], findings: [{ ...candidate, verdict: null }] as RunSummary["findings"] }));
   react.effects[1]!();
