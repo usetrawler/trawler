@@ -1,4 +1,5 @@
 import { MAX_NOT_BUG_REASON, MAX_NOT_BUG_TITLE, MAX_NOT_BUGS, type NotABug } from "@usetrawler/protocol";
+import { z } from "zod";
 import type { Tx } from "../db/tenancy.ts";
 import { isLive } from "./report.ts";
 
@@ -43,7 +44,7 @@ const notBugRef = (runId: string, findingKey: string) => `${runId}/${findingKey}
 export async function markKnownNotBugs(tx: Tx, run: { orgId: string; runId: string; projectId: string }, matches: Array<{ key: string; ref: string }>): Promise<void> {
   for (const { key, ref } of matches) {
     const slash = ref.indexOf("/");
-    if (slash < 1) continue;
+    if (slash < 1 || !z.uuid().safeParse(ref.slice(0, slash)).success) continue;
     const source = await tx
       .selectFrom("finding_dismissals as d")
       .innerJoin("runs as r", "r.id", "d.run_id")

@@ -548,6 +548,7 @@ async function handOverToNextReport(tx: Tx, runId: string, key: string): Promise
   const now = new Date();
   await tx.updateTable("findings").set({ same_as: null, updated_at: now }).where("run_id", "=", runId).where("key", "=", successor.key).execute();
   await tx.updateTable("findings").set({ same_as: successor.key, updated_at: now }).where("run_id", "=", runId).where((eb) => eb.or([eb("same_as", "=", key), eb("key", "=", key)])).execute();
+  await tx.updateTable("finding_dismissals").set({ finding_key: successor.key }).where("run_id", "=", runId).where("finding_key", "=", key).where("matched_run_id", "is not", null).execute();
   return successor.key;
 }
 
