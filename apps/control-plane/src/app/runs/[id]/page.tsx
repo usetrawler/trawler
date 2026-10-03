@@ -4,6 +4,7 @@ import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { AppShell } from "../../../components/app-shell.tsx";
 import { runView } from "../../../runs/report.ts";
 import { runPath, runTitle } from "../../../runs/status.ts";
+import { betaRefusal } from "../../../server/beta.ts";
 import { runFor } from "../../../server/runs.ts";
 import { shellFor } from "../../../server/shell.ts";
 import { runPageTitle } from "../../../server/titles.ts";
@@ -34,7 +35,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
           <li aria-current="page" className="font-bold text-ink">{runTitle(access.run.number)}</li>
         </ol>
       </nav>
-      <RunLive initial={JSON.parse(JSON.stringify({ run: access.run, view: runView(access.run) }))} />
+      <RunLive initial={JSON.parse(JSON.stringify({ run: access.run, view: runView(access.run) }))} closedBeta={betaRefusal(access.member.email) ?? undefined} />
     </AppShell>
   );
 }

@@ -348,3 +348,23 @@ test("friction replayed as a possible defect whose judge gave no verdict can be 
   expect(rows(html, "Friction").map((r) => text(r.split("</summary>")[0]!))).toEqual(["high severity 01 · Lee Park Menu is hard to find o →"]);
   expect(text(band(html))).toContain("Verified 1 of 1 reported");
 });
+
+test("an account the beta list will refuse is told so in place of Run again and Judge again, and Start another run stays", () => {
+  const message = "Hosted runs are in private beta. Write to contact@usetrawler.com to get access.";
+  const run = summary({ ...finished, jobs: [...finished.jobs, job("judge", "failed", { finding_key: "x:d4", error: "the judge timed out" })], findings: [...finished.findings, finding("x:d4", "ana", { title: "Export is empty" })] });
+  const html = renderToStaticMarkup(createElement(RunLive, { initial: JSON.parse(JSON.stringify({ run, view: runView(run) })), closedBeta: message }));
+  expect(html).not.toMatch(/>Run again/);
+  expect(html).toContain(">Start another run</a>");
+  expect(html).toContain(`<p class="mt-3 max-w-md self-end border-l-2 border-warn pl-3 text-sm max-wide:self-start">${message}</p>`);
+  const [unjudged] = rows(html, "Could not be judged");
+  expect(unjudged).not.toContain(">Judge again</button>");
+  expect(unjudged).toContain(`<p class="text-sm text-muted">${message}</p>`);
+  expect(render(run)).toMatch(/>Run again/);
+
+  const liveRun = summary({ ...live, findings: finished.findings });
+  expect(renderToStaticMarkup(createElement(RunLive, { initial: JSON.parse(JSON.stringify({ run: liveRun, view: runView(liveRun) })), closedBeta: message }))).not.toContain(message);
+  const judging = summary({ ...finished, jobs: [...finished.jobs, job("judge", "queued", { finding_key: "x:d4", requested: true })], findings: [...finished.findings, finding("x:d4", "ana", { title: "Export is empty" })] });
+  const [beingJudged] = rows(renderToStaticMarkup(createElement(RunLive, { initial: JSON.parse(JSON.stringify({ run: judging, view: runView(judging) })), closedBeta: message })), "Could not be judged");
+  expect(beingJudged).toContain("Judging again…");
+  expect(beingJudged).not.toContain(message);
+});
