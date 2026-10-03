@@ -348,7 +348,7 @@ describe("describeProduct", () => {
     const { summary: got, usage } = await describeProduct({ model, modelId: "mock", budget: new Budget(1), product });
     expect(got).toEqual({ name: "Acme", description: "A pitch board.", signUp: "open", features: [{ title: "Submit a pitch", summary: "Founders send a pitch." }, { title: "Review pitches", summary: "Reviewers approve." }] });
     expect(usage.steps).toBe(1);
-    expect(model.doGenerateCalls[0]!.providerOptions?.openrouter).toMatchObject({ reasoning: { effort: "low" } });
+    expect(model.doGenerateCalls[0]!.providerOptions?.openrouter).not.toHaveProperty("reasoning");
     const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
     expect(prompt).toContain("Acme lets founders submit pitches");
     expect(prompt).toMatch(/most central first/);
