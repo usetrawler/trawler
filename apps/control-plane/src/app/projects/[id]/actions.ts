@@ -109,7 +109,8 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   if (without) return { error: new NeedsAccount(without).message };
   const refused = await withOrg(getDb(), orgId, (tx) => refusalToStart(tx, orgId, projectId, onUs ? "trawler" : "workspace", plan.id));
   if (refused) return refusedState(refused);
-  if (onUs) return startOnUs(orgId, projectId, plan.id, member.userId);
+  const conversation = form.get("conversation") === "on";
+  if (onUs) return startOnUs(orgId, projectId, plan.id, member.userId, conversation);
 
   const resolved = await endpointFrom(orgId, { key: String(form.get("apiKey") ?? ""), provider: String(form.get("provider") ?? ""), baseUrl: String(form.get("baseUrl") ?? "") });
   if ("error" in resolved) return { error: resolved.error, ...(resolved.field ? { field: resolved.field } : {}) };
@@ -135,7 +136,7 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   try {
     const run = await withOrg(getDb(), orgId, async (tx) => {
       if (!(await keyStillStored(tx, orgId, endpoint.provider, providerBaseUrl))) throw new KeyGone();
-      return startRun(tx, orgId, projectId, getKeyring(), { ...runOptions(modelId, budgetUsd, member.userId, endpoint.provider, providerBaseUrl, price, "workspace"), planId: plan.id });
+      return startRun(tx, orgId, projectId, getKeyring(), { ...runOptions(modelId, budgetUsd, member.userId, endpoint.provider, providerBaseUrl, price, "workspace"), planId: plan.id, conversation });
     });
     runNumber = run.number;
   } catch (err) {
@@ -157,13 +158,13 @@ const runOptions = (model: string, budgetUsd: number, createdBy: string, provide
   provider, providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap, paidBy,
 });
 
-async function startOnUs(orgId: string, projectId: string, planId: string, userId: string): Promise<StartState> {
+async function startOnUs(orgId: string, projectId: string, planId: string, userId: string, conversation: boolean): Promise<StartState> {
   if (!readEnv().setup) return { error: "Trawler cannot pay for runs on this server. Add a model key to start." };
   if (!(await withOrg(getDb(), orgId, (tx) => firstRunOnUsLeft(tx, orgId)))) return { error: new FirstRunOnUsUsed().message };
   const price = await priceFor("openrouter", FIRST_RUN_ON_US.model, readEnv().openRouterUrl);
   let runNumber: number;
   try {
-    const run = await withOrg(getDb(), orgId, (tx) => startRun(tx, orgId, projectId, getKeyring(), { ...runOptions(FIRST_RUN_ON_US.model, FIRST_RUN_ON_US.budgetUsd, userId, "openrouter", null, price, "trawler"), planId }));
+    const run = await withOrg(getDb(), orgId, (tx) => startRun(tx, orgId, projectId, getKeyring(), { ...runOptions(FIRST_RUN_ON_US.model, FIRST_RUN_ON_US.budgetUsd, userId, "openrouter", null, price, "trawler"), planId, conversation }));
     runNumber = run.number;
   } catch (err) {
     if (err instanceof NeedsAccount || err instanceof RunRefused) return err instanceof RunRefused ? refusedState(err) : { error: err.message };

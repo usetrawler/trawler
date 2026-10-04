@@ -82,10 +82,10 @@ export async function handleStartRun(req: Request, deps: RunApiDeps): Promise<Re
       return startRun(tx, orgId, body.project, deps.keys, {
         budgetUsd: payer.budgetUsd, agentModel: payer.model, judgeModel: payer.model, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: `api-token:${holder.tokenId}`,
         provider: payer.provider, providerBaseUrl: payer.providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap, paidBy: payer.paidBy,
-        planId: plan.id, execution: body.execution, targetUrl: body.url, pullRequest: body.pullRequest, usesFirstRunOnUs: payer.usesFirstRunOnUs,
+        planId: plan.id, execution: body.execution, targetUrl: body.url, pullRequest: body.pullRequest, conversation: body.conversation, usesFirstRunOnUs: payer.usesFirstRunOnUs,
       });
     });
-    return ok({ id: run.id, number: run.number, reportUrl: `${deps.baseUrl.replace(/\/+$/, "")}${runPath(run.number)}` }, 201);
+    return ok({ id: run.id, number: run.number, reportUrl: `${deps.baseUrl.replace(/\/+$/, "")}${runPath(run.number)}`, people: run.people }, 201);
   } catch (err) {
     if (err instanceof ProjectNotFound) return fail(404, "That project is not in this workspace.");
     if (err instanceof PlanNotFound) return fail(404, "That plan is not on this project.");

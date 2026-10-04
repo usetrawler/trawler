@@ -5,7 +5,7 @@ import type { ArtifactStore } from "../artifacts/store.ts";
 import type { Database } from "../db/index.ts";
 import type { Keyring } from "../lib/secrets.ts";
 import { authenticateToken, TOKEN_SHAPE } from "../api-tokens/tokens.ts";
-import { claimJob, completeJob, HOSTED_SCOPE, type ClaimScope, ForeignEvents, ingestEvents, InvalidJobToken, JobOver, releaseJob, releaseJobForShutdown } from "../runs/queue.ts";
+import { channelFor, claimJob, completeJob, HOSTED_SCOPE, type ClaimScope, ForeignEvents, ingestEvents, InvalidJobToken, JobOver, releaseJob, releaseJobForShutdown } from "../runs/queue.ts";
 
 export interface RunnerApiDeps {
   db: Database;
@@ -122,6 +122,21 @@ export async function handleEvents(req: Request, jobId: string, deps: RunnerApiD
   } catch (err) {
     if (err instanceof InvalidJobToken) return problem(401, "invalid job token");
     if (err instanceof ForeignEvents) return problem(400, err.message);
+    throw err;
+  }
+}
+
+export async function handleChannel(req: Request, jobId: string, deps: RunnerApiDeps): Promise<Response> {
+  const wrongProtocol = protocolProblem(req);
+  if (wrongProtocol) return wrongProtocol;
+  const token = bearer(req);
+  if (!token || !UUID.test(jobId)) return problem(401, "invalid job token");
+  const afterParam = new URL(req.url).searchParams.get("after") ?? "0";
+  if (!/^\d{1,15}$/.test(afterParam)) return problem(400, "after must be a message number");
+  try {
+    return json({ messages: await channelFor(deps.db, token, jobId, Number(afterParam)) });
+  } catch (err) {
+    if (err instanceof InvalidJobToken) return problem(401, "invalid job token");
     throw err;
   }
 }
