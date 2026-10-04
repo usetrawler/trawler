@@ -240,7 +240,7 @@ export async function createPlan(tx: Tx, orgId: string, projectId: string, input
 }
 
 export async function renamePlan(tx: Tx, orgId: string, projectId: string, planId: string, name: string): Promise<string> {
-  await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forUpdate().executeTakeFirstOrThrow().catch(() => Promise.reject(new ProjectNotFound()));
+  if (!(await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forUpdate().executeTakeFirst())) throw new ProjectNotFound();
   const plan = await planOf(tx, orgId, projectId, planId);
   const clean = PlanNameSchema.parse(name);
   await nameFree(tx, projectId, clean, plan.id);
@@ -249,7 +249,7 @@ export async function renamePlan(tx: Tx, orgId: string, projectId: string, planI
 }
 
 export async function removePlan(tx: Tx, orgId: string, projectId: string, planId: string): Promise<void> {
-  await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forUpdate().executeTakeFirstOrThrow().catch(() => Promise.reject(new ProjectNotFound()));
+  if (!(await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forUpdate().executeTakeFirst())) throw new ProjectNotFound();
   const plan = await planOf(tx, orgId, projectId, planId);
   const { n } = await tx.selectFrom("plans").select(sql<string>`count(*)`.as("n")).where("project_id", "=", projectId).executeTakeFirstOrThrow();
   if (Number(n) <= 1) throw new LastPlan();

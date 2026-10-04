@@ -5,12 +5,12 @@ import { Recognised } from "../../../components/key-fields.tsx";
 import { Estimate, OnUs, StartRun } from "./start-run.tsx";
 
 test("a member who cannot add the model key is told that an owner or admin can", () => {
-  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: false, authorisedBefore: false }));
+  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", planId: "pl1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: false, authorisedBefore: false }));
   expect(html).toContain("Ask an owner or admin of this workspace to add a model key.");
 });
 
 test("the Start panel names the project it starts, since New run jumps straight to it", () => {
-  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: true, authorisedBefore: false }));
+  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", planId: "pl1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: true, authorisedBefore: false }));
   expect(html).toMatch(/<form id="start"[^>]*>.*>Start · <span class="text-ink">Acme Invoices<\/span><\/p>/);
 });
 
@@ -21,7 +21,7 @@ test("a recognised key is named with the article its provider takes", () => {
 });
 
 test("a product that has had a run is not asked for the authorisation again; one without runs is", () => {
-  const start = (authorisedBefore: boolean) => renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: true, authorisedBefore }));
+  const start = (authorisedBefore: boolean) => renderToStaticMarkup(createElement(StartRun, { projectId: "p1", planId: "pl1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: true, authorisedBefore }));
   expect(start(false)).toContain('name="authorised"');
   expect(start(true)).not.toContain('name="authorised"');
   expect(start(true).replace(/<[^>]+>/g, "").replaceAll("&#x27;", "'")).toContain("Confirmed when this product's first run started: it may be tested, and it is not a production system with real people's data.");
@@ -39,19 +39,19 @@ test("the estimate spans OpenRouter's providers, names the turns, and says how m
 });
 
 test("the cap's hint says the last call can take a run slightly past it, as the proxy counts a call once it has happened", () => {
-  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: true, authorisedBefore: true }));
+  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", planId: "pl1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: true, authorisedBefore: true }));
   expect(html).toContain("Hard cap (USD). The run stops once it reaches it, and the last call can take it slightly past; findings so far are kept.");
 });
 
 test("a refusal known when the page opens is said above the form, with the live run to open, and Start still asks again", () => {
-  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: true, authorisedBefore: true, refusal: { message: "Run 0007 is still going on this project. Wait for it to finish or stop it, then start again.", activeRun: { id: "live-run", number: 7 } } }));
+  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", planId: "pl1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: true, authorisedBefore: true, refusal: { message: "Run 0007 is still going on this project. Wait for it to finish or stop it, then start again.", activeRun: { id: "live-run", number: 7 } } }));
   expect(html).toContain('Run 0007 is still going on this project. Wait for it to finish or stop it, then start again. <a href="/runs/0007"');
   expect(html).toContain(">Open Run 0007</a>");
   expect(html.match(/<button type="submit"[^>]*>/)?.[0]).not.toMatch(/\sdisabled=""/);
 });
 
 test("while the first run on Trawler is left, Start offers it without key, model or cap fields, and even a member who cannot add a key may start it", () => {
-  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: false, authorisedBefore: false, firstRunOnUs: true }));
+  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", planId: "pl1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: false, authorisedBefore: false, firstRunOnUs: true }));
   expect(html).not.toContain('name="apiKey"');
   expect(html).not.toContain('name="model"');
   expect(html).not.toContain('name="budget"');
@@ -78,14 +78,14 @@ test("the first run on Trawler says Trawler pays, what after, the fixed cap, and
 
 test("an owner can pay with their own key instead of the first run on Trawler, and a saved key is named", () => {
   const offer = true;
-  const owner = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme", personas: 2, keyHint: null, canManageKey: true, authorisedBefore: true, firstRunOnUs: offer }));
+  const owner = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", planId: "pl1", projectName: "Acme", personas: 2, keyHint: null, canManageKey: true, authorisedBefore: true, firstRunOnUs: offer }));
   expect(owner).toContain("Pay with your own model key instead");
-  const saved = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme", personas: 2, keyHint: { provider: "openrouter", hint: "…a1b2", baseUrl: null }, canManageKey: false, authorisedBefore: true, firstRunOnUs: offer }));
+  const saved = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", planId: "pl1", projectName: "Acme", personas: 2, keyHint: { provider: "openrouter", hint: "…a1b2", baseUrl: null }, canManageKey: false, authorisedBefore: true, firstRunOnUs: offer }));
   expect(saved).toContain("Pay with your OpenRouter key …a1b2 instead");
 });
 
 test("a plan with more people than the first run on Trawler takes is started with a key, and Start says why", () => {
-  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme", personas: 5, keyHint: null, canManageKey: true, authorisedBefore: true, firstRunOnUs: true }));
+  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", planId: "pl1", projectName: "Acme", personas: 5, keyHint: null, canManageKey: true, authorisedBefore: true, firstRunOnUs: true }));
   expect(html).not.toContain('name="onUs"');
   expect(html).toContain('name="apiKey"');
   expect(html.replace(/<[^>]+>/g, "")).toContain("The first run on Trawler takes up to 4 people, and this plan has 5. Remove people from the plan to use it, or pay with your own model key.");
@@ -100,7 +100,7 @@ test("while a run on Trawler starts the button says Starting, and while a key is
 
 test("the Start panel links to the terms and the privacy notice, whether or not the product had a run", () => {
   for (const authorisedBefore of [false, true]) {
-    const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme", personas: 2, keyHint: null, canManageKey: true, authorisedBefore }));
+    const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", planId: "pl1", projectName: "Acme", personas: 2, keyHint: null, canManageKey: true, authorisedBefore }));
     expect(html.replace(/<[^>]+>/g, "")).toContain("Hosted runs follow the Terms ↗ (opens in a new tab) and the Privacy notice ↗ (opens in a new tab).");
     expect(html).toContain('href="https://usetrawler.com/terms/"');
     expect(html).toContain('href="https://usetrawler.com/privacy/"');
@@ -109,7 +109,7 @@ test("the Start panel links to the terms and the privacy notice, whether or not 
 
 test("an account the beta list will refuse is told so in place of the offer and the fields, and cannot press Start", () => {
   const message = "Hosted runs are in private beta. Write to contact@usetrawler.com to get access.";
-  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: true, authorisedBefore: false, firstRunOnUs: true, closedBeta: message }));
+  const html = renderToStaticMarkup(createElement(StartRun, { projectId: "p1", planId: "pl1", projectName: "Acme Invoices", personas: 2, keyHint: null, canManageKey: true, authorisedBefore: false, firstRunOnUs: true, closedBeta: message }));
   const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
   expect(text).toContain(`Start · Acme Invoices ${message}`);
   expect(html).toMatch(/<button type="submit" disabled="" aria-describedby="start-blocked"/);

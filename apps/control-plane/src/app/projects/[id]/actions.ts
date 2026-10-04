@@ -101,7 +101,8 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   const refusal = betaRefusal(member.email);
   if (refusal) return { error: refusal };
   if (!UUID.test(projectId) || !(await withOrg(getDb(), orgId, (tx) => projectExists(tx, orgId, projectId)))) return { error: "The run could not start. Try again." };
-  const requestedPlan = String(form.get("planId") ?? "") || undefined;
+  const requestedPlan = String(form.get("planId") ?? "");
+  if (!requestedPlan) return { error: "Reload the page and start the run from a plan." };
   const plan = await withOrg(getDb(), orgId, (tx) => planOf(tx, orgId, projectId, requestedPlan)).catch((err: unknown) => (err instanceof PlanNotFound ? null : Promise.reject(err)));
   if (!plan) return { error: "This plan was removed. Reload the page and choose another." };
   const without = await withOrg(getDb(), orgId, (tx) => personWithoutAccount(tx, plan.id));

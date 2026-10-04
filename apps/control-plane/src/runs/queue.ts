@@ -77,7 +77,10 @@ export function storable<T>(value: T): T {
   return value;
 }
 
-function configFor(snapshot: ConfigSnapshot, current: ProjectConfig): ProjectConfig {
+type Secrets = Pick<ProjectConfig, "accounts" | "httpCredentials" | "secretHeaders">;
+const NO_SECRETS: Secrets = { accounts: [], secretHeaders: {} };
+
+function configFor(snapshot: ConfigSnapshot, current: Secrets): ProjectConfig {
   const passwords = new Map(current.accounts.map((a) => [`${a.ref}\n${a.username}`, a.password]));
   const key = (a: { ref: string; username: string }) => `${a.ref}\n${a.username}`;
   const usable = new Set(snapshot.accounts.filter((a) => passwords.has(key(a))).map((a) => a.ref));
@@ -168,7 +171,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
     await sql`savepoint prepare_assignment`.execute(tx);
     try {
       const snapshot = picked.config_snapshot as unknown as ConfigSnapshot;
-      const current = await loadProjectConfig(tx, picked.org_id, picked.project_id, keys, picked.plan_id ?? undefined);
+      const current: Secrets = picked.plan_id ? await loadProjectConfig(tx, picked.org_id, picked.project_id, keys, picked.plan_id) : NO_SECRETS;
       const finding = picked.finding_key ? await findingFor(tx, picked.run_id, picked.finding_key) : undefined;
       const config = configFor(snapshot, current);
       const turn = picked.kind === "role_session" && picked.sign_up_seed ? turnAt(snapshot, picked.position, picked.persona_key) : undefined;

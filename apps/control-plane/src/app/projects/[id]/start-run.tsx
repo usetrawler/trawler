@@ -106,7 +106,7 @@ export function OnUs({ range, goalsPerTurn, personas }: { range: PriceRange | nu
 }
 
 export function StartRun({ projectId, planId, projectName, personas, goalsPerTurn = Array.from({ length: personas }, () => 1), keyHint: savedHint, canManageKey, authorisedBefore, firstRunOnUs, blocked, refusal, closedBeta, onStarting }: {
-  projectId: string; planId?: string; projectName: string; personas: number; goalsPerTurn?: number[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; firstRunOnUs?: boolean; blocked?: string; refusal?: StartRefusal; closedBeta?: string; onStarting?: (starting: boolean) => void;
+  projectId: string; planId: string; projectName: string; personas: number; goalsPerTurn?: number[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; firstRunOnUs?: boolean; blocked?: string; refusal?: StartRefusal; closedBeta?: string; onStarting?: (starting: boolean) => void;
 }) {
   const [state, action, pending] = useActionState<StartState, FormData>(startTheRun, {});
   const keyHint = state.keyHint ?? savedHint;
@@ -219,7 +219,7 @@ export function StartRun({ projectId, planId, projectName, personas, goalsPerTur
       id="start"
       className="flex flex-col gap-5 border border-line bg-panel p-5">
       <input type="hidden" name="projectId" value={projectId} />
-      {planId && <input type="hidden" name="planId" value={planId} />}
+      <input type="hidden" name="planId" value={planId} />
       <p className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Start · <span className="text-ink">{projectName}</span></p>
       {notice && <p id="start-notice" className="border-l-2 border-warn pl-3 text-sm">{notice.message}<OpenRun run={notice.activeRun} /></p>}
 

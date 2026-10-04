@@ -1,6 +1,6 @@
 "use client";
 import { unstable_isUnrecognizedActionError, useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { removePlanAction, renamePlanAction } from "./plan-actions.ts";
 
@@ -16,9 +16,14 @@ export function PlanTitle({ projectId, planId, name, canRemove }: { projectId: s
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const keep = useRef<HTMLButtonElement>(null);
   const rename = () => {
     const next = value.trim();
-    if (next === saved) return setValue(saved);
+    if (next === saved) {
+      setValue(saved);
+      setError(null);
+      return;
+    }
     start(async () => {
       const res = await renamePlanAction(projectId, planId, next).catch(outdated("Reload the page to rename the plan."));
       if (!res.ok) {
@@ -38,8 +43,9 @@ export function PlanTitle({ projectId, planId, name, canRemove }: { projectId: s
       setError(res.error);
       return;
     }
-    window.location.assign(`/projects/${projectId}`);
+    router.replace(`/projects/${projectId}`);
   });
+  const errorId = `plan-name-error-${planId}`;
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-3">
@@ -51,21 +57,35 @@ export function PlanTitle({ projectId, planId, name, canRemove }: { projectId: s
             onChange={(e) => setValue(e.target.value)}
             onBlur={rename}
             onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-            disabled={pending}
+            readOnly={pending}
+            aria-busy={pending || undefined}
             aria-invalid={error ? true : undefined}
+            aria-describedby={error ? errorId : undefined}
             className="min-w-0 border border-dashed border-line/60 bg-transparent px-2 py-1 outline-none hover:border-line focus:border-solid focus:border-ink focus:bg-paper"
           />
         </label>
-        {canRemove && !confirming && <button type="button" onClick={() => setConfirming(true)} className="text-sm text-muted underline-offset-4 hover:text-bad hover:underline">Remove plan</button>}
+        {canRemove && !confirming && (
+          <button
+            type="button"
+            aria-expanded={false}
+            onClick={() => {
+              setConfirming(true);
+              setTimeout(() => keep.current?.focus(), 0);
+            }}
+            className="text-sm text-muted underline-offset-4 hover:text-bad hover:underline"
+          >
+            Remove plan
+          </button>
+        )}
         {confirming && (
           <span className="flex flex-wrap items-center gap-3 text-sm" role="group" aria-label={`Remove ${saved}?`}>
             <span>Remove {saved}? Its people, goals and test accounts go; past runs keep their reports.</span>
             <button type="button" onClick={remove} disabled={pending} className="text-bad underline underline-offset-4">Remove</button>
-            <button type="button" onClick={() => setConfirming(false)} className="text-muted underline underline-offset-4">Keep it</button>
+            <button type="button" ref={keep} onClick={() => setConfirming(false)} className="text-muted underline underline-offset-4">Keep it</button>
           </span>
         )}
       </div>
-      {error && <p role="alert" className="text-sm text-bad">{error}</p>}
+      {error && <p id={errorId} role="alert" className="text-sm text-bad">{error}</p>}
     </div>
   );
 }

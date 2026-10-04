@@ -30,7 +30,7 @@ const RAN = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const NEW = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 const start = (projectId: string, authorised: boolean) => {
   const form = new FormData();
-  for (const [k, v] of Object.entries({ projectId, model: "deepseek/deepseek-v4.1-flash", budget: "2", ...(authorised ? { authorised: "on" } : {}) })) form.set(k, v);
+  for (const [k, v] of Object.entries({ projectId, planId: "pl1", model: "deepseek/deepseek-v4.1-flash", budget: "2", ...(authorised ? { authorised: "on" } : {}) })) form.set(k, v);
   return startRunAction({}, form);
 };
 

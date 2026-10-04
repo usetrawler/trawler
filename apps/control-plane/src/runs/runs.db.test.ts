@@ -715,6 +715,18 @@ describe("judge again", () => {
     return run;
   }
 
+  test("a job of a run whose plan was removed is handed out without any test account or gate secret, never another plan's", async () => {
+    const run = await runWithFailedJudge();
+    await sql`update runs set plan_id = null where id = ${run.id}`.execute(t.db);
+    await again(run.id);
+    const judge = (await claimPastChecks())!;
+    expect(judge).toMatchObject({ kind: "judge", runId: run.id });
+    expect(judge.config.accounts).toEqual([]);
+    expect(judge.config.httpCredentials).toBeUndefined();
+    expect(judge.config.personas.every((p) => p.accountRef === undefined)).toBe(true);
+    await drain();
+  });
+
   test("a failed judge runs again on the finished run, which stays finished", async () => {
     const run = await runWithFailedJudge();
     const before = await summaryOf(run.id);

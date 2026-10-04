@@ -178,8 +178,8 @@ test("the plan editor gets the workspace's plan, and too many people for it is l
 
 test("the plan tab lists the project's plans, opens the one asked for and falls back to the first", async () => {
   const html = await render(PLANS[1]!.id);
-  expect(html).toMatch(/<a href="\/projects\/[^"]+\?plan=11111111-1111-4111-8111-111111111111"[^>]*>Plan 1/);
-  expect(html).toMatch(/<a href="[^"]+\?plan=22222222-2222-4222-8222-222222222222" aria-current="page"[^>]*>Plan 2/);
+  expect(html).toMatch(/<a [^>]*href="\/projects\/[^"]+\?plan=11111111-1111-4111-8111-111111111111"[^>]*>Plan 1/);
+  expect(html).toMatch(/<a [^>]*href="[^"]+\?plan=22222222-2222-4222-8222-222222222222"[^>]*aria-current="page"[^>]*>Plan 2|<a [^>]*aria-current="page"[^>]*href="[^"]+\?plan=22222222-2222-4222-8222-222222222222"[^>]*>Plan 2/);
   expect(html).toContain("Add plan");
   expect(state.planned.at(-1)).toMatchObject({ planId: PLANS[1]!.id });
   await render("33333333-3333-4333-8333-333333333333");

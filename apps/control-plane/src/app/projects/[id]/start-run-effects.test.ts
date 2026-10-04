@@ -24,7 +24,7 @@ const { redirect } = await import("next/navigation");
 const { UnrecognizedActionError } = await import("next/dist/client/components/unrecognized-action-error.js");
 
 const keyHint = { provider: "openrouter" as const, hint: "…a1b2", baseUrl: null };
-const draw = () => StartRun({ projectId: "p1", projectName: "Acme Invoices", personas: 2, keyHint, canManageKey: true, authorisedBefore: true });
+const draw = () => StartRun({ projectId: "p1", planId: "pl1", projectName: "Acme Invoices", personas: 2, keyHint, canManageKey: true, authorisedBefore: true });
 const form = () => {
   const data = new FormData();
   data.set("projectId", "p1");
@@ -107,7 +107,7 @@ test("the first run on Trawler reads its model's price for the estimate, and lis
   actions.priceRangeAction.mockResolvedValue(range);
   react.effects = [];
   react.setters = [];
-  StartRun({ projectId: "p1", projectName: "Acme", personas: 2, keyHint, canManageKey: true, authorisedBefore: true, firstRunOnUs: true });
+  StartRun({ projectId: "p1", planId: "pl1", projectName: "Acme", personas: 2, keyHint, canManageKey: true, authorisedBefore: true, firstRunOnUs: true });
   const setRanged = react.setters[7]!;
   for (const effect of react.effects) effect();
   await vi.advanceTimersByTimeAsync(1_000);
@@ -120,7 +120,7 @@ test("a panel the beta list closes asks the server for neither models nor prices
   for (const firstRunOnUs of [false, true]) {
     react.effects = [];
     react.setters = [];
-    StartRun({ projectId: "p1", projectName: "Acme", personas: 2, keyHint, canManageKey: true, authorisedBefore: true, firstRunOnUs, closedBeta: "Hosted runs are in private beta. Write to contact@usetrawler.com to get access." });
+    StartRun({ projectId: "p1", planId: "pl1", projectName: "Acme", personas: 2, keyHint, canManageKey: true, authorisedBefore: true, firstRunOnUs, closedBeta: "Hosted runs are in private beta. Write to contact@usetrawler.com to get access." });
     for (const effect of react.effects) effect();
   }
   await vi.advanceTimersByTimeAsync(1_000);

@@ -4,7 +4,7 @@ import { sql } from "kysely";
 import type { Database } from "../db/index.ts";
 import { asSystem, withOrg } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
-import { createPlan, createProject, nameFree, planOf, ProjectNotFound, replacePlan } from "../projects/projects.ts";
+import { createPlan, createProject, MAX_PLANS, nameFree, PlanLimit, planOf, ProjectNotFound, replacePlan } from "../projects/projects.ts";
 import { ProjectLimitReached, projectLimitReached } from "../runs/plans.ts";
 import { FetchRefused } from "./safe-fetch.ts";
 import { writeLog } from "../server/log.ts";
@@ -81,7 +81,13 @@ export async function startDraft(deps: SetupDeps, input: { orgId: string; url?: 
   if (input.projectId) {
     const project = await withOrg(deps.db, input.orgId, (tx) => tx.selectFrom("projects").select(["target_url", "docs_url"]).where("id", "=", input.projectId!).where("org_id", "=", input.orgId).executeTakeFirst());
     if (!project) throw new ProjectNotFound();
-    if (input.planName !== undefined) await withOrg(deps.db, input.orgId, (tx) => nameFree(tx, input.projectId!, input.planName!.trim()));
+    if (input.planName !== undefined) {
+      await withOrg(deps.db, input.orgId, async (tx) => {
+        const { n } = await tx.selectFrom("plans").select(sql<string>`count(*)`.as("n")).where("project_id", "=", input.projectId!).executeTakeFirstOrThrow();
+        if (Number(n) >= MAX_PLANS) throw new PlanLimit();
+        await nameFree(tx, input.projectId!, input.planName!.trim());
+      });
+    }
     else if (input.planId !== undefined) await withOrg(deps.db, input.orgId, (tx) => planOf(tx, input.orgId, input.projectId!, input.planId));
     url = project.target_url;
     docsUrl = project.docs_url ?? undefined;
@@ -188,6 +194,7 @@ async function proposeClaimed(deps: SetupDeps, input: { orgId: string; descripti
   void writeLog("info", "setup chose the people", { orgId: input.orgId, seconds: (Date.now() - started) / 1000, model: usage.model, tries: usage.steps, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, costUsd: usage.costUsd, people: project.personas.length, goals: project.goals.length }).catch(() => undefined);
   const features = input.features.map((f) => f.trim()).filter(Boolean);
   return withOrg(deps.db, input.orgId, async (tx) => {
+    if (draft.project_id) await tx.selectFrom("projects").select("id").where("id", "=", draft.project_id).where("org_id", "=", input.orgId).forUpdate().execute();
     const taken = await tx.selectFrom("setup_drafts").select(["id", "result_project_id", "result_plan_id"]).where("id", "=", draft.id).forUpdate().executeTakeFirst();
     if (!taken) throw new DraftGone("the setup draft is gone");
     if (taken.result_project_id) return { projectId: taken.result_project_id, planId: taken.result_plan_id };
