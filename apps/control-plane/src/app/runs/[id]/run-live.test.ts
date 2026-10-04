@@ -15,7 +15,7 @@ const finding = (key: string, persona: string, extra: Partial<RunSummary["findin
 const summary = (over: Partial<RunSummary>): RunSummary => ({
   id: "run-1", number: 7, status: "succeeded", cancelReason: null, projectId: "project-1", planName: null, costUsd: 0.35, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash",
   provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0, createdAt: new Date("2026-09-25T19:40:00Z"), startedAt: new Date("2026-09-25T19:40:05Z"), finishedAt: new Date("2026-09-25T19:59:00Z"),
-  jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [],
+  jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [], conversation: false, conversationMessages: [],
   personas: [{ id: "ana", name: "Ana" }, { id: "lee", name: "Lee Park" }], goalTexts: [{ id: "g1", instruction: "Get an account." }, { id: "g2", instruction: "Send an invoice." }],
   ...over,
 });

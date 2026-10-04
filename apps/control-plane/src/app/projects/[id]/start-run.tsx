@@ -281,6 +281,12 @@ export function StartRun({ projectId, planId, planLabel, projectName, personas, 
           )}
         </>
       )}
+      {personas > 1 && (
+        <label className="flex items-start gap-3 text-sm">
+          <input type="checkbox" name="conversation" className="mt-1 accent-[var(--action)]" />
+          <span>People work at the same time and talk to each other</span>
+        </label>
+      )}
       {authorisedBefore ? (
         <p className="text-sm text-muted">Confirmed when this product&apos;s first run started: it may be tested, and it is not a production system with real people&apos;s data.</p>
       ) : (

@@ -70,6 +70,7 @@ describe("run api", () => {
     const first = await post(token, { project: projects.ent, execution: "own", cap: 0.5 });
     expect(first.status).toBe(201);
     const started = await first.json();
+    expect(started.people).toBeGreaterThan(0);
     expect(started.reportUrl).toMatch(/^https:\/\/app\.trawler\.test\/runs\/\d{4}$/);
     const row = await asSystem(t.db, (tx) => tx.selectFrom("runs").selectAll().where("id", "=", started.id).executeTakeFirstOrThrow());
     expect(row).toMatchObject({ paid_by: "trawler", provider: "openrouter", agent_model: FIRST_RUN_ON_US.model, execution: "own", created_by: expect.stringMatching(/^api-token:/) });

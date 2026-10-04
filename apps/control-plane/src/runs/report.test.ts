@@ -12,7 +12,7 @@ function summary(over: Partial<RunSummary>): RunSummary {
     id: "r", number: 1, status: "running", cancelReason: null, projectId: "p", planName: null, costUsd: 0.1, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "m", judgeModel: "m",
     provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0,
     createdAt: new Date(), startedAt: new Date(), finishedAt: null, jobs: [], findings: [], goals: [], botProtection: null, target: "https://a.test/",
-    personas: [{ id: "ana", name: "Ana" }, { id: "lee", name: "Lee" }], goalTexts: [{ id: "g", instruction: "Get in." }], activity: [],
+    personas: [{ id: "ana", name: "Ana" }, { id: "lee", name: "Lee" }], goalTexts: [{ id: "g", instruction: "Get in." }], activity: [], conversation: false, conversationMessages: [],
     ...over,
   };
 }

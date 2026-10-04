@@ -173,6 +173,7 @@ export interface Jobs {
   started_at: Timestamp | null;
   status: Generated<string>;
   stopped_by: string | null;
+  together: Generated<boolean>;
   token_hash: string | null;
   usage: Json | null;
 }
@@ -277,6 +278,7 @@ export interface Runs {
   cancel_reason: string | null;
   completion_usd_per_mtok: Numeric | null;
   config_snapshot: Json;
+  conversation: Generated<boolean>;
   cost_usd: Generated<Numeric>;
   created_at: Generated<Timestamp>;
   created_by: string;
