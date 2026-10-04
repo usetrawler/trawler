@@ -7,7 +7,7 @@ import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { setModelKey } from "../credentials/credentials.ts";
-import { createProject, loadProjectConfig, ProjectNotFound, replacePlan } from "../projects/projects.ts";
+import { createProject, firstPlan, loadProjectConfig, ProjectNotFound, replacePlan } from "../projects/projects.ts";
 import { cancelLiveRuns, cancelRun, CannotJudgeAgain, judgeAgain, NeedsAccount, RunNotFound, runSummary, startRun, type StartRunOptions } from "./runs.ts";
 import { dismissFinding, undoDismissal } from "./dismissals.ts";
 import { runView } from "./report.ts";
@@ -1196,4 +1196,17 @@ describe("a finding sent again with other people", () => {
     expect(await people()).toBeNull();
     await drain();
   });
+});
+
+test("a run records the name and id of the plan it started from, and keeps the name when the plan is removed", async () => {
+  await drain();
+  const own = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys, { focus: "Checkout" }));
+  const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", own, keys, options));
+  const plan = await withOrg(t.db, "org-a", (tx) => firstPlan(tx, "org-a", own));
+  const stamped = await sql<{ plan_id: string | null; plan_name: string }>`select plan_id, plan_name from runs where id = ${run.id}`.execute(t.db);
+  expect(stamped.rows).toEqual([{ plan_id: plan.id, plan_name: "Checkout" }]);
+  await sql`delete from plans where id = ${plan.id}`.execute(t.db);
+  const kept = await sql<{ plan_id: string | null; plan_name: string; project_id: string }>`select plan_id, plan_name, project_id from runs where id = ${run.id}`.execute(t.db);
+  expect(kept.rows).toEqual([{ plan_id: null, plan_name: "Checkout", project_id: own }]);
+  await drain();
 });

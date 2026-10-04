@@ -6,7 +6,7 @@ import type { Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
 import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
-import { loadProjectConfig, ProjectNotFound } from "../projects/projects.ts";
+import { firstPlan, loadProjectConfig, ProjectNotFound } from "../projects/projects.ts";
 import { budgetLeft, budgetSpentMessage, HALTED, monthlyBudget, PAUSED, projectPaused, runsHalted, type MonthlyBudget } from "./limits.ts";
 import { FIRST_RUN_ON_US } from "./models.ts";
 import { peopleLimitMessage, runsPerDayMessage, type WorkspacePlan } from "./plan-limits.ts";
@@ -139,6 +139,7 @@ async function refusalToRun(tx: Tx, orgId: string, projectId: string, paidBy: Pa
 export async function startRun(tx: Tx, orgId: string, projectId: string, keys: Keyring, options: StartRunOptions): Promise<{ id: string; number: number }> {
   await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forShare().execute();
   const config = await loadProjectConfig(tx, orgId, projectId, keys);
+  const plan = await firstPlan(tx, orgId, projectId);
   const without = await personWithoutAccount(tx, projectId);
   if (without) throw new NeedsAccount(without);
   const paidBy = options.paidBy ?? "workspace";
@@ -150,7 +151,7 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
   const run = await tx
     .insertInto("runs")
     .values({
-      org_id: orgId, project_id: projectId, number: next, config_snapshot: JSON.stringify(withoutSecrets(config)),
+      org_id: orgId, project_id: projectId, plan_id: plan.id, plan_name: plan.name, number: next, config_snapshot: JSON.stringify(withoutSecrets(config)),
       agent_model: options.agentModel, judge_model: options.judgeModel, budget_usd: options.budgetUsd.toFixed(4),
       max_steps: options.maxSteps, replay_steps: options.replaySteps, created_by: options.createdBy,
       provider: options.provider ?? "openrouter", provider_base_url: options.providerBaseUrl ?? null, token_cap: options.tokenCap ? String(options.tokenCap) : null,

@@ -5,7 +5,7 @@ import { ProjectConfigSchema } from "@usetrawler/protocol";
 import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring, last4 } from "../lib/secrets.ts";
-import { AccountLimit, addAccount, createProject, listProjects, loadProjectConfig, projectExists, projectForEditing, ProjectNotFound, removeAccount, replacePlan, UnknownAccount } from "./projects.ts";
+import { AccountLimit, addAccount, createProject, firstPlan, listProjects, loadProjectConfig, projectExists, projectForEditing, ProjectNotFound, removeAccount, replacePlan, UnknownAccount } from "./projects.ts";
 import { ProjectConfigSchema as Schema } from "@usetrawler/protocol";
 
 const t = await testDb();
@@ -75,7 +75,8 @@ test("another organisation can neither see nor load the project", async () => {
 
 test("a persona cannot be attached to another organisation's project, even by the system role", async () => {
   const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
-  await expect(asSystem(t.db, (tx) => tx.insertInto("personas").values({ org_id: "org-b", project_id: id, key: "x", name: "X", brief: "b", position: 9 }).execute())).rejects.toThrow(/foreign key/);
+  const planId = (await asSystem(t.db, (tx) => firstPlan(tx, "org-a", id))).id;
+  await expect(asSystem(t.db, (tx) => tx.insertInto("personas").values({ org_id: "org-b", project_id: id, plan_id: planId, key: "x", name: "X", brief: "b", position: 9 }).execute())).rejects.toThrow(/foreign key/);
 });
 
 test("ciphertext copied from one organisation's row does not decrypt in another", async () => {
@@ -118,7 +119,8 @@ test("an account a persona uses cannot disappear from under it", async () => {
 
 test("only one basic-auth gate per project", async () => {
   const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
-  await expect(withOrg(t.db, "org-a", (tx) => tx.insertInto("target_gates").values({ org_id: "org-a", project_id: id, kind: "basic_auth", name: "other", secret: "v1:x", secret_hint: "…", position: 9 }).execute())).rejects.toThrow(/duplicate key|unique/);
+  const planId = (await withOrg(t.db, "org-a", (tx) => firstPlan(tx, "org-a", id))).id;
+  await expect(withOrg(t.db, "org-a", (tx) => tx.insertInto("target_gates").values({ org_id: "org-a", project_id: id, plan_id: planId, kind: "basic_auth", name: "other", secret: "v1:x", secret_hint: "…", position: 9 }).execute())).rejects.toThrow(/duplicate key|unique/);
 });
 
 test("parsing a parsed config is stable, even at the origin limit", async () => {
@@ -210,4 +212,35 @@ test("an order of play that interleaves people comes back exactly as saved", asy
   expect(loaded.goals.map((g) => g.id)).toEqual(["submit", "review", "decision"]);
   const editing = await withOrg(t.db, "org-a", (tx) => projectForEditing(tx, "org-a", id));
   expect(editing!.goals.map((g) => g.key)).toEqual(["submit", "review", "decision"]);
+});
+
+test("a project starts with one plan, named from its focus or \"Main plan\", that holds its people, goals, accounts and gates", async () => {
+  const named = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys, { focus: "Team invitation flow" }));
+  const plain = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  expect((await withOrg(t.db, "org-a", (tx) => firstPlan(tx, "org-a", named))).name).toBe("Team invitation flow");
+  expect((await withOrg(t.db, "org-a", (tx) => firstPlan(tx, "org-a", plain))).name).toBe("Main plan");
+  const plan = await withOrg(t.db, "org-a", (tx) => firstPlan(tx, "org-a", plain));
+  const held = await withOrg(t.db, "org-a", async (tx) => {
+    const count = async (table: "personas" | "goals" | "target_accounts" | "target_gates") =>
+      Number((await tx.selectFrom(table).select(sql<string>`count(*)`.as("n")).where("plan_id", "=", plan.id).executeTakeFirstOrThrow()).n);
+    return [await count("personas"), await count("goals"), await count("target_accounts"), await count("target_gates")];
+  });
+  expect(held).toEqual([2, 3, 2, 3]);
+});
+
+test("a second plan of one project reuses the first plan's keys, but a plan keeps its own accounts and cannot repeat a key", async () => {
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  const second = await withOrg(t.db, "org-a", (tx) => tx.insertInto("plans").values({ org_id: "org-a", project_id: id, name: "Second", position: 1 }).returning("id").executeTakeFirstOrThrow());
+  const persona = (key: string, extra: Record<string, unknown> = {}) => ({ org_id: "org-a", project_id: id, plan_id: second.id, key, name: "X", brief: "b", position: 0, ...extra });
+  await withOrg(t.db, "org-a", (tx) => tx.insertInto("personas").values(persona("ana")).execute());
+  await expect(withOrg(t.db, "org-a", (tx) => tx.insertInto("personas").values(persona("ana")).execute())).rejects.toThrow(/duplicate key|unique/);
+  await expect(withOrg(t.db, "org-a", (tx) => tx.insertInto("personas").values(persona("lee", { account_ref: "ana" })).execute())).rejects.toThrow(/foreign key/);
+  await expect(withOrg(t.db, "org-a", (tx) => tx.insertInto("plans").values({ org_id: "org-a", project_id: id, name: "SECOND" }).execute())).rejects.toThrow(/duplicate key|unique/);
+});
+
+test("another workspace cannot see a plan or hang one on a project that is not its own", async () => {
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  expect(await withOrg(t.db, "org-b", (tx) => tx.selectFrom("plans").select("id").where("project_id", "=", id).execute())).toEqual([]);
+  await expect(asSystem(t.db, (tx) => tx.insertInto("plans").values({ org_id: "org-b", project_id: id, name: "Sneaky" }).execute())).rejects.toThrow(/foreign key/);
+  await expect(withOrg(t.db, "org-b", (tx) => firstPlan(tx, "org-b", id))).rejects.toThrow();
 });

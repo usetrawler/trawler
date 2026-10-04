@@ -107,8 +107,8 @@ describe("one active run per project", () => {
   test("the database refuses a second queued or running run of one project, even from a write that skips the check", async () => {
     const w = await workspace();
     const first = await w.start();
-    const copy = sql`insert into runs (org_id, project_id, number, config_snapshot, agent_model, judge_model, budget_usd, max_steps, replay_steps, created_by)
-      select org_id, project_id, 99, config_snapshot, agent_model, judge_model, budget_usd, max_steps, replay_steps, created_by from runs where id = ${first.id}`;
+    const copy = sql`insert into runs (org_id, project_id, plan_id, plan_name, number, config_snapshot, agent_model, judge_model, budget_usd, max_steps, replay_steps, created_by)
+      select org_id, project_id, plan_id, plan_name, 99, config_snapshot, agent_model, judge_model, budget_usd, max_steps, replay_steps, created_by from runs where id = ${first.id}`;
     await expect(copy.execute(t.db)).rejects.toThrow(/runs_one_active_per_project/);
     await withOrg(t.db, w.org, (tx) => cancelRun(tx, w.org, first.id, "stopped"));
     await expect(copy.execute(t.db)).resolves.toBeDefined();
