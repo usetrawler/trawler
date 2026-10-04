@@ -221,6 +221,7 @@ export interface Personas {
 
 export interface Plans {
   created_at: Generated<Timestamp>;
+  features: Generated<string[]>;
   id: Generated<string>;
   name: string;
   org_id: string;
@@ -315,11 +316,14 @@ export interface SetupDrafts {
   features: Json | null;
   id: Generated<string>;
   name: string | null;
+  new_plan_name: string | null;
   org_id: string;
   origins: Generated<string[]>;
   page: string;
+  plan_id: string | null;
   project_id: string | null;
   proposing_at: Timestamp | null;
+  result_plan_id: string | null;
   result_project_id: string | null;
   sign_up: string | null;
   url: string;

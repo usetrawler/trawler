@@ -73,7 +73,7 @@ type Settled = SetupProgress | "unreachable";
 
 export function afterLostProposal(progress: Settled): { open: string } | { error: string; back: "context" | "address" } {
   if (progress === "unreachable") return { error: LOST_MESSAGE.unreachable, back: "context" };
-  if (progress.state === "project") return { open: `/projects/${progress.projectId}` };
+  if (progress.state === "project") return { open: `/projects/${progress.projectId}${progress.planId ? `?plan=${progress.planId}` : ""}` };
   if (progress.state === "gone") return { error: LOST_MESSAGE.gone, back: "address" };
   return { error: LOST_MESSAGE.notChosen, back: "context" };
 }
@@ -142,10 +142,11 @@ export function Progress({ step, host, checking = false }: { step: Step; host: s
   );
 }
 
-export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], initialDescription }: { intro?: React.ReactNode; projectId?: string; projectHost?: string; chosenBefore?: string[]; initialDescription?: string }) {
+export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost, chosenBefore = [], initialDescription }: { intro?: React.ReactNode; projectId?: string; planId?: string; newPlanName?: string; projectHost?: string; chosenBefore?: string[]; initialDescription?: string }) {
   const [stage, setStage] = useState<Stage>({ kind: "address" });
   const [url, setUrl] = useState("");
   const [extra, setExtra] = useState("");
+  const [planName, setPlanName] = useState(newPlanName ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
@@ -161,12 +162,13 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
 
   const analyse = () => {
     const host = projectHost ?? hostOf(url);
+    if (newPlanName !== undefined && !planName.trim()) return setError("Give the plan a name.");
     setError(null);
     setStage({ kind: "working", step: "read", host });
     start(() => describe(host));
   };
   const describe = async (host: string) => {
-    const read = await reached(() => readProductAction(projectId ? { projectId } : { url }), "Reload the page to analyse the product.");
+    const read = await reached(() => readProductAction(projectId ? { projectId, ...(planId ? { planId } : {}), ...(newPlanName !== undefined ? { planName } : {}) } : { url }), "Reload the page to analyse the product.");
     if (read === LOST) return (setError(LOST_MESSAGE.read), setStage({ kind: "address" }));
     if (!read.ok) return (setError(read.error), setStage({ kind: "address" }));
     setStage({ kind: "working", step: "describe", host });
@@ -188,7 +190,7 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
 
   const startedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!projectId || startedFor.current === projectId) return;
+    if (!projectId || newPlanName !== undefined || startedFor.current === projectId) return;
     startedFor.current = projectId;
     analyse();
   });
@@ -197,10 +199,24 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
     return (
       <div className="flex flex-col gap-4">
         {intro}
-        <p className="max-w-xl text-muted">Trawler reads {projectHost} again, lists what the product does, and proposes people for the features you choose. Proposing replaces the people and goals on the plan. Test accounts stay; check who signs in with them afterwards.</p>
+        {newPlanName !== undefined ? (
+          <>
+            <label className="flex max-w-xl flex-col gap-2">
+              <span className="text-sm text-muted">Plan name</span>
+              <input
+                name="planName" type="text" maxLength={100} value={planName} onChange={(e) => setPlanName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); analyse(); } }}
+                className="h-12 border border-line bg-soft px-4 text-base outline-none focus:border-ink"
+              />
+            </label>
+            <p className="max-w-xl text-muted">Trawler reads {projectHost} again, lists what the product does, and proposes people for the features you choose. They go into a new plan with no test accounts; your other plans stay as they are.</p>
+          </>
+        ) : (
+          <p className="max-w-xl text-muted">Trawler reads {projectHost} again, lists what the product does, and proposes people for the features you choose. Proposing replaces the people and goals on the plan. Test accounts stay; check who signs in with them afterwards.</p>
+        )}
         {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
         <button type="button" onClick={analyse} disabled={pending} className="flex h-12 items-center justify-between gap-6 self-start bg-action px-5 font-mono text-sm tracking-[0.12em] text-[#17191c] uppercase transition hover:brightness-110 disabled:opacity-70">
-          Read the product again <span aria-hidden>→</span>
+          {newPlanName !== undefined ? "Read the product" : "Read the product again"} <span aria-hidden>→</span>
         </button>
       </div>
     );
@@ -313,7 +329,7 @@ export function SetupWizard({ intro, projectId, projectHost, chosenBefore = [], 
           <button type="submit" className="h-11 border border-ink px-4 font-mono text-xs tracking-[0.12em] uppercase">Add</button>
         </form>
       </section>
-      {projectId && <p className="text-sm text-muted">Proposing replaces the people and goals on the plan. Test accounts stay; check who signs in with them afterwards.</p>}
+      {projectId && <p className="text-sm text-muted">{newPlanName !== undefined ? `This creates the plan ${planName.trim()} with these people and goals. Your other plans stay as they are.` : "Proposing replaces the people and goals on the plan. Test accounts stay; check who signs in with them afterwards."}</p>}
       {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
       <div className="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
         <button type="button" onClick={() => { setError(null); setStage({ kind: "address" }); }} className="text-sm text-muted hover:text-ink">← Back</button>

@@ -77,7 +77,10 @@ export function storable<T>(value: T): T {
   return value;
 }
 
-function configFor(snapshot: ConfigSnapshot, current: ProjectConfig): ProjectConfig {
+type Secrets = Pick<ProjectConfig, "accounts" | "httpCredentials" | "secretHeaders">;
+const NO_SECRETS: Secrets = { accounts: [], secretHeaders: {} };
+
+function configFor(snapshot: ConfigSnapshot, current: Secrets): ProjectConfig {
   const passwords = new Map(current.accounts.map((a) => [`${a.ref}\n${a.username}`, a.password]));
   const key = (a: { ref: string; username: string }) => `${a.ref}\n${a.username}`;
   const usable = new Set(snapshot.accounts.filter((a) => passwords.has(key(a))).map((a) => a.ref));
@@ -147,7 +150,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
       .innerJoin("runs as r", "r.id", "j.run_id")
       .innerJoin("projects as p", "p.id", "r.project_id")
       .leftJoin("workspace_plans as wp", "wp.org_id", "j.org_id")
-      .select(["j.id", "j.org_id", "j.run_id", "j.kind", "j.position", "j.persona_key", "j.finding_key", "j.account_ref", "r.project_id", "r.status as run_status", "r.config_snapshot", "r.max_steps", "r.replay_steps", "r.budget_usd", "r.cost_usd", "r.agent_model", "r.judge_model", "r.sign_up_seed"])
+      .select(["j.id", "j.org_id", "j.run_id", "j.kind", "j.position", "j.persona_key", "j.finding_key", "j.account_ref", "r.project_id", "r.plan_id", "r.status as run_status", "r.config_snapshot", "r.max_steps", "r.replay_steps", "r.budget_usd", "r.cost_usd", "r.agent_model", "r.judge_model", "r.sign_up_seed"])
       .where("j.status", "=", "queued")
       .where("p.paused_at", "is", null)
       .where((eb) => eb.or([eb("r.status", "in", ACTIVE), eb("j.requested_by", "is not", null)]))
@@ -168,7 +171,7 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
     await sql`savepoint prepare_assignment`.execute(tx);
     try {
       const snapshot = picked.config_snapshot as unknown as ConfigSnapshot;
-      const current = await loadProjectConfig(tx, picked.org_id, picked.project_id, keys);
+      const current: Secrets = picked.plan_id ? await loadProjectConfig(tx, picked.org_id, picked.project_id, keys, picked.plan_id) : NO_SECRETS;
       const finding = picked.finding_key ? await findingFor(tx, picked.run_id, picked.finding_key) : undefined;
       const config = configFor(snapshot, current);
       const turn = picked.kind === "role_session" && picked.sign_up_seed ? turnAt(snapshot, picked.position, picked.persona_key) : undefined;

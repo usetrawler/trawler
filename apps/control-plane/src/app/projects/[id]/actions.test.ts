@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 type Member = { userId: string; email: string; orgId: string; orgName: string; role: string };
-const state = vi.hoisted(() => ({ without: null as string | null, startRefusal: null as Error | null, startFails: null as Error | null, logged: [] as string[], member: null as Member | null, tenants: [] as string[], projectInWorkspace: true, keyChecks: 0, keysSaved: 0, keyStillStored: true, runsStarted: 0, stillAsked: [] as unknown[][], startedIn: [] as unknown[], revalidated: [] as string[], check: { ok: true } as Record<string, unknown>, stored: true, platformKey: false, onUsLeft: true, startOptions: [] as Record<string, unknown>[] }));
+const state = vi.hoisted(() => ({ without: null as string | null, startRefusal: null as Error | null, startFails: null as Error | null, logged: [] as string[], member: null as Member | null, tenants: [] as string[], projectInWorkspace: true, keyChecks: 0, keysSaved: 0, keyStillStored: true, runsStarted: 0, stillAsked: [] as unknown[][], startedIn: [] as unknown[], revalidated: [] as string[], check: { ok: true } as Record<string, unknown>, stored: true, platformKey: false, onUsLeft: true, startOptions: [] as Record<string, unknown>[], planGone: false }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({ redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); } }));
@@ -18,10 +18,17 @@ vi.mock("../../../server/log.ts", async (importOriginal) => ({
   logError: async (message: string) => void state.logged.push(message),
 }));
 vi.mock("../../../server/env.ts", () => ({ readEnv: () => ({ openRouterUrl: "https://openrouter.test/api/v1", ...(state.platformKey ? { setup: { apiKey: "sk-or-v1-" + "p".repeat(40), model: "m" } } : {}) }) }));
-vi.mock("../../../projects/projects.ts", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../../projects/projects.ts")>()),
-  projectExists: async () => state.projectInWorkspace,
-}));
+vi.mock("../../../projects/projects.ts", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../../projects/projects.ts")>();
+  return {
+    ...original,
+    projectExists: async () => state.projectInWorkspace,
+    planOf: async (_tx: unknown, _org: string, _project: string, planId?: string) => {
+      if (state.planGone) throw new original.PlanNotFound();
+      return { id: planId ?? "plan-1", name: "Plan 1" };
+    },
+  };
+});
 vi.mock("../../../llm/providers.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../llm/providers.ts")>()),
   checkModelCall: async () => { state.keyChecks++; return state.check; },
@@ -51,7 +58,7 @@ const PROJECT = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const KEY = "sk-or-v1-" + "k".repeat(40);
 const startForm = (fields: Record<string, string> = {}) => {
   const form = new FormData();
-  for (const [k, v] of Object.entries({ projectId: PROJECT, model: "deepseek/deepseek-v4.1-flash", budget: "2", authorised: "on", ...fields })) form.set(k, v);
+  for (const [k, v] of Object.entries({ projectId: PROJECT, planId: "pl1", model: "deepseek/deepseek-v4.1-flash", budget: "2", authorised: "on", ...fields })) form.set(k, v);
   return form;
 };
 
@@ -74,6 +81,7 @@ beforeEach(() => {
   state.platformKey = false;
   state.onUsLeft = true;
   state.startOptions = [];
+  state.planGone = false;
 });
 
 test("the first run on Trawler starts without a key, on the fixed model and cap whatever the form says, paid by Trawler", async () => {
@@ -218,4 +226,16 @@ test("key checks for new runs are limited to 30 per person and 60 per workspace 
   state.member = busy("quiet-1", "org-quiet");
   expect(await startRunAction({}, startForm())).toEqual({ error: "This key cannot use deepseek/deepseek-v4.1-flash. Pick another model." });
   expect(state.keyChecks).toBe(61);
+});
+
+test("a run starts from the plan the form names, and nothing starts without one, or when that plan was removed", async () => {
+  state.platformKey = false;
+  await expect(startRunAction({}, startForm({ planId: "11111111-1111-4111-8111-111111111111" }))).rejects.toMatchObject({ to: "/runs/0001" });
+  expect(state.startOptions).toEqual([expect.objectContaining({ planId: "11111111-1111-4111-8111-111111111111" })]);
+  state.startOptions = [];
+  expect(await startRunAction({}, startForm({ planId: "" }))).toEqual({ error: "Reload the page and start the run from a plan." });
+  state.planGone = true;
+  expect(await startRunAction({}, startForm())).toEqual({ error: "This plan was removed. Reload the page and choose another." });
+  expect(state.startOptions).toEqual([]);
+  expect(state.runsStarted).toBe(1);
 });

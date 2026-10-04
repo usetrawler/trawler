@@ -114,18 +114,20 @@ export async function runAgainAction(_previous: RunAgainState, form: FormData): 
   const found = await withOrg(getDb(), orgId, async (tx) => ({
     previous: await tx
       .selectFrom("runs")
-      .select(["project_id", "status", "agent_model", "judge_model", "budget_usd", "provider", "provider_base_url", "prompt_usd_per_mtok", "completion_usd_per_mtok", "paid_by"])
+      .select(["project_id", "plan_id", "status", "agent_model", "judge_model", "budget_usd", "provider", "provider_base_url", "prompt_usd_per_mtok", "completion_usd_per_mtok", "paid_by"])
       .where("id", "=", runId)
       .where("org_id", "=", orgId)
       .executeTakeFirst(),
     stored: await modelKey(tx, orgId, keys),
   }));
   const { previous, stored } = found;
-  const without = previous && (await withOrg(getDb(), orgId, (tx) => personWithoutAccount(tx, previous.project_id)));
-  if (without) return { error: `${new NeedsAccount(without).message} Choose one on the plan, then run it again.` };
   if (!previous) return { error: "This run was not found." };
+  if (!previous.plan_id) return { error: "The plan of this run was removed. Start a run from one of the project's plans." };
+  const planId = previous.plan_id;
+  const without = await withOrg(getDb(), orgId, (tx) => personWithoutAccount(tx, planId));
+  if (without) return { error: `${new NeedsAccount(without).message} Choose one on the plan, then run it again.` };
   if (isLive(previous.status)) return { error: "This run is still going. Run it again once it has finished." };
-  const refused = await withOrg(getDb(), orgId, (tx) => refusalToStart(tx, orgId, previous.project_id));
+  const refused = await withOrg(getDb(), orgId, (tx) => refusalToStart(tx, orgId, previous.project_id, "workspace", planId));
   if (refused) return refusedState(refused);
   const onUs = previous.paid_by === "trawler";
   if (onUs && (await withOrg(getDb(), orgId, (tx) => firstRunOnUsLeft(tx, orgId)))) return { error: "This run ended before Trawler paid for any model call, so the first run on Trawler is still yours. Start it from the plan." };
@@ -156,7 +158,7 @@ export async function runAgainAction(_previous: RunAgainState, form: FormData): 
       return startRun(tx, orgId, previous.project_id, keys, {
         budgetUsd: Number(previous.budget_usd), agentModel: previous.agent_model, judgeModel: previous.judge_model,
         maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: member.userId,
-        provider: endpoint.provider, providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap,
+        provider: endpoint.provider, providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap, planId,
       });
     });
     started = run.number;

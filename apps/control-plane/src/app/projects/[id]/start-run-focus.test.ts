@@ -31,14 +31,14 @@ const draw = (options: { replacing?: boolean; hint?: typeof keyHint | null } = {
   react.stateAt = 0;
   react.refAt = 0;
   react.states = options.replacing === undefined ? [] : [options.replacing];
-  return nodes(StartRun({ projectId: "p1", projectName: "Acme Invoices", personas: 2, keyHint: options.hint === undefined ? keyHint : options.hint, canManageKey: true, authorisedBefore: true }) as ReactElement);
+  return nodes(StartRun({ projectId: "p1", planId: "pl1", projectName: "Acme Invoices", personas: 2, keyHint: options.hint === undefined ? keyHint : options.hint, canManageKey: true, authorisedBefore: true }) as ReactElement);
 };
 const offer = true;
 const drawOffer = (payingOwn: boolean, hint: typeof keyHint | null = null) => {
   react.stateAt = 0;
   react.refAt = 0;
   react.states = [false, "", null, "", null, false, "", null, 2, false, payingOwn];
-  return nodes(StartRun({ projectId: "p1", projectName: "Acme Invoices", personas: 2, keyHint: hint, canManageKey: true, authorisedBefore: true, firstRunOnUs: offer }) as ReactElement);
+  return nodes(StartRun({ projectId: "p1", planId: "pl1", projectName: "Acme Invoices", personas: 2, keyHint: hint, canManageKey: true, authorisedBefore: true, firstRunOnUs: offer }) as ReactElement);
 };
 const keyFields = (tree: Node[]) => tree.find((n) => n.type === KeyFields)?.props;
 const button = (tree: Node[], text: RegExp) => tree.find((n) => n.type === "button" && text.test([n.props?.children].flat().join("")))?.props;

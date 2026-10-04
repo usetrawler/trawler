@@ -20,7 +20,7 @@ vi.mock("../../../credentials/credentials.ts", () => ({
   setModelKey: async () => {},
   keyStillStored: async () => true,
 }));
-vi.mock("../../../projects/projects.ts", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../../projects/projects.ts")>()), projectExists: async () => true }));
+vi.mock("../../../projects/projects.ts", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../../projects/projects.ts")>()), projectExists: async () => true, planOf: async (_tx: unknown, _org: string, _project: string, planId?: string) => ({ id: planId ?? "plan-1", name: "Plan 1" }), }));
 vi.mock("../../../llm/prices.ts", () => ({ priceFor: async () => ({ promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }), openRouterPrices: async () => new Map() }));
 vi.mock("../../../llm/providers.ts", async (original) => ({ ...(await original<typeof import("../../../llm/providers.ts")>()), checkModelCall: async () => ({ ok: true }) }));
 vi.mock("../../../runs/runs.ts", () => ({ NeedsAccount: class extends Error {}, RunRefused: class extends Error {}, RunInProgress: class extends Error {}, personWithoutAccount: async () => null, refusalToStart: async () => null, startRun: async (_tx: unknown, _orgId: string, projectId: string) => { state.started.push(projectId); return { id: "new-run", number: 2 }; } }));
@@ -30,7 +30,7 @@ const RAN = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const NEW = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 const start = (projectId: string, authorised: boolean) => {
   const form = new FormData();
-  for (const [k, v] of Object.entries({ projectId, model: "deepseek/deepseek-v4.1-flash", budget: "2", ...(authorised ? { authorised: "on" } : {}) })) form.set(k, v);
+  for (const [k, v] of Object.entries({ projectId, planId: "pl1", model: "deepseek/deepseek-v4.1-flash", budget: "2", ...(authorised ? { authorised: "on" } : {}) })) form.set(k, v);
   return startRunAction({}, form);
 };
 

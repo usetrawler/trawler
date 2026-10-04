@@ -7,7 +7,7 @@ import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { setModelKey } from "../credentials/credentials.ts";
-import { createProject, firstPlan, loadProjectConfig, ProjectNotFound, replacePlan } from "../projects/projects.ts";
+import { addAccount, createPlan, createProject, firstPlan, loadProjectConfig, PlanNotFound, ProjectNotFound, replacePlan } from "../projects/projects.ts";
 import { cancelLiveRuns, cancelRun, CannotJudgeAgain, judgeAgain, NeedsAccount, RunNotFound, runSummary, startRun, type StartRunOptions } from "./runs.ts";
 import { dismissFinding, undoDismissal } from "./dismissals.ts";
 import { runView } from "./report.ts";
@@ -715,6 +715,18 @@ describe("judge again", () => {
     return run;
   }
 
+  test("a job of a run whose plan was removed is handed out without any test account or gate secret, never another plan's", async () => {
+    const run = await runWithFailedJudge();
+    await sql`update runs set plan_id = null where id = ${run.id}`.execute(t.db);
+    await again(run.id);
+    const judge = (await claimPastChecks())!;
+    expect(judge).toMatchObject({ kind: "judge", runId: run.id });
+    expect(judge.config.accounts).toEqual([]);
+    expect(judge.config.httpCredentials).toBeUndefined();
+    expect(judge.config.personas.every((p) => p.accountRef === undefined)).toBe(true);
+    await drain();
+  });
+
   test("a failed judge runs again on the finished run, which stays finished", async () => {
     const run = await runWithFailedJudge();
     const before = await summaryOf(run.id);
@@ -1209,4 +1221,24 @@ test("a run records the name and id of the plan it started from, and keeps the n
   const kept = await sql<{ plan_id: string | null; plan_name: string; project_id: string }>`select plan_id, plan_name, project_id from runs where id = ${run.id}`.execute(t.db);
   expect(kept.rows).toEqual([{ plan_id: null, plan_name: "Checkout", project_id: own }]);
   await drain();
+});
+
+test("a run starts from the plan it is given: its name, its people, its test accounts at claim time, and the check of who still needs one", async () => {
+  await drain();
+  const own = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  const second = await withOrg(t.db, "org-a", (tx) => createPlan(tx, "org-a", own, { name: "Invitations", personas: [{ id: "kofi", name: "Kofi", brief: "b" }], goals: [{ id: "g-kofi", instruction: "Invite a teammate.", personaId: "kofi" }], signsIn: ["kofi"] }));
+  await expect(withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", own, keys, { ...options, planId: second.id }))).rejects.toThrow(NeedsAccount);
+  const ref = await withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", own, { username: "kofi@acme.test", password: "kofi-password-1" }, keys, second.id));
+  await withOrg(t.db, "org-a", (tx) => replacePlan(tx, "org-a", own, { personas: [{ id: "kofi", name: "Kofi", brief: "b", accountRef: ref }], goals: [{ id: "g-kofi", instruction: "Invite a teammate.", personaId: "kofi" }] }, undefined, { planId: second.id }));
+
+  const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", own, keys, { ...options, planId: second.id }));
+  expect((await sql<{ plan_id: string; plan_name: string }>`select plan_id, plan_name from runs where id = ${run.id}`.execute(t.db)).rows).toEqual([{ plan_id: second.id, plan_name: "Invitations" }]);
+  const job = (await claimJob(t.db, keys))!;
+  expect(job).toMatchObject({ runId: run.id, kind: "account_check", accountRef: ref });
+  expect(job.config.personas.map((p) => p.id)).toEqual(["kofi"]);
+  expect(job.config.accounts).toEqual([{ ref, username: "kofi@acme.test", password: "kofi-password-1" }]);
+  await drain();
+
+  await expect(withOrg(t.db, "org-b", (tx) => startRun(tx, "org-b", other, keys, { ...options, planId: second.id }))).rejects.toThrow(PlanNotFound);
+  await expect(withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", own, keys, { ...options, planId: "not-a-plan" }))).rejects.toThrow(PlanNotFound);
 });

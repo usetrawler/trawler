@@ -6,7 +6,7 @@ import type { Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
 import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
-import { firstPlan, loadProjectConfig, ProjectNotFound } from "../projects/projects.ts";
+import { loadProjectConfig, planOf, ProjectNotFound } from "../projects/projects.ts";
 import { budgetLeft, budgetSpentMessage, HALTED, monthlyBudget, PAUSED, projectPaused, runsHalted, type MonthlyBudget } from "./limits.ts";
 import { FIRST_RUN_ON_US } from "./models.ts";
 import { peopleLimitMessage, runsPerDayMessage, type WorkspacePlan } from "./plan-limits.ts";
@@ -26,6 +26,7 @@ export interface StartRunOptions {
   price?: Price | null;
   tokenCap?: number | null;
   paidBy?: PaidBy;
+  planId?: string;
 }
 
 export type PaidBy = "workspace" | "trawler";
@@ -49,8 +50,8 @@ export class NeedsAccount extends Error {
   }
 }
 
-export async function personWithoutAccount(tx: Tx, projectId: string): Promise<string | null> {
-  const person = await tx.selectFrom("personas").select("name").where("project_id", "=", projectId).where("signs_in", "=", true).where("account_ref", "is", null).orderBy("position").executeTakeFirst();
+export async function personWithoutAccount(tx: Tx, planId: string): Promise<string | null> {
+  const person = await tx.selectFrom("personas").select("name").where("plan_id", "=", planId).where("signs_in", "=", true).where("account_ref", "is", null).orderBy("position").executeTakeFirst();
   return person?.name ?? null;
 }
 
@@ -113,17 +114,17 @@ export async function projectRunState(tx: Tx, orgId: string, projectId: string):
   return { paused: project.paused_at !== null, liveRun: await activeRunOf(tx, projectId) };
 }
 
-export async function refusalToStart(tx: Tx, orgId: string, projectId: string, paidBy: PaidBy = "workspace"): Promise<RunRefused | null> {
+export async function refusalToStart(tx: Tx, orgId: string, projectId: string, paidBy: PaidBy = "workspace", planId?: string): Promise<RunRefused | null> {
   const active = await activeRunOf(tx, projectId);
-  return active ? new RunInProgress(active) : refusalToRun(tx, orgId, projectId, paidBy);
+  return active ? new RunInProgress(active) : refusalToRun(tx, orgId, projectId, paidBy, planId);
 }
 
-async function peopleOn(tx: Tx, projectId: string): Promise<number> {
-  const row = await tx.selectFrom("personas").select(sql<string>`count(*)`.as("n")).where("project_id", "=", projectId).executeTakeFirstOrThrow();
+async function peopleOn(tx: Tx, planId: string): Promise<number> {
+  const row = await tx.selectFrom("personas").select(sql<string>`count(*)`.as("n")).where("plan_id", "=", planId).executeTakeFirstOrThrow();
   return Number(row.n);
 }
 
-async function refusalToRun(tx: Tx, orgId: string, projectId: string, paidBy: PaidBy): Promise<RunRefused | null> {
+async function refusalToRun(tx: Tx, orgId: string, projectId: string, paidBy: PaidBy, planId?: string): Promise<RunRefused | null> {
   if (runsHalted()) return new RunRefused(HALTED);
   if (await projectPaused(tx, projectId)) return new RunRefused(PAUSED);
   const plan = await workspacePlan(tx, orgId);
@@ -132,20 +133,20 @@ async function refusalToRun(tx: Tx, orgId: string, projectId: string, paidBy: Pa
     const budget = await monthlyBudget(tx, orgId);
     if (budget && budgetLeft(budget) < 0.01) return new WorkspaceBudgetSpent(budget);
   }
-  const people = await peopleOn(tx, projectId);
+  const people = await peopleOn(tx, (await planOf(tx, orgId, projectId, planId)).id);
   return people > plan.limits.people ? new TooManyPeople(plan, people) : null;
 }
 
 export async function startRun(tx: Tx, orgId: string, projectId: string, keys: Keyring, options: StartRunOptions): Promise<{ id: string; number: number }> {
   await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forShare().execute();
-  const config = await loadProjectConfig(tx, orgId, projectId, keys);
-  const plan = await firstPlan(tx, orgId, projectId);
-  const without = await personWithoutAccount(tx, projectId);
+  const plan = await planOf(tx, orgId, projectId, options.planId);
+  const config = await loadProjectConfig(tx, orgId, projectId, keys, plan.id);
+  const without = await personWithoutAccount(tx, plan.id);
   if (without) throw new NeedsAccount(without);
   const paidBy = options.paidBy ?? "workspace";
   if (paidBy === "trawler" && config.personas.length > FIRST_RUN_ON_US.maxPeople) throw new TooManyForFirstRun(config.personas.length);
   await sql`select pg_advisory_xact_lock(hashtextextended(${`runs:${orgId}`}, 0))`.execute(tx);
-  const refused = await refusalToStart(tx, orgId, projectId, paidBy);
+  const refused = await refusalToStart(tx, orgId, projectId, paidBy, plan.id);
   if (refused) throw refused;
   const { next } = await tx.selectFrom("runs").select(sql<number>`coalesce(max(number), 0) + 1`.as("next")).where("org_id", "=", orgId).executeTakeFirstOrThrow();
   const run = await tx

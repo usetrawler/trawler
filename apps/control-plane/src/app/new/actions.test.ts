@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 type Member = { userId: string; email: string; orgId: string; orgName: string; role: string };
-const state = vi.hoisted(() => ({ member: null as Member | null, calls: [] as string[], failWith: null as Error | null }));
+const state = vi.hoisted(() => ({ member: null as Member | null, calls: [] as string[], inputs: [] as Array<Record<string, unknown>>, planId: null as string | null, failWith: null as Error | null }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({ redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); } }));
@@ -14,13 +14,17 @@ vi.mock("../../setup/propose.ts", async (importOriginal) => {
   const call = (name: string, value: unknown) => async (_deps: unknown, input: { orgId: string }) => {
     if (state.failWith) throw state.failWith;
     state.calls.push(`${name}:${input.orgId}`);
+    state.inputs.push({ name, ...input });
     return value;
   };
   return {
     ...(await importOriginal<typeof import("../../setup/propose.ts")>()),
     startDraft: call("start", "0f8fad5b-d9cb-469f-a165-70867728950e"),
     describeDraft: call("describe", { name: "Acme", description: "d", features: [{ title: "Submit", summary: "s" }] }),
-    proposeFromDraft: call("propose", "p1"),
+    proposeFromDraft: async (deps: unknown, input: { orgId: string }) => {
+      await call("propose", null)(deps, input);
+      return { projectId: "p1", planId: state.planId };
+    },
   };
 });
 
@@ -32,6 +36,8 @@ const ana: Member = { userId: "u1", email: "ana@acme.test", orgId: "org-2", orgN
 beforeEach(() => {
   state.member = null;
   state.calls = [];
+  state.inputs = [];
+  state.planId = null;
   state.failWith = null;
 });
 
@@ -66,4 +72,44 @@ test("a setup model that writes nothing usable is named as the cause, and the pa
   expect(await describeProductAction(DRAFT)).toEqual({ ok: false, error: "Trawler's setup model could not write a plan this time. Try again in a moment." });
   state.failWith = new Error("connect ECONNREFUSED 203.0.113.9:443");
   expect(await readProductAction({ url: "https://app.acme.test" })).toEqual({ ok: false, error: "We could not build a plan for this page. Try again in a moment." });
+});
+
+const PROJECT = "9b2e4f5a-0c1d-4e6f-8a7b-3c4d5e6f7a8b";
+const PLAN = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+
+test("a plan to add is read from a project with a trimmed name, a plan to change with its id, and neither reaches a new project's setup", async () => {
+  state.member = ana;
+  expect(await readProductAction({ projectId: PROJECT, planName: "  Payments  " })).toMatchObject({ ok: true });
+  expect(await readProductAction({ projectId: PROJECT, planId: PLAN })).toMatchObject({ ok: true });
+  expect(await readProductAction({ url: "app.acme.test", planName: "Sneaky", planId: PLAN })).toMatchObject({ ok: true });
+  expect(state.inputs).toEqual([
+    { name: "start", orgId: "org-2", projectId: PROJECT, planName: "Payments" },
+    { name: "start", orgId: "org-2", projectId: PROJECT, planId: PLAN },
+    { name: "start", orgId: "org-2", url: "https://app.acme.test" },
+  ]);
+});
+
+test("a plan name must be there and at most 100 characters", async () => {
+  state.member = ana;
+  const error = "Give the plan a name of up to 100 characters.";
+  expect(await readProductAction({ projectId: PROJECT, planName: "   " })).toEqual({ ok: false, error });
+  expect(await readProductAction({ projectId: PROJECT, planName: "x".repeat(101) })).toEqual({ ok: false, error });
+  expect(state.calls).toEqual([]);
+});
+
+test("a name another plan has, or a plan that is gone, are told to the person and not logged as failures", async () => {
+  state.member = ana;
+  const { PlanNameTaken, PlanNotFound } = await import("../../projects/projects.ts");
+  state.failWith = new PlanNameTaken();
+  expect(await readProductAction({ projectId: PROJECT, planName: "Plan 1" })).toEqual({ ok: false, error: "Another plan of this project already has that name. Choose another name." });
+  state.failWith = new PlanNotFound();
+  expect(await readProductAction({ projectId: PROJECT, planId: PLAN })).toEqual({ ok: false, error: "This plan was removed. Go back to the project and choose another." });
+});
+
+test("proposing people opens the plan that was made, or the project when no plan was named", async () => {
+  state.member = ana;
+  state.planId = PLAN;
+  await expect(proposePeopleAction({ draftId: DRAFT, description: "d", features: ["Submit"] })).rejects.toMatchObject({ to: `/projects/p1?plan=${PLAN}` });
+  state.planId = null;
+  await expect(proposePeopleAction({ draftId: DRAFT, description: "d", features: ["Submit"] })).rejects.toMatchObject({ to: "/projects/p1" });
 });

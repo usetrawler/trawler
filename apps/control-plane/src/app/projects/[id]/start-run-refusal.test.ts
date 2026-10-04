@@ -26,7 +26,7 @@ const PAUSED = "Runs on this project are paused. Resume them on the project's pa
 
 const draw = (refusal?: { message: string; activeRun?: { id: string; number: number } }) => {
   react.calls = 0;
-  const tree = nodes(StartRun({ projectId: "p1", projectName: "Acme", personas: 2, keyHint: { provider: "openrouter", hint: "…a1b2", baseUrl: null }, canManageKey: true, authorisedBefore: true, refusal }) as ReactElement);
+  const tree = nodes(StartRun({ projectId: "p1", planId: "pl1", projectName: "Acme", personas: 2, keyHint: { provider: "openrouter", hint: "…a1b2", baseUrl: null }, canManageKey: true, authorisedBefore: true, refusal }) as ReactElement);
   const byId = (id: string) => tree.find((n) => n.props?.id === id);
   return { notice: byId("start-notice"), error: byId("start-error"), start: tree.find((n) => n.type === "button" && n.props?.type === "submit") ?? tree.find((n) => typeof n.type === "function" && "noticed" in (n.props ?? {})) };
 };
