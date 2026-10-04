@@ -43,6 +43,19 @@ export interface Account {
   userId: string;
 }
 
+export interface ApiTokens {
+  created_at: Generated<Timestamp>;
+  created_by: string;
+  id: Generated<string>;
+  last_used_at: Timestamp | null;
+  name: string;
+  org_id: string;
+  prefix: string;
+  project_id: string | null;
+  revoked_at: Timestamp | null;
+  token_hash: string;
+}
+
 export interface Artifacts {
   content_type: string;
   created_at: Generated<Timestamp>;
@@ -390,6 +403,7 @@ export interface WorkspacePlans {
 
 export interface DB {
   account: Account;
+  api_tokens: ApiTokens;
   artifacts: Artifacts;
   credentials: Credentials;
   finding_dismissals: FindingDismissals;
