@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 import type { KeyCheck } from "../../../llm/providers.ts";
 
-type Previous = { paid_by?: string; project_id: string; status: string; agent_model: string; judge_model: string; budget_usd: string; max_steps: number; replay_steps: number; provider: string; provider_base_url: string | null; prompt_usd_per_mtok: string | null; completion_usd_per_mtok: string | null };
+type Previous = { paid_by?: string; project_id: string; plan_id: string | null; status: string; agent_model: string; judge_model: string; budget_usd: string; max_steps: number; replay_steps: number; provider: string; provider_base_url: string | null; prompt_usd_per_mtok: string | null; completion_usd_per_mtok: string | null };
 const state = vi.hoisted(() => ({
   signedIn: true,
   userId: "user-1",
@@ -84,7 +84,7 @@ const runAgainAction = (runId: string) => {
 beforeEach(() => {
   Object.assign(state, {
     signedIn: true, userId: "user-1", without: null, refusal: null, startRefusal: null, checks: {}, checked: [], price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }, started: [], asked: [], keyHeld: true, held: [], startFails: null, logged: [], onUsLeft: false,
-    previous: { project_id: "project-1", status: "succeeded", agent_model: "deepseek/deepseek-v4.1-flash", judge_model: "deepseek/deepseek-v4.1-flash", budget_usd: "3.5000", max_steps: 60, replay_steps: 20, provider: "openrouter", provider_base_url: null, prompt_usd_per_mtok: null, completion_usd_per_mtok: null },
+    previous: { project_id: "project-1", plan_id: "plan-1", status: "succeeded", agent_model: "deepseek/deepseek-v4.1-flash", judge_model: "deepseek/deepseek-v4.1-flash", budget_usd: "3.5000", max_steps: 60, replay_steps: 20, provider: "openrouter", provider_base_url: null, prompt_usd_per_mtok: null, completion_usd_per_mtok: null },
     stored: { provider: "openrouter", key: "sk-or-v1-" + "k".repeat(40), baseUrl: null },
   });
 });
@@ -97,9 +97,16 @@ test("Run again starts the plan as it is now with the previous run's model and c
     orgId: "org-1", projectId: "project-1", tx: expect.anything(),
     options: {
       budgetUsd: 3.5, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash", maxSteps: 120, replaySteps: 30, createdBy: "user-1",
-      provider: "openrouter", providerBaseUrl: null, price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }, tokenCap: null,
+      provider: "openrouter", providerBaseUrl: null, price: { promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }, tokenCap: null, planId: "plan-1",
     },
   }]);
+});
+
+test("Run again says so when the plan of the run was removed, and starts nothing", async () => {
+  state.previous = { ...state.previous!, plan_id: null };
+  expect(await runAgainAction(RUN)).toEqual({ error: "The plan of this run was removed. Start a run from one of the project's plans." });
+  expect(state.started).toEqual([]);
+  expect(state.checked).toEqual([]);
 });
 
 test("Run again refuses before paying for a model check while a signing-in person has no account", async () => {

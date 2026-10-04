@@ -7,7 +7,9 @@ import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { addAccount, createProject, loadProjectConfig, projectForEditing, replacePlan } from "../projects/projects.ts";
 import { ProjectConfigSchema } from "@usetrawler/protocol";
-import { describeDraft, DraftGone, proposeFromDraft, SETUP_LIMITS, SetupLimited, SetupStillRunning, setupProgress, startDraft, type SetupDeps } from "./propose.ts";
+import { describeDraft, DraftGone, proposeFromDraft as proposed, SETUP_LIMITS, SetupLimited, SetupStillRunning, setupProgress, startDraft, type SetupDeps } from "./propose.ts";
+
+const proposeFromDraft = async (...args: Parameters<typeof proposed>) => (await proposed(...args)).projectId;
 import { FetchRefused } from "./safe-fetch.ts";
 import { ProjectLimitReached } from "../runs/plans.ts";
 import { SetupModelFailed } from "@usetrawler/core/setup";
@@ -265,4 +267,48 @@ test("a setup that another ask finished while people were being chosen hands bac
   expect(await proposeFromDraft(deps(model), { orgId: "org-race", draftId, description: "d", features: ["Get paid"] })).toBe(other);
   const { rows } = await sql<{ n: number }>`select count(*)::int as n from projects where org_id = 'org-race'`.execute(t.db);
   expect(rows[0]!.n).toBe(1);
+});
+
+test("a new plan is proposed from the same product, named as asked, and leaves the other plans, people and test accounts alone", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-plan', 'P', 'plan', now())`.execute(t.db);
+  const model = scriptedModel([text(JSON.stringify(summary)), text(JSON.stringify(people)), text(JSON.stringify(summary)), text(JSON.stringify({ personas: [people.personas[0]] }))]);
+  const first = await startDraft(deps(model), { orgId: "org-plan", url: "https://app.acme.test/new-plan" });
+  await describeDraft(deps(model), { orgId: "org-plan", draftId: first });
+  const { projectId } = await proposed(deps(model), { orgId: "org-plan", draftId: first, description: "d", features: ["Send an invoice"] });
+  const ref = await withOrg(t.db, "org-plan", (tx) => addAccount(tx, "org-plan", projectId, { username: "tom@acme.test", password: "pw" }, keys));
+
+  await expect(startDraft(deps(model), { orgId: "org-plan", projectId, planName: " plan 1 " })).rejects.toThrow(/already has that name/);
+  const draft = await startDraft(deps(model), { orgId: "org-plan", projectId, planName: "  Payments  " });
+  await describeDraft(deps(model), { orgId: "org-plan", draftId: draft });
+  const made = await proposed(deps(model), { orgId: "org-plan", draftId: draft, description: "d", features: ["Get paid"] });
+  expect(made).toMatchObject({ projectId, planId: expect.any(String) });
+  expect(await setupProgress(deps(model), { orgId: "org-plan", draftId: draft })).toEqual({ state: "project", projectId, planId: made.planId });
+  expect(await proposed(deps(model), { orgId: "org-plan", draftId: draft, description: "d", features: ["x"] })).toEqual(made);
+
+  const plans = await withOrg(t.db, "org-plan", (tx) => tx.selectFrom("plans").select(["id", "name", "features"]).where("project_id", "=", projectId).orderBy("position").execute());
+  expect(plans.map((p) => [p.name, p.features])).toEqual([["Plan 1", ["Send an invoice"]], ["Payments", ["Get paid"]]]);
+  const second = await withOrg(t.db, "org-plan", (tx) => projectForEditing(tx, "org-plan", projectId, made.planId!));
+  expect(second?.personas.map((p) => p.key)).toEqual(["ana"]);
+  expect(second?.accounts).toEqual([]);
+  const original = await withOrg(t.db, "org-plan", (tx) => projectForEditing(tx, "org-plan", projectId));
+  expect(original?.personas.map((p) => p.key)).toEqual(["ana", "tom"]);
+  expect(original?.accounts.map((a) => a.ref)).toEqual([ref]);
+});
+
+test("changing the features of one plan proposes people for that plan only", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-plans', 'Q', 'plans', now())`.execute(t.db);
+  const model = scriptedModel([text(JSON.stringify(summary)), text(JSON.stringify(people)), text(JSON.stringify(summary)), text(JSON.stringify({ personas: [people.personas[0]] })), text(JSON.stringify(summary)), text(JSON.stringify({ personas: [people.personas[1]] }))]);
+  const first = await startDraft(deps(model), { orgId: "org-plans", url: "https://app.acme.test/two-plans" });
+  await describeDraft(deps(model), { orgId: "org-plans", draftId: first });
+  const { projectId } = await proposed(deps(model), { orgId: "org-plans", draftId: first, description: "d", features: ["Send an invoice"] });
+  const added = await startDraft(deps(model), { orgId: "org-plans", projectId, planName: "Plan 2" });
+  await describeDraft(deps(model), { orgId: "org-plans", draftId: added });
+  const { planId } = await proposed(deps(model), { orgId: "org-plans", draftId: added, description: "d", features: ["Get paid"] });
+
+  const again = await startDraft(deps(model), { orgId: "org-plans", projectId, planId: planId! });
+  await describeDraft(deps(model), { orgId: "org-plans", draftId: again });
+  expect(await proposed(deps(model), { orgId: "org-plans", draftId: again, description: "d", features: ["Send an invoice", "Get paid"] })).toEqual({ projectId, planId });
+  expect((await withOrg(t.db, "org-plans", (tx) => projectForEditing(tx, "org-plans", projectId, planId!)))).toMatchObject({ features: ["Send an invoice", "Get paid"], personas: [{ key: "tom" }] });
+  expect((await withOrg(t.db, "org-plans", (tx) => projectForEditing(tx, "org-plans", projectId)))).toMatchObject({ features: ["Send an invoice"], personas: [{ key: "ana" }, { key: "tom" }] });
+  await expect(startDraft(deps(model), { orgId: "org-plans", projectId, planId: "11111111-1111-4111-8111-111111111111" })).rejects.toThrow();
 });

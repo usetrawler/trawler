@@ -21,6 +21,7 @@ vi.mock("../../../server/env.ts", () => ({ readEnv: () => ({ openRouterUrl: "htt
 vi.mock("../../../projects/projects.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../projects/projects.ts")>()),
   projectExists: async () => state.projectInWorkspace,
+  planOf: async (_tx: unknown, _org: string, _project: string, planId?: string) => ({ id: planId ?? "plan-1", name: "Plan 1" }),
 }));
 vi.mock("../../../llm/providers.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../llm/providers.ts")>()),

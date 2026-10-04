@@ -8,9 +8,9 @@ import { getDb, getKeyring } from "../../server/db.ts";
 import { readEnv } from "../../server/env.ts";
 import { logError, writeLog } from "../../server/log.ts";
 import { FetchRefused, safeFetchText, type RefusalReason } from "../../setup/safe-fetch.ts";
-import { describeDraft, DraftGone, proposeFromDraft, SetupLimited, SetupStillRunning, setupProgress, startDraft, type SetupDeps } from "../../setup/propose.ts";
+import { describeDraft, DraftGone, proposeFromDraft, SetupLimited, type Proposed, SetupStillRunning, setupProgress, startDraft, type SetupDeps } from "../../setup/propose.ts";
 import type { SetupProgress } from "../../setup/progress.ts";
-import { ProjectNotFound } from "../../projects/projects.ts";
+import { PlanLimit, PlanNameTaken, PlanNotFound, ProjectNotFound } from "../../projects/projects.ts";
 import { ProjectLimitReached } from "../../runs/plans.ts";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
@@ -39,6 +39,9 @@ function friendly(err: unknown): string {
   if (err instanceof DraftGone) return "This setup has expired. Start again from the product's address.";
   if (err instanceof SetupStillRunning) return "Trawler is still choosing the people for this setup. Wait a moment.";
   if (err instanceof ProjectNotFound) return "This project is gone.";
+  if (err instanceof PlanNotFound) return "This plan was removed. Go back to the project and choose another.";
+  if (err instanceof PlanNameTaken) return "Another plan of this project already has that name. Choose another name.";
+  if (err instanceof PlanLimit) return err.message.replace(/^a/, "A") + ".";
   if (err instanceof ProjectLimitReached) return err.message;
   return "We could not build a plan for this page. Try again in a moment.";
 }
@@ -56,19 +59,22 @@ async function setupFor(): Promise<{ orgId: string; deps: SetupDeps } | { error:
 async function failed(err: unknown, orgId: string, what: string): Promise<{ ok: false; error: string }> {
   if (err instanceof FetchRefused) await writeLog("info", "setup refused the address", { orgId, reason: err.reason });
   else if (err instanceof SetupLimited) await writeLog("info", "setup is rate limited", { orgId });
-  else if (!(err instanceof DraftGone) && !(err instanceof ProjectNotFound) && !(err instanceof ProjectLimitReached) && !(err instanceof SetupStillRunning)) await logError(what, { orgId, err });
+  else if (!(err instanceof DraftGone) && !(err instanceof ProjectNotFound) && !(err instanceof PlanNotFound) && !(err instanceof PlanNameTaken) && !(err instanceof PlanLimit) && !(err instanceof ProjectLimitReached) && !(err instanceof SetupStillRunning)) await logError(what, { orgId, err });
   return { ok: false, error: friendly(err) };
 }
 
-export async function readProductAction(input: { url?: string; projectId?: string }): Promise<Result<{ draftId: string }>> {
+export async function readProductAction(input: { url?: string; projectId?: string; planId?: string; planName?: string }): Promise<Result<{ draftId: string }>> {
   const url = typeof input.url === "string" ? input.url : "";
   const projectId = typeof input.projectId === "string" && UUID.test(input.projectId) ? input.projectId : undefined;
+  const planId = projectId && typeof input.planId === "string" && UUID.test(input.planId) ? input.planId : undefined;
+  const planName = projectId && typeof input.planName === "string" ? input.planName.trim().slice(0, 101) : undefined;
+  if (planName !== undefined && (planName.length === 0 || planName.length > 100)) return { ok: false, error: "Give the plan a name of up to 100 characters." };
   if (!projectId && !url.trim()) return { ok: false, error: "Paste the address of the product to test." };
   if (url.length > 2048) return { ok: false, error: MESSAGES.too_long };
   const setup = await setupFor();
   if ("error" in setup) return { ok: false, error: setup.error };
   try {
-    return { ok: true, draftId: await startDraft(setup.deps, { orgId: setup.orgId, ...(projectId ? { projectId } : { url: normalise(url) }) }) };
+    return { ok: true, draftId: await startDraft(setup.deps, { orgId: setup.orgId, ...(projectId ? { projectId, ...(planId ? { planId } : {}), ...(planName !== undefined ? { planName } : {}) } : { url: normalise(url) }) }) };
   } catch (err) {
     return failed(err, setup.orgId, "setup could not read the page");
   }
@@ -98,13 +104,13 @@ export async function proposePeopleAction(input: { draftId: string; description:
   if (chosen.data.features.length === 0) return { ok: false, error: "Choose at least one feature for the people to try." };
   const setup = await setupFor();
   if ("error" in setup) return { ok: false, error: setup.error };
-  let projectId: string;
+  let proposed: Proposed;
   try {
-    projectId = await proposeFromDraft(setup.deps, { orgId: setup.orgId, ...chosen.data });
+    proposed = await proposeFromDraft(setup.deps, { orgId: setup.orgId, ...chosen.data });
   } catch (err) {
     return failed(err, setup.orgId, "setup could not propose people");
   }
-  redirect(`/projects/${projectId}`);
+  redirect(`/projects/${proposed.projectId}${proposed.planId ? `?plan=${proposed.planId}` : ""}`);
 }
 
 export async function setupProgressAction(draftId: string): Promise<SetupProgress> {

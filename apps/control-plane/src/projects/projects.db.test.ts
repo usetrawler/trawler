@@ -5,7 +5,7 @@ import { ProjectConfigSchema } from "@usetrawler/protocol";
 import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring, last4 } from "../lib/secrets.ts";
-import { AccountLimit, addAccount, createProject, firstPlan, listProjects, loadProjectConfig, projectExists, projectForEditing, ProjectNotFound, removeAccount, replacePlan, UnknownAccount } from "./projects.ts";
+import { AccountLimit, addAccount, createPlan, createProject, firstPlan, LastPlan, listPlans, listProjects, loadProjectConfig, MAX_PLANS, nextPlanName, PlanInUse, PlanLimit, PlanNameTaken, PlanNotFound, removePlan, renamePlan, projectExists, projectForEditing, ProjectNotFound, removeAccount, replacePlan, UnknownAccount } from "./projects.ts";
 import { ProjectConfigSchema as Schema } from "@usetrawler/protocol";
 
 const t = await testDb();
@@ -214,11 +214,11 @@ test("an order of play that interleaves people comes back exactly as saved", asy
   expect(editing!.goals.map((g) => g.key)).toEqual(["submit", "review", "decision"]);
 });
 
-test("a project starts with one plan, named from its focus or \"Main plan\", that holds its people, goals, accounts and gates", async () => {
+test("a project starts with one plan, named from its focus or \"Plan 1\", that holds its people, goals, accounts and gates", async () => {
   const named = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys, { focus: "Team invitation flow" }));
   const plain = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
   expect((await withOrg(t.db, "org-a", (tx) => firstPlan(tx, "org-a", named))).name).toBe("Team invitation flow");
-  expect((await withOrg(t.db, "org-a", (tx) => firstPlan(tx, "org-a", plain))).name).toBe("Main plan");
+  expect((await withOrg(t.db, "org-a", (tx) => firstPlan(tx, "org-a", plain))).name).toBe("Plan 1");
   const plan = await withOrg(t.db, "org-a", (tx) => firstPlan(tx, "org-a", plain));
   const held = await withOrg(t.db, "org-a", async (tx) => {
     const count = async (table: "personas" | "goals" | "target_accounts" | "target_gates") =>
@@ -243,4 +243,65 @@ test("another workspace cannot see a plan or hang one on a project that is not i
   expect(await withOrg(t.db, "org-b", (tx) => tx.selectFrom("plans").select("id").where("project_id", "=", id).execute())).toEqual([]);
   await expect(asSystem(t.db, (tx) => tx.insertInto("plans").values({ org_id: "org-b", project_id: id, name: "Sneaky" }).execute())).rejects.toThrow(/foreign key/);
   await expect(withOrg(t.db, "org-b", (tx) => firstPlan(tx, "org-b", id))).rejects.toThrow();
+});
+
+const seat = (id: string) => ({ personas: [{ id, name: id, brief: "b" }], goals: [{ id: `g-${id}`, instruction: "Do it.", personaId: id }] });
+
+test("plans are named Plan 1, Plan 2 and so on unless the person chose a name, and a name is free to reuse once its plan is gone", async () => {
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  expect(await withOrg(t.db, "org-a", (tx) => nextPlanName(tx, "org-a", id))).toBe("Plan 2");
+  const second = await withOrg(t.db, "org-a", (tx) => createPlan(tx, "org-a", id, { name: "Plan 2", features: ["Invite a teammate"], ...seat("kofi") }));
+  expect(await withOrg(t.db, "org-a", (tx) => nextPlanName(tx, "org-a", id))).toBe("Plan 3");
+  await withOrg(t.db, "org-a", (tx) => createPlan(tx, "org-a", id, { name: "  Billing  ", ...seat("lee") }));
+  expect((await withOrg(t.db, "org-a", (tx) => listPlans(tx, "org-a", id))).map((p) => [p.name, p.people, p.features])).toEqual([["Plan 1", 2, []], ["Plan 2", 1, ["Invite a teammate"]], ["Billing", 1, []]]);
+  await expect(withOrg(t.db, "org-a", (tx) => createPlan(tx, "org-a", id, { name: "plan 2", ...seat("x") }))).rejects.toThrow(PlanNameTaken);
+  await withOrg(t.db, "org-a", (tx) => removePlan(tx, "org-a", id, second.id));
+  await expect(withOrg(t.db, "org-a", (tx) => createPlan(tx, "org-a", id, { name: "Plan 2", ...seat("kofi") }))).resolves.toMatchObject({ name: "Plan 2" });
+});
+
+test("a plan is renamed within its project, and cannot take another plan's name in any letter case", async () => {
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  const second = await withOrg(t.db, "org-a", (tx) => createPlan(tx, "org-a", id, { name: "Plan 2", ...seat("kofi") }));
+  const first = await withOrg(t.db, "org-a", (tx) => firstPlan(tx, "org-a", id));
+  expect(await withOrg(t.db, "org-a", (tx) => renamePlan(tx, "org-a", id, second.id, " Invitations "))).toBe("Invitations");
+  await expect(withOrg(t.db, "org-a", (tx) => renamePlan(tx, "org-a", id, second.id, "PLAN 1"))).rejects.toThrow(PlanNameTaken);
+  expect(await withOrg(t.db, "org-a", (tx) => renamePlan(tx, "org-a", id, first.id, "Plan 1"))).toBe("Plan 1");
+  await expect(withOrg(t.db, "org-b", (tx) => renamePlan(tx, "org-b", id, second.id, "Mine"))).rejects.toThrow();
+  await expect(withOrg(t.db, "org-a", (tx) => renamePlan(tx, "org-a", id, "not-a-plan", "X"))).rejects.toThrow(PlanNotFound);
+});
+
+test("a project keeps at least one plan and at most ten, and a plan with a live run stays", async () => {
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  const only = await withOrg(t.db, "org-a", (tx) => firstPlan(tx, "org-a", id));
+  await expect(withOrg(t.db, "org-a", (tx) => removePlan(tx, "org-a", id, only.id))).rejects.toThrow(LastPlan);
+  for (let n = 2; n <= MAX_PLANS; n++) await withOrg(t.db, "org-a", (tx) => createPlan(tx, "org-a", id, { name: `Plan ${n}`, ...seat(`p${n}`) }));
+  await expect(withOrg(t.db, "org-a", (tx) => createPlan(tx, "org-a", id, { name: "One too many", ...seat("z") }))).rejects.toThrow(PlanLimit);
+  await sql`insert into runs (org_id, project_id, plan_id, plan_name, number, status, config_snapshot, agent_model, judge_model, budget_usd, max_steps, replay_steps, created_by)
+    values ('org-a', ${id}, ${only.id}, 'Plan 1', (select coalesce(max(number), 0) + 1 from runs where org_id = 'org-a'), 'running', '{}', 'm', 'm', 1, 10, 10, 'u')`.execute(t.db);
+  await expect(withOrg(t.db, "org-a", (tx) => removePlan(tx, "org-a", id, only.id))).rejects.toThrow(PlanInUse);
+  await sql`update runs set status = 'succeeded' where plan_id = ${only.id}`.execute(t.db);
+  await withOrg(t.db, "org-a", (tx) => removePlan(tx, "org-a", id, only.id));
+  expect((await sql<{ plan_name: string; plan_id: string | null }>`select plan_name, plan_id from runs where project_id = ${id}`.execute(t.db)).rows).toEqual([{ plan_name: "Plan 1", plan_id: null }]);
+});
+
+test("each plan has its own people, goals, test accounts and gates, and the config a run loads is the plan's", async () => {
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys));
+  const second = await withOrg(t.db, "org-a", (tx) => createPlan(tx, "org-a", id, { name: "Plan 2", ...seat("kofi") }));
+  const ref = await withOrg(t.db, "org-a", (tx) => addAccount(tx, "org-a", id, { username: "kofi@acme.test", password: "kofi-password-1" }, keys, second.id));
+  const first = await withOrg(t.db, "org-a", (tx) => loadProjectConfig(tx, "org-a", id, keys));
+  const other = await withOrg(t.db, "org-a", (tx) => loadProjectConfig(tx, "org-a", id, keys, second.id));
+  expect(first.personas.map((p) => p.id)).toEqual(["ana", "lee"]);
+  expect(first.accounts.map((a) => a.username).sort()).toEqual(["ana@acme.test", "zed@acme.test"]);
+  expect(first.httpCredentials).toBeDefined();
+  expect(other.personas.map((p) => p.id)).toEqual(["kofi"]);
+  expect(other.accounts).toEqual([{ ref, username: "kofi@acme.test", password: "kofi-password-1" }]);
+  expect(other.httpCredentials).toBeUndefined();
+  expect(other.secretHeaders).toEqual({});
+  await withOrg(t.db, "org-a", (tx) => replacePlan(tx, "org-a", id, { personas: [{ id: "kofi", name: "Kofi", brief: "b", accountRef: ref }], goals: seat("kofi").goals }, undefined, { planId: second.id, features: ["Pay"] }));
+  expect((await withOrg(t.db, "org-a", (tx) => projectForEditing(tx, "org-a", id, second.id)))).toMatchObject({ plan: { id: second.id, name: "Plan 2" }, features: ["Pay"], personas: [{ key: "kofi", account_ref: ref }] });
+  await withOrg(t.db, "org-a", (tx) => removeAccount(tx, "org-a", id, ref, second.id));
+  expect((await withOrg(t.db, "org-a", (tx) => projectForEditing(tx, "org-a", id, second.id)))!.personas[0]!.account_ref).toBeNull();
+  expect((await withOrg(t.db, "org-a", (tx) => loadProjectConfig(tx, "org-a", id, keys))).accounts).toHaveLength(2);
+  await expect(withOrg(t.db, "org-a", (tx) => loadProjectConfig(tx, "org-a", id, keys, "11111111-1111-4111-8111-111111111111"))).rejects.toThrow(PlanNotFound);
+  expect(await withOrg(t.db, "org-a", (tx) => projectForEditing(tx, "org-a", id, "11111111-1111-4111-8111-111111111111"))).toBeNull();
 });

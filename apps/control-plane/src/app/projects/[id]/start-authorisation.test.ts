@@ -20,7 +20,7 @@ vi.mock("../../../credentials/credentials.ts", () => ({
   setModelKey: async () => {},
   keyStillStored: async () => true,
 }));
-vi.mock("../../../projects/projects.ts", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../../projects/projects.ts")>()), projectExists: async () => true }));
+vi.mock("../../../projects/projects.ts", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../../projects/projects.ts")>()), projectExists: async () => true, planOf: async (_tx: unknown, _org: string, _project: string, planId?: string) => ({ id: planId ?? "plan-1", name: "Plan 1" }), }));
 vi.mock("../../../llm/prices.ts", () => ({ priceFor: async () => ({ promptUsdPerMtok: 0.3, completionUsdPerMtok: 1.2 }), openRouterPrices: async () => new Map() }));
 vi.mock("../../../llm/providers.ts", async (original) => ({ ...(await original<typeof import("../../../llm/providers.ts")>()), checkModelCall: async () => ({ ok: true }) }));
 vi.mock("../../../runs/runs.ts", () => ({ NeedsAccount: class extends Error {}, RunRefused: class extends Error {}, RunInProgress: class extends Error {}, personWithoutAccount: async () => null, refusalToStart: async () => null, startRun: async (_tx: unknown, _orgId: string, projectId: string) => { state.started.push(projectId); return { id: "new-run", number: 2 }; } }));

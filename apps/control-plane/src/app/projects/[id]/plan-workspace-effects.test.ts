@@ -54,7 +54,7 @@ const startBlocked = (tree: unknown) => nodes(tree).find((node) => node.props &&
 
 const changedPlan = (changed: PlanPerson = { ...ama, name: "Ama Mensah" }) => {
   react.values = [{ personas: [ama], goals }, [changed], goals, [], null];
-  const tree = PlanWorkspace({ projectId: "p1", projectName: "Acme", initialPersonas: [ama], initialGoals: goals, initialAccounts: [], keyHint: null, canManageKey: true, authorisedBefore: true });
+  const tree = PlanWorkspace({ projectId: "p1", planId: "pl1", projectName: "Acme", initialPersonas: [ama], initialGoals: goals, initialAccounts: [], keyHint: null, canManageKey: true, authorisedBefore: true });
   const [setSaved, setPersonas, setGoals, , setError] = react.setters;
   const cleanups: unknown[] = [];
   const settle = () => { for (const effect of react.effects.splice(0)) cleanups.push(effect()); };
@@ -67,7 +67,7 @@ const accounts = () => {
   react.values = [true];
   const onChange = vi.fn();
   const onPick = vi.fn();
-  const tree = SignIn({ projectId: "p1", person: { ...ama, accountRef: "account-1", signsIn: true }, accounts: [account], onPick, onAccounts: onChange });
+  const tree = SignIn({ projectId: "p1", planId: "pl1", person: { ...ama, accountRef: "account-1", signsIn: true }, accounts: [account], onPick, onAccounts: onChange });
   const [setAdding, setUsername, setPassword, setError] = react.setters;
   const add = () => (nodes(tree).find((node) => node.type === "form")!.props!.onSubmit as (event: { preventDefault: () => void }) => void)({ preventDefault: () => {} });
   const remove = () => (nodes(tree).find((node) => node.type === "button" && text(node) === "Remove kwame@acme.test from the project")!.props!.onClick as () => void)();
@@ -83,7 +83,7 @@ test("a change saves itself shortly after the last edit, and Start waits for it"
   expect(actions.savePlanAction).not.toHaveBeenCalled();
   vi.advanceTimersByTime(1);
   await Promise.all(react.started);
-  expect(actions.savePlanAction).toHaveBeenCalledWith("p1", { personas: [{ ...ama, name: "Ama Mensah" }], goals });
+  expect(actions.savePlanAction).toHaveBeenCalledWith("p1", "pl1", { personas: [{ ...ama, name: "Ama Mensah" }], goals });
   expect(plan.setSaved).toHaveBeenLastCalledWith({ personas: [{ ...ama, name: "Ama Mensah" }], goals });
   expect(nodes(plan.tree).some((node) => text(node) === "Save plan")).toBe(false);
 });
@@ -127,12 +127,12 @@ test("leaving the page before the pause is over still sends the last change", ()
   vi.advanceTimersByTime(300);
   plan.leave();
   expect(actions.savePlanAction).toHaveBeenCalledTimes(1);
-  expect(actions.savePlanAction).toHaveBeenCalledWith("p1", { personas: [{ ...ama, name: "Ama Mensah" }], goals });
+  expect(actions.savePlanAction).toHaveBeenCalledWith("p1", "pl1", { personas: [{ ...ama, name: "Ama Mensah" }], goals });
 });
 
 test("nothing saves while a run is starting, so the run gets the plan as it was when Start was chosen", () => {
   react.values = [{ personas: [ama], goals }, [{ ...ama, name: "Ama Mensah" }], goals, [], null, true];
-  PlanWorkspace({ projectId: "p1", projectName: "Acme", initialPersonas: [ama], initialGoals: goals, initialAccounts: [], keyHint: null, canManageKey: true, authorisedBefore: true });
+  PlanWorkspace({ projectId: "p1", planId: "pl1", projectName: "Acme", initialPersonas: [ama], initialGoals: goals, initialAccounts: [], keyHint: null, canManageKey: true, authorisedBefore: true });
   for (const effect of react.effects.splice(0)) effect();
   vi.advanceTimersByTime(5000);
   expect(actions.savePlanAction).not.toHaveBeenCalled();
@@ -155,11 +155,11 @@ test("adding or removing a test account on a page left open across an update say
   const panel = accounts();
   panel.add();
   await Promise.all(react.started);
-  expect(actions.addAccountAction).toHaveBeenCalledWith("p1", { username: "", password: "" });
+  expect(actions.addAccountAction).toHaveBeenCalledWith("p1", "pl1", { username: "", password: "" });
   expect(panel.setError).toHaveBeenLastCalledWith("Trawler has been updated since this page opened. Reload the page to add the account.");
   panel.remove();
   await Promise.all(react.started);
-  expect(actions.removeAccountAction).toHaveBeenCalledWith("p1", "account-1");
+  expect(actions.removeAccountAction).toHaveBeenCalledWith("p1", "pl1", "account-1");
   expect(panel.setError).toHaveBeenLastCalledWith("Trawler has been updated since this page opened. Reload the page to remove the account.");
   expect(panel.onChange).not.toHaveBeenCalled();
   expect(panel.onPick).not.toHaveBeenCalled();
@@ -198,7 +198,7 @@ test("a goal added to a person goes right after that person's last goal, never t
   const kofi = { id: "kofi", name: "Kofi", brief: "b" };
   const list = [{ id: "a", instruction: "A.", personaId: "ama" }, { id: "b", instruction: "B.", personaId: "kofi" }];
   react.values = [{ personas: [ama, kofi], goals: list }, [ama, kofi], list, [], null];
-  const tree = PlanWorkspace({ projectId: "p1", projectName: "Acme", initialPersonas: [ama, kofi], initialGoals: list, initialAccounts: [], keyHint: null, canManageKey: true, authorisedBefore: true });
+  const tree = PlanWorkspace({ projectId: "p1", planId: "pl1", projectName: "Acme", initialPersonas: [ama, kofi], initialGoals: list, initialAccounts: [], keyHint: null, canManageKey: true, authorisedBefore: true });
   const [, , setGoals] = react.setters;
   const addForAma = nodes(tree).filter((node) => typeof node.type === "function" && typeof node.props?.onClick === "function" && text(node) === "Add a goal")[0]!;
   (addForAma.props!.onClick as () => void)();
@@ -210,7 +210,7 @@ test("moving a step in the order of play reorders the plan's goals and leaves th
   const two = [{ id: "a", instruction: "A.", personaId: "ama" }, { id: "b", instruction: "B.", personaId: "kofi" }, { id: "c", instruction: "C.", personaId: "ama" }];
   const kofi = { id: "kofi", name: "Kofi", brief: "b" };
   react.values = [{ personas: [ama, kofi], goals: two }, [ama, kofi], two, [], null];
-  const tree = PlanWorkspace({ projectId: "p1", projectName: "Acme", initialPersonas: [ama, kofi], initialGoals: two, initialAccounts: [], keyHint: null, canManageKey: true, authorisedBefore: true });
+  const tree = PlanWorkspace({ projectId: "p1", planId: "pl1", projectName: "Acme", initialPersonas: [ama, kofi], initialGoals: two, initialAccounts: [], keyHint: null, canManageKey: true, authorisedBefore: true });
   const [, , setGoals] = react.setters;
   const order = nodes(tree).find((node) => node.props && "onMove" in node.props)!;
   (order.props!.onMove as (from: number, to: number) => void)(2, 1);

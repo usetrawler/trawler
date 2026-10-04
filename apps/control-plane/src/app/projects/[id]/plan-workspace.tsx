@@ -37,8 +37,8 @@ export type PlanPerson = Persona & { signsIn?: boolean };
 
 const SIGNS_UP = "signs-up";
 
-export function SignIn({ projectId, person, accounts, onPick, onAccounts }: {
-  projectId: string; person: PlanPerson; accounts: AccountView[];
+export function SignIn({ projectId, planId, person, accounts, onPick, onAccounts }: {
+  projectId: string; planId: string; person: PlanPerson; accounts: AccountView[];
   onPick: (choice: { accountRef?: string; signsIn: boolean }) => void;
   onAccounts: (accounts: AccountView[], removed?: string) => void;
 }) {
@@ -52,7 +52,7 @@ export function SignIn({ projectId, person, accounts, onPick, onAccounts }: {
   const missing = Boolean((person.signsIn || person.accountRef) && !chosen);
   const noteId = `sign-in-${person.id}`;
   const add = () => start(async () => {
-    const res = await addAccountAction(projectId, { username, password }).catch(outdated("Reload the page to add the account."));
+    const res = await addAccountAction(projectId, planId, { username, password }).catch(outdated("Reload the page to add the account."));
     if (!res.ok) return setError(res.error);
     setError(null);
     setUsername("");
@@ -62,7 +62,7 @@ export function SignIn({ projectId, person, accounts, onPick, onAccounts }: {
     onPick({ accountRef: res.ref, signsIn: true });
   });
   const remove = (ref: string) => start(async () => {
-    const res = await removeAccountAction(projectId, ref).catch(outdated("Reload the page to remove the account."));
+    const res = await removeAccountAction(projectId, planId, ref).catch(outdated("Reload the page to remove the account."));
     if (!res.ok) return setError(res.error);
     setError(null);
     onAccounts(res.accounts, ref);
@@ -175,8 +175,8 @@ function planProblem(personas: PlanPerson[], goals: Goal[]): string | null {
   return null;
 }
 
-export function PlanWorkspace({ projectId, projectName, initialPersonas, initialGoals, initialAccounts, keyHint, canManageKey, authorisedBefore, firstRunOnUs, startRefusal, closedBeta, workspacePlan }: {
-  projectId: string; projectName: string; initialPersonas: PlanPerson[]; initialGoals: Goal[]; initialAccounts: AccountView[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; firstRunOnUs?: boolean; startRefusal?: StartRefusal; closedBeta?: string; workspacePlan?: WorkspacePlan;
+export function PlanWorkspace({ projectId, planId, projectName, initialPersonas, initialGoals, initialAccounts, keyHint, canManageKey, authorisedBefore, firstRunOnUs, startRefusal, closedBeta, workspacePlan }: {
+  projectId: string; planId: string; projectName: string; initialPersonas: PlanPerson[]; initialGoals: Goal[]; initialAccounts: AccountView[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; firstRunOnUs?: boolean; startRefusal?: StartRefusal; closedBeta?: string; workspacePlan?: WorkspacePlan;
 }) {
   const [saved, setSaved] = useState({ personas: initialPersonas, goals: initialGoals });
   const [personas, setPersonas] = useState(initialPersonas);
@@ -198,8 +198,8 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
   const unsaved = useRef<{ personas: PlanPerson[]; goals: Goal[] } | null>(null);
   unsaved.current = dirty && !problem && !saving ? { personas, goals } : null;
   useEffect(() => () => {
-    if (unsaved.current) void savePlanAction(projectId, unsaved.current).catch(() => undefined);
-  }, [projectId]);
+    if (unsaved.current) void savePlanAction(projectId, planId, unsaved.current).catch(() => undefined);
+  }, [projectId, planId]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -239,7 +239,7 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
   const save = (plan: { personas: PlanPerson[]; goals: Goal[] }) => startSaving(async () => {
     let res: Awaited<ReturnType<typeof savePlanAction>>;
     try {
-      res = await savePlanAction(projectId, plan);
+      res = await savePlanAction(projectId, planId, plan);
     } catch (err) {
       if (unstable_isUnrecognizedActionError(err)) return setError({ message: updatedSinceOpened("Reload the page to keep editing; your last change was not saved."), retry: false });
       return setError({ message: "Trawler could not be reached, so your last change is not saved yet.", retry: true });
@@ -299,6 +299,7 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
                 {own.length < MAX_GOALS_PER_PERSONA && <AddButton onClick={() => setGoals((list) => afterLastOf(list, p.id, newGoal(p.id, list)))}>Add a goal</AddButton>}
                 <SignIn
                   projectId={projectId}
+                  planId={planId}
                   person={p}
                   accounts={accounts}
                   onPick={({ accountRef, signsIn }) => updatePersona(i, { accountRef, signsIn })}
@@ -313,7 +314,7 @@ export function PlanWorkspace({ projectId, projectName, initialPersonas, initial
 
       {personas.length > 1 && <OrderOfPlay personas={personas} goals={goals} onMove={moveGoal} />}
 
-      <StartRun projectId={projectId} projectName={projectName} personas={saved.personas.length} goalsPerTurn={turnsOf(saved).map((t) => t.goalIds.length)} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} firstRunOnUs={firstRunOnUs} refusal={startRefusal} closedBeta={closedBeta} onStarting={setStarting} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : overPlan)} />
+      <StartRun projectId={projectId} planId={planId} projectName={projectName} personas={saved.personas.length} goalsPerTurn={turnsOf(saved).map((t) => t.goalIds.length)} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} firstRunOnUs={firstRunOnUs} refusal={startRefusal} closedBeta={closedBeta} onStarting={setStarting} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : overPlan)} />
     </div>
   );
 }

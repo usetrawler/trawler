@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   runs: 0, counted: [] as Array<[string, string]>, tenants: [] as string[], shells: [] as string[], planned: [] as Array<Record<string, unknown>>,
   runState: { paused: false, liveRun: null } as { paused: boolean; liveRun: { id: string; number: number } | null },
   refusal: null as Error | null,
+  plans: [] as Array<{ id: string; name: string; features: string[]; people: number }>,
   platformKey: true, onUsLeft: true, refusalFor: [] as unknown[], people: 0, beta: undefined as string[] | undefined,
 }));
 const ID = vi.hoisted(() => "0f8fad5b-d9cb-469f-a165-70867728950e");
@@ -14,6 +15,8 @@ const FREE = vi.hoisted(() => ({ plan: "free" as const, limits: { projects: 1, r
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: () => {}, push: () => {} }),
+  unstable_isUnrecognizedActionError: () => false,
   redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); },
   notFound: () => { throw Object.assign(new Error("not found"), { notFound: true }); },
 }));
@@ -30,9 +33,12 @@ vi.mock("../../../server/shell.ts", () => ({
 vi.mock("../../../server/db.ts", () => ({ getDb: () => ({}) }));
 vi.mock("../../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
 vi.mock("../../../credentials/credentials.ts", () => ({ modelKeyHint: async () => null }));
+const PLANS = [{ id: "11111111-1111-4111-8111-111111111111", name: "Plan 1", features: ["Send an invoice"], people: 2 }, { id: "22222222-2222-4222-8222-222222222222", name: "Plan 2", features: [], people: 1 }];
 vi.mock("../../../projects/projects.ts", () => ({
-  projectForEditing: async (_tx: unknown, _orgId: string, id: string) => ({
-    id, name: "Acme", target_url: "https://app.acme.test/", docs_url: null, description: "Invoices.", focus: null, features: ["Send an invoice"], allowed_origins: [],
+  MAX_PLANS: 10,
+  listPlans: async () => state.plans,
+  projectForEditing: async (_tx: unknown, _orgId: string, id: string, planId?: string) => ({
+    id, plan: { id: planId, name: state.plans.find((p) => p.id === planId)?.name }, name: "Acme", target_url: "https://app.acme.test/", docs_url: null, description: "Invoices.", focus: null, features: ["Send an invoice"], allowed_origins: [],
     personas: Array.from({ length: state.people }, (_, i) => ({ key: `p${i}`, name: `P${i}`, brief: "b", signs_in: false, account_ref: null })), goals: [], accounts: [], gates: [],
   }),
 }));
@@ -52,7 +58,7 @@ vi.mock("../../../runs/plans.ts", () => ({ workspacePlan: async () => FREE }));
 vi.mock("./plan-workspace.tsx", () => ({ PlanWorkspace: (props: Record<string, unknown>) => { state.planned.push(props); return null; } }));
 
 const { default: ProjectPage } = await import("./page.tsx");
-const render = async () => renderToStaticMarkup(await ProjectPage({ params: Promise.resolve({ id: ID }) }));
+const render = async (plan?: string) => renderToStaticMarkup(await ProjectPage({ params: Promise.resolve({ id: ID }), searchParams: Promise.resolve(plan ? { plan } : {}) }));
 
 beforeEach(() => {
   state.member = { userId: "u1", name: "Ana", email: "ana@acme.test", orgId: "org-1", orgName: "Acme workspace", role: "member" };
@@ -67,6 +73,7 @@ beforeEach(() => {
   state.onUsLeft = true;
   state.refusalFor = [];
   state.people = 0;
+  state.plans = [...PLANS];
   state.beta = undefined;
 });
 
@@ -102,7 +109,7 @@ test("a plan with more people than the first run on Trawler takes is judged as a
 
 test("a visitor who is not signed in, or no longer belongs to any workspace, is sent to sign in before anything is read", async () => {
   state.member = null;
-  await expect(ProjectPage({ params: Promise.resolve({ id: ID }) })).rejects.toMatchObject({ to: "/sign-in" });
+  await expect(ProjectPage({ params: Promise.resolve({ id: ID }), searchParams: Promise.resolve({}) })).rejects.toMatchObject({ to: "/sign-in" });
   expect(state.tenants).toEqual([]);
 });
 
@@ -129,7 +136,7 @@ test("the plan is the project's Plan tab, next to its Runs with their number, wi
 test("the plan shows the features it was set up for, with a way to change them", async () => {
   const html = await render();
   expect(html).toContain("Send an invoice");
-  expect(html).toMatch(new RegExp(`<a [^>]*href="/projects/${ID}/features"[^>]*>Change features</a>`));
+  expect(html).toMatch(new RegExp(`<a [^>]*href="/projects/${ID}/features\\?plan=[0-9a-f-]+"[^>]*>Change features</a>`));
 });
 
 test("a project without runs still offers its Runs tab, counted as none", async () => {
@@ -164,7 +171,25 @@ test("a project whose run state cannot be read is not found", async () => {
 test("the plan editor gets the workspace's plan, and too many people for it is left to the editor, which sees the plan as it is edited", async () => {
   const { TooManyPeople } = await import("../../../runs/runs.ts");
   state.refusal = new TooManyPeople(FREE, 5);
-  renderToStaticMarkup(await ProjectPage({ params: Promise.resolve({ id: ID }) }));
+  renderToStaticMarkup(await ProjectPage({ params: Promise.resolve({ id: ID }), searchParams: Promise.resolve({}) }));
   expect(state.planned[0]!.workspacePlan).toEqual(FREE);
   expect(state.planned[0]!.startRefusal).toBeUndefined();
+});
+
+test("the plan tab lists the project's plans, opens the one asked for and falls back to the first", async () => {
+  const html = await render(PLANS[1]!.id);
+  expect(html).toMatch(/<a href="\/projects\/[^"]+\?plan=11111111-1111-4111-8111-111111111111"[^>]*>Plan 1/);
+  expect(html).toMatch(/<a href="[^"]+\?plan=22222222-2222-4222-8222-222222222222" aria-current="page"[^>]*>Plan 2/);
+  expect(html).toContain("Add plan");
+  expect(state.planned.at(-1)).toMatchObject({ planId: PLANS[1]!.id });
+  await render("33333333-3333-4333-8333-333333333333");
+  expect(state.planned.at(-1)).toMatchObject({ planId: PLANS[0]!.id });
+});
+
+test("a project with one plan cannot remove it", async () => {
+  state.plans = [PLANS[0]!];
+  const html = await render();
+  expect(html).not.toContain("Remove plan");
+  state.plans = [...PLANS];
+  expect(await render()).toContain("Remove plan");
 });
