@@ -245,6 +245,7 @@ export async function renamePlan(tx: Tx, orgId: string, projectId: string, planI
   const clean = PlanNameSchema.parse(name);
   await nameFree(tx, projectId, clean, plan.id);
   await tx.updateTable("plans").set({ name: clean, updated_at: new Date() }).where("id", "=", plan.id).execute();
+  await tx.updateTable("runs").set({ plan_name: clean }).where("plan_id", "=", plan.id).execute();
   return clean;
 }
 

@@ -8,7 +8,7 @@ import { Keyring } from "../lib/secrets.ts";
 import { runView } from "../runs/report.ts";
 import { runIdByNumber, runSummary, startRun } from "../runs/runs.ts";
 import { projectHead, projectRunCount, runCounts, runHead, workspaceNav, workspaceProjects, workspaceRuns } from "./overview.ts";
-import { createPlan, createProject, listPlans, removePlan, replacePlan } from "./projects.ts";
+import { createPlan, createProject, listPlans, removePlan, renamePlan, replacePlan } from "./projects.ts";
 
 const t = await testDb();
 afterAll(() => t.drop());
@@ -313,16 +313,16 @@ test("a run number reaches only the workspace's own run with that number, never 
 test("a run line names its plan only when the project has several, or when the plan was removed, and a project's runs can be narrowed to one plan", async () => {
   const org = "org-a";
   const solo = await withOrg(t.db, org, (tx) => createProject(tx, org, ConfigNamed("Solo"), keys));
-  const soloRun = await seedRun(org, solo, hoursAgo(1), { status: "succeeded", cost: 0.2 }, [], 1);
+  const soloRun = await seedRun(org, solo, hoursAgo(1), { status: "succeeded", cost: 0.2 }, [], 1, 0);
   const lines = async (projectId: string, planId?: string) => (await withOrg(t.db, org, (tx) => workspaceRuns(tx, org, { projectId, ...(planId ? { planId } : {}) }))).runs;
   expect((await lines(solo)).map((r) => r.planName)).toEqual([null]);
 
   const two = await withOrg(t.db, org, (tx) => createProject(tx, org, ConfigNamed("Duo"), keys));
   const second = await withOrg(t.db, org, (tx) => createPlan(tx, org, two, { name: "Invitations", personas: [{ id: "kofi", name: "Kofi", brief: "b" }], goals: [{ id: "g", instruction: "Invite.", personaId: "kofi" }] }));
   const first = (await withOrg(t.db, org, (tx) => listPlans(tx, org, two)))[0]!;
-  const a = await seedRun(org, two, hoursAgo(3), { status: "succeeded", cost: 0.2 }, [], 1);
+  const a = await seedRun(org, two, hoursAgo(3), { status: "succeeded", cost: 0.2 }, [], 1, 0);
   await asSystem(t.db, (tx) => tx.updateTable("runs").set({ plan_id: second.id, plan_name: "Invitations" }).where("id", "=", a.id).execute());
-  const b = await seedRun(org, two, hoursAgo(2), { status: "succeeded", cost: 0.2 }, [], 1);
+  const b = await seedRun(org, two, hoursAgo(2), { status: "succeeded", cost: 0.2 }, [], 1, 0);
   expect((await lines(two)).map((r) => [r.id, r.planName])).toEqual([[b.id, first.name], [a.id, "Invitations"]]);
   expect((await lines(two, second.id)).map((r) => r.id)).toEqual([a.id]);
   expect((await lines(two, first.id)).map((r) => r.id)).toEqual([b.id]);
@@ -332,7 +332,11 @@ test("a run line names its plan only when the project has several, or when the p
   expect(summary!.planName).toBe("Invitations");
   expect((await withOrg(t.db, org, (tx) => runSummary(tx, org, soloRun.id)))!.planName).toBeNull();
 
+  await withOrg(t.db, org, (tx) => renamePlan(tx, org, two, second.id, "Team invites"));
+  expect((await lines(two)).map((r) => [r.id, r.planName])).toEqual([[b.id, first.name], [a.id, "Team invites"]]);
+  expect((await withOrg(t.db, org, (tx) => runSummary(tx, org, a.id)))!.planName).toBe("Team invites");
+
   await withOrg(t.db, org, (tx) => removePlan(tx, org, two, second.id));
-  expect((await lines(two)).map((r) => [r.id, r.planName])).toEqual([[b.id, null], [a.id, "Invitations"]]);
-  expect((await withOrg(t.db, org, (tx) => runSummary(tx, org, a.id)))!.planName).toBe("Invitations");
+  expect((await lines(two)).map((r) => [r.id, r.planName])).toEqual([[b.id, null], [a.id, "Team invites"]]);
+  expect((await withOrg(t.db, org, (tx) => runSummary(tx, org, a.id)))!.planName).toBe("Team invites");
 });

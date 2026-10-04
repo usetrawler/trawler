@@ -36,16 +36,16 @@ export default async function ProjectRunsPage({ params, searchParams }: { params
     if (!project || !runState) return null;
     const plans = await listPlans(tx, orgId, id);
     const plan = parsePlanQuery(query, plans);
-    const [history, counts] = await Promise.all([workspaceRuns(tx, orgId, { projectId: id, ...(plan ? { planId: plan } : {}), show, before }), runCounts(tx, orgId, id, plan)]);
-    return { project, runState, history, counts, plans, plan };
+    const [history, counts, total] = await Promise.all([workspaceRuns(tx, orgId, { projectId: id, ...(plan ? { planId: plan } : {}), show, before }), runCounts(tx, orgId, id, plan), plan ? runCounts(tx, orgId, id) : null]);
+    return { project, runState, history, counts, total: total ?? counts, plans, plan };
   });
   if (!found) notFound();
-  const { project, runState, history, counts, plans, plan } = found;
+  const { project, runState, history, counts, total, plans, plan } = found;
   const shell = await shellFor(member);
   return (
     <AppShell shell={shell} current={{ project: id }} parent wide>
       <RunsView
-        head={<ProjectHead project={project} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="runs" runs={counts.all} runState={runState} />}
+        head={<ProjectHead project={project} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="runs" runs={total.all} runState={runState} {...(plan ? { planId: plan } : {})} />}
         basePath={`/projects/${id}/runs`}
         show={show} counts={counts} runs={history.runs} olderThan={history.olderThan} paged={before !== undefined} scope="project" plans={plans.map((p) => ({ id: p.id, name: p.name }))} {...(plan ? { plan } : {})}
       />

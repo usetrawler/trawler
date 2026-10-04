@@ -41,7 +41,7 @@ vi.mock("../../../../projects/overview.ts", async (original) => ({
   runCounts: async (_tx: unknown, orgId: string, projectId?: string, planId?: string) => {
     state.counted.push([orgId, projectId]);
     state.planCounted.push(planId);
-    return { all: 3, completed: 1, attention: 2 };
+    return planId ? { all: 1, completed: 1, attention: 0 } : { all: 3, completed: 1, attention: 2 };
   },
 }));
 
@@ -128,8 +128,10 @@ test("a plan of the project narrows the runs and their counts, a plan it does no
   const second = "22222222-2222-4222-8222-222222222222";
   const html = renderToStaticMarkup(await open(ID, { plan: second }));
   expect(state.asked).toEqual([{ orgId: "org-1", projectId: ID, planId: second, show: "all", before: undefined }]);
-  expect(state.planCounted).toEqual([second]);
+  expect(state.planCounted).toEqual([second, undefined]);
   expect(html).toContain("Runs of a plan");
+  expect(html).toMatch(/>Runs<span[^>]*>3<\/span>/);
+  expect(html).toMatch(new RegExp(`href="/projects/${ID}\\?plan=${second}#start"`));
   await open(ID, { plan: "33333333-3333-4333-8333-333333333333" });
   expect(state.asked.at(-1)).not.toHaveProperty("planId");
   expect(state.planCounted.at(-1)).toBeUndefined();

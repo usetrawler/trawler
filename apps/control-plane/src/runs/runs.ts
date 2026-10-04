@@ -290,14 +290,13 @@ export async function runIdByNumber(tx: Tx, orgId: string, number: number): Prom
 export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const run = await tx
     .selectFrom("runs")
-    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason", "paid_by", "plan_id", "plan_name"])
+    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason", "paid_by", "plan_id", "plan_name", sql<string>`(select count(*) from plans p where p.project_id = runs.project_id and p.org_id = runs.org_id)`.as("plan_count")])
     .where("id", "=", runId)
     .where("org_id", "=", orgId)
     .executeTakeFirst();
   if (!run) return null;
   const snapshot = run.config_snapshot as unknown as ConfigSnapshot;
   const goalText = new Map(snapshot.goals.map((g) => [g.id, g.instruction]));
-  const { plans } = await tx.selectFrom("plans").select(sql<string>`count(*)`.as("plans")).where("project_id", "=", run.project_id).executeTakeFirstOrThrow();
   const [jobs, findings, goals, activity, screenshots, botProtection, dismissals] = await Promise.all([
     tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error", sql<boolean>`requested_by is not null`.as("requested")]).where("run_id", "=", runId).orderBy("position").execute(),
     tx.selectFrom("findings").select(["key", "persona_key", "kind", "filed_as", "goal", "title", "observed", "reproduction", "severity", "replay", "verdict", "same_as", "url", "quote", "step_people"]).where("run_id", "=", runId).orderBy("created_at").orderBy("key").execute(),
@@ -344,7 +343,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const findingTitle = new Map(findings.map((f) => [f.key, f.title]));
   const latestScreenshot = (key: string, kind: string) => screenshots.filter((a) => a.finding_key === key && a.kind === kind).at(-1)?.id ?? null;
   return {
-    id: run.id, number: run.number, status: run.status, cancelReason: run.cancel_reason as CancelReason | null, projectId: run.project_id, planName: run.plan_id === null || Number(plans) > 1 ? run.plan_name : null,
+    id: run.id, number: run.number, status: run.status, cancelReason: run.cancel_reason as CancelReason | null, projectId: run.project_id, planName: run.plan_id === null || Number(run.plan_count) > 1 ? run.plan_name : null,
     costUsd: Number(run.cost_usd), budgetUsd: Number(run.budget_usd), completionUsdPerMtok: run.completion_usd_per_mtok === null ? null : Number(run.completion_usd_per_mtok), agentModel: run.agent_model, judgeModel: run.judge_model,
     provider: run.provider, paidBy: run.paid_by as PaidBy, tokenCap: run.token_cap === null ? null : Number(run.token_cap), tokensUsed: Number(run.tokens_used),
     createdAt: run.created_at, startedAt: run.started_at, finishedAt: run.finished_at,
