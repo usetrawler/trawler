@@ -1,0 +1,14 @@
+{
+  "name": "@usetrawler/ci",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@usetrawler/protocol": "^0.0.0",
+    "zod": "^4.6.5"
+  }
+}
