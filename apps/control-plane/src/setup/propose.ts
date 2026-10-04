@@ -7,6 +7,7 @@ import type { Keyring } from "../lib/secrets.ts";
 import { createProject, ProjectNotFound, replacePlan } from "../projects/projects.ts";
 import { ProjectLimitReached, projectLimitReached } from "../runs/plans.ts";
 import { FetchRefused } from "./safe-fetch.ts";
+import { writeLog } from "../server/log.ts";
 import { WORKING_MINUTES, type SetupProgress } from "./progress.ts";
 
 const SETUP_BUDGET_USD = 0.25;
@@ -126,8 +127,12 @@ export async function describeDraft(deps: SetupDeps, input: { orgId: string; dra
     return summaryOf(described);
   }
   let summary: ProductSummary;
+  const started = Date.now();
   try {
-    ({ summary } = await describeProduct({ model: deps.model, modelId: deps.modelId, budget: new Budget(SETUP_BUDGET_USD), product: productOf(draft) }));
+    const described = await describeProduct({ model: deps.model, modelId: deps.modelId, budget: new Budget(SETUP_BUDGET_USD), product: productOf(draft) });
+    summary = described.summary;
+    const { usage } = described;
+    void writeLog("info", "setup described the product", { orgId: input.orgId, seconds: (Date.now() - started) / 1000, model: usage.model, tries: usage.steps, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, costUsd: usage.costUsd }).catch(() => undefined);
   } catch (err) {
     await withOrg(deps.db, input.orgId, (tx) => tx.updateTable("setup_drafts").set({ describe_failed_at: sql<Date>`now()` }).where("id", "=", draft.id).execute()).catch(() => undefined);
     throw err;
@@ -168,10 +173,12 @@ export async function proposeFromDraft(deps: SetupDeps, input: { orgId: string; 
 
 async function proposeClaimed(deps: SetupDeps, input: { orgId: string; description: string; features: string[]; signUp?: SignUp }, draft: Awaited<ReturnType<typeof draftOf>>): Promise<string> {
   const product = productOf(draft);
-  const { project, signsIn } = await proposePeople({
+  const started = Date.now();
+  const { project, signsIn, usage } = await proposePeople({
     model: deps.model, modelId: deps.modelId, budget: new Budget(SETUP_BUDGET_USD), product,
     name: draft.name ?? new URL(draft.url).hostname, description: input.description, features: input.features, signUp: input.signUp,
   });
+  void writeLog("info", "setup chose the people", { orgId: input.orgId, seconds: (Date.now() - started) / 1000, model: usage.model, tries: usage.steps, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, costUsd: usage.costUsd, people: project.personas.length, goals: project.goals.length }).catch(() => undefined);
   const features = input.features.map((f) => f.trim()).filter(Boolean);
   return withOrg(deps.db, input.orgId, async (tx) => {
     const taken = await tx.selectFrom("setup_drafts").select(["id", "result_project_id"]).where("id", "=", draft.id).forUpdate().executeTakeFirst();
