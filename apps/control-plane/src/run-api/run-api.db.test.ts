@@ -1,0 +1,97 @@
+import { randomBytes } from "node:crypto";
+import { sql } from "kysely";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { PROTOCOL_HEADER, PROTOCOL_VERSION, ProjectConfigSchema } from "@usetrawler/protocol";
+import { createApiToken } from "../api-tokens/tokens.ts";
+import { asSystem, withOrg } from "../db/tenancy.ts";
+import { testDb } from "../db/test-db.ts";
+import { Keyring } from "../lib/secrets.ts";
+import { createProject } from "../projects/projects.ts";
+import { handleClaim } from "../runner-api/handlers.ts";
+import { FIRST_RUN_ON_US } from "../runs/models.ts";
+import { claimJob, HOSTED_SCOPE } from "../runs/queue.ts";
+import { cancelLiveRuns, startRun } from "../runs/runs.ts";
+import { handleGetRun, handleStartRun, type RunApiDeps } from "./handlers.ts";
+
+const t = await testDb();
+afterAll(() => t.drop());
+const keys = new Keyring(randomBytes(32));
+const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "Do it.", personaId: "ana" }] });
+const options = { budgetUsd: 2, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 30, replaySteps: 20, createdBy: "u1" };
+const POOL = "pool-token-for-hosted-runners-0000";
+let projects: Record<string, string> = {};
+let runs: Record<string, string> = {};
+
+const mint = (org: string, projectId?: string) => withOrg(t.db, org, (tx) => createApiToken(tx, org, "u1", { name: "ci", ...(projectId ? { projectId } : {}) }));
+
+beforeAll(async () => {
+  for (const org of ["org-a", "org-b", "org-ent"]) await sql`insert into organization (id, name, slug, "createdAt") values (${org}, ${org}, ${org}, now())`.execute(t.db);
+  await sql`insert into workspace_plans (org_id, plan, set_by) values ('org-ent', 'enterprise', 'test') on conflict (org_id) do update set plan = 'enterprise'`.execute(t.db);
+  for (const [name, org] of [["hosted", "org-a"], ["own", "org-a"], ["otherOrg", "org-b"], ["ent", "org-ent"]] as const) projects[name] = await withOrg(t.db, org, (tx) => createProject(tx, org, config, keys));
+  for (const [name, org, execution] of [["hosted", "org-a", "hosted"], ["own", "org-a", "own"], ["otherOrg", "org-b", "own"]] as const) {
+    runs[name] = (await withOrg(t.db, org, (tx) => startRun(tx, org, projects[name]!, keys, { ...options, execution }))).id;
+  }
+});
+
+describe("claim routing", () => {
+  test("a hosted claim never gets an own job, and a token never gets a hosted job or another workspace's job", async () => {
+    expect((await claimJob(t.db, keys, { execution: "own", orgId: "org-a", projectId: projects.hosted! }))).toBeNull();
+    expect((await claimJob(t.db, keys, { execution: "own", orgId: "org-a", projectId: projects.otherOrg! }))).toBeNull();
+    const foreign = await claimJob(t.db, keys, { execution: "own", orgId: "org-b", projectId: null });
+    expect(foreign?.runId).toBe(runs.otherOrg);
+    const hosted = await claimJob(t.db, keys, HOSTED_SCOPE);
+    expect(hosted?.runId).toBe(runs.hosted);
+    expect(await claimJob(t.db, keys, HOSTED_SCOPE)).toBeNull();
+    const own = await claimJob(t.db, keys, { execution: "own", orgId: "org-a", projectId: null });
+    expect(own?.runId).toBe(runs.own);
+  });
+
+  test("the claim endpoint takes the pool token for hosted jobs and a workspace token for its own", async () => {
+    await asSystem(t.db, (tx) => tx.updateTable("jobs").set({ status: "queued", token_hash: null, lease_until: null }).execute());
+    const call = (token: string) => handleClaim(new Request("http://x/claim", { method: "POST", headers: { authorization: `Bearer ${token}`, [PROTOCOL_HEADER]: String(PROTOCOL_VERSION) } }), { db: t.db, keys, runnerToken: POOL, claimWaitMs: 0 });
+    const own = await mint("org-a");
+    const viaToken = await call(own.token);
+    expect(viaToken.status).toBe(200);
+    expect((await viaToken.json()).runId).toBe(runs.own);
+    const viaPool = await call(POOL);
+    expect((await viaPool.json()).runId).toBe(runs.hosted);
+    expect((await call("trw_" + "x".repeat(43))).status).toBe(401);
+    expect((await call("some-other-secret-value-0000")).status).toBe(401);
+  });
+});
+
+describe("run api", () => {
+  const deps = (over: Partial<RunApiDeps> = {}): RunApiDeps => ({ db: t.db, keys, baseUrl: "https://app.trawler.test", openRouterUrl: "http://unused.test", trawlerPays: true, priceOf: async () => null, ...over });
+  const post = (token: string, body: unknown, over?: Partial<RunApiDeps>) =>
+    handleStartRun(new Request("http://x/api/v1/runs", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) }), deps(over));
+
+  test("an enterprise workspace without a model key runs on Trawler's key, many times, without using its first run", async () => {
+    const { token } = await mint("org-ent");
+    const first = await post(token, { project: projects.ent, execution: "own", cap: 0.5 });
+    expect(first.status).toBe(201);
+    const started = await first.json();
+    expect(started.reportUrl).toMatch(/^https:\/\/app\.trawler\.test\/runs\/\d{4}$/);
+    const row = await asSystem(t.db, (tx) => tx.selectFrom("runs").selectAll().where("id", "=", started.id).executeTakeFirstOrThrow());
+    expect(row).toMatchObject({ paid_by: "trawler", provider: "openrouter", agent_model: FIRST_RUN_ON_US.model, execution: "own", created_by: expect.stringMatching(/^api-token:/) });
+    expect(Number(row.budget_usd)).toBe(0.5);
+    await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
+    const second = await post(token, { project: projects.ent });
+    expect(second.status).toBe(201);
+    const secondId = (await second.json()).id;
+    expect(Number((await asSystem(t.db, (tx) => tx.selectFrom("runs").select("budget_usd").where("id", "=", secondId).executeTakeFirstOrThrow())).budget_usd)).toBe(FIRST_RUN_ON_US.budgetUsd);
+    expect(await asSystem(t.db, (tx) => tx.selectFrom("first_runs_on_us").select("org_id").where("org_id", "=", "org-ent").execute())).toEqual([]);
+    const result = await handleGetRun(new Request("http://x", { headers: { authorization: `Bearer ${token}` } }), started.id, deps());
+    expect(result.status).toBe(200);
+    expect(await result.json()).toMatchObject({ id: started.id, finished: true, status: "cancelled", commentMarkdown: expect.stringContaining("<!-- trawler-ci -->") });
+  });
+
+  test("a workspace without a key on another plan is told to add one, and a hosted run cannot override the target", async () => {
+    const { token } = await mint("org-b");
+    const refused = await post(token, { project: projects.otherOrg }, { trawlerPays: false });
+    expect(refused.status).toBe(422);
+    expect((await refused.json()).error).toMatch(/Add a model key/);
+    const override = await post(token, { project: projects.otherOrg, url: "http://localhost:3000" });
+    expect(override.status).toBe(422);
+    expect((await post(token, { project: projects.ent })).status).toBe(404);
+  });
+});

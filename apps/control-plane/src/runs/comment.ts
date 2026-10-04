@@ -1,0 +1,65 @@
+import type { RunResult } from "@usetrawler/protocol";
+import { runView } from "./report.ts";
+import type { RunSummary } from "./runs.ts";
+import { runPath } from "./status.ts";
+
+export const COMMENT_MARKER = "<!-- trawler-ci -->";
+
+type CommentInput = Omit<RunResult, "commentMarkdown">;
+
+const plain = (text: string) => text.replace(/\s*\n\s*/g, " ").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
+const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+function headline(r: CommentInput): string {
+  if (!r.finished) return "Trawler is still testing this change";
+  if (r.status === "failed" || r.status === "cancelled") return "Trawler could not finish testing this change";
+  if (r.defects.confirmed > 0) return `Trawler: ${count(r.defects.confirmed, "defect")} confirmed by replay`;
+  return "Trawler found no confirmed defects";
+}
+
+function defectBlock(d: RunResult["confirmed"][number]): string {
+  const where = d.page ? ` on \`${d.page.replace(/`/g, "'")}\`` : "";
+  const steps = d.steps.map((s, i) => `${i + 1}. ${plain(s)}`).join("\n");
+  return [
+    `#### ${plain(d.title)}${where}`,
+    `Found by ${plain(d.person)} (${d.severity} severity). ${plain(d.observed)}`,
+    `<details>\n<summary>Steps to reproduce</summary>\n\n${steps}\n\n</details>`,
+  ].join("\n\n");
+}
+
+export function renderComment(r: CommentInput): string {
+  const sections = [COMMENT_MARKER, `### ${headline(r)}`];
+  if (r.finished && r.confirmed.length > 0) sections.push(r.confirmed.map(defectBlock).join("\n\n"));
+  if (r.finished && r.defects.confirmed === 0) {
+    const others = [r.defects.refuted > 0 ? `${count(r.defects.refuted, "report")} refuted on replay` : "", r.defects.inconclusive > 0 ? `${r.defects.inconclusive} inconclusive` : ""].filter(Boolean);
+    if (others.length > 0) sections.push(`Also reported: ${others.join(", ")}.`);
+  }
+  if (r.finished) sections.push(`${count(r.people, "person", "people")} used the product and reached ${r.goalsReached} of ${r.goalsTotal} ${r.goalsTotal === 1 ? "goal" : "goals"}. Cost $${r.costUsd.toFixed(2)}.`);
+  sections.push(`[Full report](${r.reportUrl})`);
+  return sections.join("\n\n");
+}
+
+export function runResultOf(s: RunSummary, baseUrl: string): RunResult {
+  const view = runView(s);
+  const result: CommentInput = {
+    id: s.id,
+    number: s.number,
+    status: s.status as RunResult["status"],
+    finished: !view.live,
+    reportUrl: `${baseUrl.replace(/\/+$/, "")}${runPath(s.number)}`,
+    people: s.personas.length,
+    goalsReached: view.goalsReached,
+    goalsTotal: view.goalsTotal,
+    defects: { confirmed: view.report.confirmed.length, refuted: view.report.refuted.length, inconclusive: view.report.inconclusive.length },
+    confirmed: view.report.confirmed.map((f) => ({
+      title: f.title,
+      page: f.page,
+      severity: f.severity,
+      person: [...new Set([f.personaName, ...f.sameReports.map((o) => o.personaName)])].join(", "),
+      observed: f.observed,
+      steps: f.reproduction,
+    })),
+    costUsd: s.costUsd,
+  };
+  return { ...result, commentMarkdown: renderComment(result) };
+}

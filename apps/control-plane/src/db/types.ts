@@ -43,6 +43,19 @@ export interface Account {
   userId: string;
 }
 
+export interface ApiTokens {
+  created_at: Generated<Timestamp>;
+  created_by: string;
+  id: Generated<string>;
+  last_used_at: Timestamp | null;
+  name: string;
+  org_id: string;
+  prefix: string;
+  project_id: string | null;
+  revoked_at: Timestamp | null;
+  token_hash: string;
+}
+
 export interface Artifacts {
   content_type: string;
   created_at: Generated<Timestamp>;
@@ -267,6 +280,7 @@ export interface Runs {
   cost_usd: Generated<Numeric>;
   created_at: Generated<Timestamp>;
   created_by: string;
+  execution: Generated<string>;
   finished_at: Timestamp | null;
   id: Generated<string>;
   judge_model: string;
@@ -280,6 +294,7 @@ export interface Runs {
   prompt_usd_per_mtok: Numeric | null;
   provider: Generated<string>;
   provider_base_url: string | null;
+  pull_request: Json | null;
   replay_steps: number;
   sign_up_seed: string | null;
   started_at: Timestamp | null;
@@ -390,6 +405,7 @@ export interface WorkspacePlans {
 
 export interface DB {
   account: Account;
+  api_tokens: ApiTokens;
   artifacts: Artifacts;
   credentials: Credentials;
   finding_dismissals: FindingDismissals;

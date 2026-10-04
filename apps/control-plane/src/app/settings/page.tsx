@@ -3,7 +3,9 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AppShell } from "../../components/app-shell.tsx";
 import { PageHead } from "../../components/page-head.tsx";
+import { listApiTokens } from "../../api-tokens/tokens.ts";
 import { modelKeyDetails } from "../../credentials/credentials.ts";
+import { listProjects } from "../../projects/projects.ts";
 import { monthlyBudget, monthSpent } from "../../runs/limits.ts";
 import { projectsCounted, runsToday, workspacePlan } from "../../runs/plans.ts";
 import { withOrg } from "../../db/tenancy.ts";
@@ -11,6 +13,7 @@ import { canManageBilling, getAuth, signedInMember } from "../../server/auth.ts"
 import { getDb } from "../../server/db.ts";
 import { readEnv } from "../../server/env.ts";
 import { shellFor } from "../../server/shell.ts";
+import { ApiTokens } from "./api-tokens.tsx";
 import { Members } from "./members.tsx";
 import { ModelKey } from "./model-key.tsx";
 import { MonthlyBudget } from "./monthly-budget.tsx";
@@ -25,21 +28,22 @@ export default async function SettingsPage() {
   if (!member) redirect("/sign-in");
   const { orgId } = member;
   const auth = getAuth();
-  const [{ details, budget, spent, plan, projects, today }, members, invitations] = await Promise.all([
+  const canManage = canManageBilling(member);
+  const [{ details, budget, spent, plan, projects, today, tokens, projectList }, members, invitations] = await Promise.all([
     withOrg(getDb(), orgId, async (tx) => ({
       details: await modelKeyDetails(tx, orgId), budget: await monthlyBudget(tx, orgId), spent: await monthSpent(tx, orgId),
       plan: await workspacePlan(tx, orgId), projects: await projectsCounted(tx, orgId), today: await runsToday(tx, orgId),
+      tokens: canManage ? await listApiTokens(tx, orgId) : [], projectList: canManage ? await listProjects(tx, orgId) : [],
     })),
     auth.workspaceMembers(orgId),
     auth.pendingInvitations(orgId),
   ]);
   const addedBy = details?.addedBy ? await auth.memberEmail(orgId, details.addedBy) : null;
-  const canManage = canManageBilling(member);
   return (
     <AppShell shell={await shellFor(member)} current="settings">
       <PageHead
         eyebrow="Settings"
-        title="Workspace, plan, members, model key and budget."
+        title="Workspace, plan, members, model key, budget and API tokens."
         subtitle="The name, what the plan allows, the people in it, the model key every run of this workspace uses, and what runs may spend in a month."
       />
       <div className="flex flex-col gap-8">
@@ -57,6 +61,11 @@ export default async function SettingsPage() {
           canManage={canManage}
         />
         <MonthlyBudget limitUsd={budget?.limitUsd ?? null} spentUsd={spent} month={new Date().toLocaleString("en-GB", { month: "long", timeZone: "UTC" })} canManage={canManage} />
+        <ApiTokens
+          tokens={tokens.map((t) => ({ id: t.id, name: t.name, prefix: t.prefix, projectName: t.projectName, createdAt: t.createdAt.toISOString(), lastUsedAt: t.lastUsedAt?.toISOString() ?? null }))}
+          projects={projectList.map((p) => ({ id: p.id, name: p.name }))}
+          canManage={canManage}
+        />
       </div>
     </AppShell>
   );
