@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { sql } from "kysely";
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import { ArtifactStoredSchema, MAX_ARTIFACT_BYTES, MAX_ARTIFACTS_PER_JOB, PROTOCOL_HEADER, PROTOCOL_VERSION, ProjectConfigSchema } from "@usetrawler/protocol";
@@ -10,7 +10,7 @@ import { createProject } from "../projects/projects.ts";
 import { handleArtifactUpload, type RunnerApiDeps } from "../runner-api/handlers.ts";
 import { claimJob, completeJob, ingestEvents, releaseJobForShutdown, type JobAssignment } from "../runs/queue.ts";
 import { cancelRun, startRun } from "../runs/runs.ts";
-import { artifactLink, screenCapture } from "./artifacts.ts";
+import { openArtifact, screenCapture } from "./artifacts.ts";
 import { MAX_FAILURES_PER_RUN, removeExpiredArtifacts } from "./cleanup.ts";
 import { s3Store, type ArtifactStore } from "./store.ts";
 import { testStorage } from "./test-storage.ts";
@@ -264,7 +264,7 @@ test("a file whose answer never came back is discarded, logged and cleaned up la
   const row = rows.rows[0]!;
   expect(row.stored_at).toBeNull();
   expect(row.discarded_at).not.toBeNull();
-  expect(await artifactLink(t.db, store, "org-a", row.id)).toBeNull();
+  expect(await openArtifact(t.db, store, "org-a", row.id)).toBeNull();
   expect(JSON.parse(logged.find((l) => l.includes("an artifact could not be stored"))!)).toMatchObject({ org_id: "org-a", run_id: job.runId, job_id: job.jobId, error: { message: "the answer never came" } });
   expect(await objectKeys()).toContain(row.storage_key);
   await sql`update artifacts set discarded_at = now() - interval '11 minutes' where id = ${row.id}`.execute(t.db);
@@ -334,7 +334,7 @@ test("a file whose row vanished and that the bucket will not remove is logged, a
   await store.remove(left[0]!);
 });
 
-test("a file still on its way to the bucket counts toward the cap but has no link, and a row left on its way past the grace period is cleaned up", async () => {
+test("a file still on its way to the bucket counts toward the cap but cannot be opened, and a row left on its way past the grace period is cleaned up", async () => {
   const job = await leasedJob();
   await fill(job, "org-a", MAX_ARTIFACTS_PER_JOB - 1);
   const { slow, entered, arrive } = heldBucket();
@@ -343,12 +343,12 @@ test("a file still on its way to the bucket counts toward the cap but has no lin
   const pending = await sql<{ id: string }>`select id from artifacts where job_id = ${job.jobId} and stored_at is null`.execute(t.db);
   expect(pending.rows).toHaveLength(1);
   const row = pending.rows[0]!;
-  expect(await artifactLink(t.db, store, "org-a", row.id)).toBeNull();
+  expect(await openArtifact(t.db, store, "org-a", row.id)).toBeNull();
   expect((await handleArtifactUpload(upload(job, PNG), job.jobId, deps)).status).toBe(409);
   arrive();
   expect((await answer).status).toBe(201);
   expect((await rowOf(row.id)).stored_at).not.toBeNull();
-  expect(await artifactLink(t.db, store, "org-a", row.id)).not.toBeNull();
+  expect(await openArtifact(t.db, store, "org-a", row.id)).not.toBeNull();
 });
 
 test("a row stuck on its way to the bucket holds its place for the grace period, then gives it back and is cleaned up", async () => {
@@ -381,7 +381,7 @@ test("a job handed back while its file is on the way to the bucket keeps that fi
   const row = rows.rows[0]!;
   expect(row.stored_at).not.toBeNull();
   expect(row.discarded_at).not.toBeNull();
-  expect(await artifactLink(t.db, store, "org-a", row.id)).toBeNull();
+  expect(await openArtifact(t.db, store, "org-a", row.id)).toBeNull();
   expect(await objectKeys()).toContain(row.storage_key);
   await sql`update artifacts set discarded_at = now() - interval '11 minutes' where id = ${row.id}`.execute(t.db);
   await removeExpiredArtifacts(t.db, store);
@@ -419,29 +419,31 @@ test("without storage configured, uploads answer 501, which the runner does not 
   expect((await handleArtifactUpload(upload(job, PNG), job.jobId, { ...deps, artifacts: undefined })).status).toBe(501);
 });
 
-test("a short-lived link serves the file with its type, only to the workspace that owns it, which the database enforces too", async () => {
+test("the app streams the file with its type and size, only to the workspace that owns it, which the database enforces too", async () => {
   const job = await leasedJob();
   const id = await stored(job);
-  const link = await artifactLink(t.db, store, "org-a", id);
-  expect(link).toMatch(/X-Amz-Expires=300/);
-  expect(link).not.toMatch(/x-amz-checksum-mode/i);
-  expect(link).toContain("response-cache-control=private%2C%20no-store");
-  const res = await fetch(link!);
-  expect(res.status).toBe(200);
-  expect(res.headers.get("content-type")).toBe("image/png");
-  expect(Buffer.from(await res.arrayBuffer())).toEqual(PNG);
-  expect(await artifactLink(t.db, store, "org-b", id)).toBeNull();
-  expect(await artifactLink(t.db, store, "org-a", "00000000-0000-4000-8000-000000000000")).toBeNull();
-  expect(await artifactLink(t.db, store, "org-a", "not-a-uuid")).toBeNull();
+  const file = await openArtifact(t.db, store, "org-a", id);
+  expect(file).toMatchObject({ contentType: "image/png", size: PNG.byteLength });
+  expect(Buffer.from(await new Response(file!.body).arrayBuffer())).toEqual(PNG);
+  expect(await openArtifact(t.db, store, "org-b", id)).toBeNull();
+  expect(await openArtifact(t.db, store, "org-a", "00000000-0000-4000-8000-000000000000")).toBeNull();
+  expect(await openArtifact(t.db, store, "org-a", "not-a-uuid")).toBeNull();
   expect(await withOrg(t.db, "org-b", (tx) => tx.selectFrom("artifacts").select("id").where("id", "=", id).execute())).toEqual([]);
 });
 
-test("a job handed back to the queue drops its files: no link, no share of the cap, and the cleanup removes them after a grace period", async () => {
+test("a row whose file the bucket no longer has opens as nothing", async () => {
+  const job = await leasedJob();
+  const id = await stored(job);
+  await s3.send(new DeleteObjectCommand({ Bucket: storage.bucket, Key: (await rowOf(id)).storage_key }));
+  expect(await openArtifact(t.db, store, "org-a", id)).toBeNull();
+});
+
+test("a job handed back to the queue drops its files: cannot be opened, no share of the cap, and the cleanup removes them after a grace period", async () => {
   const job = await leasedJob();
   const id = await stored(job, PNG, { query: "kind=screenshot&finding=f1" });
   await releaseJobForShutdown(t.db, job.token, job.jobId);
   expect((await rowOf(id)).discarded_at).not.toBeNull();
-  expect(await artifactLink(t.db, store, "org-a", id)).toBeNull();
+  expect(await openArtifact(t.db, store, "org-a", id)).toBeNull();
 
   const again = await claimJob(t.db, keys);
   expect(again!.jobId).toBe(job.jobId);

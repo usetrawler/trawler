@@ -1,5 +1,4 @@
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export interface ArtifactStorage {
   bucket: string;
@@ -12,11 +11,9 @@ export interface ArtifactStorage {
 
 export interface ArtifactStore {
   put(key: string, bytes: Uint8Array, contentType: string): Promise<void>;
-  link(key: string): Promise<string>;
+  read(key: string): Promise<ReadableStream<Uint8Array> | null>;
   remove(key: string): Promise<void>;
 }
-
-export const LINK_SECONDS = 300;
 
 export function s3Store(storage: ArtifactStorage, timeouts: { connectionMs?: number; requestMs?: number } = {}): ArtifactStore {
   const client = new S3Client({
@@ -33,8 +30,14 @@ export function s3Store(storage: ArtifactStorage, timeouts: { connectionMs?: num
     async put(key, bytes, contentType) {
       await client.send(new PutObjectCommand({ Bucket: storage.bucket, Key: key, Body: bytes, ContentType: contentType }));
     },
-    link(key) {
-      return getSignedUrl(client, new GetObjectCommand({ Bucket: storage.bucket, Key: key, ResponseCacheControl: "private, no-store" }), { expiresIn: LINK_SECONDS });
+    async read(key) {
+      try {
+        const { Body } = await client.send(new GetObjectCommand({ Bucket: storage.bucket, Key: key }));
+        return Body ? Body.transformToWebStream() : null;
+      } catch (err) {
+        if ((err as { name?: string }).name === "NoSuchKey") return null;
+        throw err;
+      }
     },
     async remove(key) {
       await client.send(new DeleteObjectCommand({ Bucket: storage.bucket, Key: key })).catch((err: unknown) => {
