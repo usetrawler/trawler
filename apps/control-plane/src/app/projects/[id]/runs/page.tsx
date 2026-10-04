@@ -10,7 +10,8 @@ import { signedInMember } from "../../../../server/auth.ts";
 import { getDb } from "../../../../server/db.ts";
 import { shellFor } from "../../../../server/shell.ts";
 import { projectPageTitle } from "../../../../server/titles.ts";
-import { parseRunsQuery, RunsView } from "../../../runs/runs-view.tsx";
+import { parsePlanQuery, parseRunsQuery, RunsView } from "../../../runs/runs-view.tsx";
+import { listPlans } from "../../../../projects/projects.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -21,9 +22,10 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-export default async function ProjectRunsPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ show?: string | string[]; before?: string | string[] }> }) {
+export default async function ProjectRunsPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ show?: string | string[]; before?: string | string[]; plan?: string | string[] }> }) {
   const { id } = await params;
-  const { show, before } = parseRunsQuery(await searchParams);
+  const query = await searchParams;
+  const { show, before } = parseRunsQuery(query);
   const member = await signedInMember(await headers());
   if (!member) redirect("/sign-in");
   const { orgId } = member;
@@ -32,18 +34,20 @@ export default async function ProjectRunsPage({ params, searchParams }: { params
     const project = await projectHead(tx, orgId, id);
     const runState = await projectRunState(tx, orgId, id);
     if (!project || !runState) return null;
-    const [history, counts] = await Promise.all([workspaceRuns(tx, orgId, { projectId: id, show, before }), runCounts(tx, orgId, id)]);
-    return { project, runState, history, counts };
+    const plans = await listPlans(tx, orgId, id);
+    const plan = parsePlanQuery(query, plans);
+    const [history, counts, total] = await Promise.all([workspaceRuns(tx, orgId, { projectId: id, ...(plan ? { planId: plan } : {}), show, before }), runCounts(tx, orgId, id, plan), plan ? runCounts(tx, orgId, id) : null]);
+    return { project, runState, history, counts, total: total ?? counts, plans, plan };
   });
   if (!found) notFound();
-  const { project, runState, history, counts } = found;
+  const { project, runState, history, counts, total, plans, plan } = found;
   const shell = await shellFor(member);
   return (
     <AppShell shell={shell} current={{ project: id }} parent wide>
       <RunsView
-        head={<ProjectHead project={project} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="runs" runs={counts.all} runState={runState} />}
+        head={<ProjectHead project={project} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="runs" runs={total.all} runState={runState} {...(plan ? { planId: plan } : {})} />}
         basePath={`/projects/${id}/runs`}
-        show={show} counts={counts} runs={history.runs} olderThan={history.olderThan} paged={before !== undefined} scope="project"
+        show={show} counts={counts} runs={history.runs} olderThan={history.olderThan} paged={before !== undefined} scope="project" plans={plans.map((p) => ({ id: p.id, name: p.name }))} {...(plan ? { plan } : {})}
       />
     </AppShell>
   );

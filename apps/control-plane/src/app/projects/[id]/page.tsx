@@ -51,7 +51,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   const shell = await shellFor(member);
   return (
     <AppShell shell={shell} current={{ project: id }} wide>
-      <ProjectHead project={{ id: project.id, name: project.name, targetUrl: project.target_url }} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="plan" runs={runs} runState={runState} />
+      <ProjectHead project={{ id: project.id, name: project.name, targetUrl: project.target_url }} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="plan" runs={runs} runState={runState} planId={planId} />
       <div className="flex max-w-3xl flex-col gap-10">
         <div className="flex flex-col gap-3">
           <p className="text-lg text-muted">{project.description}</p>
@@ -70,6 +70,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
           projectId={project.id}
           planId={planId}
           projectName={project.name}
+          planLabel={plans.length > 1 ? project.plan.name : undefined}
           initialPersonas={project.personas.map((p) => ({ id: p.key, name: p.name, brief: p.brief, signsIn: p.signs_in || p.account_ref !== null, ...(p.account_ref ? { accountRef: p.account_ref } : {}) }))}
           initialGoals={project.goals.map((g) => ({ id: g.key, instruction: g.instruction, personaId: g.persona_key }))}
           initialAccounts={project.accounts.map((a) => ({ ref: a.ref, username: a.username, hint: a.password_hint }))}

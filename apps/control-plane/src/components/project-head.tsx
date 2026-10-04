@@ -3,7 +3,7 @@ import type { ProjectRunState } from "../runs/runs.ts";
 import { PageHead, PrimaryLink } from "./page-head.tsx";
 import { PauseRuns } from "./pause-runs.tsx";
 
-export function ProjectHead({ project, address, tab, runs, runState }: { project: { id: string; name: string; targetUrl: string }; address?: string; tab: "plan" | "runs"; runs: number; runState: ProjectRunState }) {
+export function ProjectHead({ project, address, tab, runs, runState, planId }: { project: { id: string; name: string; targetUrl: string }; address?: string; tab: "plan" | "runs"; runs: number; runState: ProjectRunState; planId?: string }) {
   const tabs = [
     { key: "plan", href: `/projects/${project.id}`, label: "Plan" },
     { key: "runs", href: `/projects/${project.id}/runs`, label: "Runs", count: runs },
@@ -16,7 +16,7 @@ export function ProjectHead({ project, address, tab, runs, runState }: { project
         action={
           <div className="flex flex-wrap items-end gap-3 md:justify-end">
             <PauseRuns projectId={project.id} paused={runState.paused} liveRun={runState.liveRun} />
-            {!runState.paused && <PrimaryLink href={`/projects/${project.id}#start`}>New run</PrimaryLink>}
+            {!runState.paused && <PrimaryLink href={`/projects/${project.id}${planId ? `?plan=${planId}` : ""}#start`}>New run</PrimaryLink>}
           </div>
         }
       />

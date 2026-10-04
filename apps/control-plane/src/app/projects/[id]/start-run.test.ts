@@ -119,3 +119,10 @@ test("an account the beta list will refuse is told so in place of the offer and 
   expect(html).not.toContain('name="authorised"');
   expect(html).not.toContain('name="onUs"');
 });
+
+test("the Start panel names the plan it starts when the project has several", () => {
+  const panel = (planLabel?: string) => renderToStaticMarkup(createElement(StartRun, { projectId: "p1", planId: "pl1", projectName: "Acme Invoices", ...(planLabel ? { planLabel } : {}), personas: 2, keyHint: null, canManageKey: true, authorisedBefore: true }));
+  expect(panel("Invitations")).toContain("Acme Invoices</span> · <span class=\"text-ink\">Invitations</span>");
+  expect(panel()).not.toContain("Invitations");
+  expect(panel("Invitations")).toContain('<input type="hidden" name="planId" value="pl1"/>');
+});

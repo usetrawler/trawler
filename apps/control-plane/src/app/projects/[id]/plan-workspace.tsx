@@ -175,8 +175,8 @@ function planProblem(personas: PlanPerson[], goals: Goal[]): string | null {
   return null;
 }
 
-export function PlanWorkspace({ projectId, planId, projectName, initialPersonas, initialGoals, initialAccounts, keyHint, canManageKey, authorisedBefore, firstRunOnUs, startRefusal, closedBeta, workspacePlan }: {
-  projectId: string; planId: string; projectName: string; initialPersonas: PlanPerson[]; initialGoals: Goal[]; initialAccounts: AccountView[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; firstRunOnUs?: boolean; startRefusal?: StartRefusal; closedBeta?: string; workspacePlan?: WorkspacePlan;
+export function PlanWorkspace({ projectId, planId, planLabel, projectName, initialPersonas, initialGoals, initialAccounts, keyHint, canManageKey, authorisedBefore, firstRunOnUs, startRefusal, closedBeta, workspacePlan }: {
+  projectId: string; planId: string; planLabel?: string; projectName: string; initialPersonas: PlanPerson[]; initialGoals: Goal[]; initialAccounts: AccountView[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; firstRunOnUs?: boolean; startRefusal?: StartRefusal; closedBeta?: string; workspacePlan?: WorkspacePlan;
 }) {
   const [saved, setSaved] = useState({ personas: initialPersonas, goals: initialGoals });
   const [personas, setPersonas] = useState(initialPersonas);
@@ -314,7 +314,7 @@ export function PlanWorkspace({ projectId, planId, projectName, initialPersonas,
 
       {personas.length > 1 && <OrderOfPlay personas={personas} goals={goals} onMove={moveGoal} />}
 
-      <StartRun projectId={projectId} planId={planId} projectName={projectName} personas={saved.personas.length} goalsPerTurn={turnsOf(saved).map((t) => t.goalIds.length)} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} firstRunOnUs={firstRunOnUs} refusal={startRefusal} closedBeta={closedBeta} onStarting={setStarting} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : overPlan)} />
+      <StartRun projectId={projectId} planId={planId} projectName={projectName} planLabel={planLabel} personas={saved.personas.length} goalsPerTurn={turnsOf(saved).map((t) => t.goalIds.length)} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} firstRunOnUs={firstRunOnUs} refusal={startRefusal} closedBeta={closedBeta} onStarting={setStarting} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : overPlan)} />
     </div>
   );
 }

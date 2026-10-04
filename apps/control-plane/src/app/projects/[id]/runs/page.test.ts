@@ -2,10 +2,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 import type { RunLine } from "../../../../projects/overview.ts";
 
-type Asked = { orgId: string; projectId?: string; show?: string; before?: number };
+type Asked = { orgId: string; projectId?: string; planId?: string; show?: string; before?: number };
 const state = vi.hoisted(() => ({
   signedIn: true, found: true, runs: [] as RunLine[], olderThan: null as number | null,
-  tenants: [] as string[], heads: [] as Array<[string, string]>, asked: [] as Array<{ orgId: string; projectId?: string; show?: string; before?: number }>,
+  tenants: [] as string[], heads: [] as Array<[string, string]>, asked: [] as Array<{ orgId: string; projectId?: string; planId?: string; show?: string; before?: number }>, plans: [{ id: "11111111-1111-4111-8111-111111111111", name: "Plan 1", features: [], people: 2 }, { id: "22222222-2222-4222-8222-222222222222", name: "Invitations", features: [], people: 1 }], planCounted: [] as Array<string | undefined>,
   counted: [] as Array<[string, string | undefined]>, shells: [] as Array<string | null | undefined>,
 }));
 const ID = vi.hoisted(() => "0f8fad5b-d9cb-469f-a165-70867728950e");
@@ -27,6 +27,7 @@ vi.mock("../../../../server/shell.ts", () => ({
 }));
 vi.mock("../../../../runs/runs.ts", () => ({ projectRunState: async () => (state.found ? { paused: false, liveRun: null } : null) }));
 vi.mock("../../../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
+vi.mock("../../../../projects/projects.ts", () => ({ listPlans: async () => state.plans }));
 vi.mock("../../../../projects/overview.ts", async (original) => ({
   hostOf: (await original<typeof import("../../../../projects/overview.ts")>()).hostOf,
   projectHead: async (_tx: unknown, orgId: string, projectId: string) => {
@@ -37,17 +38,18 @@ vi.mock("../../../../projects/overview.ts", async (original) => ({
     state.asked.push({ orgId, ...options });
     return { runs: state.runs, olderThan: state.olderThan };
   },
-  runCounts: async (_tx: unknown, orgId: string, projectId?: string) => {
+  runCounts: async (_tx: unknown, orgId: string, projectId?: string, planId?: string) => {
     state.counted.push([orgId, projectId]);
-    return { all: 3, completed: 1, attention: 2 };
+    state.planCounted.push(planId);
+    return planId ? { all: 1, completed: 1, attention: 0 } : { all: 3, completed: 1, attention: 2 };
   },
 }));
 
 const { default: ProjectRunsPage } = await import("./page.tsx");
-const open = (id: string, search: { show?: string | string[]; before?: string | string[] } = {}) => ProjectRunsPage({ params: Promise.resolve({ id }), searchParams: Promise.resolve(search) });
+const open = (id: string, search: { show?: string | string[]; before?: string | string[]; plan?: string | string[] } = {}) => ProjectRunsPage({ params: Promise.resolve({ id }), searchParams: Promise.resolve(search) });
 const run: RunLine = {
   id: "r12", number: 12, status: "failed", createdAt: new Date("2026-09-25T12:32:00Z"), costUsd: 0.2, tokenCap: null, tokensUsed: 0,
-  confirmed: 0, unchecked: false, goalsReached: 0, goalsTotal: 3, projectId: ID, projectName: "Acme", projectSite: null,
+  confirmed: 0, unchecked: false, goalsReached: 0, goalsTotal: 3, projectId: ID, projectName: "Acme", projectSite: null, planName: null,
 };
 
 beforeEach(() => {
@@ -58,6 +60,7 @@ beforeEach(() => {
   state.tenants = [];
   state.heads = [];
   state.asked = [];
+  state.planCounted = [];
   state.counted = [];
   state.shells = [];
 });
@@ -119,4 +122,17 @@ test("a visitor who is not signed in, or no longer belongs to any workspace, is 
   await expect(open(ID)).rejects.toMatchObject({ to: "/sign-in" });
   expect(state.tenants).toEqual([]);
   expect(state.asked).toEqual([]);
+});
+
+test("a plan of the project narrows the runs and their counts, a plan it does not have is ignored, and the plans are offered", async () => {
+  const second = "22222222-2222-4222-8222-222222222222";
+  const html = renderToStaticMarkup(await open(ID, { plan: second }));
+  expect(state.asked).toEqual([{ orgId: "org-1", projectId: ID, planId: second, show: "all", before: undefined }]);
+  expect(state.planCounted).toEqual([second, undefined]);
+  expect(html).toContain("Runs of a plan");
+  expect(html).toMatch(/>Runs<span[^>]*>3<\/span>/);
+  expect(html).toMatch(new RegExp(`href="/projects/${ID}\\?plan=${second}#start"`));
+  await open(ID, { plan: "33333333-3333-4333-8333-333333333333" });
+  expect(state.asked.at(-1)).not.toHaveProperty("planId");
+  expect(state.planCounted.at(-1)).toBeUndefined();
 });

@@ -6,7 +6,7 @@ import { firstName, Overview, overviewSubtitle } from "./overview.tsx";
 
 const run = (over: Partial<RunLine> = {}): RunLine => ({
   id: "r9", number: 9, status: "succeeded", createdAt: new Date("2026-09-25T12:32:00Z"), costUsd: 0.4, tokenCap: null, tokensUsed: 0,
-  confirmed: 2, unchecked: false, goalsReached: 4, goalsTotal: 6, projectId: "p1", projectName: "Acme", projectSite: null, ...over,
+  confirmed: 2, unchecked: false, goalsReached: 4, goalsTotal: 6, projectId: "p1", projectName: "Acme", projectSite: null, planName: null, ...over,
 });
 const acme: ProjectLine = { id: "p1", name: "Acme Invoices", targetUrl: "https://app.acme.test/billing", site: null, lastRun: run() };
 const fresh: ProjectLine = { id: "p2", name: "Globex", targetUrl: "https://shop.globex.test/", site: null, lastRun: null };
