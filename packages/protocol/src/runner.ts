@@ -86,6 +86,7 @@ export const JobAssignmentSchema = z.object({
   returning: z.boolean().optional(),
   story: z.array(StoryEntrySchema).max(MAX_STORY).optional(),
   signUpSeed: z.string().max(200).optional(),
+  conversation: z.object({ peers: z.array(z.object({ id: z.string(), name: z.string() })).max(12) }).optional(),
   notBugs: z.array(NotABugSchema).max(MAX_NOT_BUGS).optional(),
   accountRef: z.string().optional(),
   finding: FindingSchema.optional(),
@@ -121,3 +122,17 @@ export const JobCompletionSchema = z.object({
   knownNotBugs: z.array(z.object({ key: z.string().min(1).max(200), ref: z.string().min(1).max(300) })).max(MAX_GROUPED_DEFECTS).optional(),
 });
 export type JobCompletion = z.infer<typeof JobCompletionSchema>;
+
+export const MAX_CHANNEL_MESSAGES = 200;
+
+export const ChannelMessageSchema = z.object({
+  id: z.number().int().positive(),
+  personaId: z.string(),
+  name: z.string(),
+  text: z.string().max(1000),
+  at: z.iso.datetime(),
+});
+export type ChannelMessage = z.infer<typeof ChannelMessageSchema>;
+
+export const ChannelSchema = z.object({ messages: z.array(ChannelMessageSchema).max(MAX_CHANNEL_MESSAGES) });
+export type Channel = z.infer<typeof ChannelSchema>;
