@@ -218,8 +218,8 @@ export function createAuth(options: AuthOptions) {
     advanced: { ipAddress: { ipAddressHeaders: ["x-real-ip"] } },
     account: { encryptOAuthTokens: true },
     socialProviders: {
-      ...(options.github ? { github: options.github } : {}),
-      ...(options.google ? { google: options.google } : {}),
+      ...(options.github ? { github: { ...options.github, prompt: "select_account" as const } } : {}),
+      ...(options.google ? { google: { ...options.google, prompt: "select_account" as const } } : {}),
     },
     plugins: [organizationPlugin(async (email) => (await workspaceOfEmail(email)) !== null), ...devSignIn(options.devOidc), nextCookies()],
     disabledPaths: CLOSED_ORGANIZATION_PATHS.map((path) => `/organization/${path}`),
