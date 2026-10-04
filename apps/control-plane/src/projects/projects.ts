@@ -260,7 +260,7 @@ export async function removePlan(tx: Tx, orgId: string, projectId: string, planI
 
 export class AccountLimit extends Error {
   constructor() {
-    super(`a project can hold at most ${MAX_ACCOUNTS} test accounts`);
+    super(`a plan can hold at most ${MAX_ACCOUNTS} test accounts`);
   }
 }
 
