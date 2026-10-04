@@ -1,6 +1,6 @@
 "use client";
 import { unstable_isUnrecognizedActionError, useRouter } from "next/navigation";
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { removePlanAction, renamePlanAction } from "./plan-actions.ts";
 
@@ -16,7 +16,14 @@ export function PlanTitle({ projectId, planId, name, canRemove }: { projectId: s
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const [removed, setRemoved] = useState(false);
   const keep = useRef<HTMLButtonElement>(null);
+  const openRemove = useRef<HTMLButtonElement>(null);
+  const wasConfirming = useRef(false);
+  useEffect(() => {
+    if (wasConfirming.current && !confirming) openRemove.current?.focus();
+    wasConfirming.current = confirming;
+  }, [confirming]);
   const rename = () => {
     const next = value.trim();
     if (next === saved) {
@@ -43,6 +50,7 @@ export function PlanTitle({ projectId, planId, name, canRemove }: { projectId: s
       setError(res.error);
       return;
     }
+    setRemoved(true);
     router.replace(`/projects/${projectId}`);
   });
   const errorId = `plan-name-error-${planId}`;
@@ -66,6 +74,7 @@ export function PlanTitle({ projectId, planId, name, canRemove }: { projectId: s
         </label>
         {canRemove && !confirming && (
           <button
+            ref={openRemove}
             type="button"
             aria-expanded={false}
             onClick={() => {
@@ -80,7 +89,7 @@ export function PlanTitle({ projectId, planId, name, canRemove }: { projectId: s
         {confirming && (
           <span className="flex flex-wrap items-center gap-3 text-sm" role="group" aria-label={`Remove ${saved}?`}>
             <span>Remove {saved}? Its people, goals and test accounts go; past runs keep their reports.</span>
-            <button type="button" onClick={remove} disabled={pending} className="text-bad underline underline-offset-4">Remove</button>
+            <button type="button" onClick={remove} disabled={pending || removed} className="text-bad underline underline-offset-4">Remove</button>
             <button type="button" ref={keep} onClick={() => setConfirming(false)} className="text-muted underline underline-offset-4">Keep it</button>
           </span>
         )}
