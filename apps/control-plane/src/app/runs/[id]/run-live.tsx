@@ -65,6 +65,25 @@ export function outcome(view: View): { people: string; goals: string } {
   };
 }
 
+export function Conversation({ run }: { run: RunSummary }) {
+  if (!run.conversation) return null;
+  const name = (personaKey: string | null) => run.personas.find((p) => p.id === personaKey)?.name ?? "Someone";
+  return (
+    <section aria-labelledby="conversation" className="mt-6 flex flex-col gap-2">
+      <h2 id="conversation" className={`${label} text-muted`}>Conversation</h2>
+      {run.conversationMessages.length === 0 ? (
+        <p className="text-sm text-muted">No one has said anything yet.</p>
+      ) : (
+        <ul className="flex flex-col gap-1.5 border-l-2 border-action pl-3 text-sm">
+          {run.conversationMessages.map((m) => (
+            <li key={m.id}><span className="font-bold">{name(m.personaKey)}</span> <span className="text-muted">says</span> &ldquo;{m.text}&rdquo;</li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export function CancelButton({ runId, onDone }: { runId: string; onDone: () => void }) {
   const [asking, setAsking] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
@@ -587,6 +606,8 @@ export function RunLive({ initial, closedBeta }: { initial: Data; closedBeta?: s
       ) : (
         <Outcome run={run} view={view} />
       )}
+
+      <Conversation run={run} />
 
       <div className={`mt-[34px] grid gap-5 ${view.live ? "" : "wide:grid-cols-[minmax(0,1fr)_290px]"}`}>
         <div className="flex min-w-0 flex-col gap-8">

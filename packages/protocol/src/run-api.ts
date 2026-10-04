@@ -35,6 +35,7 @@ export const StartRunResponseSchema = z.object({
   id: z.string().uuid(),
   number: z.number().int().positive(),
   reportUrl: z.string().url(),
+  people: z.number().int().positive().optional(),
 });
 export type StartRunResponse = z.infer<typeof StartRunResponseSchema>;
 

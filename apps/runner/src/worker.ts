@@ -1,8 +1,8 @@
 import type { LanguageModel } from "ai";
 import { z } from "zod";
-import { type Browser, Budget, checkAccount, groupDefects, judge, MIN_SECRET_LENGTH, runReplay, runRoleSession, type Screenshot, SecretScrubber } from "@usetrawler/core";
+import { type Browser, Budget, checkAccount, groupDefects, judge, MIN_SECRET_LENGTH, runReplay, runRoleSession, type Screenshot, SecretScrubber, type TeamChannel } from "@usetrawler/core";
 import {
-  JobAssignmentSchema, MAX_EVENTS_PER_BATCH, MAX_URL, PROTOCOL_HEADER, PROTOCOL_VERSION,
+  ChannelSchema, JobAssignmentSchema, MAX_EVENTS_PER_BATCH, MAX_URL, PROTOCOL_HEADER, PROTOCOL_VERSION,
   type JobAssignment, type JobCompletion, type JobStopReason, type JobUsage, type ProjectConfig, type RunEvent, type RunEventInput,
 } from "@usetrawler/protocol";
 
@@ -35,6 +35,7 @@ export interface WorkerDeps {
 }
 
 const CLOSE_TIMEOUT_MS = 10_000;
+const CHANNEL_TIMEOUT_MS = 10_000;
 const UPLOAD_ATTEMPTS = 6;
 const UPLOAD_TIMEOUT_MS = 30_000;
 const UPLOAD_WAIT_MS = 35_000;
@@ -89,6 +90,20 @@ async function call(deps: WorkerDeps, path: string, bearer: string, body: unknow
     if (i < attempts - 1) await pause((deps.retryBaseMs ?? 500) * 2 ** i * (0.5 + Math.random()), signal);
   }
   throw last instanceof Error ? last : new Error(String(last));
+}
+
+function channelFor(deps: WorkerDeps, job: JobAssignment): TeamChannel {
+  return {
+    read: async (afterId) => {
+      const url = new URL(`/api/runner/jobs/${encodeURIComponent(job.jobId)}/channel?${new URLSearchParams({ after: String(afterId) })}`, deps.controlPlane);
+      const res = await (deps.fetch ?? fetch)(url, {
+        headers: { authorization: `Bearer ${job.token}`, [PROTOCOL_HEADER]: String(PROTOCOL_VERSION) },
+        signal: AbortSignal.timeout(CHANNEL_TIMEOUT_MS),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status} from the channel`);
+      return ChannelSchema.parse(await res.json()).messages;
+    },
+  };
 }
 
 class JobEvents {
@@ -257,6 +272,7 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
         scrubber, budget, maxSteps: job.maxSteps, emit: events.emit, newFindingId: () => (job.turn ? `t${job.turn}f${++n}` : `f${++n}`),
         screenshot: () => b.screenshot(), keepScreenshot: screenshots.keep, pageUrl: () => b.pageUrl(), botProtection: () => b.botProtection?.() ?? null,
         goalIds: job.goalIds, story: job.story, signUpSeed: job.signUpSeed, returning: job.returning, notBugs: job.notBugs, look: deps.look?.(config.targetUrl),
+        ...(job.conversation ? { conversation: { peers: job.conversation.peers, channel: channelFor(deps, job) } } : {}),
       }),
     );
     return { usage, stoppedBy: result.stoppedBy, ...(result.error ? { error: clip(result.error) } : {}) };

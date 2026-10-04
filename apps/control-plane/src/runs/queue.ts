@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "kysely";
 import { z } from "zod";
-import { DefectGroupsSchema, FindingSchema, JobCompletionSchema, JobUsageSchema, MAX_GROUPED_DEFECTS, settleGroups, JobStopReasonSchema, ReplayObservationSchema, RunEventSchema, SignInCheckSchema, ACCOUNT_CHECK_STEPS, trimStory, turnsOf, type DefectToGroup, type Finding, type JobStopReason, type JobUsage, type NotABug, type ProjectConfig, type ReplayObservation, type RunEvent, type SignInCheck, type StoryEntry, type Turn } from "@usetrawler/protocol";
+import { MAX_CHANNEL_MESSAGES, DefectGroupsSchema, FindingSchema, JobCompletionSchema, JobUsageSchema, MAX_GROUPED_DEFECTS, settleGroups, JobStopReasonSchema, ReplayObservationSchema, RunEventSchema, SignInCheckSchema, ACCOUNT_CHECK_STEPS, trimStory, turnsOf, type ChannelMessage, type DefectToGroup, type Finding, type JobStopReason, type JobUsage, type NotABug, type ProjectConfig, type ReplayObservation, type RunEvent, type SignInCheck, type StoryEntry, type Turn } from "@usetrawler/protocol";
 import type { Database } from "../db/index.ts";
 import { asSystem, type Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -40,6 +40,7 @@ export interface JobAssignment {
   turn?: number;
   returning?: boolean;
   story?: StoryEntry[];
+  conversation?: { peers: Array<{ id: string; name: string }> };
   signUpSeed?: string;
   notBugs?: NotABug[];
   accountRef?: string;
@@ -149,6 +150,11 @@ async function storyBefore(tx: Tx, runId: string, position: number, snapshot: Co
   return trimStory(story);
 }
 
+function peersOf(snapshot: ConfigSnapshot, personaKey: string | null): Array<{ id: string; name: string }> {
+  const inTurns = new Set(turnsOf(snapshot).map((t) => t.personaId));
+  return snapshot.personas.filter((p) => p.id !== personaKey && inTurns.has(p.id)).map((p) => ({ id: p.id, name: p.name }));
+}
+
 async function claimOnce(db: Database, keys: Keyring, scope: ClaimScope): Promise<ClaimOutcome> {
   return asSystem(db, async (tx) => {
     const picked = await tx
@@ -156,14 +162,19 @@ async function claimOnce(db: Database, keys: Keyring, scope: ClaimScope): Promis
       .innerJoin("runs as r", "r.id", "j.run_id")
       .innerJoin("projects as p", "p.id", "r.project_id")
       .leftJoin("workspace_plans as wp", "wp.org_id", "j.org_id")
-      .select(["j.id", "j.org_id", "j.run_id", "j.kind", "j.position", "j.persona_key", "j.finding_key", "j.account_ref", "r.project_id", "r.plan_id", "r.status as run_status", "r.config_snapshot", "r.max_steps", "r.replay_steps", "r.budget_usd", "r.cost_usd", "r.agent_model", "r.judge_model", "r.sign_up_seed"])
+      .select(["j.id", "j.org_id", "j.run_id", "j.kind", "j.position", "j.persona_key", "j.finding_key", "j.account_ref", "r.project_id", "r.plan_id", "r.status as run_status", "r.config_snapshot", "r.max_steps", "r.replay_steps", "r.budget_usd", "r.cost_usd", "r.agent_model", "r.judge_model", "r.sign_up_seed", "r.conversation"])
       .where("j.status", "=", "queued")
       .where("p.paused_at", "is", null)
       .where("r.execution", "=", scope.execution)
       .$if(scope.execution === "own", (q) => q.where("j.org_id", "=", (scope as OwnScope).orgId))
       .$if(scope.execution === "own" && (scope as OwnScope).projectId !== null, (q) => q.where("r.project_id", "=", (scope as OwnScope).projectId!))
       .where((eb) => eb.or([eb("r.status", "in", ACTIVE), eb("j.requested_by", "is not", null)]))
-      .where((eb) => eb.not(eb.exists(eb.selectFrom("jobs as busy").select("busy.id").whereRef("busy.run_id", "=", "j.run_id").where("busy.status", "=", "leased"))))
+      .where(sql<boolean>`not exists (
+        select 1 from jobs busy where busy.run_id = j.run_id and (
+          (busy.status = 'leased' and not (r.conversation and j.kind = 'role_session' and busy.kind = 'role_session' and busy.persona_key is distinct from j.persona_key))
+          or (r.conversation and j.kind = 'role_session' and busy.kind = 'account_check' and busy.status = 'queued')
+        )
+      )`)
       .orderBy(sql`r.started_at is null or j.requested_by is not null`)
       .orderBy(sql`coalesce(wp.plan, 'free') = 'free'`)
       .orderBy("r.created_at")
@@ -184,7 +195,8 @@ async function claimOnce(db: Database, keys: Keyring, scope: ClaimScope): Promis
       const finding = picked.finding_key ? await findingFor(tx, picked.run_id, picked.finding_key) : undefined;
       const config = configFor(snapshot, current);
       const turn = picked.kind === "role_session" && picked.sign_up_seed ? turnAt(snapshot, picked.position, picked.persona_key) : undefined;
-      const story = turn ? await storyBefore(tx, picked.run_id, picked.position, snapshot) : undefined;
+      const story = turn && !picked.conversation ? await storyBefore(tx, picked.run_id, picked.position, snapshot) : undefined;
+      const peers = turn && picked.conversation ? peersOf(snapshot, picked.persona_key) : undefined;
       const returning = turn ? turnsOf(snapshot).slice(0, picked.position).some((t) => t.personaId === picked.persona_key) : undefined;
       const defects = picked.kind === "group" ? await defectsToGroup(tx, picked.run_id, config) : undefined;
       const notBugs = picked.kind === "role_session" || picked.kind === "group" ? await notBugsOf(tx, picked.org_id, picked.project_id) : [];
@@ -196,7 +208,7 @@ async function claimOnce(db: Database, keys: Keyring, scope: ClaimScope): Promis
           kind: picked.kind as JobAssignment["kind"],
           config,
           personaKey: picked.persona_key ?? undefined,
-          ...(turn ? { goalIds: turn.goalIds, turn: picked.position, returning, story, signUpSeed: keys.decrypt(picked.sign_up_seed!, signUpSeedContext(picked.org_id, picked.run_id)) } : {}),
+          ...(turn ? { goalIds: turn.goalIds, turn: picked.position, returning, story, ...(peers ? { conversation: { peers } } : {}), signUpSeed: keys.decrypt(picked.sign_up_seed!, signUpSeedContext(picked.org_id, picked.run_id)) } : {}),
           accountRef: picked.account_ref ?? (finding ? config.personas.find((p) => p.id === finding.personaKey)?.accountRef : undefined),
           finding: finding?.finding,
           observation: finding?.replay,
@@ -441,6 +453,41 @@ export async function ingestEvents(db: Database, token: string, events: RunEvent
     }
     await tx.updateTable("jobs").set({ lease_until: sql<Date>`now() + make_interval(mins => ${LEASE_MINUTES})` }).where("id", "=", job.id).execute();
     return { cancel: judgingAgain ? await judgeAgainStopped(tx, job.run_id) : await stopIfOverLimits(tx, job.run_id) };
+  });
+}
+
+export async function channelFor(db: Database, token: string, jobId: string, after: number): Promise<ChannelMessage[]> {
+  return asSystem(db, async (tx) => {
+    const job = await tx
+      .selectFrom("jobs as j")
+      .innerJoin("runs as r", "r.id", "j.run_id")
+      .select(["j.run_id", "j.persona_key", "r.config_snapshot"])
+      .where("j.id", "=", jobId)
+      .where("j.token_hash", "=", hashToken(token))
+      .where("j.status", "=", "leased")
+      .where(sql<boolean>`j.lease_until >= now()`)
+      .executeTakeFirst();
+    if (!job) throw new InvalidJobToken();
+    const rows = await tx
+      .selectFrom("run_events as e")
+      .innerJoin("jobs as author", "author.id", "e.job_id")
+      .select(["e.id", "e.at", "e.payload", "author.persona_key"])
+      .where("e.run_id", "=", job.run_id)
+      .where("e.type", "=", "message")
+      .where("author.kind", "=", "role_session")
+      .where("author.persona_key", "is distinct from", job.persona_key)
+      .where("e.id", ">", String(after))
+      .orderBy("e.id")
+      .limit(MAX_CHANNEL_MESSAGES)
+      .execute();
+    const name = new Map((job.config_snapshot as unknown as ConfigSnapshot).personas.map((p) => [p.id, p.name]));
+    return rows.map((row) => ({
+      id: Number(row.id),
+      personaId: row.persona_key ?? "",
+      name: name.get(row.persona_key ?? "") ?? row.persona_key ?? "",
+      text: (row.payload as unknown as Extract<RunEvent, { type: "message" }>).text,
+      at: new Date(row.at).toISOString(),
+    }));
   });
 }
 

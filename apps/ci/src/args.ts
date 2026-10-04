@@ -3,7 +3,7 @@ import { EXECUTIONS, FAIL_ON, type Execution, type FailOn } from "@usetrawler/pr
 
 export const USAGE = `Usage:
   trawler-ci run --project <uuid> [--api <url>] [--plan <uuid>] [--url <address>] [--runner hosted|own]
-                 [--cap <usd>] [--model <id>] [--fail-on new-confirmed|any-confirmed|never]
+                 [--cap <usd>] [--model <id>] [--conversation] [--fail-on new-confirmed|any-confirmed|never]
                  [--timeout-minutes <n>] [--no-comment]
 
 Environment:
@@ -22,6 +22,7 @@ export interface Options {
   execution: Execution;
   cap?: number;
   model?: string;
+  conversation: boolean;
   failOn: FailOn;
   timeoutMinutes: number;
   comment: boolean;
@@ -62,7 +63,7 @@ export function parseCliArgs(argv: string[], env: Record<string, string | undefi
     options: {
       api: { type: "string" }, project: { type: "string" }, plan: { type: "string" }, url: { type: "string" }, runner: { type: "string" },
       cap: { type: "string" }, model: { type: "string" }, "fail-on": { type: "string" }, "timeout-minutes": { type: "string" },
-      "no-comment": { type: "boolean" }, help: { type: "boolean", short: "h" },
+      "no-comment": { type: "boolean" }, conversation: { type: "boolean" }, help: { type: "boolean", short: "h" },
     },
   });
   if (values.help) return { help: true };
@@ -95,6 +96,7 @@ export function parseCliArgs(argv: string[], env: Record<string, string | undefi
       execution: oneOf("runner", values.runner, EXECUTIONS, "hosted"),
       cap,
       model: values.model,
+      conversation: values.conversation === true,
       failOn: oneOf("fail-on", values["fail-on"], FAIL_ON, "new-confirmed"),
       timeoutMinutes,
       comment: !values["no-comment"],

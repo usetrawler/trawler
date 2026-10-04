@@ -30,6 +30,7 @@ export interface StartRunOptions {
   execution?: Execution;
   targetUrl?: string;
   pullRequest?: PullRequest;
+  conversation?: boolean;
   usesFirstRunOnUs?: boolean;
 }
 
@@ -147,7 +148,7 @@ async function refusalToRun(tx: Tx, orgId: string, projectId: string, paidBy: Pa
   return people > plan.limits.people ? new TooManyPeople(plan, people) : null;
 }
 
-export async function startRun(tx: Tx, orgId: string, projectId: string, keys: Keyring, options: StartRunOptions): Promise<{ id: string; number: number }> {
+export async function startRun(tx: Tx, orgId: string, projectId: string, keys: Keyring, options: StartRunOptions): Promise<{ id: string; number: number; people: number }> {
   await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forShare().execute();
   const plan = await planOf(tx, orgId, projectId, options.planId);
   const execution = options.execution ?? "hosted";
@@ -156,6 +157,9 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
   const config = options.targetUrl === undefined ? loaded : { ...loaded, targetUrl: options.targetUrl, allowedOrigins: [...new Set([new URL(options.targetUrl).origin, ...loaded.allowedOrigins])] };
   const without = await personWithoutAccount(tx, plan.id);
   if (without) throw new NeedsAccount(without);
+  const turns = turnsOf(config);
+  const people = new Set(turns.map((t) => t.personaId)).size;
+  const conversation = options.conversation === true && people > 1;
   const paidBy = options.paidBy ?? "workspace";
   const usesFirstRunOnUs = paidBy === "trawler" && options.usesFirstRunOnUs !== false;
   if (usesFirstRunOnUs && config.personas.length > FIRST_RUN_ON_US.maxPeople) throw new TooManyForFirstRun(config.personas.length);
@@ -171,7 +175,7 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
       max_steps: options.maxSteps, replay_steps: options.replaySteps, created_by: options.createdBy,
       provider: options.provider ?? "openrouter", provider_base_url: options.providerBaseUrl ?? null, token_cap: options.tokenCap ? String(options.tokenCap) : null,
       prompt_usd_per_mtok: options.price ? options.price.promptUsdPerMtok.toFixed(6) : null, completion_usd_per_mtok: options.price ? options.price.completionUsdPerMtok.toFixed(6) : null,
-      paid_by: paidBy, execution, pull_request: options.pullRequest ? JSON.stringify(options.pullRequest) : null,
+      paid_by: paidBy, execution, conversation, pull_request: options.pullRequest ? JSON.stringify(options.pullRequest) : null,
     })
     .returning(["id", "number"])
     .executeTakeFirstOrThrow();
@@ -184,8 +188,8 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
   if (accounts.length) {
     await tx.insertInto("jobs").values(accounts.map((ref, i) => ({ org_id: orgId, run_id: run.id, kind: "account_check", position: i - accounts.length, account_ref: ref }))).execute();
   }
-  await tx.insertInto("jobs").values(turnsOf(config).map((turn, i) => ({ org_id: orgId, run_id: run.id, kind: "role_session", position: i, persona_key: turn.personaId }))).execute();
-  return run;
+  await tx.insertInto("jobs").values(turns.map((turn, i) => ({ org_id: orgId, run_id: run.id, kind: "role_session", position: i, persona_key: turn.personaId, together: conversation }))).execute();
+  return { ...run, people };
 }
 
 export class RunNotFound extends Error {
@@ -304,14 +308,14 @@ export async function runIdByNumber(tx: Tx, orgId: string, number: number): Prom
 export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const run = await tx
     .selectFrom("runs")
-    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason", "paid_by", "plan_id", "plan_name", sql<string>`(select count(*) from plans p where p.project_id = runs.project_id and p.org_id = runs.org_id)`.as("plan_count")])
+    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason", "paid_by", "conversation", "plan_id", "plan_name", sql<string>`(select count(*) from plans p where p.project_id = runs.project_id and p.org_id = runs.org_id)`.as("plan_count")])
     .where("id", "=", runId)
     .where("org_id", "=", orgId)
     .executeTakeFirst();
   if (!run) return null;
   const snapshot = run.config_snapshot as unknown as ConfigSnapshot;
   const goalText = new Map(snapshot.goals.map((g) => [g.id, g.instruction]));
-  const [jobs, findings, goals, activity, screenshots, botProtection, dismissals] = await Promise.all([
+  const [jobs, findings, goals, activity, screenshots, botProtection, dismissals, said] = await Promise.all([
     tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error", sql<boolean>`requested_by is not null`.as("requested")]).where("run_id", "=", runId).orderBy("position").execute(),
     tx.selectFrom("findings").select(["key", "persona_key", "kind", "filed_as", "goal", "title", "observed", "reproduction", "severity", "replay", "verdict", "same_as", "url", "quote", "step_people"]).where("run_id", "=", runId).orderBy("created_at").orderBy("key").execute(),
     tx.selectFrom("goal_outcomes").select(["persona_key", "goal", "status", "note"]).where("run_id", "=", runId).orderBy("persona_key").orderBy("goal").execute(),
@@ -349,6 +353,17 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
       .select(["d.finding_key", "d.reason", "d.dismissed_by", "d.dismissed_at", "d.matched_finding_key", "m.number as matched_run_number"])
       .where("d.run_id", "=", runId)
       .execute(),
+    run.conversation
+      ? tx
+          .selectFrom("run_events as e")
+          .innerJoin("jobs as j", "j.id", "e.job_id")
+          .select(["e.id", "e.at", "e.payload", "j.persona_key"])
+          .where("e.run_id", "=", runId)
+          .where("e.type", "=", "message")
+          .orderBy("e.id", "desc")
+          .limit(CONVERSATION_SHOWN)
+          .execute()
+      : Promise.resolve([]),
   ]);
   const dismissal = new Map(dismissals.map((d) => [d.finding_key, {
     reason: d.reason, userId: d.dismissed_by, at: d.dismissed_at, by: null as string | null,
@@ -360,6 +375,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
     id: run.id, number: run.number, status: run.status, cancelReason: run.cancel_reason as CancelReason | null, projectId: run.project_id, planName: run.plan_id === null || Number(run.plan_count) > 1 ? run.plan_name : null,
     costUsd: Number(run.cost_usd), budgetUsd: Number(run.budget_usd), completionUsdPerMtok: run.completion_usd_per_mtok === null ? null : Number(run.completion_usd_per_mtok), agentModel: run.agent_model, judgeModel: run.judge_model,
     provider: run.provider, paidBy: run.paid_by as PaidBy, tokenCap: run.token_cap === null ? null : Number(run.token_cap), tokensUsed: Number(run.tokens_used),
+    conversation: run.conversation,
     createdAt: run.created_at, startedAt: run.started_at, finishedAt: run.finished_at,
     jobs,
     findings: findings.map((f) => ({
@@ -372,16 +388,19 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
     target: snapshot.targetUrl,
     personas: snapshot.personas.map((p) => ({ id: p.id, name: p.name })),
     goalTexts: snapshot.goals.map((g) => ({ id: g.id, instruction: g.instruction, ...(g.personaId ? { personaId: g.personaId } : {}) })),
+    conversationMessages: said.toReversed().map((m) => ({ id: String(m.id), at: m.at, personaKey: m.persona_key, text: (m.payload as unknown as Extract<RunEvent, { type: "message" }>).text })),
     activity: activity.map((a) => ({ id: String(a.id), at: a.at, personaKey: a.persona_key, kind: a.kind, text: activityText(a.payload as unknown as RunEvent, goalText, findingTitle) })),
   };
 }
+
+const CONVERSATION_SHOWN = 60;
 
 export type RunSummary = NonNullable<Awaited<ReturnType<typeof runSummary>>>;
 
 const VERDICT_LABEL: Record<Verdict, string> = { confirmed: "Confirmed", refuted: "Refuted", inconclusive: "Inconclusive" };
 
 function activityText(e: RunEvent, goalText: Map<string, string>, findingTitle: Map<string, string>): string {
-  if (e.type === "note") return e.text;
+  if (e.type === "note" || e.type === "message") return e.text;
   if (e.type === "finding") return `${e.finding.kind === "defect" ? "Reported a defect" : "Noted friction"}: ${e.finding.title}`;
   if (e.type === "goal_status") return `Goal ${e.outcome.status === "reached" ? "reached" : "not reached"}: ${goalText.get(e.outcome.goal) ?? e.outcome.goal}`;
   if (e.type === "verdict") return `${VERDICT_LABEL[e.verdict]}: ${findingTitle.get(e.findingId) ?? e.findingId}`;

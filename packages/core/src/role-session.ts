@@ -5,7 +5,7 @@ import { browserQueue, runAgentLoop } from "./agent-loop.ts";
 import type { Budget } from "./llm.ts";
 import { rolePrompt, sessionStatus } from "./prompts.ts";
 import type { SecretScrubber } from "./secrets.ts";
-import { findingUrl, madeUpEmail, madeUpPassword, newSessionState, noteBotProtection, ownPasswordTool, sessionTools, type FillField } from "./session-tools.ts";
+import { findingUrl, madeUpEmail, madeUpPassword, newSessionState, noteBotProtection, ownPasswordTool, sessionTools, teamTools, type FillField, type TeamChannel } from "./session-tools.ts";
 import type { BotProtection } from "./bot-protection.ts";
 import { LOOK_TOOL, lookTool } from "./look.ts";
 
@@ -34,6 +34,7 @@ export async function runRoleSession(opts: {
   notBugs?: NotABug[];
   jobId?: string;
   look?: boolean;
+  conversation?: { peers: { id: string; name: string }[]; channel: TeamChannel };
 }): Promise<{ result: RoleResult; usage: JobUsage }> {
   if (!Number.isInteger(opts.maxSteps) || opts.maxSteps < 1) throw new RangeError(`maxSteps must be a positive integer, got ${opts.maxSteps}`);
   const jobId = opts.jobId ?? `role:${opts.persona.id}`;
@@ -66,6 +67,7 @@ export async function runRoleSession(opts: {
       scrubber: opts.scrubber, newId: opts.newFindingId, capture, pageUrl: opts.pageUrl, botProtection: opts.botProtection,
       people: opts.project.personas.map((p) => ({ id: p.id, name: p.name })), self: opts.persona.id,
     }),
+    ...(opts.conversation ? teamTools({ state, emit, jobId, channel: opts.conversation.channel, scrubber: opts.scrubber }) : {}),
     ...(opts.persona.accountRef ? {} : ownPasswordTool({ state, fillField: opts.fillField, inBrowser: queue.run, scrubber: opts.scrubber, password: seed === undefined ? undefined : madeUpPassword(seed) })),
   };
   const base = rolePrompt({
@@ -74,6 +76,7 @@ export async function runRoleSession(opts: {
     signUpEmail: opts.persona.accountRef ? undefined : madeUpEmail(opts.persona.id, seed),
     story: opts.story, returning: opts.returning, notBugs: opts.notBugs, look: LOOK_TOOL in look,
     others: opts.project.personas.filter((p) => p.id !== opts.persona.id).map((p) => p.name),
+    team: opts.conversation?.peers.map((p) => p.name),
   });
   const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
 

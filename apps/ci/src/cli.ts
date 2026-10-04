@@ -40,19 +40,22 @@ async function execute(options: Options, deps: CliDeps): Promise<number> {
     deps.err("warning: a hosted runner cannot reach localhost; use --runner own for a server started in this job");
   }
   const started = await api.startRun({
-    project: options.project, plan: options.plan, url: options.url, execution: options.execution, cap: options.cap, model: options.model, pullRequest,
+    project: options.project, plan: options.plan, url: options.url, execution: options.execution, cap: options.cap, model: options.model, conversation: options.conversation || undefined, pullRequest,
   });
   deps.err(`Trawler run #${started.number} started (${adapter.name}${pullRequest?.number ? `, pull request #${pullRequest.number}` : ""})`);
   deps.err(`Report: ${started.reportUrl}`);
 
-  let runner: RunnerProcess | undefined;
+  const runners: RunnerProcess[] = [];
   let disposeSignals = () => {};
   try {
     if (options.execution === "own") {
-      runner = (deps.startRunner ?? startRunner)({ api: options.api, token: options.token, env: deps.env, log: deps.err });
-      const stopRunner = runner;
+      const count = options.conversation ? Math.max(1, started.people ?? 1) : 1;
+      for (let i = 0; i < count; i++) {
+        runners.push((deps.startRunner ?? startRunner)({ api: options.api, token: options.token, env: deps.env, log: deps.err }));
+      }
+      const stoppable = runners;
       disposeSignals = onSignals((signal) => {
-        void stopRunner.stop().finally(() => process.exit(signal === "SIGINT" ? 130 : 143));
+        void Promise.all(stoppable.map((r) => r.stop())).finally(() => process.exit(signal === "SIGINT" ? 130 : 143));
       });
     }
     const waited = await waitForRun({
@@ -60,7 +63,7 @@ async function execute(options: Options, deps: CliDeps): Promise<number> {
       sleep: deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
       onProgress: (line) => deps.err(`Run #${started.number}: ${line}`), warn: (line) => deps.err(`warning: ${line}`),
       check: () => {
-        const failure = runner?.failure();
+        const failure = runners.map((r) => r.failure()).find((f) => f !== undefined);
         if (failure) throw new Error(`${failure} before the run finished; see the [runner] lines above`);
       },
     });
@@ -88,7 +91,7 @@ async function execute(options: Options, deps: CliDeps): Promise<number> {
     return decision.exitCode;
   } finally {
     disposeSignals();
-    await runner?.stop();
+    await Promise.all(runners.map((r) => r.stop()));
   }
 }
 
