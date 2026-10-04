@@ -47,6 +47,8 @@ vi.mock("../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: str
 vi.mock("../../credentials/credentials.ts", () => ({ modelKeyDetails: async () => state.key }));
 vi.mock("../../runs/limits.ts", () => ({ monthlyBudget: async () => state.budget, monthSpent: async () => state.spent }));
 vi.mock("../../runs/plans.ts", () => ({ workspacePlan: async () => state.plan, projectsCounted: async () => state.projects, runsToday: async () => state.today }));
+vi.mock("../../api-tokens/tokens.ts", () => ({ listApiTokens: async () => [] }));
+vi.mock("../../projects/projects.ts", () => ({ listProjects: async () => [] }));
 vi.mock("./actions.ts", () => ({
   setMonthlyBudgetAction: async () => ({}), removeMonthlyBudgetAction: async () => ({}),
   renameWorkspaceAction: async () => ({}), replaceModelKeyAction: async () => ({}), removeModelKeyAction: async () => ({}),
@@ -81,7 +83,7 @@ test("settings name who added the key among this workspace's members, and mark S
 });
 
 test("the page is headed like the app's other pages", async () => {
-  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("Settings Workspace, plan, members, model key and budget. The name, what the plan allows, the people in it, the model key every run of this workspace uses, and what runs may spend in a month.");
+  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("Settings Workspace, plan, members, model key, budget and API tokens. The name, what the plan allows, the people in it, the model key every run of this workspace uses, and what runs may spend in a month.");
 });
 
 test("a key added by someone who is no longer in this workspace says so, and a workspace without a key looks nobody up", async () => {
