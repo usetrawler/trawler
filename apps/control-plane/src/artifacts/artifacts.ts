@@ -82,12 +82,14 @@ export async function storeArtifact(
   return { id };
 }
 
-export async function artifactLink(db: Database, store: ArtifactStore, orgId: string, id: string): Promise<string | null> {
+export async function openArtifact(db: Database, store: ArtifactStore, orgId: string, id: string): Promise<{ body: ReadableStream<Uint8Array>; contentType: string; size: number } | null> {
   if (!UUID.test(id)) return null;
   const artifact = await withOrg(db, orgId, (tx) =>
-    tx.selectFrom("artifacts").select("storage_key").where("id", "=", id).where("org_id", "=", orgId).where("stored_at", "is not", null).where("discarded_at", "is", null).executeTakeFirst(),
+    tx.selectFrom("artifacts").select(["storage_key", "content_type", "size_bytes"]).where("id", "=", id).where("org_id", "=", orgId).where("stored_at", "is not", null).where("discarded_at", "is", null).executeTakeFirst(),
   );
-  return artifact ? store.link(artifact.storage_key) : null;
+  if (!artifact) return null;
+  const body = await store.read(artifact.storage_key);
+  return body ? { body, contentType: artifact.content_type, size: artifact.size_bytes } : null;
 }
 
 export async function screenCapture(db: Database, orgId: string, id: string) {
