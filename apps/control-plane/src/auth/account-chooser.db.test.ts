@@ -1,8 +1,11 @@
 import pg from "pg";
 import { afterAll, expect, test } from "vitest";
+import { testDb } from "../db/test-db.ts";
 import { createAuth } from "./auth.ts";
 
-const pool = new pg.Pool({ connectionString: "postgres://nobody@127.0.0.1:1/none", connectionTimeoutMillis: 1_000 });
+const t = await testDb();
+afterAll(() => t.drop());
+const pool = new pg.Pool({ connectionString: t.url, max: 2 });
 afterAll(() => pool.end());
 const auth = createAuth({
   pool, secret: "x".repeat(32), baseURL: "http://localhost:3000",
