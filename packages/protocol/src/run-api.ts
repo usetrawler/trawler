@@ -26,6 +26,7 @@ export const StartRunRequestSchema = z.object({
   execution: z.enum(EXECUTIONS).default("hosted"),
   cap: z.number().min(0.1).max(50).optional(),
   model: z.string().min(1).max(200).optional(),
+  conversation: z.boolean().optional(),
   pullRequest: PullRequestSchema.optional(),
 });
 export type StartRunRequest = z.input<typeof StartRunRequestSchema>;
