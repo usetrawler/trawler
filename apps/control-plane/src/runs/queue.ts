@@ -110,6 +110,12 @@ async function reapExpiredLeases(db: Database): Promise<void> {
   });
 }
 
+type OwnScope = Extract<ClaimScope, { execution: "own" }>;
+
+export type ClaimScope = { execution: "hosted" } | { execution: "own"; orgId: string; projectId: string | null };
+
+export const HOSTED_SCOPE: ClaimScope = { execution: "hosted" };
+
 type ClaimOutcome = { assignment: JobAssignment } | { quarantined: true } | null;
 
 function turnAt(snapshot: ConfigSnapshot, position: number, personaKey: string | null): Turn {
@@ -143,7 +149,7 @@ async function storyBefore(tx: Tx, runId: string, position: number, snapshot: Co
   return trimStory(story);
 }
 
-async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
+async function claimOnce(db: Database, keys: Keyring, scope: ClaimScope): Promise<ClaimOutcome> {
   return asSystem(db, async (tx) => {
     const picked = await tx
       .selectFrom("jobs as j")
@@ -153,6 +159,9 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
       .select(["j.id", "j.org_id", "j.run_id", "j.kind", "j.position", "j.persona_key", "j.finding_key", "j.account_ref", "r.project_id", "r.plan_id", "r.status as run_status", "r.config_snapshot", "r.max_steps", "r.replay_steps", "r.budget_usd", "r.cost_usd", "r.agent_model", "r.judge_model", "r.sign_up_seed"])
       .where("j.status", "=", "queued")
       .where("p.paused_at", "is", null)
+      .where("r.execution", "=", scope.execution)
+      .$if(scope.execution === "own", (q) => q.where("j.org_id", "=", (scope as OwnScope).orgId))
+      .$if(scope.execution === "own" && (scope as OwnScope).projectId !== null, (q) => q.where("r.project_id", "=", (scope as OwnScope).projectId!))
       .where((eb) => eb.or([eb("r.status", "in", ACTIVE), eb("j.requested_by", "is not", null)]))
       .where((eb) => eb.not(eb.exists(eb.selectFrom("jobs as busy").select("busy.id").whereRef("busy.run_id", "=", "j.run_id").where("busy.status", "=", "leased"))))
       .orderBy(sql`r.started_at is null or j.requested_by is not null`)
@@ -209,13 +218,13 @@ async function claimOnce(db: Database, keys: Keyring): Promise<ClaimOutcome> {
   });
 }
 
-export async function claimJob(db: Database, keys: Keyring): Promise<JobAssignment | null> {
+export async function claimJob(db: Database, keys: Keyring, scope: ClaimScope = HOSTED_SCOPE): Promise<JobAssignment | null> {
   await reapExpiredLeases(db);
   if (runsHalted()) return null;
   for (let attempt = 0; attempt < 5; attempt++) {
     let outcome: ClaimOutcome;
     try {
-      outcome = await claimOnce(db, keys);
+      outcome = await claimOnce(db, keys, scope);
     } catch (err) {
       if ((err as { code?: string }).code === "23505") continue;
       throw err;

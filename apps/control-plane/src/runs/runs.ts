@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { sql } from "kysely";
-import { turnsOf, type ProjectConfig, type RunEvent, type Verdict } from "@usetrawler/protocol";
+import { turnsOf, type Execution, type ProjectConfig, type PullRequest, type RunEvent, type Verdict } from "@usetrawler/protocol";
 import { modelKey } from "../credentials/credentials.ts";
 import type { Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -27,6 +27,10 @@ export interface StartRunOptions {
   tokenCap?: number | null;
   paidBy?: PaidBy;
   planId?: string;
+  execution?: Execution;
+  targetUrl?: string;
+  pullRequest?: PullRequest;
+  usesFirstRunOnUs?: boolean;
 }
 
 export type PaidBy = "workspace" | "trawler";
@@ -56,6 +60,12 @@ export async function personWithoutAccount(tx: Tx, planId: string): Promise<stri
 }
 
 export class RunRefused extends Error {}
+
+export class TargetOverrideRefused extends RunRefused {
+  constructor() {
+    super("A different target URL can only be tested by a runner in your own network. Use execution \"own\", or leave the URL out to test the project's target.");
+  }
+}
 
 export class RunInProgress extends RunRefused {
   constructor(readonly run: { id: string; number: number }) {
@@ -140,11 +150,15 @@ async function refusalToRun(tx: Tx, orgId: string, projectId: string, paidBy: Pa
 export async function startRun(tx: Tx, orgId: string, projectId: string, keys: Keyring, options: StartRunOptions): Promise<{ id: string; number: number }> {
   await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forShare().execute();
   const plan = await planOf(tx, orgId, projectId, options.planId);
-  const config = await loadProjectConfig(tx, orgId, projectId, keys, plan.id);
+  const execution = options.execution ?? "hosted";
+  if (options.targetUrl !== undefined && execution !== "own") throw new TargetOverrideRefused();
+  const loaded = await loadProjectConfig(tx, orgId, projectId, keys, plan.id);
+  const config = options.targetUrl === undefined ? loaded : { ...loaded, targetUrl: options.targetUrl, allowedOrigins: [...new Set([new URL(options.targetUrl).origin, ...loaded.allowedOrigins])] };
   const without = await personWithoutAccount(tx, plan.id);
   if (without) throw new NeedsAccount(without);
   const paidBy = options.paidBy ?? "workspace";
-  if (paidBy === "trawler" && config.personas.length > FIRST_RUN_ON_US.maxPeople) throw new TooManyForFirstRun(config.personas.length);
+  const usesFirstRunOnUs = paidBy === "trawler" && options.usesFirstRunOnUs !== false;
+  if (usesFirstRunOnUs && config.personas.length > FIRST_RUN_ON_US.maxPeople) throw new TooManyForFirstRun(config.personas.length);
   await sql`select pg_advisory_xact_lock(hashtextextended(${`runs:${orgId}`}, 0))`.execute(tx);
   const refused = await refusalToStart(tx, orgId, projectId, paidBy, plan.id);
   if (refused) throw refused;
@@ -157,11 +171,11 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
       max_steps: options.maxSteps, replay_steps: options.replaySteps, created_by: options.createdBy,
       provider: options.provider ?? "openrouter", provider_base_url: options.providerBaseUrl ?? null, token_cap: options.tokenCap ? String(options.tokenCap) : null,
       prompt_usd_per_mtok: options.price ? options.price.promptUsdPerMtok.toFixed(6) : null, completion_usd_per_mtok: options.price ? options.price.completionUsdPerMtok.toFixed(6) : null,
-      paid_by: paidBy,
+      paid_by: paidBy, execution, pull_request: options.pullRequest ? JSON.stringify(options.pullRequest) : null,
     })
     .returning(["id", "number"])
     .executeTakeFirstOrThrow();
-  if (paidBy === "trawler") {
+  if (usesFirstRunOnUs) {
     const claimed = await tx.insertInto("first_runs_on_us").values({ org_id: orgId, run_id: run.id }).onConflict((oc) => oc.column("org_id").doNothing()).returning("org_id").executeTakeFirst();
     if (!claimed) throw new FirstRunOnUsUsed();
   }
