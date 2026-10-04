@@ -126,6 +126,7 @@ export interface Goals {
   key: string;
   org_id: string;
   persona_key: string;
+  plan_id: string;
   position: number;
   project_id: string;
 }
@@ -212,9 +213,20 @@ export interface Personas {
   key: string;
   name: string;
   org_id: string;
+  plan_id: string;
   position: number;
   project_id: string;
   signs_in: Generated<boolean>;
+}
+
+export interface Plans {
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  name: string;
+  org_id: string;
+  position: Generated<number>;
+  project_id: string;
+  updated_at: Generated<Timestamp>;
 }
 
 export interface Projects {
@@ -261,6 +273,8 @@ export interface Runs {
   number: number;
   org_id: string;
   paid_by: Generated<string>;
+  plan_id: string | null;
+  plan_name: string;
   project_id: string;
   prompt_usd_per_mtok: Numeric | null;
   provider: Generated<string>;
@@ -316,6 +330,7 @@ export interface TargetAccounts {
   org_id: string;
   password_hint: string;
   password_secret: string;
+  plan_id: string;
   position: number;
   project_id: string;
   ref: string;
@@ -327,6 +342,7 @@ export interface TargetGates {
   kind: string;
   name: string;
   org_id: string;
+  plan_id: string;
   position: number;
   project_id: string;
   secret: string | null;
@@ -384,6 +400,7 @@ export interface DB {
   model_catalog: ModelCatalog;
   organization: Organization;
   personas: Personas;
+  plans: Plans;
   projects: Projects;
   run_events: RunEvents;
   runs: Runs;
