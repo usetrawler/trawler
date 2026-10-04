@@ -4,7 +4,7 @@ on:
   workflow_run:
     workflows: [ci]
     types: [completed]
-    branches: [main]
+    branches: [main, stable]
 permissions:
   contents: read
 jobs:
@@ -13,7 +13,7 @@ jobs:
       github.repository == 'usetrawler/trawler' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_sha == github.sha
+      (github.event.workflow_run.head_branch == 'stable' || github.event.workflow_run.head_sha == github.sha)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -93,6 +93,7 @@ jobs:
 
   staging:
     needs: images
+    if: github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     environment: staging
@@ -120,7 +121,8 @@ jobs:
           RAILWAY_CORE_TOKEN: ${{ secrets.RAILWAY_CORE_TOKEN }}
 
   production:
-    needs: [images, staging]
+    needs: images
+    if: github.event.workflow_run.head_branch == 'stable'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: production
@@ -130,7 +132,7 @@ jobs:
         with: { ref: "${{ needs.images.outputs.commit }}", fetch-depth: 0 }
       - uses: actions/setup-node@v5
         with: { node-version: 24 }
-      - name: deploy the images staging approved to production
+      - name: deploy the images of the stable branch to production
         run: node scripts/release/deploy.ts
         env:
           RELEASE_ENVIRONMENT: production
