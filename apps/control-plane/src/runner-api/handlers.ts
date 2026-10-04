@@ -4,7 +4,8 @@ import { ArtifactNotStored, ArtifactRefused, checkArtifactUpload, hasSignatureOf
 import type { ArtifactStore } from "../artifacts/store.ts";
 import type { Database } from "../db/index.ts";
 import type { Keyring } from "../lib/secrets.ts";
-import { claimJob, completeJob, ForeignEvents, ingestEvents, InvalidJobToken, JobOver, releaseJob, releaseJobForShutdown } from "../runs/queue.ts";
+import { authenticateToken, TOKEN_SHAPE } from "../api-tokens/tokens.ts";
+import { claimJob, completeJob, HOSTED_SCOPE, type ClaimScope, ForeignEvents, ingestEvents, InvalidJobToken, JobOver, releaseJob, releaseJobForShutdown } from "../runs/queue.ts";
 
 export interface RunnerApiDeps {
   db: Database;
@@ -79,14 +80,23 @@ export async function readBody(req: Request, maxBytes = MAX_BODY_BYTES): Promise
   }
 }
 
+async function claimScopeOf(token: string, deps: RunnerApiDeps): Promise<ClaimScope | null> {
+  if (TOKEN_SHAPE.test(token)) {
+    const holder = await authenticateToken(deps.db, token);
+    return holder ? { execution: "own", orgId: holder.orgId, projectId: holder.projectId } : null;
+  }
+  return sameSecret(token, deps.runnerToken) ? HOSTED_SCOPE : null;
+}
+
 export async function handleClaim(req: Request, deps: RunnerApiDeps): Promise<Response> {
   const wrongProtocol = protocolProblem(req);
   if (wrongProtocol) return wrongProtocol;
   const token = bearer(req);
-  if (!token || !sameSecret(token, deps.runnerToken)) return problem(401, "unknown runner");
+  const scope = token ? await claimScopeOf(token, deps) : null;
+  if (!scope) return problem(401, "unknown runner");
   const deadline = Date.now() + (deps.claimWaitMs ?? 25_000);
   while (!req.signal.aborted) {
-    const job = await claimJob(deps.db, deps.keys);
+    const job = await claimJob(deps.db, deps.keys, scope);
     if (job && req.signal.aborted) {
       await releaseJob(deps.db, job);
       break;

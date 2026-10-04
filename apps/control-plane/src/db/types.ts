@@ -280,6 +280,7 @@ export interface Runs {
   cost_usd: Generated<Numeric>;
   created_at: Generated<Timestamp>;
   created_by: string;
+  execution: Generated<string>;
   finished_at: Timestamp | null;
   id: Generated<string>;
   judge_model: string;
@@ -293,6 +294,7 @@ export interface Runs {
   prompt_usd_per_mtok: Numeric | null;
   provider: Generated<string>;
   provider_base_url: string | null;
+  pull_request: Json | null;
   replay_steps: number;
   sign_up_seed: string | null;
   started_at: Timestamp | null;
