@@ -18,6 +18,7 @@ export interface RunLine {
   projectId: string;
   projectName: string;
   projectSite: string | null;
+  planName: string | null;
 }
 
 export type RunFilter = "all" | "completed" | "attention";
@@ -54,7 +55,8 @@ function runLines(tx: Tx, orgId: string) {
     .innerJoin("projects as p", "p.id", "r.project_id")
     .where("r.org_id", "=", orgId)
     .select((eb) => [
-      "r.id", "r.number", "r.status", "r.created_at", "r.cost_usd", "r.token_cap", "r.tokens_used", "r.project_id", "p.name as project_name", "p.target_url as project_url",
+      "r.id", "r.number", "r.status", "r.created_at", "r.cost_usd", "r.token_cap", "r.tokens_used", "r.project_id", "r.plan_name", "p.name as project_name", "p.target_url as project_url",
+      sql<boolean>`r.plan_id IS NULL OR (SELECT count(*) FROM plans pl WHERE pl.project_id = r.project_id) > 1`.as("plan_shown"),
       eb.exists(eb.selectFrom("projects as twin").select("twin.id").whereRef("twin.org_id", "=", "p.org_id").whereRef("twin.name", "=", "p.name").whereRef("twin.id", "<>", "p.id")).as("name_shared"),
       eb.selectFrom("findings as f").select((f) => f.fn.countAll<string>().as("n")).whereRef("f.run_id", "=", "r.id").where("f.kind", "=", "defect").where("f.verdict", "=", "confirmed")
         .where((f) => f.not(f.exists(f.selectFrom("finding_dismissals as d").select("d.run_id").whereRef("d.run_id", "=", "f.run_id").whereRef("d.finding_key", "=", "f.key"))))
@@ -73,7 +75,7 @@ function toLine(r: RunRow): RunLine {
     id: r.id, number: r.number, status: r.status, createdAt: r.created_at,
     costUsd: Number(r.cost_usd), tokenCap: r.token_cap === null ? null : Number(r.token_cap), tokensUsed: Number(r.tokens_used),
     confirmed: Number(r.confirmed ?? 0), unchecked: !!r.unchecked, goalsReached: Number(r.goals_reached ?? 0), goalsTotal: Number(r.goals_total ?? 0),
-    projectId: r.project_id, projectName: r.project_name, projectSite: r.name_shared ? siteOf(r.project_url) : null,
+    projectId: r.project_id, projectName: r.project_name, projectSite: r.name_shared ? siteOf(r.project_url) : null, planName: r.plan_shown ? r.plan_name : null,
   };
 }
 
@@ -106,11 +108,12 @@ export async function runHead(tx: Tx, orgId: string, runId: string) {
   return run ? { number: run.number, projectName: run.name } : null;
 }
 
-export async function workspaceRuns(tx: Tx, orgId: string, options: { projectId?: string; show?: RunFilter; before?: number; size?: number } = {}) {
+export async function workspaceRuns(tx: Tx, orgId: string, options: { projectId?: string; planId?: string; show?: RunFilter; before?: number; size?: number } = {}) {
   const size = options.size ?? RUNS_PER_PAGE;
   const show = options.show ?? "all";
   let query = runLines(tx, orgId).orderBy("r.number", "desc").limit(size + 1);
   if (options.projectId !== undefined) query = query.where("r.project_id", "=", options.projectId);
+  if (options.planId !== undefined) query = query.where("r.plan_id", "=", options.planId);
   if (show !== "all") query = query.where("r.status", "in", FILTER_STATUSES[show]);
   if (options.before !== undefined) query = query.where("r.number", "<", options.before);
   const rows = await query.execute();
@@ -118,7 +121,7 @@ export async function workspaceRuns(tx: Tx, orgId: string, options: { projectId?
   return { runs, olderThan: rows.length > size ? runs.at(-1)!.number : null };
 }
 
-export async function runCounts(tx: Tx, orgId: string, projectId?: string): Promise<Record<RunFilter, number>> {
+export async function runCounts(tx: Tx, orgId: string, projectId?: string, planId?: string): Promise<Record<RunFilter, number>> {
   let query = tx
     .selectFrom("runs")
     .where("org_id", "=", orgId)
@@ -128,6 +131,7 @@ export async function runCounts(tx: Tx, orgId: string, projectId?: string): Prom
       sql<string>`count(*) filter (where status in (${sql.join(FILTER_STATUSES.attention)}))`.as("attention"),
     ]);
   if (projectId !== undefined) query = query.where("project_id", "=", projectId);
+  if (planId !== undefined) query = query.where("plan_id", "=", planId);
   const counts = await query.executeTakeFirstOrThrow();
   return { all: Number(counts.all), completed: Number(counts.completed), attention: Number(counts.attention) };
 }

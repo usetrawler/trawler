@@ -129,7 +129,7 @@ test("the plan is the project's Plan tab, next to its Runs with their number, wi
   expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}/runs" class="[^"]*">Runs<span[^>]*>3</span></a>`));
   expect(state.counted).toEqual([["org-1", ID]]);
   expect(html).not.toContain('aria-label="Progress"');
-  expect(html).toMatch(new RegExp(`<a href="/projects/${ID}#start"[^>]*>New run<`));
+  expect(html).toMatch(new RegExp(`<a href="/projects/${ID}\\?plan=[0-9a-f-]+#start"[^>]*>New run<`));
   expect(html).toMatch(/>Project · <a href="https:\/\/app\.acme\.test\/"[^>]*>app\.acme\.test</);
 });
 

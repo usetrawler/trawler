@@ -21,12 +21,12 @@ export function RunTable({ runs, compact = false, project = true }: { runs: RunL
               <span className="min-w-0">
                 {project ? (
                   <>
-                    <strong className="block truncate">{r.projectName}{r.projectSite && <span className="font-normal text-muted"> · {r.projectSite}</span>}</strong>
+                    <strong className="block truncate">{r.projectName}{r.projectSite && <span className="font-normal text-muted"> · {r.projectSite}</span>}{r.planName && <span className="font-normal text-muted"> · {r.planName}</span>}</strong>
                     <small className="mt-0.5 block text-[10px] text-muted">{when}<span className={`md:hidden ${tone}`}> · {narrowStatus}</span></small>
                   </>
                 ) : (
                   <>
-                    <strong className="block truncate">{when}</strong>
+                    <strong className="block truncate">{when}{r.planName && <span className="font-normal text-muted"> · {r.planName}</span>}</strong>
                     <small className={`mt-0.5 block text-[10px] md:hidden ${tone}`}>{narrowStatus}</small>
                   </>
                 )}

@@ -542,7 +542,7 @@ export function RunLive({ initial, closedBeta }: { initial: Data; closedBeta?: s
         <div className={`flex min-w-0 flex-col ${view.live ? "md:min-w-80 md:flex-1" : "wide:flex-1"}`}>
           <p className="font-mono text-base tracking-[0.1em] text-muted uppercase">{runStatusLabel(run.status)} · <LocalTime iso={new Date(when).toISOString()} /></p>
           <h1 className={`my-2.5 font-bold wrap-anywhere ${view.live ? "text-[48px] leading-[0.94] tracking-[-0.06em] md:text-[clamp(48px,6vw,88px)]" : "text-[44px] leading-[0.96] tracking-[-0.055em] md:text-[clamp(44px,5vw,72px)]"}`}>{view.headline}</h1>
-          <p className="text-base break-words text-muted">{host} · {run.agentModel}</p>
+          <p className="text-base break-words text-muted">{host} · {run.planName && <>{run.planName} · </>}{run.agentModel}</p>
           {view.live && <p className="mt-2 max-w-[700px] text-lg text-muted">Defects count only after a fresh agent reproduces them.</p>}
           <p role="status" aria-live="polite" className="text-sm text-warn">
             {(gone || stale) && <span className="mt-2 block">{gone ? "This run is no longer available." : "Lost contact with Trawler. Retrying…"}</span>}

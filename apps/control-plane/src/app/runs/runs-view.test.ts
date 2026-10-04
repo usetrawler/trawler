@@ -2,11 +2,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { RunFilter, RunLine } from "../../projects/overview.ts";
-import { parseRunsQuery, RunsView } from "./runs-view.tsx";
+import { parsePlanQuery, parseRunsQuery, RunsView } from "./runs-view.tsx";
 
 const run: RunLine = {
   id: "r1", number: 12, status: "failed", createdAt: new Date("2026-09-25T12:32:00Z"), costUsd: 0.2, tokenCap: null, tokensUsed: 0,
-  confirmed: 0, unchecked: false, goalsReached: 0, goalsTotal: 3, projectId: "p1", projectName: "Acme", projectSite: null,
+  confirmed: 0, unchecked: false, goalsReached: 0, goalsTotal: 3, projectId: "p1", projectName: "Acme", projectSite: null, planName: null,
 };
 
 const render = (over: { show?: RunFilter; runs?: RunLine[]; olderThan?: number | null; paged?: boolean; scope?: "workspace" | "project" } = {}) => renderToStaticMarkup(createElement(RunsView, {
@@ -71,5 +71,28 @@ describe("parseRunsQuery", () => {
     for (const show of [undefined, "all", "running", "", ["completed", "attention"]]) expect(parseRunsQuery({ show }).show).toBe("all");
     for (const before of [undefined, "0", "-3", "4.5", "abc", "2147483648", "01", ["3", "4"]]) expect(parseRunsQuery({ before }).before).toBeUndefined();
     expect(parseRunsQuery({ before: "2147483647" }).before).toBe(2_147_483_647);
+  });
+});
+
+describe("RunsView, a project with several plans", () => {
+  const plans = [{ id: "pl-1", name: "Plan 1" }, { id: "pl-2", name: "Invitations" }];
+  const html = (plan?: string, show: RunFilter = "all") => renderToStaticMarkup(createElement(RunsView, {
+    head: null, basePath: "/projects/p1/runs", show, counts: { all: 3, completed: 2, attention: 1 }, runs: [run], olderThan: 5, paged: false, scope: "project", plans, ...(plan ? { plan } : {}),
+  }));
+  const planLinks = (markup: string) => [...(markup.match(/<nav aria-label="Runs of a plan".*?<\/nav>/)?.[0] ?? "").matchAll(/<a href="([^"]*)"( aria-current="page")?[^>]*>([^<]*)<\/a>/g)].map((m) => [m[3], m[1], Boolean(m[2])]);
+
+  it("offers all plans and each plan, marks the open one, and keeps the plan in the status filters and the paging", () => {
+    expect(planLinks(html())).toEqual([["All plans", "/projects/p1/runs", true], ["Plan 1", "/projects/p1/runs?plan=pl-1", false], ["Invitations", "/projects/p1/runs?plan=pl-2", false]]);
+    expect(planLinks(html("pl-2", "attention"))).toEqual([["All plans", "/projects/p1/runs?show=attention", false], ["Plan 1", "/projects/p1/runs?show=attention&amp;plan=pl-1", false], ["Invitations", "/projects/p1/runs?show=attention&amp;plan=pl-2", true]]);
+    expect(filters(html("pl-2")).map((f) => f.href)).toEqual(["/projects/p1/runs?plan=pl-2", "/projects/p1/runs?show=completed&amp;plan=pl-2", "/projects/p1/runs?show=attention&amp;plan=pl-2"]);
+    expect(pages(html("pl-2"))).toEqual([["Older runs", "/projects/p1/runs?before=5&amp;plan=pl-2"]]);
+  });
+
+  it("offers no plan filter to a project with one plan, and ignores a plan the project does not have", () => {
+    expect(renderToStaticMarkup(createElement(RunsView, { head: null, basePath: "/p", show: "all", counts: { all: 0, completed: 0, attention: 0 }, runs: [], olderThan: null, paged: false, scope: "project", plans: [plans[0]!] }))).not.toContain("Runs of a plan");
+    expect(parsePlanQuery({ plan: "pl-2" }, plans)).toBe("pl-2");
+    expect(parsePlanQuery({ plan: "other" }, plans)).toBeUndefined();
+    expect(parsePlanQuery({ plan: ["pl-2"] }, plans)).toBeUndefined();
+    expect(parsePlanQuery({}, plans)).toBeUndefined();
   });
 });

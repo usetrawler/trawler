@@ -8,7 +8,7 @@ import { Keyring } from "../lib/secrets.ts";
 import { runView } from "../runs/report.ts";
 import { runIdByNumber, runSummary, startRun } from "../runs/runs.ts";
 import { projectHead, projectRunCount, runCounts, runHead, workspaceNav, workspaceProjects, workspaceRuns } from "./overview.ts";
-import { createProject, replacePlan } from "./projects.ts";
+import { createPlan, createProject, listPlans, removePlan, replacePlan } from "./projects.ts";
 
 const t = await testDb();
 afterAll(() => t.drop());
@@ -19,6 +19,7 @@ const config = ProjectConfigSchema.parse({
   goals: [{ id: "sign-in", instruction: "Get in." }, { id: "invoice", instruction: "Send an invoice." }, { id: "export", instruction: "Export a year." }],
 });
 const options = { budgetUsd: 2, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 30, replaySteps: 20, createdBy: "u1" };
+const ConfigNamed = (name: string) => ProjectConfigSchema.parse({ ...config, name, targetUrl: `https://${name.toLowerCase()}.acme.test/` });
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
 
 let acme = "";
@@ -94,7 +95,7 @@ test("the home page lists every project of the workspace, the most recently acti
   expect(projects[2]).toMatchObject({ id: acme, targetUrl: "https://app.acme.test/" });
   expect(projects[2]!.lastRun).toEqual({
     id: live.id, number: live.number, status: "running", createdAt: expect.any(Date),
-    costUsd: 0.02, tokenCap: null, tokensUsed: 0, confirmed: 0, unchecked: false, goalsReached: 0, goalsTotal: 6, projectId: acme, projectName: "Acme", projectSite: null,
+    costUsd: 0.02, tokenCap: null, tokensUsed: 0, confirmed: 0, unchecked: false, goalsReached: 0, goalsTotal: 6, projectId: acme, projectName: "Acme", projectSite: null, planName: null,
   });
   expect(projects[1]!.lastRun).toMatchObject({ id: waiting.id, status: "queued", projectName: "Beta" });
 });
@@ -104,7 +105,7 @@ test("the workspace's runs are newest first across its projects, each with its p
   expect(history.runs.map((r) => r.id)).toEqual([waiting.id, live.id, latest.id, cancelled.id, capped.id, failed.id]);
   expect(history.runs[4]).toEqual({
     id: capped.id, number: capped.number, status: "stopped_budget", createdAt: expect.any(Date),
-    costUsd: 2, tokenCap: 100_000, tokensUsed: 120_000, confirmed: 1, unchecked: false, goalsReached: 2, goalsTotal: 6, projectId: acme, projectName: "Acme", projectSite: null,
+    costUsd: 2, tokenCap: 100_000, tokensUsed: 120_000, confirmed: 1, unchecked: false, goalsReached: 2, goalsTotal: 6, projectId: acme, projectName: "Acme", projectSite: null, planName: null,
   });
   expect(history.runs[3]).toMatchObject({ status: "cancelled", projectId: beta, projectName: "Beta" });
   expect(history.runs[5]).toMatchObject({ status: "failed", confirmed: 0, unchecked: false, goalsReached: 0, goalsTotal: 6, costUsd: 0.1 });
@@ -307,4 +308,31 @@ test("a run number reaches only the workspace's own run with that number, never 
   expect(await withOrg(t.db, "org-b", (tx) => runIdByNumber(tx, "org-a", latest.number))).toBeNull();
   expect(await asSystem(t.db, (tx) => runIdByNumber(tx, "org-b", latest.number))).toBe(await ownRun("org-b", latest.number));
   expect(await withOrg(t.db, "org-a", (tx) => runIdByNumber(tx, "org-a", 9999))).toBeNull();
+});
+
+test("a run line names its plan only when the project has several, or when the plan was removed, and a project's runs can be narrowed to one plan", async () => {
+  const org = "org-a";
+  const solo = await withOrg(t.db, org, (tx) => createProject(tx, org, ConfigNamed("Solo"), keys));
+  const soloRun = await seedRun(org, solo, hoursAgo(1), { status: "succeeded", cost: 0.2 }, [], 1);
+  const lines = async (projectId: string, planId?: string) => (await withOrg(t.db, org, (tx) => workspaceRuns(tx, org, { projectId, ...(planId ? { planId } : {}) }))).runs;
+  expect((await lines(solo)).map((r) => r.planName)).toEqual([null]);
+
+  const two = await withOrg(t.db, org, (tx) => createProject(tx, org, ConfigNamed("Duo"), keys));
+  const second = await withOrg(t.db, org, (tx) => createPlan(tx, org, two, { name: "Invitations", personas: [{ id: "kofi", name: "Kofi", brief: "b" }], goals: [{ id: "g", instruction: "Invite.", personaId: "kofi" }] }));
+  const first = (await withOrg(t.db, org, (tx) => listPlans(tx, org, two)))[0]!;
+  const a = await seedRun(org, two, hoursAgo(3), { status: "succeeded", cost: 0.2 }, [], 1);
+  await asSystem(t.db, (tx) => tx.updateTable("runs").set({ plan_id: second.id, plan_name: "Invitations" }).where("id", "=", a.id).execute());
+  const b = await seedRun(org, two, hoursAgo(2), { status: "succeeded", cost: 0.2 }, [], 1);
+  expect((await lines(two)).map((r) => [r.id, r.planName])).toEqual([[b.id, first.name], [a.id, "Invitations"]]);
+  expect((await lines(two, second.id)).map((r) => r.id)).toEqual([a.id]);
+  expect((await lines(two, first.id)).map((r) => r.id)).toEqual([b.id]);
+  expect(await withOrg(t.db, org, (tx) => runCounts(tx, org, two, second.id))).toEqual({ all: 1, completed: 1, attention: 0 });
+  expect(await withOrg(t.db, org, (tx) => runCounts(tx, org, two))).toEqual({ all: 2, completed: 2, attention: 0 });
+  const summary = await withOrg(t.db, org, (tx) => runSummary(tx, org, a.id));
+  expect(summary!.planName).toBe("Invitations");
+  expect((await withOrg(t.db, org, (tx) => runSummary(tx, org, soloRun.id)))!.planName).toBeNull();
+
+  await withOrg(t.db, org, (tx) => removePlan(tx, org, two, second.id));
+  expect((await lines(two)).map((r) => [r.id, r.planName])).toEqual([[b.id, null], [a.id, "Invitations"]]);
+  expect((await withOrg(t.db, org, (tx) => runSummary(tx, org, a.id)))!.planName).toBe("Invitations");
 });

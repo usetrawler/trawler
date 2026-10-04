@@ -6,7 +6,7 @@ import { RunTable } from "./run-table.tsx";
 
 const line = (over: Partial<RunLine> = {}): RunLine => ({
   id: "r1", number: 17, status: "succeeded", createdAt: new Date("2026-09-25T12:32:00Z"), costUsd: 3.08, tokenCap: null, tokensUsed: 0,
-  confirmed: 3, unchecked: false, goalsReached: 2, goalsTotal: 3, projectId: "p1", projectName: "Acme Invoices", projectSite: null, ...over,
+  confirmed: 3, unchecked: false, goalsReached: 2, goalsTotal: 3, projectId: "p1", projectName: "Acme Invoices", projectSite: null, planName: null, ...over,
 });
 const render = (runs: RunLine[], project = true) => renderToStaticMarkup(createElement(RunTable, { runs, project }));
 const rows = (html: string) => html.match(/<li[^>]*>.*?<\/li>/g) ?? [];
@@ -78,4 +78,12 @@ test("narrow run rows keep their results and spend below the date in both histor
 test("the narrow summary preserves unchecked defects and token-priced spend", () => {
   expect(narrowSummary(render([line({ confirmed: 0, unchecked: true })]))).toBe("not checked · 2/3 goals · $3.08");
   expect(narrowSummary(render([line({ tokenCap: 1_000_000, tokensUsed: 1_234_567 })]))).toBe("3 confirmed · 2/3 goals · 1.23M tokens");
+});
+
+test("a run names its plan after the project, or after its date inside a project, only when the line carries one", () => {
+  const [named] = rows(render([line({ planName: "Invitations" })]));
+  expect(named).toContain("Invitations</span></strong>");
+  const [inProject] = rows(render([line({ planName: "Invitations" })], false));
+  expect(inProject).toMatch(/<time[^>]*>[^<]*<\/time><span class="font-normal text-muted"> · Invitations<\/span>/);
+  expect(rows(render([line()])[0] ? render([line()]) : "")[0]).not.toContain(" · Invitations");
 });

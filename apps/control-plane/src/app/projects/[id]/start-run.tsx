@@ -105,8 +105,8 @@ export function OnUs({ range, goalsPerTurn, personas }: { range: PriceRange | nu
   );
 }
 
-export function StartRun({ projectId, planId, projectName, personas, goalsPerTurn = Array.from({ length: personas }, () => 1), keyHint: savedHint, canManageKey, authorisedBefore, firstRunOnUs, blocked, refusal, closedBeta, onStarting }: {
-  projectId: string; planId: string; projectName: string; personas: number; goalsPerTurn?: number[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; firstRunOnUs?: boolean; blocked?: string; refusal?: StartRefusal; closedBeta?: string; onStarting?: (starting: boolean) => void;
+export function StartRun({ projectId, planId, planLabel, projectName, personas, goalsPerTurn = Array.from({ length: personas }, () => 1), keyHint: savedHint, canManageKey, authorisedBefore, firstRunOnUs, blocked, refusal, closedBeta, onStarting }: {
+  projectId: string; planId: string; planLabel?: string; projectName: string; personas: number; goalsPerTurn?: number[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; firstRunOnUs?: boolean; blocked?: string; refusal?: StartRefusal; closedBeta?: string; onStarting?: (starting: boolean) => void;
 }) {
   const [state, action, pending] = useActionState<StartState, FormData>(startTheRun, {});
   const keyHint = state.keyHint ?? savedHint;
@@ -199,7 +199,7 @@ export function StartRun({ projectId, planId, projectName, personas, goalsPerTur
   if (closedBeta) {
     return (
       <form id="start" onSubmit={(e) => e.preventDefault()} className="flex flex-col gap-5 border border-line bg-panel p-5">
-        <p className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Start · <span className="text-ink">{projectName}</span></p>
+        <p className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Start · <span className="text-ink">{projectName}</span>{planLabel && <> · <span className="text-ink">{planLabel}</span></>}</p>
         <p id="start-blocked" className="border-l-2 border-warn pl-3 text-sm">{closedBeta}</p>
         <div className="flex justify-end">
           <Submit blocked={closedBeta} pending={false} noticed={false} checksKey={false} />
@@ -220,7 +220,7 @@ export function StartRun({ projectId, planId, projectName, personas, goalsPerTur
       className="flex flex-col gap-5 border border-line bg-panel p-5">
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="planId" value={planId} />
-      <p className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Start · <span className="text-ink">{projectName}</span></p>
+      <p className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Start · <span className="text-ink">{projectName}</span>{planLabel && <> · <span className="text-ink">{planLabel}</span></>}</p>
       {notice && <p id="start-notice" className="border-l-2 border-warn pl-3 text-sm">{notice.message}<OpenRun run={notice.activeRun} /></p>}
 
       {onUs ? (
