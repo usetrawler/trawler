@@ -323,6 +323,13 @@ describe("describeProduct", () => {
     expect(usage.steps).toBe(2);
   });
 
+  test("a page that gets no features twice ends with the readable reason after two tries", async () => {
+    const empty = { name: "Acme", description: "A pitch board.", signUp: "unclear", features: [] };
+    const model = scriptedModel([text(JSON.stringify(empty)), text(JSON.stringify(empty))]);
+    await expect(describeProduct({ model, modelId: "mock", budget: new Budget(1), product: { url: "https://app.acme.test/", page: "Acme" } })).rejects.toThrow("the setup model found no features on the page");
+    expect(model.doGenerateCalls).toHaveLength(2);
+  });
+
   test("names the product, describes it and lists its features, most central first", async () => {
     const summary = { name: "Acme", description: "A pitch board.", signUp: "open", features: [{ title: " Submit a pitch ", summary: "Founders send a pitch." }, { title: "Review pitches", summary: "Reviewers approve." }, { title: "submit a pitch", summary: "dup" }, { title: " ", summary: "empty" }] };
     const model = scriptedModel([text(JSON.stringify(summary))]);

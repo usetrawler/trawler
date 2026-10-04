@@ -129,8 +129,9 @@ export async function describeDraft(deps: SetupDeps, input: { orgId: string; dra
   let summary: ProductSummary;
   const started = Date.now();
   try {
-    let usage;
-    ({ summary, usage } = await describeProduct({ model: deps.model, modelId: deps.modelId, budget: new Budget(SETUP_BUDGET_USD), product: productOf(draft) }));
+    const described = await describeProduct({ model: deps.model, modelId: deps.modelId, budget: new Budget(SETUP_BUDGET_USD), product: productOf(draft) });
+    summary = described.summary;
+    const { usage } = described;
     void writeLog("info", "setup described the product", { orgId: input.orgId, seconds: (Date.now() - started) / 1000, model: usage.model, tries: usage.steps, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, costUsd: usage.costUsd }).catch(() => undefined);
   } catch (err) {
     await withOrg(deps.db, input.orgId, (tx) => tx.updateTable("setup_drafts").set({ describe_failed_at: sql<Date>`now()` }).where("id", "=", draft.id).execute()).catch(() => undefined);
