@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { ADDRESS_HAS_A_WORKSPACE, WORKSPACE_NAME_RULE } from "../../auth/plugins.ts";
+import { createApiToken, revokeApiToken, TokenLimit, TokenNameSchema, TokenProjectNotFound } from "../../api-tokens/tokens.ts";
 import { modelKeyHint, removeModelKey, setModelKey } from "../../credentials/credentials.ts";
 import { withOrg } from "../../db/tenancy.ts";
 import { freshEndpoint, withinListingLimit } from "../../llm/key-input.ts";
@@ -209,4 +210,42 @@ export async function changeRoleAction(_previous: MembersState, form: FormData):
   const role = roleFrom(form.get("role"));
   const refused = await throughAuth(member.orgId, async () => auth.api.updateMemberRole({ headers: await headers(), body: { memberId: target.id, role, organizationId: member.orgId } }), "Their role could not be changed. Try again.");
   return refused ?? { done: `${nameOf(target)} is now ${role === "admin" ? "an admin" : "a member"}.` };
+}
+
+export interface ApiTokenState {
+  error?: string;
+  created?: { name: string; token: string };
+  revoked?: boolean;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const TOKEN_OWNERS_AND_ADMINS = "Only an owner or admin of this workspace can create or revoke API tokens.";
+
+export async function createApiTokenAction(_previous: ApiTokenState, form: FormData): Promise<ApiTokenState> {
+  const member = await manager();
+  if ("error" in member) return { error: TOKEN_OWNERS_AND_ADMINS };
+  const name = TokenNameSchema.safeParse(String(form.get("name") ?? ""));
+  if (!name.success) return { error: "Give the token a name of up to 100 characters." };
+  const project = String(form.get("project") ?? "");
+  if (project && !UUID.test(project)) return { error: "That project is not in this workspace." };
+  try {
+    const made = await withOrg(getDb(), member.orgId, (tx) => createApiToken(tx, member.orgId, member.userId, { name: name.data, ...(project ? { projectId: project } : {}) }));
+    revalidatePath("/settings");
+    return { created: { name: name.data, token: made.token } };
+  } catch (err) {
+    if (err instanceof TokenLimit) return { error: "A workspace can hold at most 20 API tokens. Revoke one first." };
+    if (err instanceof TokenProjectNotFound) return { error: "That project is not in this workspace." };
+    await logError("an API token could not be created", { orgId: member.orgId, err });
+    return { error: "The token could not be created. Try again." };
+  }
+}
+
+export async function revokeApiTokenAction(_previous: ApiTokenState, form: FormData): Promise<ApiTokenState> {
+  const member = await manager();
+  if ("error" in member) return { error: TOKEN_OWNERS_AND_ADMINS };
+  const id = String(form.get("id") ?? "");
+  if (!UUID.test(id)) return { error: "That token is already gone." };
+  const done = await withOrg(getDb(), member.orgId, (tx) => revokeApiToken(tx, member.orgId, id));
+  revalidatePath("/settings");
+  return done ? { revoked: true } : { error: "That token is already gone." };
 }
