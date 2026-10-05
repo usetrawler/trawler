@@ -5,7 +5,7 @@ import { runPath } from "./status.ts";
 
 export const COMMENT_MARKER = "<!-- trawler-ci -->";
 
-type CommentInput = Omit<RunResult, "commentMarkdown"> & { peopleFailed?: number; unjudged?: number };
+type CommentInput = Omit<RunResult, "commentMarkdown"> & { peopleFailed?: number };
 
 const plain = (text: string) => text.replace(/\s*\n\s*/g, " ").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
 const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -14,9 +14,17 @@ function headline(r: CommentInput): string {
   if (!r.finished) return "Trawler is still testing this change";
   if (r.status === "failed" || r.status === "cancelled") return "Trawler could not finish testing this change";
   if (r.defects.confirmed === 0 && (r.peopleFailed ?? 0) > 0) return "Trawler could not finish testing this change";
-  if (r.defects.confirmed === 0 && (r.unjudged ?? 0) > 0) return `Trawler: ${count(r.unjudged!, "report")} not verified before the run ended`;
+  if (r.status === "stopped_budget") return "Trawler ran out of its budget before it finished testing this change";
+  if (r.defects.confirmed === 0 && (r.unverified ?? 0) > 0) return `Trawler: ${count(r.unverified!, "report")} not verified before the run ended`;
   if (r.defects.confirmed > 0) return `Trawler: ${count(r.defects.confirmed, "defect")} confirmed by replay`;
   return "Trawler found no confirmed defects";
+}
+
+function budgetLine(r: CommentInput): string {
+  const unverified = r.unverified ?? 0;
+  const confirmed = r.defects.confirmed > 0 ? ` ${count(r.defects.confirmed, "defect")} confirmed by replay so far.` : "";
+  const left = unverified > 0 ? ` ${count(unverified, "reported defect")} ${unverified === 1 ? "was" : "were"} not replayed or judged, so ${unverified === 1 ? "it is" : "they are"} not confirmed.` : "";
+  return `The run stopped at its cap, so this is not a clean result.${confirmed}${left} Raise the cap or run again to finish.`;
 }
 
 function defectBlock(d: RunResult["confirmed"][number]): string {
@@ -31,13 +39,14 @@ function defectBlock(d: RunResult["confirmed"][number]): string {
 
 export function renderComment(r: CommentInput): string {
   const sections = [COMMENT_MARKER, `### ${headline(r)}`];
+  if (r.finished && r.status === "stopped_budget") sections.push(budgetLine(r));
   if (r.finished && r.confirmed.length > 0) sections.push(r.confirmed.map(defectBlock).join("\n\n"));
   if (r.finished && r.defects.confirmed === 0) {
     const others = [r.defects.refuted > 0 ? `${count(r.defects.refuted, "report")} refuted on replay` : "", r.defects.inconclusive > 0 ? `${r.defects.inconclusive} inconclusive` : ""].filter(Boolean);
     if (others.length > 0) sections.push(`Also reported: ${others.join(", ")}.`);
   }
   if (r.finished && (r.peopleFailed ?? 0) > 0) sections.push(`${count(r.peopleFailed!, "person", "people")} could not finish, for example because the model provider refused the key. See the report.`);
-  if (r.finished && (r.unjudged ?? 0) > 0) sections.push(`${count(r.unjudged!, "reported defect")} could not be verified by replay before the run ended, for example because its cap ran out. They are not confirmed; see the report.`);
+  if (r.finished && r.status !== "stopped_budget" && (r.unverified ?? 0) > 0) sections.push(`${count(r.unverified!, "reported defect")} could not be verified by replay before the run ended, for example because its cap ran out. They are not confirmed; see the report.`);
   if (r.finished) sections.push(`${count(r.people, "person", "people")} used the product and reached ${r.goalsReached} of ${r.goalsTotal} ${r.goalsTotal === 1 ? "goal" : "goals"}. Cost $${r.costUsd.toFixed(2)}.`);
   sections.push(`[Full report](${r.reportUrl})`);
   return sections.join("\n\n");
@@ -64,6 +73,7 @@ export function runResultOf(s: RunSummary, baseUrl: string): RunResult {
       steps: f.reproduction,
     })),
     costUsd: s.costUsd,
+    unverified: view.report.couldNotJudge.length + view.report.notJudged.length,
   };
-  return { ...result, commentMarkdown: renderComment({ ...result, peopleFailed: view.personas.filter((p) => p.state === "failed").length, unjudged: view.report.couldNotJudge.length }) };
+  return { ...result, commentMarkdown: renderComment({ ...result, peopleFailed: view.personas.filter((p) => p.state === "failed").length }) };
 }

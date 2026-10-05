@@ -95,6 +95,7 @@ export const RunResultSchema = z.object({
   defects: z.object({ confirmed: z.number().int().nonnegative(), refuted: z.number().int().nonnegative(), inconclusive: z.number().int().nonnegative() }),
   confirmed: z.array(ConfirmedDefectSchema),
   costUsd: z.number().nonnegative(),
+  unverified: z.number().int().nonnegative().optional(),
   commentMarkdown: z.string(),
 });
 export type RunResult = z.infer<typeof RunResultSchema>;
