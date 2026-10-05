@@ -55,6 +55,7 @@ vi.mock("../../../runs/runs.ts", async (original) => ({
   refusalToStart: async (_tx: unknown, _org: string, _id: string, paidBy: unknown) => { state.refusalFor.push(paidBy); return state.refusal; },
 }));
 vi.mock("../../../runs/plans.ts", () => ({ workspacePlan: async () => FREE }));
+vi.mock("../../../runs/pr-plan-store.ts", () => ({ recentPrPlans: async () => [] }));
 vi.mock("./plan-workspace.tsx", () => ({ PlanWorkspace: (props: Record<string, unknown>) => { state.planned.push(props); return null; } }));
 
 const { default: ProjectPage } = await import("./page.tsx");
