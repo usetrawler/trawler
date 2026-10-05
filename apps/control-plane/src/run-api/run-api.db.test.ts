@@ -86,6 +86,23 @@ describe("run api", () => {
     expect(await result.json()).toMatchObject({ id: started.id, finished: true, status: "cancelled", commentMarkdown: expect.stringContaining("<!-- trawler-ci -->") });
   });
 
+  test("accounts from the CI job lift the need for a stored account on an own run, and a hosted run with them is refused", async () => {
+    const { token } = await mint("org-ent");
+    const id = await withOrg(t.db, "org-ent", (tx) => createProject(tx, "org-ent", { ...config, name: "Signs in" }, keys, { signsIn: ["ana"] }));
+    const missing = await post(token, { project: id, execution: "own" });
+    expect(missing.status).toBe(422);
+    expect((await missing.json()).error).toBe("Ana needs a test account to sign in.");
+    const hosted = await post(token, { project: id, accounts: ["Ana"] });
+    expect(hosted.status).toBe(400);
+    expect((await hosted.json()).error).toMatch(/accounts can only be given with execution "own"/);
+    const started = await post(token, { project: id, execution: "own", accounts: ["Ana"] });
+    expect(started.status).toBe(201);
+    const { id: runId } = (await started.json()) as { id: string };
+    const row = await asSystem(t.db, (tx) => tx.selectFrom("runs").select("provided_accounts").where("id", "=", runId).executeTakeFirstOrThrow());
+    expect(row.provided_accounts).toEqual(["Ana"]);
+    await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
+  });
+
   test("a workspace without a key on another plan is told to add one, and a hosted run cannot override the target", async () => {
     const { token } = await mint("org-b");
     const refused = await post(token, { project: projects.otherOrg }, { trawlerPays: false });

@@ -5,7 +5,7 @@ import { parseArgs } from "node:util";
 import type { LanguageModel } from "ai";
 import YAML from "yaml";
 import { Budget, createModel, openBrowser, proposeProject, SecretScrubber } from "@usetrawler/core";
-import { ProjectConfigSchema, type RunEventInput } from "@usetrawler/protocol";
+import { parseAccountsFile, ProjectConfigSchema, type RunEventInput } from "@usetrawler/protocol";
 import { localRun, type OpenBrowser } from "./local-run.ts";
 import { RunDir, renderReport } from "./run-dir.ts";
 import { workLoop, workOnce, type WorkerDeps } from "./worker.ts";
@@ -28,6 +28,7 @@ const USAGE = `Usage:
   trawler-runner work --control-plane https://app.usetrawler.com [--once]
 
 Set OPENROUTER_API_KEY for setup and run. work needs only TRAWLER_RUNNER_TOKEN: its model calls go through the control plane.
+Set TRAWLER_ACCOUNTS_FILE to a JSON file of {"<person>": {"username", "password"}} for work to sign in people whose accounts come from the CI job.
 Set TRAWLER_LOOK=1 for run or work to let people and replays see the page as a picture, or to a comma-separated list of
 target origins to allow it only for those products (experimental; the model must take images).`;
 
@@ -162,6 +163,15 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
   const browserLauncher = deps.env.TRAWLER_BROWSER_LAUNCHER?.trim() || undefined;
   const sharedDownloads = deps.env.TRAWLER_BROWSER_DOWNLOADS?.trim() || undefined;
   if (!browserLauncher && deps.env.TRAWLER_REQUIRE_EGRESS === "1") throw new UsageError("this runner must start the browser as its own user, and TRAWLER_BROWSER_LAUNCHER is not set; use the runner image");
+  const accountsFile = deps.env.TRAWLER_ACCOUNTS_FILE?.trim();
+  let accounts: ReturnType<typeof parseAccountsFile> | undefined;
+  if (accountsFile) {
+    try {
+      accounts = parseAccountsFile(readFileSync(accountsFile, "utf8"));
+    } catch (err) {
+      throw new UsageError(`TRAWLER_ACCOUNTS_FILE ${accountsFile} cannot be used: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
   const egress = egressServer ? egressClient(egressServer, egressToken!) : undefined;
   const unfinished = new Set<() => Promise<void>>();
   let keysReported = false;
@@ -234,6 +244,7 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
     maskReportsWith: reporting.maskWith,
     fetch: deps.fetchImpl,
     secrets: [runnerToken],
+    accounts,
     betweenJobs,
   };
   if (egress) await egress.ready();

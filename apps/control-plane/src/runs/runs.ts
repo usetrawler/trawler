@@ -31,6 +31,7 @@ export interface StartRunOptions {
   targetUrl?: string;
   pullRequest?: PullRequest;
   conversation?: boolean;
+  providedAccounts?: string[];
   usesFirstRunOnUs?: boolean;
 }
 
@@ -55,12 +56,25 @@ export class NeedsAccount extends Error {
   }
 }
 
-export async function personWithoutAccount(tx: Tx, planId: string): Promise<string | null> {
-  const person = await tx.selectFrom("personas").select("name").where("plan_id", "=", planId).where("signs_in", "=", true).where("account_ref", "is", null).orderBy("position").executeTakeFirst();
+const signsInWithoutAccount = (tx: Tx, planId: string) => tx.selectFrom("personas").select("name").where("plan_id", "=", planId).where("signs_in", "=", true).where("account_ref", "is", null);
+
+export async function personWithoutAccount(tx: Tx, planId: string, provided: string[] = []): Promise<string | null> {
+  const person = await signsInWithoutAccount(tx, planId).$if(provided.length > 0, (q) => q.where("name", "not in", provided)).orderBy("position").executeTakeFirst();
   return person?.name ?? null;
 }
 
+async function providedPeople(tx: Tx, planId: string, names: string[]): Promise<string[]> {
+  if (names.length === 0) return [];
+  return (await signsInWithoutAccount(tx, planId).where("name", "in", names).orderBy("position").execute()).map((p) => p.name);
+}
+
 export class RunRefused extends Error {}
+
+export class ProvidedAccountsRefused extends RunRefused {
+  constructor() {
+    super("Accounts provided by the CI job can only reach a runner in your own network. Use execution \"own\", or leave the accounts out.");
+  }
+}
 
 export class TargetOverrideRefused extends RunRefused {
   constructor() {
@@ -155,8 +169,10 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
   if (options.targetUrl !== undefined && execution !== "own") throw new TargetOverrideRefused();
   const loaded = await loadProjectConfig(tx, orgId, projectId, keys, plan.id);
   const config = options.targetUrl === undefined ? loaded : { ...loaded, targetUrl: options.targetUrl, allowedOrigins: [...new Set([new URL(options.targetUrl).origin, ...loaded.allowedOrigins])] };
-  const without = await personWithoutAccount(tx, plan.id);
+  if (options.providedAccounts?.length && execution !== "own") throw new ProvidedAccountsRefused();
+  const without = await personWithoutAccount(tx, plan.id, options.providedAccounts);
   if (without) throw new NeedsAccount(without);
+  const providedAccounts = await providedPeople(tx, plan.id, options.providedAccounts ?? []);
   const turns = turnsOf(config);
   const people = new Set(turns.map((t) => t.personaId)).size;
   const conversation = options.conversation === true && people > 1;
@@ -175,7 +191,7 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
       max_steps: options.maxSteps, replay_steps: options.replaySteps, created_by: options.createdBy,
       provider: options.provider ?? "openrouter", provider_base_url: options.providerBaseUrl ?? null, token_cap: options.tokenCap ? String(options.tokenCap) : null,
       prompt_usd_per_mtok: options.price ? options.price.promptUsdPerMtok.toFixed(6) : null, completion_usd_per_mtok: options.price ? options.price.completionUsdPerMtok.toFixed(6) : null,
-      paid_by: paidBy, execution, conversation, pull_request: options.pullRequest ? JSON.stringify(options.pullRequest) : null,
+      paid_by: paidBy, execution, conversation, provided_accounts: JSON.stringify(providedAccounts), pull_request: options.pullRequest ? JSON.stringify(options.pullRequest) : null,
     })
     .returning(["id", "number"])
     .executeTakeFirstOrThrow();
@@ -308,7 +324,7 @@ export async function runIdByNumber(tx: Tx, orgId: string, number: number): Prom
 export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const run = await tx
     .selectFrom("runs")
-    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason", "paid_by", "conversation", "plan_id", "plan_name", sql<string>`(select count(*) from plans p where p.project_id = runs.project_id and p.org_id = runs.org_id)`.as("plan_count")])
+    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason", "paid_by", "conversation", "provided_accounts", "plan_id", "plan_name", sql<string>`(select count(*) from plans p where p.project_id = runs.project_id and p.org_id = runs.org_id)`.as("plan_count")])
     .where("id", "=", runId)
     .where("org_id", "=", orgId)
     .executeTakeFirst();
@@ -376,6 +392,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
     costUsd: Number(run.cost_usd), budgetUsd: Number(run.budget_usd), completionUsdPerMtok: run.completion_usd_per_mtok === null ? null : Number(run.completion_usd_per_mtok), agentModel: run.agent_model, judgeModel: run.judge_model,
     provider: run.provider, paidBy: run.paid_by as PaidBy, tokenCap: run.token_cap === null ? null : Number(run.token_cap), tokensUsed: Number(run.tokens_used),
     conversation: run.conversation,
+    providedAccounts: run.provided_accounts as string[],
     createdAt: run.created_at, startedAt: run.started_at, finishedAt: run.finished_at,
     jobs,
     findings: findings.map((f) => ({

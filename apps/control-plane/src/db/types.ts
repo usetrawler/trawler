@@ -294,6 +294,7 @@ export interface Runs {
   plan_name: string;
   project_id: string;
   prompt_usd_per_mtok: Numeric | null;
+  provided_accounts: Generated<Json>;
   provider: Generated<string>;
   provider_base_url: string | null;
   pull_request: Json | null;

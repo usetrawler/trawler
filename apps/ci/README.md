@@ -18,9 +18,25 @@ Needs Node 24 or newer and `npm ci` at the repository root. No build step.
 
 ```
 node apps/ci/src/main.ts run --project <uuid> [--plan <uuid>] [--url <address>] [--runner hosted|own]
-  [--cap <usd>] [--model <id>] [--fail-on new-confirmed|any-confirmed|never] [--timeout-minutes 45] [--no-comment]
+  [--accounts <file>] [--cap <usd>] [--model <id>] [--fail-on new-confirmed|any-confirmed|never] [--timeout-minutes 45] [--no-comment]
 ```
 
 - `TRAWLER_API_TOKEN` is a workspace API token (Settings). `TRAWLER_API` is the default for `--api`.
 - `--runner hosted` runs on Trawler's runners; `--runner own` runs the browser inside the CI job, so `--url` can be `http://localhost:...`.
 - Exit codes: 0 pass, 1 confirmed defects (`new-confirmed` and `any-confirmed` behave the same until there is a baseline) or an API/auth error, 2 usage error. A run that hit its cap, the time limit, was cancelled or failed does not fail the job.
+
+## Accounts
+
+When your boot script already creates the test users, hand them to the run instead of typing them into the plan. Have the script write a JSON file that maps each person's name in the plan to the account it created, and pass it with `--accounts` (needs `--runner own`):
+
+```json
+{
+  "Daniel": { "username": "daniel@ci.test", "password": "a-long-random-password" },
+  "Priya": { "username": "priya@ci.test", "password": "another-long-random-password" }
+}
+```
+
+- The keys must match the people's names in the plan exactly. Up to 20 people, a file of at most 64 KB; `username` and `password` are non-empty strings.
+- Only the names go to Trawler; the passwords stay in the job. The CLI points the runners it starts at the file through `TRAWLER_ACCOUNTS_FILE`, and they scrub the passwords from everything they report.
+- A person in the plan who signs in but is not named in the file still needs an account stored in the plan, or the run is refused. A person named in the file who does not sign in, or already has a stored account, keeps the plan's setting.
+- Without `--accounts` nothing changes: signing-in people use the accounts stored in the plan.

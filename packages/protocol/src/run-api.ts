@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_ACCOUNTS, TargetAccountSchema } from "./project.ts";
 
 export const RUN_API_VERSION = 1;
 
@@ -27,9 +28,32 @@ export const StartRunRequestSchema = z.object({
   cap: z.number().min(0.1).max(50).optional(),
   model: z.string().min(1).max(200).optional(),
   conversation: z.boolean().optional(),
+  accounts: z.array(z.string().min(1).max(100)).max(MAX_ACCOUNTS).optional(),
   pullRequest: PullRequestSchema.optional(),
 });
 export type StartRunRequest = z.input<typeof StartRunRequestSchema>;
+
+export const MAX_ACCOUNTS_FILE_BYTES = 64_000;
+
+export const AccountsFileSchema = z.record(z.string().min(1).max(100), z.object(TargetAccountSchema.shape).omit({ ref: true })).refine((accounts) => Object.keys(accounts).length > 0 && Object.keys(accounts).length <= MAX_ACCOUNTS, { message: `must name between 1 and ${MAX_ACCOUNTS} people` });
+export type AccountsFile = z.infer<typeof AccountsFileSchema>;
+
+export const providedAccountRef = (personaId: string) => `ci:${personaId}`;
+
+export function parseAccountsFile(text: string): AccountsFile {
+  if (new TextEncoder().encode(text).length > MAX_ACCOUNTS_FILE_BYTES) throw new Error(`the accounts file is larger than ${MAX_ACCOUNTS_FILE_BYTES} bytes`);
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error("the accounts file is not valid JSON");
+  }
+  const parsed = AccountsFileSchema.safeParse(json);
+  if (parsed.success) return parsed.data;
+  const issue = parsed.error.issues[0];
+  const where = issue?.path.length ? ` (${issue.path.join(".")})` : "";
+  throw new Error(`the accounts file must map each person's name to {"username", "password"}: ${issue?.message ?? "unreadable"}${where}`);
+}
 
 export const StartRunResponseSchema = z.object({
   id: z.string().uuid(),

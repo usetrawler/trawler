@@ -3,6 +3,7 @@ import { EXECUTIONS, FAIL_ON, type Execution, type FailOn } from "@usetrawler/pr
 
 export const USAGE = `Usage:
   trawler-ci run --project <uuid> [--api <url>] [--plan <uuid>] [--url <address>] [--runner hosted|own]
+                 [--accounts <file>]
                  [--cap <usd>] [--model <id>] [--conversation] [--fail-on new-confirmed|any-confirmed|never]
                  [--timeout-minutes <n>] [--no-comment]
 
@@ -26,6 +27,7 @@ export interface Options {
   failOn: FailOn;
   timeoutMinutes: number;
   comment: boolean;
+  accounts?: string;
 }
 
 export type Parsed = { help: true } | { help: false; options: Options };
@@ -63,7 +65,7 @@ export function parseCliArgs(argv: string[], env: Record<string, string | undefi
     options: {
       api: { type: "string" }, project: { type: "string" }, plan: { type: "string" }, url: { type: "string" }, runner: { type: "string" },
       cap: { type: "string" }, model: { type: "string" }, "fail-on": { type: "string" }, "timeout-minutes": { type: "string" },
-      "no-comment": { type: "boolean" }, conversation: { type: "boolean" }, help: { type: "boolean", short: "h" },
+      "no-comment": { type: "boolean" }, accounts: { type: "string" }, conversation: { type: "boolean" }, help: { type: "boolean", short: "h" },
     },
   });
   if (values.help) return { help: true };
@@ -85,6 +87,8 @@ export function parseCliArgs(argv: string[], env: Record<string, string | undefi
     timeoutMinutes = Number(values["timeout-minutes"]);
     if (!/^\d+(\.\d+)?$/.test(values["timeout-minutes"]) || timeoutMinutes <= 0) throw new UsageError(`--timeout-minutes must be a positive number, got ${values["timeout-minutes"]}`);
   }
+  const execution = oneOf("runner", values.runner, EXECUTIONS, "hosted");
+  if (values.accounts !== undefined && execution !== "own") throw new UsageError("--accounts needs --runner own, because a hosted runner cannot read a file in this job");
   return {
     help: false,
     options: {
@@ -93,13 +97,14 @@ export function parseCliArgs(argv: string[], env: Record<string, string | undefi
       project: uuid("project", values.project, true)!,
       plan: uuid("plan", values.plan, false),
       url: values.url === undefined ? undefined : httpUrl("url", values.url),
-      execution: oneOf("runner", values.runner, EXECUTIONS, "hosted"),
+      execution,
       cap,
       model: values.model,
       conversation: values.conversation === true,
       failOn: oneOf("fail-on", values["fail-on"], FAIL_ON, "new-confirmed"),
       timeoutMinutes,
       comment: !values["no-comment"],
+      accounts: values.accounts,
     },
   };
 }
