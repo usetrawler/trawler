@@ -36,6 +36,14 @@ describe("renderComment", () => {
     expect(withDefect).toContain("1 person could not finish");
   });
 
+  test("says when reports were left unverified instead of calling the run clean", () => {
+    const md = renderComment({ ...base, people: 2, unjudged: 1 });
+    expect(md).toContain("### Trawler: 1 report not verified before the run ended");
+    expect(md).not.toContain("found no confirmed defects");
+    expect(md).toContain("1 reported defect could not be verified by replay");
+    expect(renderComment({ ...base, unjudged: 0 })).toContain("found no confirmed defects");
+  });
+
   test("says so when nothing was confirmed", () => {
     const md = renderComment({ ...base, defects: { confirmed: 0, refuted: 2, inconclusive: 1 } });
     expect(md).toContain("### Trawler found no confirmed defects");
