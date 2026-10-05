@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 import type { Database } from "../db/index.ts";
-import { asSystem, type Tx } from "../db/tenancy.ts";
+import { asSystem, withOrg, type Tx } from "../db/tenancy.ts";
 
 export const TOKEN_PREFIX = "trw_";
 export const MAX_API_TOKENS = 20;
@@ -90,14 +90,19 @@ export async function authenticateToken(db: Database, token: string, now = new D
 
 const CALLS_PER_WINDOW = 120;
 const WINDOW_MS = 60_000;
-const calls = new Map<string, number[]>();
+const KEEP_BUCKETS = 10;
 
-export function withinTokenRate(tokenId: string, now = Date.now()): { ok: true } | { ok: false; retryAfterSeconds: number } {
-  const recent = (calls.get(tokenId) ?? []).filter((t) => now - t < WINDOW_MS);
-  if (recent.length >= CALLS_PER_WINDOW) {
-    calls.set(tokenId, recent);
-    return { ok: false, retryAfterSeconds: Math.max(1, Math.ceil((recent[0]! + WINDOW_MS - now) / 1000)) };
-  }
-  calls.set(tokenId, [...recent, now]);
-  return { ok: true };
+export async function withinTokenRate(db: Database, holder: Pick<TokenHolder, "tokenId" | "orgId">, now = Date.now()): Promise<{ ok: true } | { ok: false; retryAfterSeconds: number }> {
+  const minute = Math.floor(now / WINDOW_MS);
+  return withOrg(db, holder.orgId, async (tx) => {
+    const counted = await tx
+      .insertInto("api_token_calls")
+      .values({ token_id: holder.tokenId, org_id: holder.orgId, minute: String(minute), calls: 1 })
+      .onConflict((oc) => oc.columns(["token_id", "minute"]).doUpdateSet((eb) => ({ calls: eb("api_token_calls.calls", "+", 1) })).where("api_token_calls.calls", "<", CALLS_PER_WINDOW))
+      .returning("calls")
+      .executeTakeFirst();
+    if (!counted) return { ok: false as const, retryAfterSeconds: Math.max(1, Math.ceil(((minute + 1) * WINDOW_MS - now) / 1000)) };
+    if (counted.calls === 1) await tx.deleteFrom("api_token_calls").where("token_id", "=", holder.tokenId).where("minute", "<", String(minute - KEEP_BUCKETS)).execute();
+    return { ok: true as const };
+  });
 }

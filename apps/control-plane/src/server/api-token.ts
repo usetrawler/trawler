@@ -12,7 +12,7 @@ export async function tokenWorkspace(headers: Headers, db: Database = getDb()): 
   if (!given) return { ok: false, response: refuse(401, "Send the API token as 'Authorization: Bearer <token>'.", { "www-authenticate": "Bearer" }) };
   const holder = await authenticateToken(db, given);
   if (!holder) return { ok: false, response: refuse(401, "That API token is not valid or was revoked.", { "www-authenticate": "Bearer" }) };
-  const rate = withinTokenRate(holder.tokenId);
+  const rate = await withinTokenRate(db, holder);
   if (!rate.ok) return { ok: false, response: refuse(429, "Too many calls with this token. Slow down.", { "retry-after": String(rate.retryAfterSeconds) }) };
   return { ok: true, holder };
 }
