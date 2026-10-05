@@ -122,9 +122,9 @@ function httpAddress(url: string): string {
   return parsed.href;
 }
 
-const clip = (text: string, max: number) => cutAt(text.trim(), max).trim();
+export const clip = (text: string, max: number) => cutAt(text.trim(), max).trim();
 
-function slug(value: string): string {
+export function slug(value: string): string {
   return value.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
@@ -181,7 +181,7 @@ async function askOnce<T>(opts: { model: LanguageModel; budget: Budget }, schema
   }
 }
 
-async function ask<T>(opts: { model: LanguageModel; modelId: string; budget: Budget }, schema: z.ZodType<T>, prompt: string, problemsOf: (answer: T) => string[] = () => []): Promise<{ answer: T; usage: JobUsage }> {
+export async function ask<T>(opts: { model: LanguageModel; modelId: string; budget: Budget }, schema: z.ZodType<T>, prompt: string, problemsOf: (answer: T) => string[] = () => []): Promise<{ answer: T; usage: JobUsage }> {
   if (opts.budget.exceeded) throw spent();
   const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
   let answer: T | null = null;
