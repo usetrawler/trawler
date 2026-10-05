@@ -167,6 +167,25 @@ describe("submit_finding", () => {
   });
 });
 
+describe("finish on standby", () => {
+  test("going on standby emits one standby event, and finishing again ends the session without another", async () => {
+    const { tools, state, events } = setup({ othersAreWorking: async () => true });
+    for (const g of goals) await tools.goal_status.execute!({ goal: g.id, status: "reached", note: "" }, ctx);
+    events.length = 0;
+    expect(await tools.finish.execute!({ summary: "done" }, ctx)).toMatch(/standby/);
+    expect(state.standby).not.toBeNull();
+    expect(await tools.finish.execute!({}, ctx)).toBe("finished");
+    expect(events).toEqual([{ type: "standby", jobId: "role:solo" }]);
+  });
+  test("a person with nobody else working finishes without a standby event", async () => {
+    const { tools, events } = setup({ othersAreWorking: async () => false });
+    for (const g of goals) await tools.goal_status.execute!({ goal: g.id, status: "reached", note: "" }, ctx);
+    events.length = 0;
+    expect(await tools.finish.execute!({ summary: "done" }, ctx)).toBe("finished");
+    expect(events).toEqual([]);
+  });
+});
+
 describe("note, goal_status and finish", () => {
   test("note appends to the scratchpad and emits", async () => {
     const { tools, state, events } = setup();

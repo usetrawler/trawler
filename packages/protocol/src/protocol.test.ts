@@ -142,6 +142,9 @@ describe("RunEvent", () => {
     const usage = { model: "m", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
     expect(() => RunEventSchema.parse({ seq: 1, at: "2026-09-24T10:00:00.000Z", jobId: "x", type: "job_finished", usage, stoppedBy: "banana" })).toThrow();
   });
+  test("parses a standby event", () => {
+    expect(RunEventSchema.parse({ seq: 1, at: "2026-09-24T10:00:00.000Z", jobId: "role:solo", type: "standby" }).type).toBe("standby");
+  });
   test("rejects an unknown event type", () => {
     expect(() => RunEventSchema.parse({ seq: 1, at: "2026-09-24T10:00:00.000Z", jobId: "x", type: "nope" })).toThrow();
   });
