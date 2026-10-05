@@ -43,6 +43,13 @@ export interface Account {
   userId: string;
 }
 
+export interface ApiTokenCalls {
+  calls: number;
+  minute: Int8;
+  org_id: string;
+  token_id: string;
+}
+
 export interface ApiTokens {
   created_at: Generated<Timestamp>;
   created_by: string;
@@ -426,6 +433,7 @@ export interface WorkspacePlans {
 
 export interface DB {
   account: Account;
+  api_token_calls: ApiTokenCalls;
   api_tokens: ApiTokens;
   artifacts: Artifacts;
   credentials: Credentials;

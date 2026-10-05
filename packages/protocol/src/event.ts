@@ -20,6 +20,7 @@ export const RunEventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("step"), step: z.number().int().positive(), tool: z.string().max(100).nullable(), costUsd: z.number().nonnegative().max(1000), url: z.string().max(MAX_URL).optional() }),
   z.object({ ...base, type: z.literal("note"), text: z.string().max(MAX_NOTE) }),
   z.object({ ...base, type: z.literal("message"), text: z.string().min(1).max(1000) }),
+  z.object({ ...base, type: z.literal("standby") }),
   z.object({ ...base, type: z.literal("finding"), finding: FindingSchema }),
   z.object({ ...base, type: z.literal("goal_status"), outcome: GoalOutcomeSchema }),
   z.object({ ...base, type: z.literal("blocked_request"), url: z.string().max(MAX_URL) }),

@@ -68,6 +68,15 @@ describe("decide", () => {
     expect(decide(result({}), "any-confirmed").exitCode).toBe(0);
   });
 
+  it("says a capped run is not a clean result, with the reports left unverified", () => {
+    const decision = decide(result({ status: "stopped_budget", unverified: 2 }), "any-confirmed");
+    expect(decision.exitCode).toBe(0);
+    expect(decision.message).toContain("ran out of its budget before it finished testing");
+    expect(decision.message).toContain("not a clean result");
+    expect(decision.message).toContain("2 reported defect(s) not replayed or judged");
+    expect(decision.message).not.toContain("stopped budget");
+  });
+
   it.each(["failed", "cancelled", "stopped_budget"] as const)("is neutral when the run ended as %s", (status) => {
     const decision = decide(result({ status, defects: { confirmed: 1, refuted: 0, inconclusive: 0 } }), "any-confirmed");
     expect(decision.exitCode).toBe(0);

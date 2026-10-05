@@ -3,6 +3,7 @@ import { sql } from "kysely";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { PROTOCOL_HEADER, PROTOCOL_VERSION, ProjectConfigSchema } from "@usetrawler/protocol";
 import { createApiToken } from "../api-tokens/tokens.ts";
+import { setModelKey } from "../credentials/credentials.ts";
 import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
@@ -22,12 +23,23 @@ const POOL = "pool-token-for-hosted-runners-0000";
 let projects: Record<string, string> = {};
 let runs: Record<string, string> = {};
 
+const hadARun = async (org: string, projectId: string, providedAccounts?: string[]) => {
+  await withOrg(t.db, org, (tx) => startRun(tx, org, projectId, keys, { ...options, ...(providedAccounts ? { providedAccounts, execution: "own" as const } : {}) }));
+  await withOrg(t.db, org, (tx) => cancelLiveRuns(tx, org, "stopped"));
+};
+
+const runsOf = (projectId: string) => asSystem(t.db, (tx) => tx.selectFrom("runs").select("id").where("project_id", "=", projectId).execute());
+
 const mint = (org: string, projectId?: string) => withOrg(t.db, org, (tx) => createApiToken(tx, org, "u1", { name: "ci", ...(projectId ? { projectId } : {}) }));
 
 beforeAll(async () => {
-  for (const org of ["org-a", "org-b", "org-ent"]) await sql`insert into organization (id, name, slug, "createdAt") values (${org}, ${org}, ${org}, now())`.execute(t.db);
+  for (const org of ["org-a", "org-b", "org-ent", "org-key"]) await sql`insert into organization (id, name, slug, "createdAt") values (${org}, ${org}, ${org}, now())`.execute(t.db);
   await sql`insert into workspace_plans (org_id, plan, set_by) values ('org-ent', 'enterprise', 'test') on conflict (org_id) do update set plan = 'enterprise'`.execute(t.db);
   for (const [name, org] of [["hosted", "org-a"], ["own", "org-a"], ["otherOrg", "org-b"], ["ent", "org-ent"]] as const) projects[name] = await withOrg(t.db, org, (tx) => createProject(tx, org, config, keys));
+  projects.keyed = await withOrg(t.db, "org-key", (tx) => createProject(tx, "org-key", config, keys));
+  await withOrg(t.db, "org-key", (tx) => setModelKey(tx, "org-key", { provider: "openrouter", key: "sk-or-test-key-0123456789abcdef", baseUrl: null }, "u1", keys));
+  await hadARun("org-ent", projects.ent!);
+  await hadARun("org-key", projects.keyed);
   for (const [name, org, execution] of [["hosted", "org-a", "hosted"], ["own", "org-a", "own"], ["otherOrg", "org-b", "own"]] as const) {
     runs[name] = (await withOrg(t.db, org, (tx) => startRun(tx, org, projects[name]!, keys, { ...options, execution }))).id;
   }
@@ -89,6 +101,7 @@ describe("run api", () => {
   test("accounts from the CI job lift the need for a stored account on an own run, and a hosted run with them is refused", async () => {
     const { token } = await mint("org-ent");
     const id = await withOrg(t.db, "org-ent", (tx) => createProject(tx, "org-ent", { ...config, name: "Signs in" }, keys, { signsIn: ["ana"] }));
+    await hadARun("org-ent", id, ["Ana"]);
     const missing = await post(token, { project: id, execution: "own" });
     expect(missing.status).toBe(422);
     expect((await missing.json()).error).toBe("Ana needs a test account to sign in.");
@@ -129,5 +142,55 @@ describe("run api", () => {
     await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
     expect((await post(token, { project: projects.ent, pullRequest: { description: "x".repeat(4001) } })).status).toBe(400);
     expect((await post(token, { project: projects.ent, planMode: "everything" })).status).toBe(400);
+  });
+
+  test("the first run of a project cannot be started from the API, because that is where the person confirms they may test the product", async () => {
+    const { token } = await mint("org-ent");
+    const fresh = await withOrg(t.db, "org-ent", (tx) => createProject(tx, "org-ent", { ...config, name: "Brand new" }, keys));
+    const refused = await post(token, { project: fresh, execution: "own" });
+    expect(refused.status).toBe(412);
+    expect((await refused.json()).error).toMatch(/Start the first run of this project from the app, where you confirm you are authorised to test it/);
+    expect(await runsOf(fresh)).toEqual([]);
+    await hadARun("org-ent", fresh);
+    expect((await post(token, { project: fresh, execution: "own" })).status).toBe(201);
+    await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
+  });
+
+  test("a workspace key is tried on the chosen model before the run is queued, and a refused key or unknown model is a clear refusal", async () => {
+    const { token } = await mint("org-key");
+    const before = (await runsOf(projects.keyed!)).length;
+    const checked: Array<[string, string]> = [];
+    const answering = (answer: Awaited<ReturnType<NonNullable<RunApiDeps["modelCheck"]>>>): Partial<RunApiDeps> => ({ modelCheck: async (endpoint, model) => { checked.push([endpoint.key, model]); return answer; } });
+
+    const keyRefused = await post(token, { project: projects.keyed, model: "vendor/model-x" }, answering({ ok: false, reason: "key", detail: "No auth credentials found" }));
+    expect(keyRefused.status).toBe(422);
+    expect((await keyRefused.json()).error).toBe("OpenRouter did not accept this key (No auth credentials found).");
+    const unknownModel = await post(token, { project: projects.keyed, model: "vendor/nope" }, answering({ ok: false, reason: "model", detail: "not a valid model ID" }));
+    expect(unknownModel.status).toBe(422);
+    expect((await unknownModel.json()).error).toBe("This key cannot use vendor/nope (not a valid model ID). Pick another model.");
+    const unreachable = await post(token, { project: projects.keyed, model: "vendor/model-x" }, answering({ ok: false, reason: "unavailable" }));
+    expect(unreachable.status).toBe(503);
+    expect(checked).toEqual([["sk-or-test-key-0123456789abcdef", "vendor/model-x"], ["sk-or-test-key-0123456789abcdef", "vendor/nope"], ["sk-or-test-key-0123456789abcdef", "vendor/model-x"]]);
+    expect(await runsOf(projects.keyed!)).toHaveLength(before);
+
+    const accepted = await post(token, { project: projects.keyed, model: "vendor/model-x" }, answering({ ok: true }));
+    expect(accepted.status).toBe(201);
+    expect(await runsOf(projects.keyed!)).toHaveLength(before + 1);
+    await withOrg(t.db, "org-key", (tx) => cancelLiveRuns(tx, "org-key", "stopped"));
+  });
+
+  test("the model check is not made where Trawler pays on its own key, and not for a run that is refused anyway", async () => {
+    const never: Partial<RunApiDeps> = { modelCheck: async () => { throw new Error("must not be called"); } };
+    const ent = await mint("org-ent");
+    await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
+    const onUs = await post(ent.token, { project: projects.ent, execution: "own" }, never);
+    expect(onUs.status).toBe(201);
+    const inProgress = await post(ent.token, { project: projects.ent, execution: "own" }, never);
+    expect(inProgress.status).toBe(409);
+    await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
+    const keyed = await mint("org-key");
+    await post(keyed.token, { project: projects.keyed }, { modelCheck: async () => ({ ok: true }) });
+    expect((await post(keyed.token, { project: projects.keyed }, never)).status).toBe(409);
+    await withOrg(t.db, "org-key", (tx) => cancelLiveRuns(tx, "org-key", "stopped"));
   });
 });

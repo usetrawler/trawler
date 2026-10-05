@@ -37,11 +37,34 @@ describe("renderComment", () => {
   });
 
   test("says when reports were left unverified instead of calling the run clean", () => {
-    const md = renderComment({ ...base, people: 2, unjudged: 1 });
+    const md = renderComment({ ...base, people: 2, unverified: 1 });
     expect(md).toContain("### Trawler: 1 report not verified before the run ended");
     expect(md).not.toContain("found no confirmed defects");
     expect(md).toContain("1 reported defect could not be verified by replay");
-    expect(renderComment({ ...base, unjudged: 0 })).toContain("found no confirmed defects");
+    expect(renderComment({ ...base, unverified: 0 })).toContain("found no confirmed defects");
+  });
+
+  test("never calls a run clean when it stopped at its cap", () => {
+    const empty = renderComment({ ...base, status: "stopped_budget" });
+    expect(empty).toContain("### Trawler ran out of its budget before it finished testing this change");
+    expect(empty).not.toContain("found no confirmed defects");
+    expect(empty).toContain("The run stopped at its cap, so this is not a clean result.");
+    const unreplayed = renderComment({ ...base, status: "stopped_budget", unverified: 3 });
+    expect(unreplayed).toContain("### Trawler ran out of its budget before it finished testing this change");
+    expect(unreplayed).toContain("3 reported defects were not replayed or judged, so they are not confirmed.");
+    expect(unreplayed).not.toContain("could not be verified by replay");
+    expect(renderComment({ ...base, status: "stopped_budget", unverified: 1 })).toContain("1 reported defect was not replayed or judged, so it is not confirmed.");
+  });
+
+  test("lists confirmed defects under the cap headline", () => {
+    const md = renderComment({
+      ...base, status: "stopped_budget", defects: { confirmed: 1, refuted: 0, inconclusive: 0 }, unverified: 2,
+      confirmed: [{ title: "Save fails", page: "/settings", severity: "high", person: "Ana", observed: "A 500 error.", steps: ["Open /settings"] }],
+    });
+    expect(md).toContain("### Trawler ran out of its budget before it finished testing this change");
+    expect(md).toContain("1 defect confirmed by replay so far.");
+    expect(md).toContain("#### Save fails on `/settings`");
+    expect(md).not.toContain("### Trawler: 1 defect confirmed by replay");
   });
 
   test("says so when nothing was confirmed", () => {

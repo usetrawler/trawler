@@ -349,7 +349,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const record = run.pr_plan as unknown as PrPlanRecord | null;
   const origin = record?.prPlanId ? await tx.selectFrom("pr_plans as p").leftJoin("runs as r", "r.id", "p.created_by_run_id").select("r.number").where("p.id", "=", record.prPlanId).executeTakeFirst() : undefined;
   const [jobs, findings, goals, activity, screenshots, botProtection, dismissals, said] = await Promise.all([
-    tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error", sql<boolean>`requested_by is not null`.as("requested")]).where("run_id", "=", runId).orderBy("position").execute(),
+    tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error", sql<boolean>`requested_by is not null`.as("requested"), sql<boolean>`status = 'leased' and exists (select 1 from run_events e where e.job_id = jobs.id and e.type = 'standby')`.as("on_standby")]).where("run_id", "=", runId).orderBy("position").execute(),
     tx.selectFrom("findings").select(["key", "persona_key", "kind", "filed_as", "goal", "title", "observed", "reproduction", "severity", "replay", "verdict", "same_as", "url", "quote", "step_people"]).where("run_id", "=", runId).orderBy("created_at").orderBy("key").execute(),
     tx.selectFrom("goal_outcomes").select(["persona_key", "goal", "status", "note"]).where("run_id", "=", runId).orderBy("persona_key").orderBy("goal").execute(),
     tx
@@ -357,7 +357,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
       .innerJoin("jobs as j", "j.id", "e.job_id")
       .select(["e.id", "e.type", "e.at", "e.payload", "j.persona_key", "j.kind"])
       .where("e.run_id", "=", runId)
-      .where("e.type", "in", ["note", "finding", "goal_status", "verdict"])
+      .where("e.type", "in", ["note", "finding", "goal_status", "verdict", "standby"])
       .orderBy("e.id", "desc")
       .limit(8)
       .execute(),
@@ -443,6 +443,7 @@ function activityText(e: RunEvent, goalText: Map<string, string>, findingTitle: 
   if (e.type === "note" || e.type === "message") return e.text;
   if (e.type === "finding") return `${e.finding.kind === "defect" ? "Reported a defect" : "Noted friction"}: ${e.finding.title}`;
   if (e.type === "goal_status") return `Goal ${e.outcome.status === "reached" ? "reached" : "not reached"}: ${goalText.get(e.outcome.goal) ?? e.outcome.goal}`;
+  if (e.type === "standby") return "Is on standby for the others";
   if (e.type === "verdict") return `${VERDICT_LABEL[e.verdict]}: ${findingTitle.get(e.findingId) ?? e.findingId}`;
   return e.type;
 }

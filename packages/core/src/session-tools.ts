@@ -264,6 +264,7 @@ export function sessionTools(opts: {
         const open = [...state.goals.values()].filter((g) => g.status === "not_attempted").map((g) => g.goal);
         if (open.length) return `rejected: give these goals a status first (goal_status reached or failed): ${open.join(", ")}`;
         if (!state.standby && opts.othersAreWorking && await opts.othersAreWorking()) {
+          emit({ type: "standby", jobId });
           state.standby = { since: Date.now(), summary: kept, emptyWaits: 0 };
           return STANDBY_STARTED;
         }

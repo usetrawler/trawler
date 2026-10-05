@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { runResultOf } from "./comment.ts";
 import { pageLabel, runView, stepsWithPeople } from "./report.ts";
 import type { RunSummary } from "./runs.ts";
 
@@ -29,6 +30,15 @@ test("while people explore, the use stage is active and each person shows where 
   expect(view.headline).toMatch(/using the product/);
 });
 
+test("a person who went on standby shows as on standby while their job is leased, and not once it completes", () => {
+  const standing = job("role_session", "leased", { persona_key: "ana", on_standby: true });
+  const goals = [{ personaKey: "ana", goal: "g", status: "reached" as const, note: "" }];
+  const live = runView(summary({ jobs: [standing, job("role_session", "leased", { persona_key: "lee" })], goals }));
+  expect(live.personas.map((p) => p.state)).toEqual(["standby", "exploring"]);
+  const done = runView(summary({ jobs: [{ ...standing, status: "succeeded", on_standby: false }, job("role_session", "leased", { persona_key: "lee" })], goals }));
+  expect(done.personas.map((p) => p.state)).toEqual(["reached", "exploring"]);
+});
+
 test("a finished run sorts defects by verdict and explains the ones never judged", () => {
   const view = runView(summary({
     status: "succeeded",
@@ -55,6 +65,14 @@ test("a run stopped at the cap says so, and skipped stages are marked", () => {
   expect(view.personas[1]!.state).toBe("cancelled");
   expect(view.report.notJudged[0]!.reason).toMatch(/ended before/);
   expect(view.headline).toBe("Stopped at the cap. None of the reported defects was confirmed.");
+});
+
+test("a capped run's API result counts defects that were never replayed and is not worded as clean", () => {
+  const result = runResultOf(summary({ status: "stopped_budget", jobs: [job("role_session", "succeeded", { persona_key: "ana" })], findings: [finding("ana:f1", "ana"), finding("ana:f2", "ana")] }), "https://app.test");
+  expect(result).toMatchObject({ status: "stopped_budget", finished: true, unverified: 2, defects: { confirmed: 0 } });
+  expect(result.commentMarkdown).toContain("### Trawler ran out of its budget before it finished testing this change");
+  expect(result.commentMarkdown).toContain("2 reported defects were not replayed or judged");
+  expect(result.commentMarkdown).not.toContain("found no confirmed defects");
 });
 
 test("a run stopped while someone was still exploring settles instead of looking live forever", () => {

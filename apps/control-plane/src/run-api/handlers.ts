@@ -3,13 +3,15 @@ import { keyStillStored, modelKey } from "../credentials/credentials.ts";
 import type { Database } from "../db/index.ts";
 import { withOrg } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
+import { modelCheckRefusal } from "../llm/model-check.ts";
 import { priceFor, type Price } from "../llm/prices.ts";
-import { PREFERRED_MODELS, type Provider } from "../llm/providers.ts";
+import { checkModelCall, endpointFor, PREFERRED_MODELS, type Endpoint, type Provider } from "../llm/providers.ts";
+import { projectRunCount } from "../projects/overview.ts";
 import { planOf, PlanNotFound, projectExists, ProjectNotFound } from "../projects/projects.ts";
 import { runResultOf } from "../runs/comment.ts";
 import { DEFAULT_RUN, FIRST_RUN_ON_US } from "../runs/models.ts";
 import { workspacePlan } from "../runs/plans.ts";
-import { firstRunOnUsLeft, NeedsAccount, personWithoutAccount, RunInProgress, RunRefused, runSummary, startRun, type PaidBy } from "../runs/runs.ts";
+import { firstRunOnUsLeft, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunRefused, runSummary, startRun, type PaidBy } from "../runs/runs.ts";
 import { runPath } from "../runs/status.ts";
 import { tokenWorkspace } from "../server/api-token.ts";
 
@@ -20,6 +22,7 @@ export interface RunApiDeps {
   openRouterUrl: string;
   trawlerPays: boolean;
   priceOf?: (provider: Provider, model: string, openRouterUrl: string) => Promise<Price | null>;
+  modelCheck?: typeof checkModelCall;
   afterStart?: () => void;
 }
 
@@ -29,6 +32,9 @@ const fail = (status: number, error: string) => Response.json({ error }, { statu
 const ok = (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "no-store" } });
 
 class KeyGone extends Error {}
+class FirstRunFromApp extends Error {}
+
+const CHECK_STATUS = { key: 422, model: 422, unavailable: 503 } as const;
 
 interface Payer {
   paidBy: PaidBy;
@@ -61,17 +67,20 @@ export async function handleStartRun(req: Request, deps: RunApiDeps): Promise<Re
   const { orgId } = holder;
   const priceOf = deps.priceOf ?? priceFor;
   try {
-    const run = await withOrg(deps.db, orgId, async (tx) => {
+    const { plan, payer, endpoint } = await withOrg(deps.db, orgId, async (tx) => {
       if (!(await projectExists(tx, orgId, body.project))) throw new ProjectNotFound();
+      if ((await projectRunCount(tx, orgId, body.project)) === 0) throw new FirstRunFromApp();
       const plan = await planOf(tx, orgId, body.project, body.plan);
       const without = await personWithoutAccount(tx, plan.id, body.accounts);
       if (without) throw new NeedsAccount(without);
       const stored = await modelKey(tx, orgId, deps.keys);
       let payer: Payer;
+      let endpoint: Endpoint | null = null;
       if (stored) {
         const model = body.model ?? PREFERRED_MODELS[stored.provider][0];
         if (!model) throw new RunRefused("This workspace uses its own endpoint, so say which model to use.");
         payer = { paidBy: "workspace", provider: stored.provider, providerBaseUrl: stored.provider === "custom" ? stored.baseUrl : null, model, budgetUsd: body.cap ?? DEFAULT_RUN.budgetUsd, usesFirstRunOnUs: false };
+        endpoint = endpointFor(stored.provider, stored.key, { openRouterUrl: deps.openRouterUrl, customUrl: stored.baseUrl });
       } else if ((await workspacePlan(tx, orgId)).plan === "enterprise" && deps.trawlerPays) {
         payer = trawlerPayer(body.cap, false);
       } else if (deps.trawlerPays && (await firstRunOnUsLeft(tx, orgId))) {
@@ -79,6 +88,15 @@ export async function handleStartRun(req: Request, deps: RunApiDeps): Promise<Re
       } else {
         throw new RunRefused("Add a model key in Settings to start runs.");
       }
+      const refused = await refusalToStart(tx, orgId, body.project, payer.paidBy, plan.id);
+      if (refused) throw refused;
+      return { plan, payer, endpoint };
+    });
+    if (endpoint) {
+      const checkRefusal = await modelCheckRefusal(endpoint, payer.model, deps.modelCheck);
+      if (checkRefusal) return fail(CHECK_STATUS[checkRefusal.reason], checkRefusal.error);
+    }
+    const run = await withOrg(deps.db, orgId, async (tx) => {
       if (payer.paidBy === "workspace" && !(await keyStillStored(tx, orgId, payer.provider, payer.providerBaseUrl))) throw new KeyGone();
       const price = await priceOf(payer.provider, payer.model, deps.openRouterUrl);
       return startRun(tx, orgId, body.project, deps.keys, {
@@ -91,6 +109,7 @@ export async function handleStartRun(req: Request, deps: RunApiDeps): Promise<Re
     return ok({ id: run.id, number: run.number, reportUrl: `${deps.baseUrl.replace(/\/+$/, "")}${runPath(run.number)}`, people: run.people }, 201);
   } catch (err) {
     if (err instanceof ProjectNotFound) return fail(404, "That project is not in this workspace.");
+    if (err instanceof FirstRunFromApp) return fail(412, "Start the first run of this project from the app, where you confirm you are authorised to test it. Runs started with an API token are available after that.");
     if (err instanceof PlanNotFound) return fail(404, "That plan is not on this project.");
     if (err instanceof NeedsAccount) return fail(422, err.message);
     if (err instanceof RunInProgress) return fail(409, err.message);

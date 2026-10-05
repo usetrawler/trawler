@@ -6,8 +6,9 @@ import { keyStillStored, modelKey, modelKeyHint, setModelKey, type KeyHint } fro
 import { withOrg } from "../../../db/tenancy.ts";
 import { openRouterPriceRange, openRouterPrices, priceFor, type Price, type PriceRange } from "../../../llm/prices.ts";
 import { planOf, PlanNotFound, projectExists, ProjectNotFound } from "../../../projects/projects.ts";
+import { modelCheckRefusal } from "../../../llm/model-check.ts";
 import { freshEndpoint, runCheckRefusal, withinListingLimit, type KeyInput } from "../../../llm/key-input.ts";
-import { checkModelCall, endpointFor, listModels, PREFERRED_MODELS, PROVIDER_LABEL, priceKey, type Endpoint, type Provider } from "../../../llm/providers.ts";
+import { endpointFor, listModels, PREFERRED_MODELS, PROVIDER_LABEL, priceKey, type Endpoint, type Provider } from "../../../llm/providers.ts";
 import { projectRunCount } from "../../../projects/overview.ts";
 import { DEFAULT_RUN, FIRST_RUN_ON_US } from "../../../runs/models.ts";
 import { FirstRunOnUsUsed, firstRunOnUsLeft, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunRefused, startRun, type PaidBy } from "../../../runs/runs.ts";
@@ -118,14 +119,8 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   if (fresh && !canManageBilling(member)) return { error: "Only an owner or admin of this workspace can change its model key." };
   const tooOften = runCheckRefusal(member);
   if (tooOften) return { error: tooOften };
-  const label = PROVIDER_LABEL[endpoint.provider];
-  const check = await checkModelCall(endpoint, modelId);
-  if (!check.ok) {
-    const detail = check.detail ? ` (${check.detail})` : "";
-    if (check.reason === "key") return { error: `${label} did not accept this key${detail}.`, field: "key" };
-    if (check.reason === "model") return { error: `This key cannot use ${modelId}${detail}. Pick another model.` };
-    return { error: `${label} could not be reached to check the key. Try again in a moment.` };
-  }
+  const checkRefusal = await modelCheckRefusal(endpoint, modelId);
+  if (checkRefusal) return { error: checkRefusal.error, ...(checkRefusal.field ? { field: checkRefusal.field } : {}) };
   if (fresh) {
     await withOrg(getDb(), orgId, (tx) => setModelKey(tx, orgId, { provider: endpoint.provider, key: endpoint.key, baseUrl: endpoint.provider === "custom" ? endpoint.baseUrl : null }, member.userId, getKeyring()));
     revalidatePath(`/projects/${projectId}`);

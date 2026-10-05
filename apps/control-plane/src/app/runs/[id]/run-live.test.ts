@@ -229,6 +229,16 @@ test("while a run is live the active stage and the person exploring visibly move
   expect(render({ ...live, status: "succeeded", finishedAt: new Date("2026-09-25T20:00:00Z") })).not.toMatch(/animate-(spin|ping|pulse)/);
 });
 
+test("a person on standby shows as on standby while their job is leased, and not once it completes", () => {
+  const standing = job("role_session", "leased", { persona_key: "ana", on_standby: true });
+  const goals = live.goals;
+  const onStandby = render({ ...live, jobs: [standing, job("role_session", "leased", { persona_key: "lee" })], goals, activity: [{ id: "1", at: new Date(), personaKey: "ana", kind: "role_session", text: "Is on standby for the others" }] });
+  expect(text(onStandby)).toContain("Ana Goals done; on standby for the others. On standby");
+  expect(text(onStandby)).toContain("Ana: Is on standby for the others");
+  const after = render({ ...live, jobs: [{ ...standing, status: "succeeded", on_standby: false }, job("role_session", "leased", { persona_key: "lee" })], goals });
+  expect(text(after)).not.toContain("On standby");
+});
+
 test("a defect whose replay failed is not judged, its row gives the reason, and the opened row keeps the whole of it", () => {
   const error = `the browser failed 3 times in a row; last error: ${"x".repeat(300)}`;
   const html = render(summary({ ...finished, jobs: [...finished.jobs, job("replay", "failed", { finding_key: "x:d1", error })], findings: [finding("x:d1", "ana", { title: "Export is empty" })] }));

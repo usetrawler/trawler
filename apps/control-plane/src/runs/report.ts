@@ -8,7 +8,7 @@ function useDetail(people: number, turns: number): string {
   return `${people} people taking ${turns} turns`;
 }
 
-export type PersonaState = "waiting" | "exploring" | "reached" | "missed" | "finished" | "failed" | "cancelled";
+export type PersonaState = "waiting" | "exploring" | "standby" | "reached" | "missed" | "finished" | "failed" | "cancelled";
 export type JudgeAgainState = "judge_again" | "judging" | "after_run" | "cap_spent";
 
 const OPEN = new Set(["queued", "leased"]);
@@ -99,7 +99,7 @@ export function runView(s: RunSummary) {
     const own = goalsFor(s.goalTexts, p.id);
     const reached = goals.filter((g) => g.status === "reached").length;
     let state: PersonaState = "waiting";
-    if (live && turns.some((j) => j.status === "leased")) state = "exploring";
+    if (live && turns.some((j) => j.status === "leased")) state = turns.some((j) => j.status === "leased" && j.on_standby) ? "standby" : "exploring";
     else if (ended && failed) state = "failed";
     else if (ended) state = goals.some((g) => g.status === "failed") ? "missed" : reached === own.length ? "reached" : "finished";
     else if (!live || turns.some((j) => j.status === "cancelled")) state = "cancelled";
