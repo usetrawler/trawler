@@ -29,7 +29,7 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 const STAGE_LABEL: Record<StageState, string> = { waiting: "Waiting", active: "In progress", done: "Done", skipped: "Skipped" };
 const PERSONA_LABEL: Record<PersonaState, [string, string]> = {
-  waiting: ["Waiting", "text-muted"], exploring: ["Exploring", "text-info"], reached: ["Goal reached", "text-ok"], missed: ["Goal not reached", "text-warn"],
+  waiting: ["Waiting", "text-muted"], exploring: ["Exploring", "text-info"], standby: ["On standby", "text-muted"], reached: ["Goal reached", "text-ok"], missed: ["Goal not reached", "text-warn"],
   finished: ["Finished", "text-ink"], failed: ["Could not finish", "text-bad"], cancelled: ["Stopped", "text-muted"],
 };
 const SEVERITY_TONE: Record<string, string> = { high: "bg-action", medium: "bg-[#d5a557]", low: "bg-[#93b89e]" };
@@ -49,6 +49,7 @@ export function personLine(p: Person): string {
   if (p.state === "failed") return p.error ? `Could not finish: ${p.error}` : "Could not finish.";
   if (p.state === "cancelled") return p.hadTurn ? "Stopped before the end." : "Stopped before their turn.";
   if (p.state === "waiting") return p.hadTurn ? `Reached ${p.goals.filter((g) => g.status === "reached").length} of ${p.goals.length} so far; waiting for their next turn.` : "Waiting for their turn.";
+  if (p.state === "standby") return "Goals done; on standby for the others.";
   if (p.state === "exploring") {
     const next = p.goals.find((g) => !g.status);
     return next ? `Working on: ${next.goal}` : "Exploring.";

@@ -86,3 +86,17 @@ test("othersWorking is true while another person's session is queued or leased a
   await completeJob(t.db, lee.token, { usage: { model: "a", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "finish" });
   expect(ChannelSchema.parse(await (await read(ana)).json()).othersWorking).toBe(false);
 });
+
+test("a person who went on standby is on standby on the run page until their job completes", async () => {
+  const { run, ana, lee } = await conversation("standing by");
+  const states = async () => {
+    const summary = (await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!;
+    return { standing: summary.jobs.filter((j) => j.on_standby).length, latest: summary.activity.map((a) => a.text) };
+  };
+  expect(await states()).toEqual({ standing: 0, latest: [] });
+  await ingestEvents(t.db, ana.token, [{ seq: 1, at: new Date().toISOString(), jobId: ana.jobId, type: "standby" }], ana.jobId);
+  expect(await states()).toEqual({ standing: 1, latest: ["Is on standby for the others"] });
+  await completeJob(t.db, ana.token, { usage: { model: "a", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "finish" });
+  expect((await states()).standing).toBe(0);
+  expect(lee.jobId).not.toBe(ana.jobId);
+});
