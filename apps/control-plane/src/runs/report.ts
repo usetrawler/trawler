@@ -1,5 +1,5 @@
 import { goalsFor } from "@usetrawler/protocol";
-import { RUN_TIME_LIMIT_HOURS } from "./limits.ts";
+import { RUN_TIME_LIMIT_HOURS, UNCLAIMED_RUN_MINUTES } from "./limits.ts";
 import { ACCOUNT_REFUSED, outOfBudget, type CancelReason, type RunSummary } from "./runs.ts";
 
 export type StageState = "waiting" | "active" | "done" | "skipped";
@@ -156,6 +156,8 @@ const STOPPED_BECAUSE: Record<CancelReason, string> = {
   workspace_budget: "Stopped when the workspace reached its monthly budget.",
   paused: "Stopped when runs on this project were paused.",
   halted: "Stopped because Trawler paused hosted runs.",
+  stopped_from_ci: "Stopped from CI: the job timed out, was cancelled or was interrupted before the run finished.",
+  unclaimed: `No runner picked this run up within ${UNCLAIMED_RUN_MINUTES} minutes, so it was stopped.`,
 };
 
 function headline(s: RunSummary, confirmed: number, defects: number, replaysAllFailed: boolean, defectsDismissed: boolean): string {

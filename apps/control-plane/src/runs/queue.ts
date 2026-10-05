@@ -10,7 +10,7 @@ import { logError } from "../server/log.ts";
 import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
 import { markKnownNotBugs, notBugsOf } from "./dismissals.ts";
-import { budgetLeft, monthlyBudget, RUN_TIME_LIMIT_HOURS, runsHalted } from "./limits.ts";
+import { budgetLeft, monthlyBudget, RUN_TIME_LIMIT_HOURS, runsHalted, UNCLAIMED_RUN_MINUTES } from "./limits.ts";
 import { turnSteps } from "./models.ts";
 import { ACCOUNT_REFUSED, affordableOutputTokens, capSpent, endRun, giveBackUnusedFirstRun, signUpSeedContext, type CancelReason, type ConfigSnapshot, type PaidBy } from "./runs.ts";
 
@@ -115,7 +115,7 @@ async function reapExpiredLeases(db: Database): Promise<void> {
 
 type OwnScope = Extract<ClaimScope, { execution: "own" }>;
 
-export type ClaimScope = { execution: "hosted" } | { execution: "own"; orgId: string; projectId: string | null };
+export type ClaimScope = { execution: "hosted" } | { execution: "own"; orgId: string; projectId: string | null; runId?: string };
 
 export const HOSTED_SCOPE: ClaimScope = { execution: "hosted" };
 
@@ -171,6 +171,7 @@ async function claimOnce(db: Database, keys: Keyring, scope: ClaimScope): Promis
       .where("r.execution", "=", scope.execution)
       .$if(scope.execution === "own", (q) => q.where("j.org_id", "=", (scope as OwnScope).orgId))
       .$if(scope.execution === "own" && (scope as OwnScope).projectId !== null, (q) => q.where("r.project_id", "=", (scope as OwnScope).projectId!))
+      .$if(scope.execution === "own" && (scope as OwnScope).runId !== undefined, (q) => q.where("j.run_id", "=", (scope as OwnScope).runId!))
       .where((eb) => eb.or([eb("r.status", "in", ACTIVE), eb("j.requested_by", "is not", null)]))
       .where(sql<boolean>`not exists (
         select 1 from jobs busy where busy.run_id = j.run_id and (
@@ -421,6 +422,32 @@ export async function stopRunsPastLimits(db: Database): Promise<number> {
       if (stop !== null && stop !== "inactive") stopped++;
     } catch (err) {
       await logError("a run past its limits could not be stopped", { runId: run.id, err });
+    }
+  }
+  return stopped;
+}
+
+const unclaimed = (tx: Tx) =>
+  tx
+    .selectFrom("runs")
+    .select("id")
+    .where("status", "=", "queued")
+    .where("execution", "=", "own")
+    .where("created_at", "<=", sql<Date>`now() - make_interval(mins => ${UNCLAIMED_RUN_MINUTES})`);
+
+export async function stopUnclaimedRuns(db: Database): Promise<number> {
+  const due = await asSystem(db, (tx) => unclaimed(tx).execute());
+  let stopped = 0;
+  for (const run of due) {
+    try {
+      const still = await asSystem(db, async (tx) => {
+        const locked = await unclaimed(tx).where("id", "=", run.id).forUpdate().executeTakeFirst();
+        if (locked) await endRun(tx, run.id, { status: "cancelled", reason: "unclaimed" });
+        return locked !== undefined;
+      });
+      if (still) stopped++;
+    } catch (err) {
+      await logError("a run no runner picked up could not be stopped", { runId: run.id, err });
     }
   }
   return stopped;
