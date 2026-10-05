@@ -67,7 +67,7 @@ export async function personWithoutAccount(tx: Tx, planId: string, provided: str
 
 async function providedPeople(tx: Tx, planId: string, names: string[]): Promise<string[]> {
   if (names.length === 0) return [];
-  return (await signsInWithoutAccount(tx, planId).where("name", "in", names).orderBy("position").execute()).map((p) => p.name);
+  return (await tx.selectFrom("personas").select("name").where("plan_id", "=", planId).where("account_ref", "is", null).where("name", "in", names).orderBy("position").execute()).map((p) => p.name);
 }
 
 export class RunRefused extends Error {}
