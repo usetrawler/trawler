@@ -1,8 +1,8 @@
-import { stopRunsPastLimits, stopUnclaimedRuns } from "../runs/queue.ts";
+import { stopRunsOfGoneClients, stopRunsPastLimits, stopUnclaimedRuns } from "../runs/queue.ts";
 import { getDb } from "./db.ts";
 import { logError } from "./log.ts";
 
-const SWEEP_MS = 5 * 60 * 1000;
+const SWEEP_MS = 60 * 1000;
 
 export function startRunLimitSweep(): () => void {
   let sweeping = false;
@@ -14,6 +14,8 @@ export function startRunLimitSweep(): () => void {
       .catch((err: unknown) => logError("runs past their limits could not be stopped", { err }))
       .then(() => stopUnclaimedRuns(getDb()))
       .catch((err: unknown) => logError("runs no runner picked up could not be stopped", { err }))
+      .then(() => stopRunsOfGoneClients(getDb()))
+      .catch((err: unknown) => logError("runs whose CI job is gone could not be stopped", { err }))
       .finally(() => {
         sweeping = false;
       });

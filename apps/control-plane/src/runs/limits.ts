@@ -3,6 +3,7 @@ import type { Tx } from "../db/tenancy.ts";
 
 export const RUN_TIME_LIMIT_HOURS = 3;
 export const UNCLAIMED_RUN_MINUTES = 20;
+export const CLIENT_GONE_MINUTES = 3;
 export const MONTHLY_BUDGET_RANGE = { min: 1, max: 100_000 };
 
 export const runsHalted = (env: Record<string, string | undefined> = process.env) => /^(1|true|yes|on)$/i.test(env.TRAWLER_HALT_RUNS?.trim() ?? "");

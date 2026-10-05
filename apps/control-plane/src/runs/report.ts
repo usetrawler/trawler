@@ -158,6 +158,7 @@ const STOPPED_BECAUSE: Record<CancelReason, string> = {
   halted: "Stopped because Trawler paused hosted runs.",
   stopped_from_ci: "Stopped from CI: the job timed out, was cancelled or was interrupted before the run finished.",
   unclaimed: `No runner picked this run up within ${UNCLAIMED_RUN_MINUTES} minutes, so it was stopped.`,
+  ci_gone: "The CI job that started this run stopped asking about it, so the run was stopped.",
 };
 
 function headline(s: RunSummary, confirmed: number, defects: number, replaysAllFailed: boolean, defectsDismissed: boolean): string {

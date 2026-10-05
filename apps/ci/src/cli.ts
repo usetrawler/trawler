@@ -24,11 +24,23 @@ export interface CliDeps {
   exit?: (code: number) => void;
 }
 
+const quietly = (stream: NodeJS.WriteStream) => (line: string) => {
+  try {
+    stream.write(`${line}\n`);
+  } catch {
+    // the other end of the pipe is gone; the run still has to be stopped
+  }
+};
+
 export const defaultDeps: CliDeps = {
   env: process.env,
-  out: (line) => console.log(line),
-  err: (line) => console.error(line),
+  out: (line) => quietly(process.stdout)(line),
+  err: (line) => quietly(process.stderr)(line),
 };
+
+export function ignoreOutputErrors(streams: Array<Pick<NodeJS.WriteStream, "on">> = [process.stdout, process.stderr]): void {
+  for (const stream of streams) stream.on("error", () => {});
+}
 
 export function onSignals(handler: (signal: NodeJS.Signals) => void): () => void {
   const signals = ["SIGINT", "SIGTERM"] as const;
@@ -83,7 +95,10 @@ async function execute(options: Options, deps: CliDeps): Promise<number> {
   };
   try {
     disposeSignals = (deps.onSignals ?? onSignals)((signal) => {
-      void Promise.all([stopRun(`the job received ${signal}`), ...runners.map((r) => r.stop())]).finally(() => (deps.exit ?? process.exit)(signal === "SIGINT" ? 130 : 143));
+      const stopping = stopRun(`the job received ${signal}`);
+      void Promise.all([stopping, ...runners.map((r) => r.stop())])
+        .catch(() => undefined)
+        .finally(() => (deps.exit ?? process.exit)(signal === "SIGINT" ? 130 : 143));
     });
     if (options.execution === "own") {
       const count = options.conversation ? Math.max(1, started.people ?? 1) : 1;

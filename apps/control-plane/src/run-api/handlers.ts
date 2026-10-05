@@ -1,3 +1,4 @@
+import { sql } from "kysely";
 import { StartRunRequestSchema } from "@usetrawler/protocol";
 import { keyStillStored, modelKey } from "../credentials/credentials.ts";
 import type { Database } from "../db/index.ts";
@@ -99,11 +100,13 @@ export async function handleStartRun(req: Request, deps: RunApiDeps): Promise<Re
     const run = await withOrg(deps.db, orgId, async (tx) => {
       if (payer.paidBy === "workspace" && !(await keyStillStored(tx, orgId, payer.provider, payer.providerBaseUrl))) throw new KeyGone();
       const price = await priceOf(payer.provider, payer.model, deps.openRouterUrl);
-      return startRun(tx, orgId, body.project, deps.keys, {
+      const started = await startRun(tx, orgId, body.project, deps.keys, {
         budgetUsd: payer.budgetUsd, agentModel: payer.model, judgeModel: payer.model, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: `api-token:${holder.tokenId}`,
         provider: payer.provider, providerBaseUrl: payer.providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap, paidBy: payer.paidBy,
         planId: plan.id, execution: body.execution, targetUrl: body.url, pullRequest: body.pullRequest, planMode: body.planMode, replan: body.replan, conversation: body.conversation, providedAccounts: body.accounts, usesFirstRunOnUs: payer.usesFirstRunOnUs,
       });
+      await tx.updateTable("runs").set({ client_seen_at: sql<Date>`now()` }).where("id", "=", started.id).execute();
+      return started;
     });
     if (body.pullRequest) deps.afterStart?.();
     return ok({ id: run.id, number: run.number, reportUrl: `${deps.baseUrl.replace(/\/+$/, "")}${runPath(run.number)}`, people: run.people }, 201);
@@ -124,8 +127,13 @@ export async function handleGetRun(req: Request, id: string, deps: RunApiDeps): 
   if (!auth.ok) return auth.response;
   const { holder } = auth;
   if (!UUID.test(id)) return fail(404, "Run not found.");
-  const summary = await withOrg(deps.db, holder.orgId, (tx) => runSummary(tx, holder.orgId, id));
-  if (!summary || (holder.projectId && summary.projectId !== holder.projectId)) return fail(404, "Run not found.");
+  const summary = await withOrg(deps.db, holder.orgId, async (tx) => {
+    const found = await runSummary(tx, holder.orgId, id);
+    if (!found || (holder.projectId && found.projectId !== holder.projectId)) return null;
+    await tx.updateTable("runs").set({ client_seen_at: sql<Date>`now()` }).where("id", "=", id).where("client_seen_at", "is not", null).where("status", "in", ["queued", "running"]).execute();
+    return found;
+  });
+  if (!summary) return fail(404, "Run not found.");
   return ok(runResultOf(summary, deps.baseUrl));
 }
 

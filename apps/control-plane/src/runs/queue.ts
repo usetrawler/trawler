@@ -10,9 +10,9 @@ import { logError } from "../server/log.ts";
 import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
 import { markKnownNotBugs, notBugsOf } from "./dismissals.ts";
-import { budgetLeft, monthlyBudget, RUN_TIME_LIMIT_HOURS, runsHalted, UNCLAIMED_RUN_MINUTES } from "./limits.ts";
+import { budgetLeft, CLIENT_GONE_MINUTES, monthlyBudget, RUN_TIME_LIMIT_HOURS, runsHalted, UNCLAIMED_RUN_MINUTES } from "./limits.ts";
 import { turnSteps } from "./models.ts";
-import { ACCOUNT_REFUSED, affordableOutputTokens, capSpent, endRun, giveBackUnusedFirstRun, signUpSeedContext, type CancelReason, type ConfigSnapshot, type PaidBy } from "./runs.ts";
+import { ACCOUNT_REFUSED, affordableOutputTokens, cancelRun, capSpent, endRun, giveBackUnusedFirstRun, signUpSeedContext, type CancelReason, type ConfigSnapshot, type PaidBy } from "./runs.ts";
 
 const LEASE_MINUTES = 10;
 const GROUPED_OBSERVED_CHARS = 600;
@@ -448,6 +448,30 @@ export async function stopUnclaimedRuns(db: Database): Promise<number> {
       if (still) stopped++;
     } catch (err) {
       await logError("a run no runner picked up could not be stopped", { runId: run.id, err });
+    }
+  }
+  return stopped;
+}
+
+const clientGone = (tx: Tx) =>
+  tx
+    .selectFrom("runs")
+    .select(["id", "org_id"])
+    .where("status", "in", ACTIVE)
+    .where("client_seen_at", "<=", sql<Date>`now() - make_interval(mins => ${CLIENT_GONE_MINUTES})`);
+
+export async function stopRunsOfGoneClients(db: Database): Promise<number> {
+  const due = await asSystem(db, (tx) => clientGone(tx).execute());
+  let stopped = 0;
+  for (const run of due) {
+    try {
+      const still = await asSystem(db, async (tx) => {
+        const locked = await clientGone(tx).where("id", "=", run.id).forUpdate().executeTakeFirst();
+        return locked !== undefined && (await cancelRun(tx, run.org_id, run.id, "ci_gone"));
+      });
+      if (still) stopped++;
+    } catch (err) {
+      await logError("a run whose CI job stopped asking about it could not be stopped", { runId: run.id, err });
     }
   }
   return stopped;
