@@ -118,6 +118,7 @@ describe("runCli", () => {
     let polled = 0;
     const fetch = fakeFetch((c) => {
       if (c.url.endsWith("/api/v1/runs")) return { status: 201, json: { id: ID, number: 7, reportUrl: "https://app.example/runs/7" } };
+      if (c.url.endsWith(`/api/v1/runs/${ID}/stop`)) return { json: { id: ID, status: "cancelled", stopped: true } };
       if (c.url.includes("/api/v1/runs/")) {
         const next = runResults[Math.min(polled++, runResults.length - 1)]!;
         return "id" in next ? { json: next } : { status: next.status, json: { error: "boom" } };
@@ -206,7 +207,61 @@ describe("runCli", () => {
     h.deps.now = () => (time += 60_000);
     expect(await runCli([...argv, "--timeout-minutes", "3"], h.deps)).toBe(0);
     expect(h.err.join("\n")).toContain("did not finish within 3 minutes");
+    expect(h.err.join("\n")).toContain("so it was stopped");
     expect(h.out).toEqual([]);
+    expect(stops(h)).toHaveLength(1);
+  });
+
+  it("does not stop a run that finished", async () => {
+    const h = harness([result({})], {});
+    await runCli(argv, h.deps);
+    expect(stops(h)).toEqual([]);
+  });
+
+  it("stops the run, and the runners, when the job is interrupted, and exits with the signal's code", async () => {
+    const h = harness([result({ status: "running", finished: false })], {});
+    let handler: ((signal: NodeJS.Signals) => void) | undefined;
+    let disposed = false;
+    const exits: number[] = [];
+    const stopped: string[] = [];
+    let fired = false;
+    let time = 0;
+    const deps = {
+      ...h.deps,
+      now: () => (time += 60_000),
+      onSignals: (h2: (signal: NodeJS.Signals) => void) => ((handler = h2), () => void (disposed = true)),
+      exit: (code: number) => void exits.push(code),
+      startRunner: () => ({ failure: () => undefined, stop: async () => void stopped.push("runner") }),
+      sleep: async () => {
+        if (fired) return;
+        fired = true;
+        handler!("SIGTERM");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      },
+    };
+    expect(await runCli([...argv, "--runner", "own", "--timeout-minutes", "30"], deps)).toBe(0);
+    expect(exits).toEqual([143]);
+    expect(stops(h)).toHaveLength(1);
+    expect(stopped).toContain("runner");
+    expect(disposed).toBe(true);
+    expect(h.err.join("\n")).toContain("stopped (the job received SIGTERM)");
+  });
+
+  it("hands the run's id to the runner it starts", async () => {
+    const h = harness([result({})], {});
+    const started: Array<{ runId?: string }> = [];
+    await runCli([...argv, "--runner", "own"], { ...h.deps, startRunner: (o: { runId?: string }) => (started.push(o), { failure: () => undefined, stop: async () => undefined }) });
+    expect(started.map((s) => s.runId)).toEqual([ID]);
+  });
+
+  it("warns, and still ends, when the stop cannot be sent", async () => {
+    const h = harness([result({ status: "running", finished: false })], {});
+    const base = h.deps.fetch!;
+    h.deps.fetch = ((url: string, init?: RequestInit) => (String(url).endsWith("/stop") ? Promise.resolve(new Response(JSON.stringify({ error: "down" }), { status: 503 })) : base(url, init))) as typeof fetch;
+    let time = 0;
+    h.deps.now = () => (time += 60_000);
+    expect(await runCli([...argv, "--timeout-minutes", "3"], h.deps)).toBe(0);
+    expect(h.err.join("\n")).toContain("warning: could not stop run #7");
   });
 
   it("surfaces the server's message on auth errors with exit 1", async () => {
@@ -268,8 +323,13 @@ describe("runCli", () => {
     expect(await runCli([...argv, "--runner", "own"], deps)).toBe(1);
     expect(h.err.join("\n")).toContain("the runner exited with code 3");
     expect(stopped).toEqual(["stop"]);
+    expect(stops(h)).toHaveLength(1);
   });
 });
+
+function stops(h: { calls: Call[] }): Call[] {
+  return h.calls.filter((c) => c.method === "POST" && c.url.endsWith(`/api/v1/runs/${ID}/stop`));
+}
 
 function transient(): { status: number } {
   return { status: 503 };
