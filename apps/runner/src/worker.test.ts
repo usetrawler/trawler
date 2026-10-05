@@ -4,7 +4,7 @@ import { z } from "zod";
 import { afterEach, expect, test, vi } from "vitest";
 import { PROTOCOL_HEADER } from "@usetrawler/protocol";
 import { scriptedModel, text, toolCall } from "../../../packages/core/src/testing.ts";
-import { channelFor, workLoop, workOnce, type LogFields, type WorkerDeps } from "./worker.ts";
+import { channelFor, FatalClaim, workLoop, workOnce, type LogFields, type WorkerDeps } from "./worker.ts";
 
 const token = "job-token-" + "x".repeat(40);
 const config = {
@@ -770,4 +770,58 @@ test("the team channel stops waiting when the others have finished, and does not
   expect(await channel.read(0)).toEqual([]);
   expect(calls).toBe(2);
   expect(channel.othersWorking?.()).toBeUndefined();
+});
+
+test.each([
+  [401, '{"error":"unknown runner"}', "does not know this runner"],
+  [426, '{"error":"this control plane speaks protocol 9; upgrade the runner"}', "this control plane speaks protocol 9; upgrade the runner"],
+  [403, '{"error":"no"}', "HTTP 403"],
+  [404, "{}", "HTTP 404"],
+])("a claim the control plane refuses with %i ends the work loop with one clear report instead of retrying", async (status, body, message) => {
+  let claims = 0;
+  server = createServer((req, res) => {
+    claims++;
+    res.statusCode = status;
+    res.end(body);
+  });
+  const url = await new Promise<string>((resolve) => server!.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${(server!.address() as { port: number }).port}`)));
+  const reports: string[] = [];
+  const logs: string[] = [];
+  const stop = new AbortController();
+  await expect(workLoop(deps(url, scriptedModel([]), { claimRetryMs: 1, report: (m) => void reports.push(m), log: (l) => void logs.push(l) }), stop.signal)).rejects.toBeInstanceOf(FatalClaim);
+  expect(claims).toBe(1);
+  expect(reports).toEqual([expect.stringContaining(`claim failed for good, the runner is stopping: `)]);
+  expect(reports[0]).toContain(message);
+  expect(logs).toEqual(reports);
+  expect(reports[0]).not.toContain("runner-rrrr");
+});
+
+test.each([408, 429])("a claim answered with %i is still retried", async (status) => {
+  const statuses = [status, 204];
+  let claims = 0;
+  server = createServer((req, res) => {
+    res.statusCode = statuses[claims++] ?? 204;
+    res.end();
+  });
+  const url = await new Promise<string>((resolve) => server!.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${(server!.address() as { port: number }).port}`)));
+  const stop = new AbortController();
+  const looping = workLoop(deps(url, scriptedModel([]), { attempts: 1, claimRetryMs: 1 }), stop.signal);
+  while (claims < 3) await new Promise((r) => setTimeout(r, 5));
+  stop.abort();
+  await expect(looping).resolves.toBeUndefined();
+});
+
+test("a worker that was given a run asks for the jobs of that run only", async () => {
+  const bodies: unknown[] = [];
+  server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    bodies.push(JSON.parse(Buffer.concat(chunks).toString()));
+    res.statusCode = 204;
+    res.end();
+  });
+  const url = await new Promise<string>((resolve) => server!.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${(server!.address() as { port: number }).port}`)));
+  await workOnce(deps(url, scriptedModel([]), { runId: baseJob.runId }));
+  await workOnce(deps(url, scriptedModel([])));
+  expect(bodies).toEqual([{ run: baseJob.runId }, {}]);
 });

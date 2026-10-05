@@ -544,3 +544,25 @@ test("a runner that must browse through the egress proxy refuses to work without
   expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(2);
   expect(err.join("\n")).toMatch(/must browse through the egress proxy/);
 });
+
+test.each([[401, "does not know this runner"], [426, "upgrade the runner"]])("work stops with exit 1 and one line when the control plane answers a claim with %i", async (status, message) => {
+  let claims = 0;
+  const fetchImpl = (async () => (claims++, new Response(JSON.stringify({ error: "this control plane speaks protocol 9; upgrade the runner" }), { status }))) as unknown as typeof fetch;
+  const closed: string[] = [];
+  const { d, err } = deps({ env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40) }, fetchImpl, startReporting: async () => ({ report: () => {}, maskWith: () => {}, close: async () => void closed.push("closed") }) as never });
+  expect(await runCli(["work", "--control-plane", "http://localhost:9"], d)).toBe(1);
+  expect(claims).toBe(1);
+  expect(err.filter((l) => l.includes("claim failed"))).toEqual([expect.stringContaining(message)]);
+  expect(closed).toEqual(["closed"]);
+});
+
+test("work refuses a TRAWLER_RUN_ID that is not a run's id, and sends a valid one with every claim", async () => {
+  const bad = deps({ env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_RUN_ID: "not-an-id" } });
+  expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], bad.d)).toBe(2);
+  const bodies: unknown[] = [];
+  const fetchImpl = (async (_url: unknown, init?: RequestInit) => (bodies.push(JSON.parse(String(init?.body))), new Response(null, { status: 204 }))) as unknown as typeof fetch;
+  const run = "22222222-2222-4222-8222-222222222222";
+  const good = deps({ env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_RUN_ID: run }, fetchImpl });
+  expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], good.d)).toBe(0);
+  expect(bodies).toEqual([{ run }]);
+});

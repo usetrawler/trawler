@@ -35,6 +35,7 @@ export interface WorkerDeps {
   betweenJobs?: () => Promise<void>;
   look?: (targetUrl: string) => boolean;
   channelPollMs?: number;
+  runId?: string;
 }
 
 const CLOSE_TIMEOUT_MS = 10_000;
@@ -50,6 +51,9 @@ const clip = (s: string) => Array.from(s).slice(0, MAX_ERROR).join("");
 
 class Unauthorized extends Error {}
 class Refused extends Error {}
+class UpgradeRequired extends Error {}
+
+export class FatalClaim extends Error {}
 
 const worthRetrying = (status: number) => status === 429 || (status >= 500 && status !== 501);
 const timedOut = (err: unknown) => err instanceof Error && err.name === "TimeoutError";
@@ -59,6 +63,18 @@ function described(err: unknown): string {
   const code = (err.cause as { code?: unknown } | undefined)?.code;
   return typeof code === "string" ? `${err.message} (${code})` : err.message;
 }
+
+async function errorOf(res: Response): Promise<string> {
+  const text = await res.text().catch(() => "");
+  try {
+    const error = (JSON.parse(text) as { error?: unknown }).error;
+    return typeof error === "string" ? error : text;
+  } catch {
+    return text;
+  }
+}
+
+const permanent = (status: number) => status >= 400 && status < 500 && status !== 408 && status !== 429;
 
 function pause(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -84,11 +100,11 @@ async function call(deps: WorkerDeps, path: string, bearer: string, body: unknow
         signal,
       });
       if (res.status === 401) throw new Unauthorized(`the control plane refused ${path}`);
-      if (res.status === 426) throw new Error(await res.text());
+      if (res.status === 426) throw new UpgradeRequired(await errorOf(res));
       if (res.status < 500 && res.status !== 429) return res;
       last = new Error(`HTTP ${res.status} from ${path}`);
     } catch (err) {
-      if (err instanceof Unauthorized || signal?.aborted) throw err;
+      if (err instanceof Unauthorized || err instanceof UpgradeRequired || signal?.aborted) throw err;
       last = err;
     }
     if (i < attempts - 1) await pause((deps.retryBaseMs ?? 500) * 2 ** i * (0.5 + Math.random()), signal);
@@ -351,12 +367,15 @@ async function assignment(deps: WorkerDeps, res: Response): Promise<JobAssignmen
 export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<"idle" | "done"> {
   let res: Response;
   try {
-    res = await call(deps, "/api/runner/claim", deps.runnerToken, {}, signal);
+    res = await call(deps, "/api/runner/claim", deps.runnerToken, deps.runId ? { run: deps.runId } : {}, signal);
   } catch (err) {
     if (signal?.aborted) return "idle";
+    if (err instanceof Unauthorized) throw new FatalClaim("the control plane does not know this runner (HTTP 401); check the token the runner was started with");
+    if (err instanceof UpgradeRequired) throw new FatalClaim(`this runner is too old for the control plane (HTTP 426): ${err.message}`);
     throw err;
   }
   if (res.status === 204) return "idle";
+  if (!res.ok && permanent(res.status)) throw new FatalClaim(`the control plane refuses this runner's claims (HTTP ${res.status}): ${(await errorOf(res)).slice(0, 200)}`);
   if (!res.ok) throw new Error(`claim failed: HTTP ${res.status}`);
   let job: JobAssignment | null;
   try {
@@ -445,6 +464,12 @@ export async function workLoop(deps: WorkerDeps, signal: AbortSignal): Promise<v
       await workOnce(deps, signal);
       reportedSinceLastClaim = false;
     } catch (err) {
+      if (err instanceof FatalClaim) {
+        const fatal = scrubber.scrub(`claim failed for good, the runner is stopping: ${err.message}`);
+        deps.log(fatal, { level: "error" });
+        deps.report?.(fatal, {});
+        throw err;
+      }
       const message = scrubber.scrub(`claim failed: ${err instanceof Error ? err.message : String(err)}`);
       deps.log(message, { level: "error" });
       if (!reportedSinceLastClaim) deps.report?.(message, {});
