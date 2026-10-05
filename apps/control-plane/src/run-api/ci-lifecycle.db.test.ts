@@ -8,10 +8,10 @@ import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { createProject } from "../projects/projects.ts";
 import { handleClaim } from "../runner-api/handlers.ts";
-import { UNCLAIMED_RUN_MINUTES } from "../runs/limits.ts";
-import { claimJob, stopUnclaimedRuns } from "../runs/queue.ts";
-import { startRun } from "../runs/runs.ts";
-import { handleStopRun, type RunApiDeps } from "./handlers.ts";
+import { CLIENT_GONE_MINUTES, UNCLAIMED_RUN_MINUTES } from "../runs/limits.ts";
+import { claimJob, stopRunsOfGoneClients, stopUnclaimedRuns } from "../runs/queue.ts";
+import { cancelLiveRuns, startRun } from "../runs/runs.ts";
+import { handleGetRun, handleStartRun, handleStopRun, type RunApiDeps } from "./handlers.ts";
 
 const t = await testDb();
 afterAll(() => t.drop());
@@ -30,7 +30,7 @@ const stop = (token: string | undefined, id: string) =>
 
 beforeAll(async () => {
   for (const org of ["org-x", "org-y"]) await sql`insert into organization (id, name, slug, "createdAt") values (${org}, ${org}, ${org}, now())`.execute(t.db);
-  for (const name of ["stopA", "stopB", "claimA", "claimB", "sweepOld", "sweepNew", "sweepHosted", "sweepRunning", "yOther"]) {
+  for (const name of ["stopA", "stopB", "claimA", "claimB", "sweepOld", "sweepNew", "sweepHosted", "sweepRunning", "yOther", "goneStale", "goneFresh", "goneApp", "goneRunning"]) {
     projects[name] = await withOrg(t.db, orgOf(name), (tx) => createProject(tx, orgOf(name), { ...config, name }, keys));
   }
 });
@@ -146,5 +146,60 @@ describe("a run no runner picks up", () => {
     expect(jobs.every((j) => j.status === "cancelled")).toBe(true);
     expect(await stopUnclaimedRuns(t.db)).toBe(0);
     await expect(start("sweepOld")).resolves.toBeDefined();
+  });
+});
+
+describe("a run whose CI job stopped asking about it", () => {
+  const seen = (id: string) => asSystem(t.db, (tx) => tx.selectFrom("runs").select(sql<number | null>`extract(epoch from now() - client_seen_at)`.as("ago")).where("id", "=", id).executeTakeFirstOrThrow()).then((r) => (r.ago === null ? null : Number(r.ago)));
+  const lastSeen = (id: string, minutesAgo: number) => asSystem(t.db, (tx) => tx.updateTable("runs").set({ client_seen_at: sql<Date>`now() - make_interval(mins => ${minutesAgo})` }).where("id", "=", id).execute());
+  const post = (token: string, project: string) =>
+    handleStartRun(new Request("http://x/api/v1/runs", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ project, execution: "own" }) }), deps);
+  const get = (token: string, id: string) => handleGetRun(new Request(`http://x/api/v1/runs/${id}`, { headers: { authorization: `Bearer ${token}` } }), id, deps);
+
+  test("is marked seen when started through the API, and each poll refreshes it, while a run started from the app is never marked", async () => {
+    const { token } = await mint("org-x");
+    const fromApp = await start("goneStale");
+    expect(await seen(fromApp.id)).toBeNull();
+    expect((await get(token, fromApp.id)).status).toBe(200);
+    expect(await seen(fromApp.id)).toBeNull();
+    await withOrg(t.db, "org-x", (tx) => cancelLiveRuns(tx, "org-x", "stopped"));
+    const posted = await post(token, projects.goneStale!);
+    expect(posted.status).toBe(201);
+    const id = (await posted.json()).id as string;
+    expect(await seen(id)).toBeLessThan(30);
+    await lastSeen(id, 2);
+    expect(await seen(id)).toBeGreaterThan(100);
+    expect((await get(token, id)).status).toBe(200);
+    expect(await seen(id)).toBeLessThan(30);
+    await lastSeen(id, 2);
+    expect((await get((await mint("org-y")).token, id)).status).toBe(404);
+    expect(await seen(id)).toBeGreaterThan(100);
+  });
+
+  test("is cancelled once nobody has asked for more than the limit, which frees its project, while a polled, an app-started and a finished run are left", async () => {
+    const { token } = await mint("org-x");
+    const gone = (await asSystem(t.db, (tx) => tx.selectFrom("runs").select("id").where("project_id", "=", projects.goneStale!).where("status", "=", "queued").executeTakeFirstOrThrow())).id;
+    const fresh = await start("goneFresh");
+    const app = await start("goneApp");
+    const running = await start("goneRunning");
+    await claimJob(t.db, keys, { execution: "own", orgId: "org-x", projectId: projects.goneRunning!, runId: running.id });
+    await lastSeen(fresh.id, CLIENT_GONE_MINUTES - 1);
+    await asSystem(t.db, (tx) => tx.updateTable("runs").set({ created_at: sql<Date>`now() - interval '5 hours'` }).where("id", "=", app.id).execute());
+    await lastSeen(gone, CLIENT_GONE_MINUTES + 1);
+    await lastSeen(running.id, CLIENT_GONE_MINUTES + 10);
+    await asSystem(t.db, (tx) => tx.updateTable("runs").set({ client_seen_at: sql<Date>`now() - interval '1 hour'` }).where("project_id", "=", projects.goneStale!).where("status", "=", "cancelled").execute());
+    expect(await stopRunsOfGoneClients(t.db)).toBe(2);
+    expect(await row(gone)).toEqual({ status: "cancelled", cancel_reason: "ci_gone" });
+    expect(await row(running.id)).toEqual({ status: "cancelled", cancel_reason: "ci_gone" });
+    const jobs = await asSystem(t.db, (tx) => tx.selectFrom("jobs").select("status").where("run_id", "=", gone).execute());
+    expect(jobs.every((j) => j.status === "cancelled")).toBe(true);
+    expect((await row(fresh.id)).status).toBe("queued");
+    expect((await row(app.id)).status).toBe("queued");
+    expect(await stopRunsOfGoneClients(t.db)).toBe(0);
+    await expect(start("goneStale")).resolves.toBeDefined();
+    await lastSeen(fresh.id, CLIENT_GONE_MINUTES + 1);
+    expect((await get(token, fresh.id)).status).toBe(200);
+    expect(await stopRunsOfGoneClients(t.db)).toBe(0);
+    expect((await row(fresh.id)).status).toBe("queued");
   });
 });

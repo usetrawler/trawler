@@ -234,7 +234,7 @@ export class RunNotFound extends Error {
   }
 }
 
-export type CancelReason = "stopped" | "key_removed" | "account_refused" | "time_limit" | "workspace_budget" | "paused" | "halted" | "stopped_from_ci" | "unclaimed";
+export type CancelReason = "stopped" | "key_removed" | "account_refused" | "time_limit" | "workspace_budget" | "paused" | "halted" | "stopped_from_ci" | "unclaimed" | "ci_gone";
 
 export const ACCOUNT_REFUSED = "The product refused the username and password of";
 

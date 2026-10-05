@@ -300,6 +300,7 @@ export interface Runs {
   agent_model: string;
   budget_usd: Numeric;
   cancel_reason: string | null;
+  client_seen_at: Timestamp | null;
   completion_usd_per_mtok: Numeric | null;
   config_snapshot: Json;
   conversation: Generated<boolean>;
