@@ -960,12 +960,14 @@ describe("runRoleSession on standby", () => {
   test("the prompts forbid hints and keep standby to actions only the person's own account can do", () => {
     const prompt = rolePrompt({ persona: project.personas[0]!, targetUrl: "https://acme.test", goals: project.goals, team: ["Dana"] });
     expect(prompt).toContain("report facts, never hints");
-    expect(prompt).toContain("which account or credentials to use");
+    expect(prompt).toContain("which account to sign in with");
     expect(prompt).toContain("you stay on standby");
     const standby = standbyPrompt();
     expect(standby).toContain("only your own account or role can do");
     expect(standby).toContain("report facts, never hints");
     expect(standby).toContain("what to try next");
+    expect(standby).toContain("before you leave that page");
+    expect(standby).toContain("pass it on exactly as shown");
     expect(rolePrompt({ persona: project.personas[0]!, targetUrl: "https://acme.test", goals: project.goals })).not.toContain("never hints");
   });
 });
