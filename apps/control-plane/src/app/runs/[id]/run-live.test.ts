@@ -15,7 +15,7 @@ const finding = (key: string, persona: string, extra: Partial<RunSummary["findin
 const summary = (over: Partial<RunSummary>): RunSummary => ({
   id: "run-1", number: 7, status: "succeeded", cancelReason: null, projectId: "project-1", planName: null, costUsd: 0.35, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash",
   provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0, createdAt: new Date("2026-09-25T19:40:00Z"), startedAt: new Date("2026-09-25T19:40:05Z"), finishedAt: new Date("2026-09-25T19:59:00Z"),
-  jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [], conversation: false, prPlan: null, conversationMessages: [], providedAccounts: [],
+  jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [], conversation: false, prPlan: null, conversationMessages: [], execution: "hosted", providedAccounts: [],
   personas: [{ id: "ana", name: "Ana" }, { id: "lee", name: "Lee Park" }], goalTexts: [{ id: "g1", instruction: "Get an account." }, { id: "g2", instruction: "Send an invoice." }],
   ...over,
 });
@@ -165,6 +165,18 @@ test("Run again and Start another run belong to every run that has ended, and to
     expect(html).not.toContain("Run again");
     expect(html).not.toContain("Start another run");
   }
+});
+
+test("a run that came from CI offers no Run again and says to start it from there; a hosted run is unchanged and a live run says nothing", () => {
+  const came = "This run came from CI. Start it again from there.";
+  for (const status of ["succeeded", "failed", "cancelled"]) {
+    const html = render(summary({ ...finished, status, execution: "own" }));
+    expect(html).not.toContain("Run again");
+    expect(html).toContain(came);
+    expect(head(html)).toContain(">Start another run</a>");
+  }
+  expect(render(summary({ ...finished, execution: "hosted" }))).not.toContain(came);
+  expect(render(summary({ ...live, execution: "own" }))).not.toContain(came);
 });
 
 test("every defect counts as reported whatever the replay made of it, friction does not, and a defect the judge left without a verdict can be judged again", () => {

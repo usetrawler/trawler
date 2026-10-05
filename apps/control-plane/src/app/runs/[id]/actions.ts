@@ -114,7 +114,7 @@ export async function runAgainAction(_previous: RunAgainState, form: FormData): 
   const found = await withOrg(getDb(), orgId, async (tx) => ({
     previous: await tx
       .selectFrom("runs")
-      .select(["project_id", "plan_id", "status", "agent_model", "judge_model", "budget_usd", "provider", "provider_base_url", "prompt_usd_per_mtok", "completion_usd_per_mtok", "paid_by"])
+      .select(["project_id", "plan_id", "status", "execution", "agent_model", "judge_model", "budget_usd", "provider", "provider_base_url", "prompt_usd_per_mtok", "completion_usd_per_mtok", "paid_by"])
       .where("id", "=", runId)
       .where("org_id", "=", orgId)
       .executeTakeFirst(),
@@ -122,6 +122,7 @@ export async function runAgainAction(_previous: RunAgainState, form: FormData): 
   }));
   const { previous, stored } = found;
   if (!previous) return { error: "This run was not found." };
+  if (previous.execution === "own") return { error: "This run came from CI. Start it again from there." };
   if (!previous.plan_id) return { error: "The plan of this run was removed. Start a run from one of the project's plans." };
   const planId = previous.plan_id;
   const without = await withOrg(getDb(), orgId, (tx) => personWithoutAccount(tx, planId));
