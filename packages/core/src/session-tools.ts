@@ -10,6 +10,7 @@ export interface SessionState {
   findings: Finding[];
   goals: Map<string, GoalOutcome>;
   finished: string | null;
+  standby: { since: number; summary: string; emptyWaits: number } | null;
   page: "unseen" | "seen" | "stale";
   botProtection: BotProtection | null;
 }
@@ -19,6 +20,8 @@ export type FillField = (ref: string, text: string, kind: FieldKind) => Promise<
 export type InBrowser = <T>(action: () => Promise<T>) => Promise<T>;
 
 const CLOSED = "rejected: the session is already finished";
+export const STANDBY = { maxTurns: 12, maxMs: 6 * 60_000, maxEmptyWaits: 4, maxWaitSeconds: 30, defaultWaitSeconds: 20 };
+const STANDBY_STARTED = "Your goals are recorded, but other people are still working, so you stay on standby for them. Use read_team_channel with wait_seconds and say_to_team; do not give hints (see your standby rules). Call finish again when you have nothing left to do.";
 const PASSWORD_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 
 function seeded(seed: string, purpose: string): Buffer {
@@ -41,6 +44,7 @@ export function newSessionState(goals: Goal[]): SessionState {
     findings: [],
     goals: new Map(goals.map((g) => [g.id, { goal: g.id, status: "not_attempted", note: "" }])),
     finished: null,
+    standby: null,
     page: "unseen",
     botProtection: null,
   };
@@ -151,6 +155,7 @@ export function sessionTools(opts: {
   botProtection?: () => BotProtection | null;
   people?: { id: string; name: string }[];
   self?: string;
+  othersAreWorking?: () => Promise<boolean>;
 }) {
   const { state, emit, jobId } = opts;
   const goalIds = () => [...state.goals.keys()];
@@ -250,14 +255,19 @@ export function sessionTools(opts: {
       },
     }),
     finish: tool({
-      description: "End the session with a short summary once every goal has a status (reached or failed).",
+      description: "End the session with a short summary once every goal has a status (reached or failed). When other people are still working you go on standby for them first; call finish again to end it.",
       inputSchema: z.object({ summary: z.string().nullish() }),
       execute: async ({ summary }) => {
         if (state.finished !== null) return CLOSED;
-        if (!summary?.trim()) return "rejected: summary: write a short summary";
+        const kept = summary?.trim() ? summary : state.standby?.summary;
+        if (!kept) return "rejected: summary: write a short summary";
         const open = [...state.goals.values()].filter((g) => g.status === "not_attempted").map((g) => g.goal);
         if (open.length) return `rejected: give these goals a status first (goal_status reached or failed): ${open.join(", ")}`;
-        state.finished = summary;
+        if (!state.standby && opts.othersAreWorking && await opts.othersAreWorking()) {
+          state.standby = { since: Date.now(), summary: kept, emptyWaits: 0 };
+          return STANDBY_STARTED;
+        }
+        state.finished = kept;
         return "finished";
       },
     }),
@@ -270,7 +280,8 @@ export const MAX_TEAM_MESSAGE = 1000;
 export const CHANNEL_UNREADABLE = "Could not read the channel.";
 
 export interface TeamChannel {
-  read: (afterId: number) => Promise<ChannelMessage[]>;
+  read: (afterId: number, waitSeconds?: number) => Promise<ChannelMessage[]>;
+  othersWorking?: () => boolean | undefined;
 }
 
 export function teamTools(opts: { state: SessionState; emit: (e: RunEventInput) => void; jobId: string; channel: TeamChannel; scrubber: SecretScrubber }) {
@@ -278,7 +289,7 @@ export function teamTools(opts: { state: SessionState; emit: (e: RunEventInput) 
   let lastSeen = 0;
   return {
     say_to_team: tool({
-      description: "Post a short message to the shared channel the other people testing with you can read: what you found, what you need from them (for example an action only they can do), or an answer to their question. One or two sentences.",
+      description: "Post a short message to the shared channel the other people testing with you can read: a fact you saw or did, what you need from them (for example an action only they can do), or an answer to their question. Never a hint: not where something is, how to do something, which page, account or credentials to use, or what to try next. One or two sentences.",
       inputSchema: z.object({ text: z.string().nullish() }),
       execute: async ({ text }) => {
         if (state.finished !== null) return CLOSED;
@@ -289,17 +300,30 @@ export function teamTools(opts: { state: SessionState; emit: (e: RunEventInput) 
       },
     }),
     read_team_channel: tool({
-      description: "Read the new messages the other people testing with you have posted since you last read the channel.",
-      inputSchema: z.object({}),
-      execute: async () => {
+      description: `Read the new messages the other people testing with you have posted since you last read the channel. wait_seconds (0 to ${STANDBY.maxWaitSeconds}) waits that long for a new message instead of returning at once.`,
+      inputSchema: z.object({ wait_seconds: z.number().nullish() }),
+      execute: async ({ wait_seconds }) => {
         if (state.finished !== null) return CLOSED;
-        let messages: ChannelMessage[];
+        const standing = state.standby;
+        let wait = Math.min(Math.max(Math.floor(wait_seconds ?? (standing ? STANDBY.defaultWaitSeconds : 0)) || 0, 0), STANDBY.maxWaitSeconds);
+        if (standing) wait = Math.min(wait, Math.max(0, Math.ceil((standing.since + STANDBY.maxMs - Date.now()) / 1000)));
+        let messages: ChannelMessage[] = [];
+        let unreadable = false;
         try {
-          messages = await opts.channel.read(lastSeen);
+          messages = await opts.channel.read(lastSeen, wait);
         } catch {
-          return CHANNEL_UNREADABLE;
+          unreadable = true;
         }
         const fresh = messages.filter((m) => m.id > lastSeen);
+        if (standing) {
+          standing.emptyWaits = fresh.length === 0 ? standing.emptyWaits + 1 : 0;
+          const over = opts.channel.othersWorking?.() === false ? "Everybody else has finished." : standing.emptyWaits >= STANDBY.maxEmptyWaits ? "Nobody asked you for anything." : null;
+          if (over) {
+            state.finished = standing.summary;
+            return `${over} Standby is over and the session has ended.`;
+          }
+        }
+        if (unreadable) return CHANNEL_UNREADABLE;
         if (fresh.length === 0) return "No new messages.";
         lastSeen = Math.max(...fresh.map((m) => m.id));
         const tag = randomBytes(8).toString("hex");

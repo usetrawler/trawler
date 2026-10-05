@@ -1,12 +1,13 @@
 import { APICallError, tool } from "ai";
 import { z } from "zod";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
 import { JOB_STOPPED, ProjectConfigSchema, RunEventSchema, type RunEventInput } from "@usetrawler/protocol";
 import { Budget, createModel } from "./llm.ts";
-import { rolePrompt, sessionStatus } from "./prompts.ts";
+import { rolePrompt, sessionStatus, standbyPrompt } from "./prompts.ts";
 import { runRoleSession } from "./role-session.ts";
 import { SecretScrubber } from "./secrets.ts";
+import { STANDBY } from "./session-tools.ts";
 import { proxyRefusal, reasoning, scriptedModel, text, toolCall } from "./testing.ts";
 
 const project = ProjectConfigSchema.parse({
@@ -844,5 +845,127 @@ describe("runRoleSession in a conversation", () => {
     expect(names).not.toContain("say_to_team");
     expect(names).not.toContain("read_team_channel");
     expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).not.toContain("say_to_team");
+  });
+});
+
+describe("runRoleSession on standby", () => {
+  const peers = [{ id: "admin", name: "Dana" }];
+  const message = (id: number, text: string) => ({ id, personaId: "admin", name: "Dana", text, at: "2026-10-04T10:00:00.000Z" });
+  const done = [reached("sign-up"), reached("invoice")];
+  const channelOf = (opts: { working: boolean | undefined; messages?: (after: number) => ReturnType<typeof message>[]; onRead?: (after: number, wait?: number) => void }) => {
+    const state = { working: opts.working, waits: [] as Array<number | undefined> };
+    return {
+      state,
+      channel: {
+        read: async (after: number, wait?: number) => {
+          state.waits.push(wait);
+          opts.onRead?.(after, wait);
+          return opts.messages?.(after) ?? [];
+        },
+        othersWorking: () => state.working,
+      },
+    };
+  };
+
+  test("a finished person helps while the others work, then ends once they are done", async () => {
+    const { channel, state } = channelOf({
+      working: true,
+      messages: (after) => (after === 0 ? [message(4, "Please invite me to the workspace.")] : []),
+      onRead: (_after, wait) => { if (wait === 10) state.working = false; },
+    });
+    const model = scriptedModel([
+      ...done, finish,
+      toolCall("read_team_channel", { wait_seconds: 99 }),
+      toolCall("browser_snapshot", {}),
+      toolCall("say_to_team", { text: "I sent the invitation; the product shows the link /invite/abc." }),
+      toolCall("read_team_channel", {}),
+      toolCall("read_team_channel", { wait_seconds: 10 }),
+      toolCall("say_to_team", { text: "never sent" }),
+    ]);
+    const { promise, events } = run(model, { conversation: { peers, channel } });
+    const { result, usage } = await promise;
+    expect(result.stoppedBy).toBe("finish");
+    expect(result.goals.map((g) => g.status)).toEqual(["reached", "reached"]);
+    expect(usage.steps).toBe(8);
+    expect(events.filter((e) => e.type === "message")).toEqual([{ type: "message", jobId: "role:solo", text: "I sent the invitation; the product shows the link /invite/abc." }]);
+    expect(events.filter((e) => e.type === "job_finished")).toMatchObject([{ stoppedBy: "finish" }]);
+    expect(state.waits).toEqual([0, 30, 20, 10]);
+    const afterFinish = JSON.stringify(model.doGenerateCalls[3]!.prompt);
+    expect(afterFinish).toContain("you stay on standby");
+    expect(JSON.stringify(model.doGenerateCalls[3]!)).toContain("## Standby");
+    expect(JSON.stringify(model.doGenerateCalls[2]!)).not.toContain("## Standby");
+    expect(JSON.stringify(model.doGenerateCalls[4]!.prompt)).toContain("Please invite me to the workspace.");
+  });
+
+  test("it ends at once when the others finish while it waits", async () => {
+    const { channel, state } = channelOf({ working: true, onRead: (_a, wait) => { if (wait) state.working = false; } });
+    const model = scriptedModel([...done, finish, toolCall("read_team_channel", {}), toolCall("say_to_team", { text: "never sent" })]);
+    const { result, usage } = await run(model, { conversation: { peers, channel } }).promise;
+    expect(result.stoppedBy).toBe("finish");
+    expect(usage.steps).toBe(4);
+  });
+
+  test("standby ends after a fixed number of turns even when teammates keep writing", async () => {
+    let id = 0;
+    const { channel } = channelOf({ working: true, messages: () => [message(++id, "still here")] });
+    const model = scriptedModel([...done, finish, ...Array.from({ length: 30 }, () => toolCall("read_team_channel", {}))]);
+    const { result, usage } = await run(model, { conversation: { peers, channel }, maxSteps: 100 }).promise;
+    expect(result.stoppedBy).toBe("finish");
+    expect(usage.steps).toBe(3 + STANDBY.maxTurns);
+  });
+
+  test("standby ends after the time limit", async () => {
+    let now = 1_000_000;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      let id = 0;
+      const { channel } = channelOf({ working: true, messages: () => [message(++id, "still here")], onRead: () => { now += STANDBY.maxMs / 2; } });
+      const model = scriptedModel([...done, finish, ...Array.from({ length: 10 }, () => toolCall("read_team_channel", {}))]);
+      const { result, usage } = await run(model, { conversation: { peers, channel }, maxSteps: 100 }).promise;
+      expect(result.stoppedBy).toBe("finish");
+      expect(usage.steps).toBeLessThanOrEqual(3 + 3);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  test("standby ends after a few empty waits and shares the session's step budget", async () => {
+    const quiet = channelOf({ working: true });
+    const model = scriptedModel([...done, finish, ...Array.from({ length: 10 }, () => toolCall("read_team_channel", {}))]);
+    const first = await run(model, { conversation: { peers, channel: quiet.channel }, maxSteps: 100 }).promise;
+    expect(first.result.stoppedBy).toBe("finish");
+    expect(first.usage.steps).toBe(3 + STANDBY.maxEmptyWaits);
+
+    let id = 0;
+    const busy = channelOf({ working: true, messages: () => [message(++id, "still here")] });
+    const capped = scriptedModel([...done, finish, ...Array.from({ length: 10 }, () => toolCall("read_team_channel", {}))]);
+    const second = await run(capped, { conversation: { peers, channel: busy.channel }, maxSteps: 6 }).promise;
+    expect(second.result.stoppedBy).toBe("finish");
+    expect(second.usage.steps).toBe(6);
+  });
+
+  test("without a sign that others are working, finish ends the session as before", async () => {
+    for (const working of [undefined, false]) {
+      const { channel } = channelOf({ working });
+      const model = scriptedModel([...done, finish]);
+      const { result, usage } = await run(model, { conversation: { peers, channel } }).promise;
+      expect(result.stoppedBy).toBe("finish");
+      expect(usage.steps).toBe(3);
+    }
+    const down = scriptedModel([...done, finish]);
+    const { usage } = await run(down, { conversation: { peers, channel: { read: async () => { throw new Error("down"); } } } }).promise;
+    expect(usage.steps).toBe(3);
+  });
+
+  test("the prompts forbid hints and keep standby to actions only the person's own account can do", () => {
+    const prompt = rolePrompt({ persona: project.personas[0]!, targetUrl: "https://acme.test", goals: project.goals, team: ["Dana"] });
+    expect(prompt).toContain("report facts, never hints");
+    expect(prompt).toContain("which account or credentials to use");
+    expect(prompt).toContain("you stay on standby");
+    const standby = standbyPrompt();
+    expect(standby).toContain("only your own account or role can do");
+    expect(standby).toContain("report facts, never hints");
+    expect(standby).toContain("what to try next");
+    expect(rolePrompt({ persona: project.personas[0]!, targetUrl: "https://acme.test", goals: project.goals })).not.toContain("never hints");
   });
 });

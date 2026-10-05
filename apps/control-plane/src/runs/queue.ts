@@ -466,7 +466,7 @@ export async function ingestEvents(db: Database, token: string, events: RunEvent
   });
 }
 
-export async function channelFor(db: Database, token: string, jobId: string, after: number): Promise<ChannelMessage[]> {
+export async function channelFor(db: Database, token: string, jobId: string, after: number): Promise<{ messages: ChannelMessage[]; othersWorking: boolean }> {
   return asSystem(db, async (tx) => {
     const job = await tx
       .selectFrom("jobs as j")
@@ -490,14 +490,23 @@ export async function channelFor(db: Database, token: string, jobId: string, aft
       .orderBy("e.id")
       .limit(MAX_CHANNEL_MESSAGES)
       .execute();
+    const working = await tx
+      .selectFrom("jobs")
+      .select("id")
+      .where("run_id", "=", job.run_id)
+      .where("kind", "=", "role_session")
+      .where("persona_key", "is distinct from", job.persona_key)
+      .where("status", "in", ["queued", "leased"])
+      .executeTakeFirst();
     const name = new Map((job.config_snapshot as unknown as ConfigSnapshot).personas.map((p) => [p.id, p.name]));
-    return rows.map((row) => ({
+    const messages = rows.map((row) => ({
       id: Number(row.id),
       personaId: row.persona_key ?? "",
       name: name.get(row.persona_key ?? "") ?? row.persona_key ?? "",
       text: (row.payload as unknown as Extract<RunEvent, { type: "message" }>).text,
       at: new Date(row.at).toISOString(),
     }));
+    return { messages, othersWorking: working !== undefined };
   });
 }
 
