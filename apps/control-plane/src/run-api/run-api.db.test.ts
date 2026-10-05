@@ -112,4 +112,22 @@ describe("run api", () => {
     expect(override.status).toBe(422);
     expect((await post(token, { project: projects.ent })).status).toBe(404);
   });
+
+  test("pull request details and a plan mode are stored with the run, plan by default, and the planner is kicked", async () => {
+    const { token } = await mint("org-ent");
+    await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
+    let kicked = 0;
+    const pullRequest = { number: 482, title: "Add export", description: "Adds a button.", changedFiles: ["src/a.ts"] };
+    const started = await (await post(token, { project: projects.ent, pullRequest }, { afterStart: () => void kicked++ })).json();
+    expect(kicked).toBe(1);
+    const row = await asSystem(t.db, (tx) => tx.selectFrom("runs").select(["pull_request", "pr_plan"]).where("id", "=", started.id).executeTakeFirstOrThrow());
+    expect(row.pull_request).toMatchObject(pullRequest);
+    expect(row.pr_plan).toEqual({ mode: "both", goalIds: [] });
+    await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
+    const regression = await (await post(token, { project: projects.ent, pullRequest, planMode: "regression" })).json();
+    expect((await asSystem(t.db, (tx) => tx.selectFrom("runs").select("pr_plan").where("id", "=", regression.id).executeTakeFirstOrThrow())).pr_plan).toBeNull();
+    await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
+    expect((await post(token, { project: projects.ent, pullRequest: { description: "x".repeat(4001) } })).status).toBe(400);
+    expect((await post(token, { project: projects.ent, planMode: "everything" })).status).toBe(400);
+  });
 });

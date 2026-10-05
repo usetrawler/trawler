@@ -15,7 +15,7 @@ const finding = (key: string, persona: string, extra: Partial<RunSummary["findin
 const summary = (over: Partial<RunSummary>): RunSummary => ({
   id: "run-1", number: 7, status: "succeeded", cancelReason: null, projectId: "project-1", planName: null, costUsd: 0.35, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash",
   provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0, createdAt: new Date("2026-09-25T19:40:00Z"), startedAt: new Date("2026-09-25T19:40:05Z"), finishedAt: new Date("2026-09-25T19:59:00Z"),
-  jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [], conversation: false, conversationMessages: [], providedAccounts: [],
+  jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [], conversation: false, prPlan: null, conversationMessages: [], providedAccounts: [],
   personas: [{ id: "ana", name: "Ana" }, { id: "lee", name: "Lee Park" }], goalTexts: [{ id: "g1", instruction: "Get an account." }, { id: "g2", instruction: "Send an invoice." }],
   ...over,
 });
@@ -390,4 +390,16 @@ test("a finding Trawler marked not a bug says so and links to the earlier mark i
 test("the run page names the plan the run came from when the project has several, or the plan was removed", () => {
   expect(render(summary({ ...finished, planName: "Invitations" }))).toMatch(/Invitations · deepseek\/deepseek-v4\.1-flash/);
   expect(render(summary({ ...finished, planName: null }))).not.toContain("Invitations");
+});
+
+test("a run planned for a pull request shows the PR and the goals the lead chose, or why it did not plan", () => {
+  const planned = text(render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: null, goals: [{ id: "pr-export", instruction: "all invoices of last month come out as one spreadsheet", personaId: "lee" }] } })));
+  expect(planned).toContain("Planned for PR #482");
+  expect(planned).toContain("The project's plan runs as it is, with these goals added for the change.");
+  expect(planned).toContain("Lee Park wants all invoices of last month come out as one spreadsheet");
+  const fellBack = text(render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: "Nothing in this pull request points at a feature, so the project's plan ran as it is.", goals: [] } })));
+  expect(fellBack).toContain("Pull request #482");
+  expect(fellBack).toContain("Nothing in this pull request points at a feature");
+  expect(text(render(summary({ ...finished, prPlan: { number: 482, mode: "change", note: null, goals: [] } })))).toContain("Planning for PR #482");
+  expect(text(render(finished))).not.toContain("PR #");
 });

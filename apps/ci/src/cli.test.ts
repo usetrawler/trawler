@@ -78,6 +78,28 @@ describe("github adapter", () => {
     expect(github.pullRequest({ GITHUB_REPOSITORY: "acme/shop", GITHUB_SHA: "abc" })).toEqual({ repository: "acme/shop", commit: "abc" });
   });
 
+  it("reads the description from the event and the changed files from the API, a page at a time and capped", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "trawler-ci-"));
+    const path = join(dir, "event.json");
+    writeFileSync(path, JSON.stringify({ number: 12, pull_request: { number: 12, title: "Add cart", body: "Adds a cart.", head: { sha: "abc" } } }));
+    const env = { GITHUB_ACTIONS: "true", GITHUB_EVENT_PATH: path, GITHUB_REPOSITORY: "acme/shop", GITHUB_TOKEN: "ghs_x" };
+    const pullRequest = github.pullRequest(env)!;
+    expect(pullRequest).toMatchObject({ title: "Add cart", description: "Adds a cart." });
+    const calls: Call[] = [];
+    const file = (i: number) => ({ filename: `src/f${i}.ts` });
+    const details = await github.pullRequestDetails!(env, pullRequest, fakeFetch((c) => ({ json: Array.from({ length: 100 }, (_, i) => file(i + (c.url.endsWith("page=2") ? 100 : 0))) }), calls));
+    expect(calls.map((c) => c.url)).toEqual(["https://api.github.com/repos/acme/shop/pulls/12/files?per_page=100&page=1", "https://api.github.com/repos/acme/shop/pulls/12/files?per_page=100&page=2"]);
+    expect(details.changedFiles).toHaveLength(200);
+    expect(details.changedFiles![199]).toBe("src/f199.ts");
+  });
+
+  it("asks GitHub for the title and description when the event has none", async () => {
+    const calls: Call[] = [];
+    const details = await github.pullRequestDetails!({ GITHUB_TOKEN: "ghs_x" }, { number: 5, repository: "acme/shop" }, fakeFetch((c) => ({ json: c.url.endsWith("/pulls/5") ? { title: "T", body: "B" } : [{ filename: "a.ts" }] }), calls));
+    expect(details).toEqual({ title: "T", description: "B", changedFiles: ["a.ts"] });
+    expect(await github.pullRequestDetails!({}, { number: 5, repository: "acme/shop" }, fakeFetch(() => ({}), calls))).toEqual({});
+  });
+
   it("skips the comment without a token", async () => {
     expect(await github.postComment({}, { number: 1, repository: "a/b" }, MARKDOWN, fakeFetch(() => ({})))).toBe("skipped");
   });
@@ -128,9 +150,32 @@ describe("runCli", () => {
     writeFileSync(summary, "");
     const h = harness([result({})], { GITHUB_ACTIONS: "true", GITHUB_EVENT_PATH: event, GITHUB_REPOSITORY: "acme/shop", GITHUB_TOKEN: "ghs_x", GITHUB_STEP_SUMMARY: summary });
     expect(await runCli([...argv, "--fail-on", "never"], h.deps)).toBe(0);
-    expect(h.calls[0]?.body.pullRequest).toMatchObject({ number: 12, repository: "acme/shop", commit: "abc" });
+    expect(h.calls.find((c) => c.url.endsWith("/api/v1/runs"))?.body.pullRequest).toMatchObject({ number: 12, repository: "acme/shop", commit: "abc" });
     expect(h.calls.at(-1)).toMatchObject({ method: "POST", url: "https://api.github.com/repos/acme/shop/issues/12/comments" });
     expect(readFileSync(summary, "utf8")).toContain(MARKDOWN);
+  });
+
+  it("sends the changed files and the plan mode, and keeps going without details when GitHub fails", async () => {
+    const event = join(mkdtempSync(join(tmpdir(), "trawler-ci-")), "e.json");
+    writeFileSync(event, JSON.stringify({ number: 4, pull_request: { number: 4, title: "Add cart", body: "Adds a cart." } }));
+    const env = { GITHUB_ACTIONS: "true", GITHUB_EVENT_PATH: event, GITHUB_REPOSITORY: "acme/shop", GITHUB_TOKEN: "ghs_x" };
+    const good = harness([result({})], env);
+    const base = good.deps.fetch!;
+    good.deps.fetch = ((url: string, init?: RequestInit) => (String(url).includes("/pulls/4/files") ? Promise.resolve(Response.json([{ filename: "src/cart.ts" }])) : base(url, init))) as typeof fetch;
+    await runCli([...argv, "--fail-on", "never", "--no-comment"], good.deps);
+    expect(good.calls.find((c) => c.url.endsWith("/api/v1/runs"))?.body).toMatchObject({ planMode: "both", pullRequest: { number: 4, title: "Add cart", description: "Adds a cart.", changedFiles: ["src/cart.ts"] } });
+    const bad = harness([result({})], env);
+    const original = bad.deps.fetch!;
+    bad.deps.fetch = ((url: string, init?: RequestInit) => (String(url).includes("api.github.com") ? Promise.resolve(new Response("nope", { status: 500 })) : original(url, init))) as typeof fetch;
+    expect(await runCli([...argv, "--fail-on", "never", "--no-comment"], bad.deps)).toBe(0);
+    expect(bad.err.join("\n")).toContain("could not read the pull request's details");
+    const sent = bad.calls.find((c) => c.url.endsWith("/api/v1/runs"))?.body;
+    expect(sent.pullRequest.changedFiles).toBeUndefined();
+    expect(sent.pullRequest.description).toBe("Adds a cart.");
+    const regression = harness([result({})], env);
+    await runCli([...argv, "--fail-on", "never", "--no-comment", "--plan-mode", "regression"], regression.deps);
+    expect(regression.calls.some((c) => c.url.includes("api.github.com"))).toBe(false);
+    expect(regression.calls.find((c) => c.url.endsWith("/api/v1/runs"))?.body.planMode).toBe("regression");
   });
 
   it("does not fail the job when the comment fails", async () => {

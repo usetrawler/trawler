@@ -1,5 +1,5 @@
 import { appendFileSync, readFileSync } from "node:fs";
-import type { PullRequest } from "@usetrawler/protocol";
+import { MAX_PR_DESCRIPTION, MAX_PR_FILES, type PullRequest } from "@usetrawler/protocol";
 import { COMMENT_MARKER, type CiAdapter, type Env } from "./types.ts";
 
 const MAX_PAGES = 30;
@@ -47,6 +47,24 @@ export async function upsertComment(
   return "created";
 }
 
+const githubHeaders = (token: string) => ({ authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "trawler-ci" });
+
+async function getJson<T>(fetchImpl: typeof fetch, url: string, token: string): Promise<T> {
+  const res = await fetchImpl(url, { headers: githubHeaders(token), signal: AbortSignal.timeout(30_000) });
+  if (!res.ok) throw new Error(`GitHub GET ${new URL(url).pathname} answered HTTP ${res.status}`);
+  return (await res.json()) as T;
+}
+
+export async function changedFilesOf(fetchImpl: typeof fetch, opts: { apiUrl: string; token: string; repository: string; number: number }): Promise<string[]> {
+  const files: string[] = [];
+  for (let page = 1; files.length < MAX_PR_FILES && page <= Math.ceil(MAX_PR_FILES / PAGE_SIZE); page++) {
+    const batch = await getJson<Array<{ filename?: unknown }>>(fetchImpl, `${opts.apiUrl}/repos/${opts.repository}/pulls/${opts.number}/files?per_page=${PAGE_SIZE}&page=${page}`, opts.token);
+    files.push(...batch.flatMap((f) => (typeof f.filename === "string" && f.filename ? [f.filename.slice(0, 300)] : [])));
+    if (batch.length < PAGE_SIZE) break;
+  }
+  return files.slice(0, MAX_PR_FILES);
+}
+
 export const github: CiAdapter = {
   name: "github",
   detect: (env) => env.GITHUB_ACTIONS === "true",
@@ -55,6 +73,7 @@ export const github: CiAdapter = {
     const pullRequest: PullRequest = {
       number: typeof pr?.number === "number" && pr.number > 0 ? pr.number : undefined,
       title: clip(pr?.title, 300),
+      description: clip(pr?.body, MAX_PR_DESCRIPTION),
       baseRef: clip(pr?.base?.ref, 200),
       headRef: clip(pr?.head?.ref, 200),
       commit: clip(pr?.head?.sha ?? env.GITHUB_SHA, 64),
@@ -62,6 +81,13 @@ export const github: CiAdapter = {
       url: typeof pr?.html_url === "string" && URL.canParse(pr.html_url) ? pr.html_url : undefined,
     };
     return Object.values(pullRequest).some((v) => v !== undefined) ? pullRequest : undefined;
+  },
+  async pullRequestDetails(env, pullRequest, fetchImpl = fetch) {
+    const token = env.GITHUB_TOKEN?.trim();
+    if (!token || !pullRequest.number || !pullRequest.repository) return {};
+    const opts = { apiUrl: (env.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/, ""), token, repository: pullRequest.repository, number: pullRequest.number };
+    const text = pullRequest.title !== undefined ? {} : await getJson<{ title?: unknown; body?: unknown }>(fetchImpl, `${opts.apiUrl}/repos/${opts.repository}/pulls/${opts.number}`, token).then((pr) => ({ title: clip(pr.title, 300), description: clip(pr.body, MAX_PR_DESCRIPTION) }));
+    return { ...text, changedFiles: await changedFilesOf(fetchImpl, opts) };
   },
   async postComment(env, pullRequest, markdown, fetchImpl = fetch) {
     const token = env.GITHUB_TOKEN?.trim();

@@ -13,6 +13,8 @@ export async function register(): Promise<void> {
   startArtifactCleanup();
   const { startRunLimitSweep } = await import("./server/run-limits.ts");
   startRunLimitSweep();
+  const { startPrPlanSweep } = await import("./server/pr-plans.ts");
+  startPrPlanSweep();
 }
 
 export const onRequestError: Instrumentation.onRequestError = async (err, request, context) => {

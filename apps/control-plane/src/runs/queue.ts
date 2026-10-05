@@ -101,6 +101,7 @@ async function reapExpiredLeases(db: Database): Promise<void> {
       .selectFrom("jobs")
       .select(["id", "run_id", "org_id", "kind", "finding_key"])
       .where("status", "=", "leased")
+      .where("kind", "!=", "pr_plan")
       .where("lease_until", "<", sql<Date>`now()`)
       .forUpdate()
       .skipLocked()
@@ -165,6 +166,7 @@ async function claimOnce(db: Database, keys: Keyring, scope: ClaimScope): Promis
       .leftJoin("workspace_plans as wp", "wp.org_id", "j.org_id")
       .select(["j.id", "j.org_id", "j.run_id", "j.kind", "j.position", "j.persona_key", "j.finding_key", "j.account_ref", "r.project_id", "r.plan_id", "r.status as run_status", "r.config_snapshot", "r.max_steps", "r.replay_steps", "r.budget_usd", "r.cost_usd", "r.agent_model", "r.judge_model", "r.sign_up_seed", "r.conversation", "r.provided_accounts"])
       .where("j.status", "=", "queued")
+      .where("j.kind", "!=", "pr_plan")
       .where("p.paused_at", "is", null)
       .where("r.execution", "=", scope.execution)
       .$if(scope.execution === "own", (q) => q.where("j.org_id", "=", (scope as OwnScope).orgId))
@@ -174,6 +176,7 @@ async function claimOnce(db: Database, keys: Keyring, scope: ClaimScope): Promis
         select 1 from jobs busy where busy.run_id = j.run_id and (
           (busy.status = 'leased' and not (r.conversation and j.kind = 'role_session' and busy.kind = 'role_session' and busy.persona_key is distinct from j.persona_key))
           or (r.conversation and j.kind = 'role_session' and busy.kind = 'account_check' and busy.status = 'queued')
+          or (busy.kind = 'pr_plan' and busy.status in ('queued', 'leased'))
         )
       )`)
       .orderBy(sql`r.started_at is null or j.requested_by is not null`)
