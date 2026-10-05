@@ -278,5 +278,10 @@ Otherwise answer with turns, in the order the people play them:
 - Each turn is one person, by id from the list above, and 1 to 3 new goals for them; a person can have several turns. At most 8 goals in all.
 - Each goal has an id (lowercase words joined by dashes) and an instruction phrased as the outcome that person wants, in the words of a user who has never heard of the pull request ("the invoices of last month are downloaded as one CSV file"). Never quote or closely paraphrase the pull request, and never name a file, component, function, route, address, variable or setting, or say that anything was added, changed or fixed. Do not describe steps or how the change was built.
 - When a goal needs something another person does first, put that person's turn before it and phrase the later goal so it points at that exact thing, calling them by the first name they have in the list.
-- Choose only people whose role can reach the change; skip the rest.`;
+- Choose only people whose role can reach the change; skip the rest.
+
+Also decide how the people get their accounts, and answer it as accountFlow:
+- "exercise" only when the pull request's title, description or changed file paths clearly show that it changes how people sign up, sign in, are invited, reset their passwords, or get roles or permissions (path words such as login, signin, signup, register, auth, session, invite, invitation, password, permission, role, membership, account). Then the people who have to sign up or be invited go through that real flow instead of being handed an account, and you write at least one goal for such a person about getting access, phrased as the outcome ("a new colleague joins the team and sees its workspace").
+- "provided" for every other pull request, and whenever you are unsure. Then everyone who has an account uses it and all the effort goes to testing the change.
+Add accountReason: one short sentence for the product's owner saying why, in your own words, never naming a file, component or address and never using the words "pull request".`;
 }

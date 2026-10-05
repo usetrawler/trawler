@@ -27,7 +27,14 @@ export interface LeadTurn {
   goals: Array<{ id: string; instruction: string }>;
 }
 
-const Answer = z.object({ turns: z.array(z.object({ person: z.string(), goals: z.array(z.object({ id: z.string(), instruction: z.string() })) })) });
+export type AccountFlow = "provided" | "exercise";
+const REASON_CHARS = 200;
+
+const Answer = z.object({
+  turns: z.array(z.object({ person: z.string(), goals: z.array(z.object({ id: z.string(), instruction: z.string() })) })),
+  accountFlow: z.string().optional().catch(undefined).describe('"provided" or "exercise"'),
+  accountReason: z.string().optional().catch(undefined),
+});
 
 const words = (text: string) => text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
 const identifierWords = (name: string) => words(name.replace(/([a-z\d])([A-Z])/g, "$1 $2").replace(/_/g, " "));
@@ -105,6 +112,12 @@ export function settleTurns(answer: z.infer<typeof Answer>, people: LeadPerson[]
   return { turns, dropped };
 }
 
+export function settleAccountFlow(answer: { accountFlow?: unknown; accountReason?: unknown }, pr: PullRequestText): { accountFlow: AccountFlow; accountReason?: string } {
+  const accountFlow: AccountFlow = typeof answer.accountFlow === "string" && answer.accountFlow.trim().toLowerCase() === "exercise" ? "exercise" : "provided";
+  const reason = typeof answer.accountReason === "string" ? clip(answer.accountReason, REASON_CHARS) : "";
+  return { accountFlow, ...(reason && !leaksPullRequest(reason, pr) ? { accountReason: reason } : {}) };
+}
+
 export async function planForPullRequest(opts: {
   model: LanguageModel;
   modelId: string;
@@ -116,7 +129,7 @@ export async function planForPullRequest(opts: {
   goals: Array<{ person: string; instruction: string }>;
   takenGoalIds?: string[];
   page?: string;
-}): Promise<{ turns: LeadTurn[]; dropped: number; usage: JobUsage }> {
+}): Promise<{ turns: LeadTurn[]; dropped: number; usage: JobUsage; accountFlow: AccountFlow; accountReason?: string }> {
   const { answer, usage } = await ask(opts, Answer, prPlanPrompt(opts), (a) => problemsOf(a, opts.people, opts.pullRequest));
-  return { ...settleTurns(answer, opts.people, opts.pullRequest, opts.takenGoalIds), usage };
+  return { ...settleTurns(answer, opts.people, opts.pullRequest, opts.takenGoalIds), ...settleAccountFlow(answer, opts.pullRequest), usage };
 }

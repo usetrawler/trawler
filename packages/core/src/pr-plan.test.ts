@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { Budget } from "./llm.ts";
-import { leaksPullRequest, planForPullRequest, settleTurns, type LeadPerson, type PullRequestText } from "./pr-plan.ts";
+import { leaksPullRequest, planForPullRequest, settleAccountFlow, settleTurns, type LeadPerson, type PullRequestText } from "./pr-plan.ts";
 import { scriptedModel, text } from "./testing.ts";
 
 const pr: PullRequestText = {
@@ -116,5 +116,55 @@ describe("planForPullRequest", () => {
     expect(new Set(turns[0]!.goals.map((g) => g.id)).size).toBe(8);
     expect(turns[0]!.goals[0]!.id).toBe("pr-goal-2");
     expect(dropped).toBe(4);
+  });
+
+  describe("how the people get their accounts", () => {
+    const invite: PullRequestText = { title: "Let admins invite colleagues by email", description: "Admins can send an invitation link that expires after a week.", changedFiles: ["src/server/invitations.ts", "src/app/team/invite/page.tsx"] };
+    const withFlow = (turns: unknown, flow: Record<string, unknown>) => text(JSON.stringify({ turns, ...flow }));
+    const goal = [{ person: "tom", goals: [{ id: "joins", instruction: "A new colleague joins the team and sees its workspace" }] }];
+
+    test("a pull request about invitations yields exercise, with the reason for the owner", async () => {
+      const model = scriptedModel([withFlow(goal, { accountFlow: "exercise", accountReason: "Changes how invited colleagues join a team." })]);
+      const planned = await plan(model, { pullRequest: invite });
+      expect(planned).toMatchObject({ accountFlow: "exercise", accountReason: "Changes how invited colleagues join a team." });
+      const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
+      expect(prompt).toContain("accountFlow");
+      expect(prompt).toContain("whenever you are unsure");
+    });
+
+    test("an unrelated pull request yields provided", async () => {
+      const planned = await plan(scriptedModel([withFlow(goal, { accountFlow: "provided", accountReason: "Only the invoice export changes." })]));
+      expect(planned).toMatchObject({ accountFlow: "provided", accountReason: "Only the invoice export changes." });
+    });
+
+    test.each([
+      ["a missing field", {}],
+      ["an unknown value", { accountFlow: "sometimes" }],
+      ["a value of the wrong kind", { accountFlow: 3 }],
+      ["an empty value", { accountFlow: "" }],
+    ])("%s falls back to provided", async (_, flow) => {
+      const model = scriptedModel([withFlow(goal, flow)]);
+      const planned = await plan(model);
+      expect(planned.accountFlow).toBe("provided");
+      expect(planned.turns).toHaveLength(1);
+      expect(model.doGenerateCalls).toHaveLength(1);
+    });
+
+    test("the value is read without regard to case and spaces", () => {
+      expect(settleAccountFlow({ accountFlow: " Exercise " }, pr).accountFlow).toBe("exercise");
+    });
+
+    test.each([
+      ["names the pull request", "This pull request changes how people sign in."],
+      ["names a file", "Touches invitations.ts and the invite page."],
+      ["repeats the pull request's words", "Admins can send an invitation link that expires"],
+      ["is empty", "   "],
+    ])("the reason is dropped when it %s, and the flow stays", (_, reason) => {
+      expect(settleAccountFlow({ accountFlow: "exercise", accountReason: reason }, invite)).toEqual({ accountFlow: "exercise" });
+    });
+
+    test("a long reason is cut short", () => {
+      expect(settleAccountFlow({ accountFlow: "exercise", accountReason: "Colleagues join. ".repeat(40) }, invite).accountReason!.length).toBeLessThanOrEqual(200);
+    });
   });
 });
