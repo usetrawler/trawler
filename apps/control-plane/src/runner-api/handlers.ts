@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { ARTIFACT_EXTENSIONS, ArtifactUploadSchema, EventBatchSchema, isArtifactContentType, JobCompletionSchema, MAX_ARTIFACT_BYTES, PROTOCOL_HEADER, PROTOCOL_VERSION } from "@usetrawler/protocol";
+import { ARTIFACT_EXTENSIONS, ArtifactUploadSchema, ClaimRequestSchema, EventBatchSchema, isArtifactContentType, JobCompletionSchema, MAX_ARTIFACT_BYTES, PROTOCOL_HEADER, PROTOCOL_VERSION } from "@usetrawler/protocol";
 import { ArtifactNotStored, ArtifactRefused, checkArtifactUpload, hasSignatureOf, storeArtifact } from "../artifacts/artifacts.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
 import type { Database } from "../db/index.ts";
@@ -40,6 +40,7 @@ export function sameSecret(a: string, b: string): boolean {
 }
 
 export const MAX_BODY_BYTES = 2_000_000;
+const MAX_CLAIM_BYTES = 1_000;
 
 class BodyTooLarge extends Error {}
 
@@ -92,8 +93,13 @@ export async function handleClaim(req: Request, deps: RunnerApiDeps): Promise<Re
   const wrongProtocol = protocolProblem(req);
   if (wrongProtocol) return wrongProtocol;
   const token = bearer(req);
-  const scope = token ? await claimScopeOf(token, deps) : null;
+  let scope = token ? await claimScopeOf(token, deps) : null;
   if (!scope) return problem(401, "unknown runner");
+  const read = await readBody(req, MAX_CLAIM_BYTES);
+  if ("tooLarge" in read) return problem(413, "the request is too large");
+  const claim = ClaimRequestSchema.safeParse(read.value ?? {});
+  if (!claim.success) return problem(400, "invalid claim", claim.error.issues);
+  if (scope.execution === "own" && claim.data.run) scope = { ...scope, runId: claim.data.run };
   const deadline = Date.now() + (deps.claimWaitMs ?? 25_000);
   while (!req.signal.aborted) {
     const job = await claimJob(deps.db, deps.keys, scope);
