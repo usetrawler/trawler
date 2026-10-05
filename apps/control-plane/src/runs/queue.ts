@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "kysely";
 import { z } from "zod";
-import { MAX_CHANNEL_MESSAGES, DefectGroupsSchema, FindingSchema, JobCompletionSchema, JobUsageSchema, MAX_GROUPED_DEFECTS, settleGroups, JobStopReasonSchema, ReplayObservationSchema, RunEventSchema, SignInCheckSchema, ACCOUNT_CHECK_STEPS, trimStory, turnsOf, type ChannelMessage, type DefectToGroup, type Finding, type JobStopReason, type JobUsage, type NotABug, type ProjectConfig, type ReplayObservation, type RunEvent, type SignInCheck, type StoryEntry, type Turn } from "@usetrawler/protocol";
+import { MAX_CHANNEL_MESSAGES, DefectGroupsSchema, FindingSchema, JobCompletionSchema, JobUsageSchema, MAX_GROUPED_DEFECTS, settleGroups, JobStopReasonSchema, ReplayObservationSchema, RunEventSchema, SignInCheckSchema, ACCOUNT_CHECK_STEPS, providedAccountRef, trimStory, turnsOf, type ChannelMessage, type DefectToGroup, type Finding, type JobStopReason, type JobUsage, type NotABug, type ProjectConfig, type ReplayObservation, type RunEvent, type SignInCheck, type StoryEntry, type Turn } from "@usetrawler/protocol";
 import type { Database } from "../db/index.ts";
 import { asSystem, type Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -44,6 +44,7 @@ export interface JobAssignment {
   signUpSeed?: string;
   notBugs?: NotABug[];
   accountRef?: string;
+  providedAccounts?: string[];
   finding?: Finding;
   observation?: ReplayObservation;
   defects?: DefectToGroup[];
@@ -162,7 +163,7 @@ async function claimOnce(db: Database, keys: Keyring, scope: ClaimScope): Promis
       .innerJoin("runs as r", "r.id", "j.run_id")
       .innerJoin("projects as p", "p.id", "r.project_id")
       .leftJoin("workspace_plans as wp", "wp.org_id", "j.org_id")
-      .select(["j.id", "j.org_id", "j.run_id", "j.kind", "j.position", "j.persona_key", "j.finding_key", "j.account_ref", "r.project_id", "r.plan_id", "r.status as run_status", "r.config_snapshot", "r.max_steps", "r.replay_steps", "r.budget_usd", "r.cost_usd", "r.agent_model", "r.judge_model", "r.sign_up_seed", "r.conversation"])
+      .select(["j.id", "j.org_id", "j.run_id", "j.kind", "j.position", "j.persona_key", "j.finding_key", "j.account_ref", "r.project_id", "r.plan_id", "r.status as run_status", "r.config_snapshot", "r.max_steps", "r.replay_steps", "r.budget_usd", "r.cost_usd", "r.agent_model", "r.judge_model", "r.sign_up_seed", "r.conversation", "r.provided_accounts"])
       .where("j.status", "=", "queued")
       .where("p.paused_at", "is", null)
       .where("r.execution", "=", scope.execution)
@@ -194,6 +195,11 @@ async function claimOnce(db: Database, keys: Keyring, scope: ClaimScope): Promis
       const current: Secrets = picked.plan_id ? await loadProjectConfig(tx, picked.org_id, picked.project_id, keys, picked.plan_id) : NO_SECRETS;
       const finding = picked.finding_key ? await findingFor(tx, picked.run_id, picked.finding_key) : undefined;
       const config = configFor(snapshot, current);
+      const provided = picked.provided_accounts as string[];
+      const accountRefOf = (personaId: string) => {
+        const persona = config.personas.find((p) => p.id === personaId);
+        return persona?.accountRef ?? (persona && provided.includes(persona.name) ? providedAccountRef(persona.id) : undefined);
+      };
       const turn = picked.kind === "role_session" && picked.sign_up_seed ? turnAt(snapshot, picked.position, picked.persona_key) : undefined;
       const story = turn && !picked.conversation ? await storyBefore(tx, picked.run_id, picked.position, snapshot) : undefined;
       const peers = turn && picked.conversation ? peersOf(snapshot, picked.persona_key) : undefined;
@@ -209,7 +215,8 @@ async function claimOnce(db: Database, keys: Keyring, scope: ClaimScope): Promis
           config,
           personaKey: picked.persona_key ?? undefined,
           ...(turn ? { goalIds: turn.goalIds, turn: picked.position, returning, story, ...(peers ? { conversation: { peers } } : {}), signUpSeed: keys.decrypt(picked.sign_up_seed!, signUpSeedContext(picked.org_id, picked.run_id)) } : {}),
-          accountRef: picked.account_ref ?? (finding ? config.personas.find((p) => p.id === finding.personaKey)?.accountRef : undefined),
+          accountRef: picked.account_ref ?? (finding ? accountRefOf(finding.personaKey) : undefined),
+          ...(provided.length > 0 ? { providedAccounts: provided } : {}),
           finding: finding?.finding,
           observation: finding?.replay,
           ...(defects ? { defects } : {}),

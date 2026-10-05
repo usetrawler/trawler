@@ -1,9 +1,10 @@
 import type { LanguageModel } from "ai";
 import { z } from "zod";
 import { type Browser, Budget, checkAccount, groupDefects, judge, MIN_SECRET_LENGTH, runReplay, runRoleSession, type Screenshot, SecretScrubber, type TeamChannel } from "@usetrawler/core";
+import { withProvidedAccounts } from "./provided-accounts.ts";
 import {
   ChannelSchema, JobAssignmentSchema, MAX_EVENTS_PER_BATCH, MAX_URL, PROTOCOL_HEADER, PROTOCOL_VERSION,
-  type JobAssignment, type JobCompletion, type JobStopReason, type JobUsage, type ProjectConfig, type RunEvent, type RunEventInput,
+  type AccountsFile, type JobAssignment, type JobCompletion, type JobStopReason, type JobUsage, type ProjectConfig, type RunEvent, type RunEventInput,
 } from "@usetrawler/protocol";
 
 export interface LogFields {
@@ -30,6 +31,7 @@ export interface WorkerDeps {
   uploadWaitMs?: number;
   uploadTimeoutMs?: number;
   secrets?: string[];
+  accounts?: AccountsFile;
   betweenJobs?: () => Promise<void>;
   look?: (targetUrl: string) => boolean;
 }
@@ -350,6 +352,14 @@ export async function workOnce(deps: WorkerDeps, signal?: AbortSignal): Promise<
     throw err;
   }
   if (!job) return "done";
+  const withAccounts = withProvidedAccounts(job, deps.accounts);
+  if ("missing" in withAccounts) {
+    const reason = `${withAccounts.missing} signs in with an account from the CI job, but this runner has none for ${withAccounts.missing}; add it to the file given to trawler-ci --accounts, under that exact name`;
+    problem(deps, reason, { jobId: job.jobId, runId: job.runId, kind: job.kind });
+    await complete(deps, job, { usage: zeroUsage(job.agentModel), stoppedBy: "error", error: reason }).catch(() => undefined);
+    return "done";
+  }
+  job = withAccounts.job;
   const scrubber = runnerScrubber({ ...deps, secrets: [...(deps.secrets ?? []), job.token] }, job.config);
   deps.maskReportsWith?.(scrubber);
   const ids: LogFields = { jobId: job.jobId, runId: job.runId, kind: job.kind };

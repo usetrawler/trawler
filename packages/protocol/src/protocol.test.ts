@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { FindingSchema, goalsFor, MAX_STORY_CHARS, ProjectConfigSchema, RunEventSchema, trimStory, turnsOf } from "./index.ts";
+import { FindingSchema, goalsFor, MAX_STORY_CHARS, parseAccountsFile, ProjectConfigSchema, RunEventSchema, StartRunRequestSchema, trimStory, turnsOf } from "./index.ts";
 
 const project = {
   name: "Acme",
@@ -179,4 +179,34 @@ test("the story keeps the newest entries within its size, each cut short if long
   expect(kept.every((e) => e.text.length <= 500)).toBe(true);
   expect(kept.reduce((n, e) => n + e.text.length, 0)).toBeLessThanOrEqual(MAX_STORY_CHARS);
   expect(trimStory([{ personaId: "p", name: "P", text: "short" }])).toEqual([{ personaId: "p", name: "P", text: "short" }]);
+});
+
+describe("accounts from the CI job", () => {
+  test("a file maps each person's name to a username and a password", () => {
+    expect(parseAccountsFile(JSON.stringify({ Daniel: { username: "daniel@ci.test", password: "pw-123456" }, Priya: { username: "priya", password: "pw-abcdef", note: "ignored" } }))).toEqual({
+      Daniel: { username: "daniel@ci.test", password: "pw-123456" }, Priya: { username: "priya", password: "pw-abcdef" },
+    });
+  });
+
+  test.each([
+    ["not json", "not valid JSON"],
+    ["{}", "between 1 and"],
+    ["[]", "must map each person"],
+    [JSON.stringify({ Daniel: { username: "", password: "pw-123456" } }), "Daniel.username"],
+    [JSON.stringify({ Daniel: { username: "d" } }), "Daniel.password"],
+    [JSON.stringify({ Daniel: "pw-123456" }), "must map each person"],
+    [JSON.stringify({ Daniel: { username: "d", password: "x".repeat(70_000) } }), "larger than"],
+  ])("refuses %s without echoing it", (text, message) => {
+    expect(() => parseAccountsFile(text)).toThrow(message);
+    try {
+      parseAccountsFile(text);
+    } catch (err) {
+      expect((err as Error).message).not.toContain("pw-123456");
+    }
+  });
+
+  test("a run request names the people but has no place for a password", () => {
+    expect(StartRunRequestSchema.parse({ project: "0b3a1f0e-6c43-4a53-9a2e-5d6d8c1f7a10", execution: "own", accounts: ["Daniel"] }).accounts).toEqual(["Daniel"]);
+    expect(() => StartRunRequestSchema.parse({ project: "0b3a1f0e-6c43-4a53-9a2e-5d6d8c1f7a10", accounts: [""] })).toThrow();
+  });
 });

@@ -20,7 +20,13 @@ describe("parseCliArgs", () => {
     expect(parsed).toMatchObject({ options: { api: "http://localhost:8080", plan: PROJECT, url: "http://localhost:3000", execution: "own", cap: 2.5, model: "x/y", failOn: "never", timeoutMinutes: 10, comment: false, conversation: true } });
   });
 
+  it("reads --accounts with --runner own", () => {
+    const parsed = parseCliArgs(["run", "--api", "https://a.example", "--project", PROJECT, "--runner", "own", "--accounts", "accounts.json"], env);
+    expect(parsed).toMatchObject({ options: { execution: "own", accounts: "accounts.json" } });
+  });
+
   it.each([
+    [["run", "--api", "https://a.example", "--project", PROJECT, "--accounts", "accounts.json"], env, "--accounts needs --runner own"],
     [["run", "--project", PROJECT], env, "--api"],
     [["run", "--api", "https://a.example"], env, "--project is required"],
     [["run", "--api", "https://a.example", "--project", "nope"], env, "UUID"],

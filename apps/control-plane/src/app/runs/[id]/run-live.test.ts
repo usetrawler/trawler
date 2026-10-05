@@ -15,7 +15,7 @@ const finding = (key: string, persona: string, extra: Partial<RunSummary["findin
 const summary = (over: Partial<RunSummary>): RunSummary => ({
   id: "run-1", number: 7, status: "succeeded", cancelReason: null, projectId: "project-1", planName: null, costUsd: 0.35, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash",
   provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0, createdAt: new Date("2026-09-25T19:40:00Z"), startedAt: new Date("2026-09-25T19:40:05Z"), finishedAt: new Date("2026-09-25T19:59:00Z"),
-  jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [], conversation: false, conversationMessages: [],
+  jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [], conversation: false, conversationMessages: [], providedAccounts: [],
   personas: [{ id: "ana", name: "Ana" }, { id: "lee", name: "Lee Park" }], goalTexts: [{ id: "g1", instruction: "Get an account." }, { id: "g2", instruction: "Send an invoice." }],
   ...over,
 });
@@ -65,6 +65,12 @@ test("a run Trawler paid for says so next to its cost, live and finished", () =>
   expect(text(head(render(summary({ ...live, paidBy: "trawler", budgetUsd: 1 }))))).toContain("Live cost $0.84 of $1.00 cap · paid by Trawler");
   expect(text(band(render(summary({ ...finished, paidBy: "trawler", tokenCap: 3_000_000, tokensUsed: 1_200_000 }))))).toContain("Tokens 1.20M cap was 3.0M · price unknown · paid by Trawler");
   expect(text(band(render(finished)))).not.toContain("paid by Trawler");
+});
+
+test("a run says which people signed in with accounts provided by the CI job, and says nothing otherwise", () => {
+  expect(text(head(render(summary({ ...finished, providedAccounts: ["Daniel"] }))))).toContain("Daniel signs in with an account provided by the CI job.");
+  expect(text(head(render(summary({ ...live, providedAccounts: ["Daniel", "Priya"] }))))).toContain("Daniel, Priya sign in with accounts provided by the CI job.");
+  expect(text(head(render(finished)))).not.toContain("CI job");
 });
 
 test("a confirmed defect is a row with its severity, number, person, title and what happened, marked as replayed, that opens to its steps and the replay", () => {

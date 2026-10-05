@@ -467,6 +467,32 @@ test("an account check signs in once and completes with what the product said, n
   expect(JSON.stringify(seen)).not.toContain("correct-horse-battery");
 });
 
+test("a person whose account comes from the CI job signs in with it, and its password never reaches an event, a note or the completion", async () => {
+  const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana", accountRef: undefined, providedAccounts: ["Ana"] });
+  const filled: string[] = [];
+  await workOnce(deps(url, scriptedModel([
+    toolCall("sign_in", { account: "ci:ana", usernameField: "e1", passwordField: "e2" }),
+    toolCall("note", { text: "signed in with ci-secret-pass" }),
+    toolCall("goal_status", { goal: "g", status: "reached", note: "used ci-secret-pass" }),
+    toolCall("finish", { summary: "done with ci-secret-pass" }),
+  ]), { accounts: { Ana: { username: "ana@ci.test", password: "ci-secret-pass" } }, openBrowser: async () => ({ ...(await browser()), fillField: async (_ref: string, value: string) => (filled.push(value), "typed") }) }));
+  expect(filled).toEqual(["ana@ci.test", "ci-secret-pass"]);
+  expect(seen.events.map((e) => e.type)).toEqual(expect.arrayContaining(["note", "goal_status"]));
+  expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "finish" })]);
+  expect(JSON.stringify(seen)).not.toContain("ci-secret-pass");
+});
+
+test("a person whose account should come from the CI job but is not in the runner's file fails the job early, naming them", async () => {
+  const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana", providedAccounts: ["Ana"] });
+  let opened = false;
+  const reports: string[] = [];
+  await workOnce(deps(url, scriptedModel([]), { accounts: { Bob: { username: "bob", password: "bob-secret-pass" } }, report: (m) => void reports.push(m), openBrowser: async () => { opened = true; throw new Error("unreachable"); } }));
+  expect(opened).toBe(false);
+  expect(seen.events).toEqual([]);
+  expect(seen.completions).toEqual([expect.objectContaining({ stoppedBy: "error", error: expect.stringContaining("Ana signs in with an account from the CI job") })]);
+  expect(JSON.stringify([seen, reports])).not.toContain("bob-secret-pass");
+});
+
 test("an account check that names no account completes as an error", async () => {
   const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "account_check" });
   await workOnce(deps(url, scriptedModel([])));

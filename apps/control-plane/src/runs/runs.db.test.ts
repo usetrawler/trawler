@@ -8,7 +8,7 @@ import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { setModelKey } from "../credentials/credentials.ts";
 import { addAccount, createPlan, createProject, firstPlan, loadProjectConfig, PlanNotFound, ProjectNotFound, replacePlan } from "../projects/projects.ts";
-import { cancelLiveRuns, cancelRun, CannotJudgeAgain, judgeAgain, NeedsAccount, RunNotFound, runSummary, startRun, type StartRunOptions } from "./runs.ts";
+import { cancelLiveRuns, cancelRun, CannotJudgeAgain, judgeAgain, NeedsAccount, ProvidedAccountsRefused, RunNotFound, runSummary, startRun, type StartRunOptions } from "./runs.ts";
 import { dismissFinding, undoDismissal } from "./dismissals.ts";
 import { runView } from "./report.ts";
 import { workspaceRuns } from "../projects/overview.ts";
@@ -970,6 +970,25 @@ test("a run does not start while a person who has to sign in has no account, and
   const plan = await withOrg(t.db, "org-a", (tx) => loadProjectConfig(tx, "org-a", id, keys));
   await withOrg(t.db, "org-a", (tx) => replacePlan(tx, "org-a", id, { personas: plan.personas.map((p) => ({ ...p, accountRef: "ana" })), goals: plan.goals }));
   await expect(withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", id, keys, options))).resolves.toMatchObject({ id: expect.any(String) });
+});
+
+test("a person who signs in can take their account from the CI job: the run starts without a stored one, remembers who, and the claim names them", async () => {
+  await drain();
+  const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", config, keys, { signsIn: ["lee"] }));
+  await expect(withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", id, keys, { ...options, execution: "own", providedAccounts: ["Someone Else"] }))).rejects.toThrow(NeedsAccount);
+  await expect(withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", id, keys, { ...options, providedAccounts: ["Lee"] }))).rejects.toBeInstanceOf(ProvidedAccountsRefused);
+  const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", id, keys, { ...options, execution: "own", providedAccounts: ["Lee", "Ana"] }));
+  expect((await sql<{ provided_accounts: string[] }>`select provided_accounts from runs where id = ${run.id}`.execute(t.db)).rows).toEqual([{ provided_accounts: ["Lee"] }]);
+  expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.providedAccounts).toEqual(["Lee"]);
+  const scope = { execution: "own", orgId: "org-a", projectId: id } as const;
+  let job = (await claimJob(t.db, keys, scope))!;
+  while (job.kind !== "role_session" || job.personaKey !== "lee") {
+    await completeJob(t.db, job.token, { usage: usage(0), stoppedBy: job.kind === "account_check" ? "report" : "finish", ...(job.kind === "account_check" ? { signIn: { outcome: "signed_in" as const, observed: "Signed in." } } : {}) });
+    job = (await claimJob(t.db, keys, scope))!;
+  }
+  expect(job.providedAccounts).toEqual(["Lee"]);
+  expect(job.config.accounts.map((a) => a.ref)).toEqual(["ana"]);
+  await drain();
 });
 
 describe("a team session", () => {

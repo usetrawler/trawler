@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { parseAccountsFile } from "@usetrawler/protocol";
 import { runApi, ApiError, type RunApi } from "./api.ts";
 import { parseCliArgs, UsageError, USAGE, type Options } from "./args.ts";
 import { detectAdapter } from "./adapters/index.ts";
@@ -16,6 +19,7 @@ export interface CliDeps {
   sleep?: (ms: number) => Promise<void>;
   pollMs?: number;
   startRunner?: typeof startRunner;
+  readFile?: (path: string) => string;
 }
 
 export const defaultDeps: CliDeps = {
@@ -32,7 +36,16 @@ function onSignals(handler: (signal: NodeJS.Signals) => void): () => void {
   };
 }
 
+function readAccounts(path: string, deps: CliDeps): { file: string; names: string[] } {
+  try {
+    return { file: resolve(path), names: Object.keys(parseAccountsFile((deps.readFile ?? ((p) => readFileSync(p, "utf8")))(path))) };
+  } catch (err) {
+    throw new UsageError(`--accounts ${path} cannot be used: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 async function execute(options: Options, deps: CliDeps): Promise<number> {
+  const accounts = options.accounts === undefined ? undefined : readAccounts(options.accounts, deps);
   const adapter = detectAdapter(deps.env);
   const api: RunApi = runApi(options.api, options.token, deps.fetch);
   const pullRequest = adapter.pullRequest(deps.env);
@@ -40,7 +53,7 @@ async function execute(options: Options, deps: CliDeps): Promise<number> {
     deps.err("warning: a hosted runner cannot reach localhost; use --runner own for a server started in this job");
   }
   const started = await api.startRun({
-    project: options.project, plan: options.plan, url: options.url, execution: options.execution, cap: options.cap, model: options.model, conversation: options.conversation || undefined, pullRequest,
+    project: options.project, plan: options.plan, url: options.url, execution: options.execution, cap: options.cap, model: options.model, conversation: options.conversation || undefined, accounts: accounts?.names, pullRequest,
   });
   deps.err(`Trawler run #${started.number} started (${adapter.name}${pullRequest?.number ? `, pull request #${pullRequest.number}` : ""})`);
   deps.err(`Report: ${started.reportUrl}`);
@@ -51,7 +64,7 @@ async function execute(options: Options, deps: CliDeps): Promise<number> {
     if (options.execution === "own") {
       const count = options.conversation ? Math.max(1, started.people ?? 1) : 1;
       for (let i = 0; i < count; i++) {
-        runners.push((deps.startRunner ?? startRunner)({ api: options.api, token: options.token, env: deps.env, log: deps.err }));
+        runners.push((deps.startRunner ?? startRunner)({ api: options.api, token: options.token, env: deps.env, log: deps.err, accountsFile: accounts?.file }));
       }
       const stoppable = runners;
       disposeSignals = onSignals((signal) => {

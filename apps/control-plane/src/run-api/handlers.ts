@@ -56,13 +56,14 @@ export async function handleStartRun(req: Request, deps: RunApiDeps): Promise<Re
   if (holder.projectId && holder.projectId !== body.project) return fail(403, "This API token is limited to another project.");
   if (body.model !== undefined && !MODEL_ID.test(body.model)) return fail(400, "Invalid request: model is not a valid model name.");
   if (body.url !== undefined && body.execution !== "own") return fail(422, "A different target URL can only be tested by a runner in your own network. Use execution \"own\", or leave the URL out to test the project's target.");
+  if (body.accounts?.length && body.execution !== "own") return fail(400, "Invalid request: accounts can only be given with execution \"own\", because a hosted runner cannot read the CI job's accounts.");
   const { orgId } = holder;
   const priceOf = deps.priceOf ?? priceFor;
   try {
     const run = await withOrg(deps.db, orgId, async (tx) => {
       if (!(await projectExists(tx, orgId, body.project))) throw new ProjectNotFound();
       const plan = await planOf(tx, orgId, body.project, body.plan);
-      const without = await personWithoutAccount(tx, plan.id);
+      const without = await personWithoutAccount(tx, plan.id, body.accounts);
       if (without) throw new NeedsAccount(without);
       const stored = await modelKey(tx, orgId, deps.keys);
       let payer: Payer;
@@ -82,7 +83,7 @@ export async function handleStartRun(req: Request, deps: RunApiDeps): Promise<Re
       return startRun(tx, orgId, body.project, deps.keys, {
         budgetUsd: payer.budgetUsd, agentModel: payer.model, judgeModel: payer.model, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: `api-token:${holder.tokenId}`,
         provider: payer.provider, providerBaseUrl: payer.providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap, paidBy: payer.paidBy,
-        planId: plan.id, execution: body.execution, targetUrl: body.url, pullRequest: body.pullRequest, conversation: body.conversation, usesFirstRunOnUs: payer.usesFirstRunOnUs,
+        planId: plan.id, execution: body.execution, targetUrl: body.url, pullRequest: body.pullRequest, conversation: body.conversation, providedAccounts: body.accounts, usesFirstRunOnUs: payer.usesFirstRunOnUs,
       });
     });
     return ok({ id: run.id, number: run.number, reportUrl: `${deps.baseUrl.replace(/\/+$/, "")}${runPath(run.number)}`, people: run.people }, 201);

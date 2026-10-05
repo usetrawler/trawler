@@ -172,6 +172,46 @@ describe("runCli", () => {
     expect(await runCli(["run"], h.deps)).toBe(2);
   });
 
+  describe("--accounts", () => {
+    const accounts = JSON.stringify({ Daniel: { username: "daniel@ci.test", password: "ci-pass-123456" } });
+    const withFile = (content: string) => {
+      const file = join(mkdtempSync(join(tmpdir(), "trawler-ci-")), "accounts.json");
+      writeFileSync(file, content);
+      return file;
+    };
+
+    it("sends the run only the names and hands the file to every runner it starts", async () => {
+      const h = harness([result({ defects: { confirmed: 0, refuted: 0, inconclusive: 0 } })], {});
+      const file = withFile(accounts);
+      const started: Array<{ accountsFile?: string; log: (line: string) => void }> = [];
+      const deps = { ...h.deps, startRunner: (o: { accountsFile?: string; log: (line: string) => void }) => (started.push(o), { failure: () => undefined, stop: async () => undefined }) };
+      expect(await runCli([...argv, "--runner", "own", "--accounts", file], deps)).toBe(0);
+      expect(h.calls[0]?.body).toMatchObject({ execution: "own", accounts: ["Daniel"] });
+      expect(JSON.stringify(h.calls)).not.toContain("ci-pass-123456");
+      expect(started.map((s) => s.accountsFile)).toEqual([file]);
+      expect(h.err.join("\n")).not.toContain("ci-pass-123456");
+    });
+
+    it("leaves the request without accounts when the flag is absent", async () => {
+      const h = harness([result({})], {});
+      await runCli([...argv, "--runner", "own"], { ...h.deps, startRunner: () => ({ failure: () => undefined, stop: async () => undefined }) });
+      expect(h.calls[0]?.body).not.toHaveProperty("accounts");
+    });
+
+    it.each([["not json"], [JSON.stringify({ Daniel: { username: "daniel" } })]])("exits 2 before starting a run when the file cannot be used (%#)", async (content) => {
+      const h = harness([result({})], {});
+      expect(await runCli([...argv, "--runner", "own", "--accounts", withFile(content)], h.deps)).toBe(2);
+      expect(h.calls).toEqual([]);
+      expect(h.err.join("\n")).toContain("--accounts");
+    });
+
+    it("exits 2 when the file is missing", async () => {
+      const h = harness([result({})], {});
+      expect(await runCli([...argv, "--runner", "own", "--accounts", "/nonexistent/accounts.json"], h.deps)).toBe(2);
+      expect(h.calls).toEqual([]);
+    });
+  });
+
   it("fails with the runner's message when it dies early", async () => {
     const h = harness([result({ status: "running", finished: false })], {});
     const stopped: string[] = [];

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { JobStopReasonSchema, JobUsageSchema, RunEventSchema } from "./event.ts";
 import { FindingSchema, ReplayObservationSchema } from "./finding.ts";
-import { ProjectConfigSchema } from "./project.ts";
+import { MAX_PERSONAS, ProjectConfigSchema } from "./project.ts";
 
 export const PROTOCOL_VERSION = 8;
 export const PROTOCOL_HEADER = "x-trawler-protocol";
@@ -89,6 +89,7 @@ export const JobAssignmentSchema = z.object({
   conversation: z.object({ peers: z.array(z.object({ id: z.string(), name: z.string() })).max(12) }).optional(),
   notBugs: z.array(NotABugSchema).max(MAX_NOT_BUGS).optional(),
   accountRef: z.string().optional(),
+  providedAccounts: z.array(z.string()).max(MAX_PERSONAS).optional(),
   finding: FindingSchema.optional(),
   observation: ReplayObservationSchema.optional(),
   defects: z.array(DefectToGroupSchema).max(MAX_GROUPED_DEFECTS).optional(),

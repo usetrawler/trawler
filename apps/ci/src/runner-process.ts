@@ -15,12 +15,13 @@ export interface RunnerOptions {
   token: string;
   env: Record<string, string | undefined>;
   log: (line: string) => void;
+  accountsFile?: string;
   command?: { file: string; args: string[] };
 }
 
 export function startRunner(opts: RunnerOptions): RunnerProcess {
   const command = opts.command ?? { file: process.execPath, args: [RUNNER_BIN, "work", "--control-plane", opts.api] };
-  const child = spawn(command.file, command.args, { env: { ...opts.env, TRAWLER_RUNNER_TOKEN: opts.token }, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(command.file, command.args, { env: { ...opts.env, TRAWLER_RUNNER_TOKEN: opts.token, ...(opts.accountsFile ? { TRAWLER_ACCOUNTS_FILE: opts.accountsFile } : {}) }, stdio: ["ignore", "pipe", "pipe"] });
   let stopping = false;
   let ended: string | undefined;
   const exited = new Promise<void>((resolve) => {

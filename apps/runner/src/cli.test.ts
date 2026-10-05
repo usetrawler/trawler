@@ -319,6 +319,15 @@ test.each(["true", " 1", "a.test", "https://a.test,", "ftp://a.test"])("work and
   expect(browsers).toBe(0);
 });
 
+test.each([["{not json", "not valid JSON"], [JSON.stringify({ Ana: { username: "ana", password: 5 } }), "must map each person"], [JSON.stringify({ Ana: "shared-secret-pass" }), "must map each person"], ["{}", "between 1 and"]])("work refuses a TRAWLER_ACCOUNTS_FILE it cannot use without printing what is in it (%#)", async (content, message) => {
+  const file = join(mkdtempSync(join(tmpdir(), "acc-")), "accounts.json");
+  writeFileSync(file, content);
+  const { d, err } = deps({ env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_ACCOUNTS_FILE: file } });
+  expect(await runCli(["work", "--control-plane", "http://localhost:9", "--once"], d)).toBe(2);
+  expect(err.join("\n")).toContain(message);
+  expect(err.join("\n")).not.toContain("shared-secret-pass");
+});
+
 test("work refuses to send the runner token over plain http to another machine", async () => {
   const { d, err } = deps({ env: { OPENROUTER_API_KEY: "k", TRAWLER_RUNNER_TOKEN: "t".repeat(40) } });
   expect(await runCli(["work", "--control-plane", "http://cp.example.com"], d)).toBe(2);
