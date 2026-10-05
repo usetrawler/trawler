@@ -1,11 +1,12 @@
 import type { LanguageModel } from "ai";
 import { sql } from "kysely";
-import { Budget, pageText, planForPullRequest, type LeadTurn } from "@usetrawler/core/setup";
+import { Budget, pageText, planForPullRequest, settleTurns, type LeadTurn } from "@usetrawler/core/setup";
 import { MAX_GOALS, MAX_GOALS_PER_PERSONA, turnsOf, type Goal, type PlanMode, type PullRequest } from "@usetrawler/protocol";
 import type { Database } from "../db/index.ts";
-import { asSystem } from "../db/tenancy.ts";
+import { asSystem, type Tx } from "../db/tenancy.ts";
 import { logError, writeLog } from "../server/log.ts";
 import { workspacePlan } from "./plans.ts";
+import { currentPrPlan, inputsHash, prKey, storePrPlan } from "./pr-plan-store.ts";
 import type { ConfigSnapshot } from "./runs.ts";
 
 export const PR_PLAN_POSITION = -1000;
@@ -20,6 +21,9 @@ export interface PrPlanRecord {
   mode: Exclude<PlanMode, "regression">;
   goalIds: string[];
   note?: string;
+  prPlanId?: string;
+  version?: number;
+  reused?: boolean;
 }
 
 export const hasPullRequestDetails = (pr: PullRequest | undefined) => Boolean(pr && (pr.title?.trim() || pr.description?.trim() || pr.changedFiles?.length));
@@ -64,6 +68,16 @@ export function withLeadsGoals(snapshot: Plan, turns: LeadTurn[], mode: Exclude<
   return { personas, goals: [...existing, ...added], added };
 }
 
+export async function storedPlanFor(tx: Tx, orgId: string, projectId: string, planId: string, pr: PullRequest, mode: Exclude<PlanMode, "regression">, config: Plan) {
+  const key = prKey(pr);
+  const stored = key ? await currentPrPlan(tx, projectId, planId, key) : null;
+  if (!stored || stored.inputsHash !== inputsHash(pr)) return null;
+  const people = config.personas.map((p) => ({ id: p.id, name: p.name, brief: p.brief, account: p.accountRef ?? null }));
+  const turns = settleTurns({ turns: stored.turns }, people, pr, config.goals.map((g) => g.id)).turns;
+  const limit = await workspacePlan(tx, orgId);
+  return { stored, merged: withLeadsGoals(config, turns, mode, limit.limits.people) };
+}
+
 export interface PrPlanDeps {
   db: Database;
   model: LanguageModel | null;
@@ -72,7 +86,7 @@ export interface PrPlanDeps {
 }
 
 const noteOf = (err: unknown) => `The lead could not plan for this pull request (${(err instanceof Error ? err.message : String(err)).slice(0, 300)}), so the project's plan ran as it is.`;
-const NOTHING = "Nothing in this pull request points at a feature, so the project's plan ran as it is.";
+export const NOTHING = "Nothing in this pull request points at a feature, so the project's plan ran as it is.";
 
 async function claimPrPlan(db: Database) {
   return asSystem(db, async (tx) => {
@@ -118,7 +132,7 @@ async function ask(deps: PrPlanDeps, job: Claimed): Promise<Outcome> {
 
 async function finish(db: Database, job: Claimed, outcome: Outcome): Promise<void> {
   await asSystem(db, async (tx) => {
-    const run = await tx.selectFrom("runs").select(["status", "conversation", "paid_by"]).where("id", "=", job.run_id).forUpdate().executeTakeFirstOrThrow();
+    const run = await tx.selectFrom("runs").select(["status", "conversation", "paid_by", "project_id"]).where("id", "=", job.run_id).forUpdate().executeTakeFirstOrThrow();
     if (!ACTIVE.includes(run.status)) {
       await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date(), lease_until: null }).where("id", "=", job.id).execute();
       return;
@@ -127,7 +141,12 @@ async function finish(db: Database, job: Claimed, outcome: Outcome): Promise<voi
     const snapshot = job.config_snapshot as unknown as ConfigSnapshot;
     const limit = await workspacePlan(tx, job.org_id);
     const merged = "turns" in outcome ? withLeadsGoals(snapshot, outcome.turns, mode, limit.limits.people) : null;
-    const record: PrPlanRecord = { mode, goalIds: merged?.added.map((g) => g.id) ?? [], ...("failure" in outcome ? { note: noteOf(outcome.failure) } : merged ? {} : { note: NOTHING }) };
+    const pr = job.pull_request as unknown as PullRequest;
+    const key = prKey(pr);
+    const stored = "turns" in outcome && outcome.turns.length > 0 && job.plan_id && key
+      ? await storePrPlan(tx, { orgId: job.org_id, projectId: run.project_id, planId: job.plan_id, key, hash: inputsHash(pr), turns: outcome.turns, runId: job.run_id })
+      : null;
+    const record: PrPlanRecord = { mode, goalIds: merged?.added.map((g) => g.id) ?? [], ...("failure" in outcome ? { note: noteOf(outcome.failure) } : merged ? {} : { note: NOTHING }), ...(stored ? { prPlanId: stored.id, version: stored.version } : {}) };
     if (merged) {
       const next = turnsOf(merged);
       const people = new Set(next.map((t) => t.personaId)).size;

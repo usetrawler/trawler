@@ -393,13 +393,17 @@ test("the run page names the plan the run came from when the project has several
 });
 
 test("a run planned for a pull request shows the PR and the goals the lead chose, or why it did not plan", () => {
-  const planned = text(render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: null, goals: [{ id: "pr-export", instruction: "all invoices of last month come out as one spreadsheet", personaId: "lee" }] } })));
+  const planned = text(render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: null, version: null, reused: false, createdByRun: null, goals: [{ id: "pr-export", instruction: "all invoices of last month come out as one spreadsheet", personaId: "lee" }] } })));
   expect(planned).toContain("Planned for PR #482");
   expect(planned).toContain("The project's plan runs as it is, with these goals added for the change.");
   expect(planned).toContain("Lee Park wants all invoices of last month come out as one spreadsheet");
-  const fellBack = text(render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: "Nothing in this pull request points at a feature, so the project's plan ran as it is.", goals: [] } })));
+  const fellBack = text(render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: "Nothing in this pull request points at a feature, so the project's plan ran as it is.", version: null, reused: false, createdByRun: null, goals: [] } })));
   expect(fellBack).toContain("Pull request #482");
   expect(fellBack).toContain("Nothing in this pull request points at a feature");
-  expect(text(render(summary({ ...finished, prPlan: { number: 482, mode: "change", note: null, goals: [] } })))).toContain("Planning for PR #482");
+  expect(text(render(summary({ ...finished, prPlan: { number: 482, mode: "change", note: null, version: null, reused: false, createdByRun: null, goals: [] } })))).toContain("Planning for PR #482");
+  const goals = [{ id: "pr-export", instruction: "all invoices of last month come out as one spreadsheet", personaId: "lee" }];
+  expect(planned).not.toContain("Plan v");
+  expect(text(render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: null, version: 2, reused: true, createdByRun: 31, goals } })))).toContain("Plan v2 of this pull request, reused from run #31.");
+  expect(text(render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: null, version: 1, reused: false, createdByRun: 7, goals } })))).toContain("Plan v1 of this pull request, created in this run.");
   expect(text(render(finished))).not.toContain("PR #");
 });

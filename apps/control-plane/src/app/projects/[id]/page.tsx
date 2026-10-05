@@ -5,12 +5,14 @@ import { notFound, redirect } from "next/navigation";
 import { AppShell } from "../../../components/app-shell.tsx";
 import { ProjectHead } from "../../../components/project-head.tsx";
 import { PlanWorkspace } from "./plan-workspace.tsx";
+import { PrPlans } from "./pr-plans.tsx";
 import { modelKeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
 import { projectRunCount } from "../../../projects/overview.ts";
 import { FIRST_RUN_ON_US } from "../../../runs/models.ts";
 import { firstRunOnUsLeft, projectRunState, refusalToStart, RunInProgress, TooManyPeople } from "../../../runs/runs.ts";
 import { workspacePlan } from "../../../runs/plans.ts";
+import { recentPrPlans } from "../../../runs/pr-plan-store.ts";
 import { listPlans, MAX_PLANS, projectForEditing } from "../../../projects/projects.ts";
 import { PlansBar } from "./plans-bar.tsx";
 import { PlanTitle } from "./plan-title.tsx";
@@ -41,8 +43,8 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   const plans = await withOrg(getDb(), orgId, (tx) => listPlans(tx, orgId, id));
   const planId = plans.find((p) => p.id === requestedPlan)?.id ?? plans[0]?.id;
   if (!planId) notFound();
-  const [project, keyHint, runs, runState, onUsLeft, plan] = await withOrg(getDb(), orgId, (tx) =>
-    Promise.all([projectForEditing(tx, orgId, id, planId), modelKeyHint(tx, orgId), projectRunCount(tx, orgId, id), projectRunState(tx, orgId, id), env.setup ? firstRunOnUsLeft(tx, orgId) : false, workspacePlan(tx, orgId)]),
+  const [project, keyHint, runs, runState, onUsLeft, plan, prPlans] = await withOrg(getDb(), orgId, (tx) =>
+    Promise.all([projectForEditing(tx, orgId, id, planId), modelKeyHint(tx, orgId), projectRunCount(tx, orgId, id), projectRunState(tx, orgId, id), env.setup ? firstRunOnUsLeft(tx, orgId) : false, workspacePlan(tx, orgId), recentPrPlans(tx, orgId, id, planId)]),
   );
   if (!project || !runState) notFound();
   const offeredOnUs = onUsLeft && project.personas.length <= FIRST_RUN_ON_US.maxPeople;
@@ -82,6 +84,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
           startRefusal={refusal ? { message: refusal.message, ...(refusal instanceof RunInProgress ? { activeRun: refusal.run } : {}) } : undefined}
           closedBeta={betaRefusal(member.email) ?? undefined}
         />
+        <PrPlans plans={prPlans} people={project.personas.map((p) => ({ id: p.key, name: p.name }))} />
       </div>
     </AppShell>
   );
