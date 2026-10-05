@@ -1,11 +1,12 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { EventEmitter } from "node:events";
+import { describe, expect, it, vi } from "vitest";
 import type { RunResult } from "@usetrawler/protocol";
 import { github, upsertComment } from "./adapters/github.ts";
 import { COMMENT_MARKER } from "./adapters/types.ts";
-import { runCli } from "./cli.ts";
+import { defaultDeps, ignoreOutputErrors, runCli } from "./cli.ts";
 
 const ID = "0b3a1f0e-6c43-4a53-9a2e-5d6d8c1f7a10";
 const MARKDOWN = `${COMMENT_MARKER}\n## Trawler\n1 confirmed defect`;
@@ -245,6 +246,58 @@ describe("runCli", () => {
     expect(stopped).toContain("runner");
     expect(disposed).toBe(true);
     expect(h.err.join("\n")).toContain("stopped (the job received SIGTERM)");
+  });
+
+  it("sends the stop request before it prints anything, even when the output is gone", async () => {
+    const h = harness([result({ status: "running", finished: false })], {});
+    const timeline: string[] = [];
+    let handler: ((signal: NodeJS.Signals) => void) | undefined;
+    let fired = false;
+    let time = 0;
+    const deps = {
+      ...h.deps,
+      err: (line: string) => void timeline.push(`print: ${line}`),
+      fetch: ((url: string, init?: RequestInit) => {
+        if (String(url).endsWith("/stop")) timeline.push("stop");
+        return h.deps.fetch(url, init);
+      }) as typeof fetch,
+      now: () => (time += 60_000),
+      onSignals: (h2: (signal: NodeJS.Signals) => void) => ((handler = h2), () => undefined),
+      exit: () => undefined,
+      sleep: async () => {
+        if (fired) return;
+        fired = true;
+        timeline.push("signal");
+        handler!("SIGINT");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      },
+    };
+    await runCli([...argv, "--timeout-minutes", "30"], deps);
+    const after = timeline.slice(timeline.indexOf("signal") + 1);
+    expect(after[0]).toBe("stop");
+    expect(after.some((e) => e.startsWith("print"))).toBe(true);
+  });
+
+  it("does not throw when stdout or stderr is a closed pipe", () => {
+    const epipe = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => {
+      throw epipe;
+    });
+    const errWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => {
+      throw epipe;
+    });
+    try {
+      expect(() => defaultDeps.out("a line")).not.toThrow();
+      expect(() => defaultDeps.err("a line")).not.toThrow();
+    } finally {
+      write.mockRestore();
+      errWrite.mockRestore();
+    }
+    const stdout = new EventEmitter();
+    const stderr = new EventEmitter();
+    ignoreOutputErrors([stdout, stderr] as never);
+    expect(() => stdout.emit("error", epipe)).not.toThrow();
+    expect(() => stderr.emit("error", epipe)).not.toThrow();
   });
 
   it("hands the run's id to the runner it starts", async () => {
