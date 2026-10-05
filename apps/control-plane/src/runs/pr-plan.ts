@@ -1,6 +1,6 @@
 import type { LanguageModel } from "ai";
 import { sql } from "kysely";
-import { Budget, pageText, planForPullRequest, settleTurns, type LeadTurn } from "@usetrawler/core/setup";
+import { Budget, pageText, planForPullRequest, settleTurns, type AccountFlow, type LeadTurn } from "@usetrawler/core/setup";
 import { MAX_GOALS, MAX_GOALS_PER_PERSONA, turnsOf, type Goal, type PlanMode, type PullRequest } from "@usetrawler/protocol";
 import type { Database } from "../db/index.ts";
 import { asSystem, type Tx } from "../db/tenancy.ts";
@@ -24,6 +24,15 @@ export interface PrPlanRecord {
   prPlanId?: string;
   version?: number;
   reused?: boolean;
+  accountFlow?: AccountFlow;
+  accountReason?: string;
+  signUps?: string[];
+}
+
+export async function accountsFor(tx: Tx, planId: string | null, provided: string[], flow: AccountFlow): Promise<{ accounts: string[]; signUps: string[] }> {
+  if (flow !== "exercise" || !planId || provided.length === 0) return { accounts: provided, signUps: [] };
+  const signing = new Set((await tx.selectFrom("personas").select("name").where("plan_id", "=", planId).where("signs_in", "=", true).where("name", "in", provided).execute()).map((p) => p.name));
+  return { accounts: provided.filter((n) => signing.has(n)), signUps: provided.filter((n) => !signing.has(n)) };
 }
 
 export const hasPullRequestDetails = (pr: PullRequest | undefined) => Boolean(pr && (pr.title?.trim() || pr.description?.trim() || pr.changedFiles?.length));
@@ -110,7 +119,7 @@ async function claimPrPlan(db: Database) {
 }
 
 type Claimed = NonNullable<Awaited<ReturnType<typeof claimPrPlan>>>;
-type Outcome = { turns: LeadTurn[]; usage: { model: string; inputTokens: number; outputTokens: number; costUsd: number; steps: number } } | { failure: unknown };
+type Outcome = { turns: LeadTurn[]; accountFlow: AccountFlow; accountReason?: string; usage: { model: string; inputTokens: number; outputTokens: number; costUsd: number; steps: number } } | { failure: unknown };
 
 async function ask(deps: PrPlanDeps, job: Claimed): Promise<Outcome> {
   try {
@@ -124,7 +133,7 @@ async function ask(deps: PrPlanDeps, job: Claimed): Promise<Outcome> {
       features: job.features, people: snapshot.personas.map((p) => ({ id: p.id, name: p.name, brief: p.brief, account: p.accountRef ?? null })),
       goals: playedGoals(snapshot).map((g) => ({ person: name.get(g.personaId) ?? g.personaId, instruction: g.instruction })), takenGoalIds: snapshot.goals.map((g) => g.id), page,
     });
-    return { turns: planned.turns, usage: planned.usage };
+    return { turns: planned.turns, accountFlow: planned.accountFlow, ...(planned.accountReason ? { accountReason: planned.accountReason } : {}), usage: planned.usage };
   } catch (err) {
     return { failure: err };
   }
@@ -132,7 +141,7 @@ async function ask(deps: PrPlanDeps, job: Claimed): Promise<Outcome> {
 
 async function finish(db: Database, job: Claimed, outcome: Outcome): Promise<void> {
   await asSystem(db, async (tx) => {
-    const run = await tx.selectFrom("runs").select(["status", "conversation", "paid_by", "project_id"]).where("id", "=", job.run_id).forUpdate().executeTakeFirstOrThrow();
+    const run = await tx.selectFrom("runs").select(["status", "conversation", "paid_by", "project_id", "provided_accounts"]).where("id", "=", job.run_id).forUpdate().executeTakeFirstOrThrow();
     if (!ACTIVE.includes(run.status)) {
       await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date(), lease_until: null }).where("id", "=", job.id).execute();
       return;
@@ -144,9 +153,14 @@ async function finish(db: Database, job: Claimed, outcome: Outcome): Promise<voi
     const pr = job.pull_request as unknown as PullRequest;
     const key = prKey(pr);
     const stored = "turns" in outcome && outcome.turns.length > 0 && job.plan_id && key
-      ? await storePrPlan(tx, { orgId: job.org_id, projectId: run.project_id, planId: job.plan_id, key, hash: inputsHash(pr), turns: outcome.turns, runId: job.run_id })
+      ? await storePrPlan(tx, { orgId: job.org_id, projectId: run.project_id, planId: job.plan_id, key, hash: inputsHash(pr), turns: outcome.turns, accountFlow: outcome.accountFlow, accountReason: outcome.accountReason, runId: job.run_id })
       : null;
-    const record: PrPlanRecord = { mode, goalIds: merged?.added.map((g) => g.id) ?? [], ...("failure" in outcome ? { note: noteOf(outcome.failure) } : merged ? {} : { note: NOTHING }), ...(stored ? { prPlanId: stored.id, version: stored.version } : {}) };
+    const provided = "turns" in outcome ? await accountsFor(tx, job.plan_id, run.provided_accounts as string[], outcome.accountFlow) : null;
+    const record: PrPlanRecord = {
+      mode, goalIds: merged?.added.map((g) => g.id) ?? [], ...("failure" in outcome ? { note: noteOf(outcome.failure) } : merged ? {} : { note: NOTHING }), ...(stored ? { prPlanId: stored.id, version: stored.version } : {}),
+      ...("turns" in outcome ? { accountFlow: outcome.accountFlow, ...(outcome.accountReason ? { accountReason: outcome.accountReason } : {}), signUps: provided!.signUps } : {}),
+    };
+    if (provided && provided.signUps.length > 0) await tx.updateTable("runs").set({ provided_accounts: JSON.stringify(provided.accounts) }).where("id", "=", job.run_id).execute();
     if (merged) {
       const next = turnsOf(merged);
       const people = new Set(next.map((t) => t.personaId)).size;

@@ -73,6 +73,17 @@ test("a run says which people signed in with accounts provided by the CI job, an
   expect(text(head(render(finished)))).not.toContain("CI job");
 });
 
+test("a run whose pull request touches how people get accounts says who goes through the real sign-up, and says nothing otherwise", () => {
+  const goals = [{ id: "pr-join", instruction: "a new colleague joins the team", personaId: "lee" }];
+  const plan = { number: 482, mode: "both" as const, note: null, version: null, reused: false, createdByRun: null, goals };
+  const both = text(head(render(summary({ ...finished, providedAccounts: ["Daniel"], prPlan: { ...plan, signUps: ["Priya", "Tom"] } }))));
+  expect(both).toContain("Daniel signs in with an account provided by the CI job.");
+  expect(both).toContain("This pull request touches how people get accounts, so Priya, Tom go through the real sign-up instead of using the CI account.");
+  expect(text(head(render(summary({ ...finished, prPlan: { ...plan, signUps: ["Priya"] } }))))).toContain("so Priya goes through the real sign-up");
+  expect(text(head(render(summary({ ...finished, providedAccounts: ["Daniel"], prPlan: plan }))))).not.toContain("real sign-up");
+  expect(text(head(render(summary({ ...finished, prPlan: { ...plan, signUps: [] } }))))).not.toContain("real sign-up");
+});
+
 test("a confirmed defect is a row with its severity, number, person, title and what happened, marked as replayed, that opens to its steps and the replay", () => {
   const [row] = rows(render(finished), "Confirmed");
   const [summaryPart, details] = row!.split("</summary>");

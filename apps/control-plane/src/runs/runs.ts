@@ -9,7 +9,7 @@ import type { Provider } from "../llm/providers.ts";
 import { loadProjectConfig, planOf, ProjectNotFound } from "../projects/projects.ts";
 import { budgetLeft, budgetSpentMessage, HALTED, monthlyBudget, PAUSED, projectPaused, runsHalted, type MonthlyBudget } from "./limits.ts";
 import { FIRST_RUN_ON_US } from "./models.ts";
-import { DEFAULT_PLAN_MODE, hasPullRequestDetails, NOTHING, PR_PLAN_POSITION, storedPlanFor, type PrPlanRecord } from "./pr-plan.ts";
+import { accountsFor, DEFAULT_PLAN_MODE, hasPullRequestDetails, NOTHING, PR_PLAN_POSITION, storedPlanFor, type PrPlanRecord } from "./pr-plan.ts";
 import { markPrPlanUsed } from "./pr-plan-store.ts";
 import { peopleLimitMessage, runsPerDayMessage, type WorkspacePlan } from "./plan-limits.ts";
 import { runsToday, workspacePlan } from "./plans.ts";
@@ -176,7 +176,7 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
   if (options.providedAccounts?.length && execution !== "own") throw new ProvidedAccountsRefused();
   const without = await personWithoutAccount(tx, plan.id, options.providedAccounts);
   if (without) throw new NeedsAccount(without);
-  const providedAccounts = await providedPeople(tx, plan.id, options.providedAccounts ?? []);
+  let providedAccounts = await providedPeople(tx, plan.id, options.providedAccounts ?? []);
   const paidBy = options.paidBy ?? "workspace";
   const planMode = options.planMode ?? DEFAULT_PLAN_MODE;
   let prPlan: PrPlanRecord | null = planMode !== "regression" && hasPullRequestDetails(options.pullRequest) ? { mode: planMode, goalIds: [] } : null;
@@ -190,7 +190,12 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
   if (reuse) {
     const { merged, stored } = reuse;
     if (merged) planned = { ...config, personas: merged.personas, goals: merged.goals };
-    prPlan = { mode: prPlan!.mode, goalIds: merged?.added.map((g) => g.id) ?? [], ...(merged ? {} : { note: NOTHING }), prPlanId: stored.id, version: stored.version, reused: true };
+    const flow = await accountsFor(tx, plan.id, providedAccounts, stored.accountFlow);
+    providedAccounts = flow.accounts;
+    prPlan = {
+      mode: prPlan!.mode, goalIds: merged?.added.map((g) => g.id) ?? [], ...(merged ? {} : { note: NOTHING }), prPlanId: stored.id, version: stored.version, reused: true,
+      accountFlow: stored.accountFlow, ...(stored.accountReason ? { accountReason: stored.accountReason } : {}), signUps: flow.signUps,
+    };
   }
   const turns = turnsOf(planned);
   const people = new Set(turns.map((t) => t.personaId)).size;
@@ -433,7 +438,7 @@ const CONVERSATION_SHOWN = 60;
 
 function plannedFor(record: PrPlanRecord, number: number | null, snapshot: ConfigSnapshot, createdByRun: number | null) {
   const chosen = new Set(record.goalIds);
-  return { number, mode: record.mode, note: record.note ?? null, version: record.version ?? null, reused: record.reused === true, createdByRun, goals: snapshot.goals.filter((g) => chosen.has(g.id)).map((g) => ({ id: g.id, instruction: g.instruction, personaId: g.personaId ?? null })) };
+  return { number, mode: record.mode, note: record.note ?? null, version: record.version ?? null, reused: record.reused === true, createdByRun, ...(record.signUps?.length ? { signUps: record.signUps } : {}), ...(record.accountReason ? { accountReason: record.accountReason } : {}), goals: snapshot.goals.filter((g) => chosen.has(g.id)).map((g) => ({ id: g.id, instruction: g.instruction, personaId: g.personaId ?? null })) };
 }
 
 export type RunSummary = NonNullable<Awaited<ReturnType<typeof runSummary>>>;

@@ -592,6 +592,7 @@ export function RunLive({ initial, closedBeta }: { initial: Data; closedBeta?: s
           <h1 className={`my-2.5 font-bold wrap-anywhere ${view.live ? "text-[48px] leading-[0.94] tracking-[-0.06em] md:text-[clamp(48px,6vw,88px)]" : "text-[44px] leading-[0.96] tracking-[-0.055em] md:text-[clamp(44px,5vw,72px)]"}`}>{view.headline}</h1>
           <p className="text-base break-words text-muted">{host} · {run.planName && <>{run.planName} · </>}{run.agentModel}</p>
           {run.providedAccounts.length > 0 && <p className="text-sm break-words text-muted">{run.providedAccounts.join(", ")} {run.providedAccounts.length === 1 ? "signs" : "sign"} in with {run.providedAccounts.length === 1 ? "an account" : "accounts"} provided by the CI job.</p>}
+          {(run.prPlan?.signUps?.length ?? 0) > 0 && <p title={run.prPlan!.accountReason} className="text-sm break-words text-muted">This pull request touches how people get accounts, so {run.prPlan!.signUps!.join(", ")} {run.prPlan!.signUps!.length === 1 ? "goes" : "go"} through the real sign-up instead of using the CI account.</p>}
           {view.live && <p className="mt-2 max-w-[700px] text-lg text-muted">Defects count only after a fresh agent reproduces them.</p>}
           <p role="status" aria-live="polite" className="text-sm text-warn">
             {(gone || stale) && <span className="mt-2 block">{gone ? "This run is no longer available." : "Lost contact with Trawler. Retrying…"}</span>}
