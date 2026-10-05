@@ -135,5 +135,5 @@ export const ChannelMessageSchema = z.object({
 });
 export type ChannelMessage = z.infer<typeof ChannelMessageSchema>;
 
-export const ChannelSchema = z.object({ messages: z.array(ChannelMessageSchema).max(MAX_CHANNEL_MESSAGES) });
+export const ChannelSchema = z.object({ messages: z.array(ChannelMessageSchema).max(MAX_CHANNEL_MESSAGES), othersWorking: z.boolean().optional() });
 export type Channel = z.infer<typeof ChannelSchema>;

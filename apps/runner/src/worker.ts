@@ -34,10 +34,12 @@ export interface WorkerDeps {
   accounts?: AccountsFile;
   betweenJobs?: () => Promise<void>;
   look?: (targetUrl: string) => boolean;
+  channelPollMs?: number;
 }
 
 const CLOSE_TIMEOUT_MS = 10_000;
 const CHANNEL_TIMEOUT_MS = 10_000;
+const CHANNEL_POLL_MS = 3000;
 const UPLOAD_ATTEMPTS = 6;
 const UPLOAD_TIMEOUT_MS = 30_000;
 const UPLOAD_WAIT_MS = 35_000;
@@ -94,17 +96,29 @@ async function call(deps: WorkerDeps, path: string, bearer: string, body: unknow
   throw last instanceof Error ? last : new Error(String(last));
 }
 
-function channelFor(deps: WorkerDeps, job: JobAssignment): TeamChannel {
+export function channelFor(deps: WorkerDeps, job: JobAssignment): TeamChannel {
+  let othersWorking: boolean | undefined;
+  const fetchOnce = async (afterId: number) => {
+    const url = new URL(`/api/runner/jobs/${encodeURIComponent(job.jobId)}/channel?${new URLSearchParams({ after: String(afterId) })}`, deps.controlPlane);
+    const res = await (deps.fetch ?? fetch)(url, {
+      headers: { authorization: `Bearer ${job.token}`, [PROTOCOL_HEADER]: String(PROTOCOL_VERSION) },
+      signal: AbortSignal.timeout(CHANNEL_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status} from the channel`);
+    const channel = ChannelSchema.parse(await res.json());
+    othersWorking = channel.othersWorking;
+    return channel.messages;
+  };
   return {
-    read: async (afterId) => {
-      const url = new URL(`/api/runner/jobs/${encodeURIComponent(job.jobId)}/channel?${new URLSearchParams({ after: String(afterId) })}`, deps.controlPlane);
-      const res = await (deps.fetch ?? fetch)(url, {
-        headers: { authorization: `Bearer ${job.token}`, [PROTOCOL_HEADER]: String(PROTOCOL_VERSION) },
-        signal: AbortSignal.timeout(CHANNEL_TIMEOUT_MS),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status} from the channel`);
-      return ChannelSchema.parse(await res.json()).messages;
+    read: async (afterId, waitSeconds = 0) => {
+      const deadline = Date.now() + waitSeconds * 1000;
+      for (;;) {
+        const messages = await fetchOnce(afterId);
+        if (messages.length > 0 || othersWorking === false || Date.now() >= deadline) return messages;
+        await pause(Math.min(deps.channelPollMs ?? CHANNEL_POLL_MS, deadline - Date.now()));
+      }
     },
+    othersWorking: () => othersWorking,
   };
 }
 

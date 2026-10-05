@@ -78,3 +78,11 @@ test("messages of another run never reach a person, and the run page lists the c
   const summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", second.run.id));
   expect(summary).toMatchObject({ conversation: true, conversationMessages: [{ personaKey: "lee", text: "hello from the second run" }] });
 });
+
+test("othersWorking is true while another person's session is queued or leased and false once they are done", async () => {
+  const { ana, lee } = await conversation("standby");
+  expect(ChannelSchema.parse(await (await read(ana)).json()).othersWorking).toBe(true);
+  expect(ChannelSchema.parse(await (await read(lee)).json()).othersWorking).toBe(true);
+  await completeJob(t.db, lee.token, { usage: { model: "a", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "finish" });
+  expect(ChannelSchema.parse(await (await read(ana)).json()).othersWorking).toBe(false);
+});

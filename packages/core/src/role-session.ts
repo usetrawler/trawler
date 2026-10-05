@@ -3,12 +3,13 @@ import type { Screenshot } from "./browser.ts";
 import { goalsFor, type JobUsage, type NotABug, type Persona, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
 import { browserQueue, runAgentLoop } from "./agent-loop.ts";
 import type { Budget } from "./llm.ts";
-import { rolePrompt, sessionStatus } from "./prompts.ts";
+import { rolePrompt, sessionStatus, standbyPrompt } from "./prompts.ts";
 import type { SecretScrubber } from "./secrets.ts";
-import { findingUrl, madeUpEmail, madeUpPassword, newSessionState, noteBotProtection, ownPasswordTool, sessionTools, teamTools, type FillField, type TeamChannel } from "./session-tools.ts";
+import { findingUrl, madeUpEmail, madeUpPassword, newSessionState, noteBotProtection, ownPasswordTool, sessionTools, STANDBY, teamTools, type FillField, type TeamChannel } from "./session-tools.ts";
 import type { BotProtection } from "./bot-protection.ts";
 import { LOOK_TOOL, lookTool } from "./look.ts";
 
+const NOTHING_NEWER = 999_999_999_999_999;
 const NUDGE = "Every turn must call a tool; plain text does nothing. Continue with the goals, and call finish once every goal has a status.";
 
 export async function runRoleSession(opts: {
@@ -56,6 +57,7 @@ export async function runRoleSession(opts: {
       }
     : undefined;
   const look: ToolSet = opts.look && screenshot ? { [LOOK_TOOL]: lookTool({ screenshot: () => queue.run(screenshot) }) } : {};
+  const conversation = opts.conversation;
   const tools = {
     ...queue.tools,
     ...look,
@@ -66,8 +68,17 @@ export async function runRoleSession(opts: {
       fillField: opts.fillField, inBrowser: queue.run,
       scrubber: opts.scrubber, newId: opts.newFindingId, capture, pageUrl: opts.pageUrl, botProtection: opts.botProtection,
       people: opts.project.personas.map((p) => ({ id: p.id, name: p.name })), self: opts.persona.id,
+      othersAreWorking: conversation ? async () => {
+        try {
+          if (!conversation.channel.othersWorking) return false;
+          await conversation.channel.read(NOTHING_NEWER, 0);
+        } catch {
+          return false;
+        }
+        return conversation.channel.othersWorking?.() === true;
+      } : undefined,
     }),
-    ...(opts.conversation ? teamTools({ state, emit, jobId, channel: opts.conversation.channel, scrubber: opts.scrubber }) : {}),
+    ...(conversation ? teamTools({ state, emit, jobId, channel: conversation.channel, scrubber: opts.scrubber }) : {}),
     ...(opts.persona.accountRef ? {} : ownPasswordTool({ state, fillField: opts.fillField, inBrowser: queue.run, scrubber: opts.scrubber, password: seed === undefined ? undefined : madeUpPassword(seed) })),
   };
   const base = rolePrompt({
@@ -78,13 +89,14 @@ export async function runRoleSession(opts: {
     others: opts.project.personas.filter((p) => p.id !== opts.persona.id).map((p) => p.name),
     team: opts.conversation?.peers.map((p) => p.name),
   });
+  let standbyFrom: number | undefined;
   const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
 
   emit({ type: "job_started", jobId, kind: "role_session" });
   const { stoppedBy, error } = await runAgentLoop({
     model: opts.model,
     tools,
-    instructions: () => base + sessionStatus(state.notes, [...state.goals.values()], usage.steps, opts.maxSteps),
+    instructions: () => base + sessionStatus(state.notes, [...state.goals.values()], usage.steps, opts.maxSteps) + (state.standby ? standbyPrompt() : ""),
     nudge: NUDGE,
     scrubber: opts.scrubber,
     budget: opts.budget,
@@ -93,6 +105,11 @@ export async function runRoleSession(opts: {
     finished: () => state.finished !== null,
     crashed: queue.crashed,
     onStep: (step, costUsd) => {
+      if (state.standby) {
+        standbyFrom ??= usage.steps;
+        const over = usage.steps - standbyFrom >= STANDBY.maxTurns || Date.now() - state.standby.since >= STANDBY.maxMs || usage.steps >= opts.maxSteps || opts.budget.exceeded || queue.crashed() !== false;
+        if (over) state.finished = state.standby.summary;
+      }
       const url = findingUrl(opts.pageUrl?.());
       emit({ type: "step", jobId, step: usage.steps, tool: step.toolCalls[0]?.toolName ?? null, costUsd, ...(url ? { url } : {}) });
     },

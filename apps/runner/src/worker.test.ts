@@ -4,7 +4,7 @@ import { z } from "zod";
 import { afterEach, expect, test, vi } from "vitest";
 import { PROTOCOL_HEADER } from "@usetrawler/protocol";
 import { scriptedModel, text, toolCall } from "../../../packages/core/src/testing.ts";
-import { workLoop, workOnce, type LogFields, type WorkerDeps } from "./worker.ts";
+import { channelFor, workLoop, workOnce, type LogFields, type WorkerDeps } from "./worker.ts";
 
 const token = "job-token-" + "x".repeat(40);
 const config = {
@@ -739,4 +739,35 @@ test("a hosted replay of a defect that needs two people opens a second browser f
   const model = scriptedModel([toolCall("browser_snapshot", {}), toolCall("act_as", { person: "Ana" }), toolCall("browser_snapshot", {}), toolCall("report_replay", { completed: true, observed: "500", blockedAt: null })]);
   await workOnce(deps(url, model, { openBrowser: counting }));
   expect({ opened, closed }).toEqual({ opened: 2, closed: 2 });
+});
+
+test("the team channel waits for a new message, then reports whether the others are still working", async () => {
+  const message = { id: 5, personaId: "lee", name: "Lee", text: "invite me", at: "2026-10-04T10:00:00.000Z" };
+  const answers = [{ messages: [], othersWorking: true }, { messages: [], othersWorking: true }, { messages: [message], othersWorking: true }];
+  const urls: string[] = [];
+  const fetchStub = (async (url: URL) => {
+    urls.push(String(url));
+    return new Response(JSON.stringify(answers.shift()), { headers: { "content-type": "application/json" } });
+  }) as unknown as typeof fetch;
+  const channel = channelFor({ controlPlane: "http://cp.test", fetch: fetchStub, channelPollMs: 1 } as WorkerDeps, baseJob as never);
+  expect(channel.othersWorking?.()).toBeUndefined();
+  expect(await channel.read(2, 5)).toEqual([message]);
+  expect(urls).toHaveLength(3);
+  expect(urls[0]).toContain("after=2");
+  expect(channel.othersWorking?.()).toBe(true);
+});
+
+test("the team channel stops waiting when the others have finished, and does not wait without being asked", async () => {
+  const bodies = [{ messages: [], othersWorking: false }, { messages: [] }];
+  let calls = 0;
+  const fetchStub = (async () => {
+    calls++;
+    return new Response(JSON.stringify(bodies.shift()), { headers: { "content-type": "application/json" } });
+  }) as unknown as typeof fetch;
+  const channel = channelFor({ controlPlane: "http://cp.test", fetch: fetchStub, channelPollMs: 1 } as WorkerDeps, baseJob as never);
+  expect(await channel.read(0, 30)).toEqual([]);
+  expect(channel.othersWorking?.()).toBe(false);
+  expect(await channel.read(0)).toEqual([]);
+  expect(calls).toBe(2);
+  expect(channel.othersWorking?.()).toBeUndefined();
 });

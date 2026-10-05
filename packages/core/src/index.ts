@@ -1,7 +1,7 @@
 export { Budget, createModel, stepCost, tallyStep } from "./llm.ts";
 export { pruneMessages } from "./context.ts";
 export { MIN_SECRET_LENGTH, scrubConsole, SecretScrubber } from "./secrets.ts";
-export { newSessionState, sessionTools, teamTools, type FieldKind, type FillField, type SessionState, type SessionTools, type TeamChannel } from "./session-tools.ts";
+export { newSessionState, sessionTools, STANDBY, teamTools, type FieldKind, type FillField, type SessionState, type SessionTools, type TeamChannel } from "./session-tools.ts";
 export { BROWSER_TOOLS, openBrowser, type BotProtection, type Browser, type Screenshot } from "./browser.ts";
 export { botProtection, type PageSignals } from "./bot-protection.ts";
 export { runRoleSession } from "./role-session.ts";

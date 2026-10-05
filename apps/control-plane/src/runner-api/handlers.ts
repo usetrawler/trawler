@@ -134,7 +134,7 @@ export async function handleChannel(req: Request, jobId: string, deps: RunnerApi
   const afterParam = new URL(req.url).searchParams.get("after") ?? "0";
   if (!/^\d{1,15}$/.test(afterParam)) return problem(400, "after must be a message number");
   try {
-    return json({ messages: await channelFor(deps.db, token, jobId, Number(afterParam)) });
+    return json(await channelFor(deps.db, token, jobId, Number(afterParam)));
   } catch (err) {
     if (err instanceof InvalidJobToken) return problem(401, "invalid job token");
     throw err;
