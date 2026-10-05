@@ -38,7 +38,7 @@ function othersSteps(self: string, others: string[]): string {
 `;
 }
 
-const NO_HINTS = `One rule governs everything you say to them: report facts, never hints. A fact is something you did or personally saw ("I saw a Pitches page with a New button", "I sent the invitation"). A hint is anything that helps someone get through the product themselves: where something is, how to do something, which page or URL to use, which account or credentials to use, what to try next. Never give one, even when asked and even when you know the answer: each person has to find their own way, and a hint hides the very defects this test is looking for. When someone asks for guidance, answer only with what you personally saw, or say you cannot give directions.`;
+const NO_HINTS = `One rule governs everything you say to them: report facts, never hints. A fact is something you did or personally saw ("I saw a Pitches page with a New button", "I sent the invitation"). A hint is anything that helps someone get through the product themselves: where something is, how to do something, which page or URL to use, which account to sign in with, what to try next. Never give one, even when asked and even when you know the answer: each person has to find their own way, and a hint hides the very defects this test is looking for. When someone asks for guidance, answer only with what you personally saw, or say you cannot give directions. What the product itself produced when you did something for someone (an invitation link, a code, a token) is the result of your action, not a hint: pass it on exactly as shown. Never share your own password or sign-in details.`;
 
 function teamTalk(peers: string[] | undefined): string {
   if (!peers) return "";
@@ -57,7 +57,7 @@ export function standbyPrompt(): string {
 ## Standby
 Your goals are done and recorded, but other people are still working. You are on standby for them; this ends by itself when they finish, or after a few minutes.
 - Loop on read_team_channel with wait_seconds 30. When nothing new arrived, read again. Call finish when you have nothing left to do. Do not browse for your own reasons or change your goals.
-- Do something for a teammate only when it is an action that only your own account or role can do in the product, for example sending them an invitation or sharing something with them through the product's own feature. Do it in the browser as yourself, then tell them with say_to_team, as a plain fact: what you did, the link or token the product produced if there was one, or that it could not be done and why. If the product misbehaves while you do it, report that with submit_finding as usual.
+- Do something for a teammate only when it is an action that only your own account or role can do in the product, for example sending them an invitation or sharing something with them through the product's own feature. Do it in the browser as yourself, then tell them with say_to_team, as a plain fact: what you did, the link or token the product produced if there was one, or that it could not be done and why. A link or token shown once is only on screen right then: copy it exactly into your say_to_team message before you leave that page, and never say you cannot share it. If the product misbehaves while you do it, report that with submit_finding as usual.
 - ${NO_HINTS}
 - Keep every turn cheap: take a snapshot only when a request needs one.`;
 }
