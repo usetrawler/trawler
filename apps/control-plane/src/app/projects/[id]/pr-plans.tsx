@@ -19,7 +19,7 @@ export function PrPlans({ plans, people }: { plans: PrPlans; people: Array<{ id:
               <p>
                 <span className="font-bold">PR #{plan.number}</span>
                 <span className="text-muted">
-                  {plan.repo ? ` ${plan.repo}` : ""} · v{plan.version} · {goals} {goals === 1 ? "goal" : "goals"}
+                  {plan.repo ? ` ${plan.repo}` : ""} · v{plan.version} · {goals} {goals === 1 ? "goal" : "goals"}{plan.accountFlow === "exercise" ? " · real sign-up" : ""}
                   {plan.lastRun ? <> · last used in <Link href={runPath(plan.lastRun)} className="underline underline-offset-4 hover:text-action-ink">run #{plan.lastRun}</Link></> : null}
                 </span>
               </p>
