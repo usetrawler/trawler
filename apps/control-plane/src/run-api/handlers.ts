@@ -84,7 +84,7 @@ export async function handleStartRun(req: Request, deps: RunApiDeps): Promise<Re
       return startRun(tx, orgId, body.project, deps.keys, {
         budgetUsd: payer.budgetUsd, agentModel: payer.model, judgeModel: payer.model, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: `api-token:${holder.tokenId}`,
         provider: payer.provider, providerBaseUrl: payer.providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap, paidBy: payer.paidBy,
-        planId: plan.id, execution: body.execution, targetUrl: body.url, pullRequest: body.pullRequest, planMode: body.planMode, conversation: body.conversation, providedAccounts: body.accounts, usesFirstRunOnUs: payer.usesFirstRunOnUs,
+        planId: plan.id, execution: body.execution, targetUrl: body.url, pullRequest: body.pullRequest, planMode: body.planMode, replan: body.replan, conversation: body.conversation, providedAccounts: body.accounts, usesFirstRunOnUs: payer.usesFirstRunOnUs,
       });
     });
     if (body.pullRequest) deps.afterStart?.();

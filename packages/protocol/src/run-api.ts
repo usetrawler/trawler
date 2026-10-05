@@ -38,6 +38,7 @@ export const StartRunRequestSchema = z.object({
   accounts: z.array(z.string().min(1).max(100)).max(MAX_ACCOUNTS).optional(),
   pullRequest: PullRequestSchema.optional(),
   planMode: z.enum(PLAN_MODES).optional(),
+  replan: z.boolean().optional(),
 });
 export type StartRunRequest = z.input<typeof StartRunRequestSchema>;
 

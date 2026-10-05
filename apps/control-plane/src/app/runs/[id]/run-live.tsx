@@ -95,6 +95,9 @@ export function PullRequestPlan({ run }: { run: RunSummary }) {
       <h2 id="pr-plan" className={`${label} text-muted`}>{title}</h2>
       {plan.goals.length > 0 ? (
         <>
+          {plan.version !== null && (
+            <p className="text-sm text-muted">{`Plan v${plan.version} of this pull request, ${plan.reused ? `reused${plan.createdByRun ? ` from run #${plan.createdByRun}` : ""}` : "created in this run"}.`}</p>
+          )}
           <p className="text-sm text-muted">{plan.mode === "both" ? "The project's plan runs as it is, with these goals added for the change." : "Only these goals run, aimed at the change."}</p>
           <ul className="flex flex-col gap-1.5 border-l-2 border-action pl-3 text-sm">
             {plan.goals.map((g) => (

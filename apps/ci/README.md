@@ -18,10 +18,11 @@ Needs Node 24 or newer and `npm ci` at the repository root. No build step.
 
 ```
 node apps/ci/src/main.ts run --project <uuid> [--plan <uuid>] [--url <address>] [--runner hosted|own]
-  [--accounts <file>] [--cap <usd>] [--model <id>] [--fail-on new-confirmed|any-confirmed|never] [--timeout-minutes 45] [--no-comment]
+  [--accounts <file>] [--cap <usd>] [--model <id>] [--fail-on new-confirmed|any-confirmed|never] [--plan-mode regression|change|both] [--replan] [--timeout-minutes 45] [--no-comment]
 ```
 
 - `TRAWLER_API_TOKEN` is a workspace API token (Settings). `TRAWLER_API` is the default for `--api`.
+- `--replan` plans the pull request again even if its title, description and changed files have not changed since the last run; by default a pull request keeps its plan until they change.
 - `--runner hosted` runs on Trawler's runners; `--runner own` runs the browser inside the CI job, so `--url` can be `http://localhost:...`.
 - Exit codes: 0 pass, 1 confirmed defects (`new-confirmed` and `any-confirmed` behave the same until there is a baseline) or an API/auth error, 2 usage error. A run that hit its cap, the time limit, was cancelled or failed does not fail the job.
 

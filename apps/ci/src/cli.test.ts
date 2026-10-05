@@ -164,6 +164,10 @@ describe("runCli", () => {
     good.deps.fetch = ((url: string, init?: RequestInit) => (String(url).includes("/pulls/4/files") ? Promise.resolve(Response.json([{ filename: "src/cart.ts" }])) : base(url, init))) as typeof fetch;
     await runCli([...argv, "--fail-on", "never", "--no-comment"], good.deps);
     expect(good.calls.find((c) => c.url.endsWith("/api/v1/runs"))?.body).toMatchObject({ planMode: "both", pullRequest: { number: 4, title: "Add cart", description: "Adds a cart.", changedFiles: ["src/cart.ts"] } });
+    expect(good.calls.find((c) => c.url.endsWith("/api/v1/runs"))?.body.replan).toBeUndefined();
+    const replanned = harness([result({})], env);
+    await runCli([...argv, "--fail-on", "never", "--no-comment", "--replan"], replanned.deps);
+    expect(replanned.calls.find((c) => c.url.endsWith("/api/v1/runs"))?.body.replan).toBe(true);
     const bad = harness([result({})], env);
     const original = bad.deps.fetch!;
     bad.deps.fetch = ((url: string, init?: RequestInit) => (String(url).includes("api.github.com") ? Promise.resolve(new Response("nope", { status: 500 })) : original(url, init))) as typeof fetch;
