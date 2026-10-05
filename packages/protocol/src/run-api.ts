@@ -8,9 +8,16 @@ export type Execution = (typeof EXECUTIONS)[number];
 export const FAIL_ON = ["new-confirmed", "any-confirmed", "never"] as const;
 export type FailOn = (typeof FAIL_ON)[number];
 
+export const PLAN_MODES = ["regression", "change", "both"] as const;
+export type PlanMode = (typeof PLAN_MODES)[number];
+export const MAX_PR_DESCRIPTION = 4000;
+export const MAX_PR_FILES = 200;
+
 export const PullRequestSchema = z.object({
   number: z.number().int().positive().optional(),
   title: z.string().max(300).optional(),
+  description: z.string().max(MAX_PR_DESCRIPTION).optional(),
+  changedFiles: z.array(z.string().min(1).max(300)).max(MAX_PR_FILES).optional(),
   baseRef: z.string().max(200).optional(),
   headRef: z.string().max(200).optional(),
   commit: z.string().max(64).optional(),
@@ -28,6 +35,7 @@ export const StartRunRequestSchema = z.object({
   model: z.string().min(1).max(200).optional(),
   conversation: z.boolean().optional(),
   pullRequest: PullRequestSchema.optional(),
+  planMode: z.enum(PLAN_MODES).optional(),
 });
 export type StartRunRequest = z.input<typeof StartRunRequestSchema>;
 

@@ -20,6 +20,7 @@ export interface RunApiDeps {
   openRouterUrl: string;
   trawlerPays: boolean;
   priceOf?: (provider: Provider, model: string, openRouterUrl: string) => Promise<Price | null>;
+  afterStart?: () => void;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -82,9 +83,10 @@ export async function handleStartRun(req: Request, deps: RunApiDeps): Promise<Re
       return startRun(tx, orgId, body.project, deps.keys, {
         budgetUsd: payer.budgetUsd, agentModel: payer.model, judgeModel: payer.model, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: `api-token:${holder.tokenId}`,
         provider: payer.provider, providerBaseUrl: payer.providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap, paidBy: payer.paidBy,
-        planId: plan.id, execution: body.execution, targetUrl: body.url, pullRequest: body.pullRequest, conversation: body.conversation, usesFirstRunOnUs: payer.usesFirstRunOnUs,
+        planId: plan.id, execution: body.execution, targetUrl: body.url, pullRequest: body.pullRequest, planMode: body.planMode, conversation: body.conversation, usesFirstRunOnUs: payer.usesFirstRunOnUs,
       });
     });
+    if (body.pullRequest) deps.afterStart?.();
     return ok({ id: run.id, number: run.number, reportUrl: `${deps.baseUrl.replace(/\/+$/, "")}${runPath(run.number)}`, people: run.people }, 201);
   } catch (err) {
     if (err instanceof ProjectNotFound) return fail(404, "That project is not in this workspace.");

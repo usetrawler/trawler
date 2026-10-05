@@ -35,12 +35,20 @@ function onSignals(handler: (signal: NodeJS.Signals) => void): () => void {
 async function execute(options: Options, deps: CliDeps): Promise<number> {
   const adapter = detectAdapter(deps.env);
   const api: RunApi = runApi(options.api, options.token, deps.fetch);
-  const pullRequest = adapter.pullRequest(deps.env);
+  let pullRequest = adapter.pullRequest(deps.env);
+  if (pullRequest && options.planMode !== "regression" && adapter.pullRequestDetails) {
+    try {
+      const details = await adapter.pullRequestDetails(deps.env, pullRequest, deps.fetch);
+      pullRequest = { ...pullRequest, ...Object.fromEntries(Object.entries(details).filter(([, v]) => v !== undefined)) };
+    } catch (err) {
+      deps.err(`warning: could not read the pull request's details, so the run plans without them: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
   if (options.execution === "hosted" && options.url && /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])/.test(options.url)) {
     deps.err("warning: a hosted runner cannot reach localhost; use --runner own for a server started in this job");
   }
   const started = await api.startRun({
-    project: options.project, plan: options.plan, url: options.url, execution: options.execution, cap: options.cap, model: options.model, conversation: options.conversation || undefined, pullRequest,
+    project: options.project, plan: options.plan, url: options.url, execution: options.execution, cap: options.cap, model: options.model, conversation: options.conversation || undefined, pullRequest, planMode: pullRequest ? options.planMode : undefined,
   });
   deps.err(`Trawler run #${started.number} started (${adapter.name}${pullRequest?.number ? `, pull request #${pullRequest.number}` : ""})`);
   deps.err(`Report: ${started.reportUrl}`);

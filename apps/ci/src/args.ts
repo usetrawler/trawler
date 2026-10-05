@@ -1,15 +1,15 @@
 import { parseArgs } from "node:util";
-import { EXECUTIONS, FAIL_ON, type Execution, type FailOn } from "@usetrawler/protocol";
+import { EXECUTIONS, FAIL_ON, PLAN_MODES, type Execution, type FailOn, type PlanMode } from "@usetrawler/protocol";
 
 export const USAGE = `Usage:
   trawler-ci run --project <uuid> [--api <url>] [--plan <uuid>] [--url <address>] [--runner hosted|own]
                  [--cap <usd>] [--model <id>] [--conversation] [--fail-on new-confirmed|any-confirmed|never]
-                 [--timeout-minutes <n>] [--no-comment]
+                 [--plan-mode regression|change|both] [--timeout-minutes <n>] [--no-comment]
 
 Environment:
   TRAWLER_API         default for --api
   TRAWLER_API_TOKEN   workspace API token (required)
-  GITHUB_TOKEN        lets the run comment on the pull request (GitHub Actions)`;
+  GITHUB_TOKEN        lets the run comment on the pull request and read its title, description and changed files (GitHub Actions)`;
 
 export class UsageError extends Error {}
 
@@ -24,6 +24,7 @@ export interface Options {
   model?: string;
   conversation: boolean;
   failOn: FailOn;
+  planMode: PlanMode;
   timeoutMinutes: number;
   comment: boolean;
 }
@@ -62,7 +63,7 @@ export function parseCliArgs(argv: string[], env: Record<string, string | undefi
     allowPositionals: true,
     options: {
       api: { type: "string" }, project: { type: "string" }, plan: { type: "string" }, url: { type: "string" }, runner: { type: "string" },
-      cap: { type: "string" }, model: { type: "string" }, "fail-on": { type: "string" }, "timeout-minutes": { type: "string" },
+      cap: { type: "string" }, model: { type: "string" }, "fail-on": { type: "string" }, "plan-mode": { type: "string" }, "timeout-minutes": { type: "string" },
       "no-comment": { type: "boolean" }, conversation: { type: "boolean" }, help: { type: "boolean", short: "h" },
     },
   });
@@ -98,6 +99,7 @@ export function parseCliArgs(argv: string[], env: Record<string, string | undefi
       model: values.model,
       conversation: values.conversation === true,
       failOn: oneOf("fail-on", values["fail-on"], FAIL_ON, "new-confirmed"),
+      planMode: oneOf("plan-mode", values["plan-mode"], PLAN_MODES, "both"),
       timeoutMinutes,
       comment: !values["no-comment"],
     },

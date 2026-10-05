@@ -84,6 +84,31 @@ export function Conversation({ run }: { run: RunSummary }) {
   );
 }
 
+export function PullRequestPlan({ run }: { run: RunSummary }) {
+  const plan = run.prPlan;
+  if (!plan) return null;
+  const pr = plan.number ? `PR #${plan.number}` : "the pull request";
+  const name = (personaId: string | null) => run.personas.find((p) => p.id === personaId)?.name ?? "Someone";
+  const title = plan.goals.length > 0 ? `Planned for ${pr}` : plan.note ? `Pull request${plan.number ? ` #${plan.number}` : ""}` : `Planning for ${pr}`;
+  return (
+    <section aria-labelledby="pr-plan" className="mt-6 flex flex-col gap-2">
+      <h2 id="pr-plan" className={`${label} text-muted`}>{title}</h2>
+      {plan.goals.length > 0 ? (
+        <>
+          <p className="text-sm text-muted">{plan.mode === "both" ? "The project's plan runs as it is, with these goals added for the change." : "Only these goals run, aimed at the change."}</p>
+          <ul className="flex flex-col gap-1.5 border-l-2 border-action pl-3 text-sm">
+            {plan.goals.map((g) => (
+              <li key={g.id}><span className="font-bold">{name(g.personaId)}</span> <span className="text-muted">wants</span> {g.instruction}</li>
+            ))}
+          </ul>
+        </>
+      ) : (
+        <p className="text-sm text-muted">{plan.note ?? "Reading the pull request to choose the people and goals."}</p>
+      )}
+    </section>
+  );
+}
+
 export function CancelButton({ runId, onDone }: { runId: string; onDone: () => void }) {
   const [asking, setAsking] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
@@ -580,6 +605,7 @@ export function RunLive({ initial, closedBeta }: { initial: Data; closedBeta?: s
       {!view.live && again.error && <div className="mt-3 flex wide:justify-end"><RunAgainError again={again} /></div>}
       {!view.live && closedBeta && <p className="mt-3 max-w-md self-end border-l-2 border-warn pl-3 text-sm max-wide:self-start">{closedBeta}</p>}
       {run.botProtection && <BotProtectionNotice met={run.botProtection} />}
+      <PullRequestPlan run={run} />
 
       {view.live ? (
         <>

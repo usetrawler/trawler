@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { sql } from "kysely";
-import { turnsOf, type Execution, type ProjectConfig, type PullRequest, type RunEvent, type Verdict } from "@usetrawler/protocol";
+import { turnsOf, type Execution, type PlanMode, type ProjectConfig, type PullRequest, type RunEvent, type Verdict } from "@usetrawler/protocol";
 import { modelKey } from "../credentials/credentials.ts";
 import type { Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -9,6 +9,7 @@ import type { Provider } from "../llm/providers.ts";
 import { loadProjectConfig, planOf, ProjectNotFound } from "../projects/projects.ts";
 import { budgetLeft, budgetSpentMessage, HALTED, monthlyBudget, PAUSED, projectPaused, runsHalted, type MonthlyBudget } from "./limits.ts";
 import { FIRST_RUN_ON_US } from "./models.ts";
+import { DEFAULT_PLAN_MODE, hasPullRequestDetails, PR_PLAN_POSITION, type PrPlanRecord } from "./pr-plan.ts";
 import { peopleLimitMessage, runsPerDayMessage, type WorkspacePlan } from "./plan-limits.ts";
 import { runsToday, workspacePlan } from "./plans.ts";
 import { gaveNoVerdict } from "./report.ts";
@@ -30,6 +31,7 @@ export interface StartRunOptions {
   execution?: Execution;
   targetUrl?: string;
   pullRequest?: PullRequest;
+  planMode?: PlanMode;
   conversation?: boolean;
   usesFirstRunOnUs?: boolean;
 }
@@ -161,6 +163,8 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
   const people = new Set(turns.map((t) => t.personaId)).size;
   const conversation = options.conversation === true && people > 1;
   const paidBy = options.paidBy ?? "workspace";
+  const planMode = options.planMode ?? DEFAULT_PLAN_MODE;
+  const prPlan: PrPlanRecord | null = planMode !== "regression" && hasPullRequestDetails(options.pullRequest) ? { mode: planMode, goalIds: [] } : null;
   const usesFirstRunOnUs = paidBy === "trawler" && options.usesFirstRunOnUs !== false;
   if (usesFirstRunOnUs && config.personas.length > FIRST_RUN_ON_US.maxPeople) throw new TooManyForFirstRun(config.personas.length);
   await sql`select pg_advisory_xact_lock(hashtextextended(${`runs:${orgId}`}, 0))`.execute(tx);
@@ -175,7 +179,7 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
       max_steps: options.maxSteps, replay_steps: options.replaySteps, created_by: options.createdBy,
       provider: options.provider ?? "openrouter", provider_base_url: options.providerBaseUrl ?? null, token_cap: options.tokenCap ? String(options.tokenCap) : null,
       prompt_usd_per_mtok: options.price ? options.price.promptUsdPerMtok.toFixed(6) : null, completion_usd_per_mtok: options.price ? options.price.completionUsdPerMtok.toFixed(6) : null,
-      paid_by: paidBy, execution, conversation, pull_request: options.pullRequest ? JSON.stringify(options.pullRequest) : null,
+      paid_by: paidBy, execution, conversation, pull_request: options.pullRequest ? JSON.stringify(options.pullRequest) : null, pr_plan: prPlan ? JSON.stringify(prPlan) : null,
     })
     .returning(["id", "number"])
     .executeTakeFirstOrThrow();
@@ -184,6 +188,7 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
     if (!claimed) throw new FirstRunOnUsUsed();
   }
   await tx.updateTable("runs").set({ sign_up_seed: keys.encrypt(randomBytes(24).toString("base64url"), signUpSeedContext(orgId, run.id)) }).where("id", "=", run.id).execute();
+  if (prPlan) await tx.insertInto("jobs").values({ org_id: orgId, run_id: run.id, kind: "pr_plan", position: PR_PLAN_POSITION }).execute();
   const accounts = [...new Set(config.personas.flatMap((p) => (p.accountRef ? [p.accountRef] : [])))];
   if (accounts.length) {
     await tx.insertInto("jobs").values(accounts.map((ref, i) => ({ org_id: orgId, run_id: run.id, kind: "account_check", position: i - accounts.length, account_ref: ref }))).execute();
@@ -308,7 +313,7 @@ export async function runIdByNumber(tx: Tx, orgId: string, number: number): Prom
 export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const run = await tx
     .selectFrom("runs")
-    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason", "paid_by", "conversation", "plan_id", "plan_name", sql<string>`(select count(*) from plans p where p.project_id = runs.project_id and p.org_id = runs.org_id)`.as("plan_count")])
+    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason", "paid_by", "conversation", "plan_id", "plan_name", "pull_request", "pr_plan", sql<string>`(select count(*) from plans p where p.project_id = runs.project_id and p.org_id = runs.org_id)`.as("plan_count")])
     .where("id", "=", runId)
     .where("org_id", "=", orgId)
     .executeTakeFirst();
@@ -376,6 +381,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
     costUsd: Number(run.cost_usd), budgetUsd: Number(run.budget_usd), completionUsdPerMtok: run.completion_usd_per_mtok === null ? null : Number(run.completion_usd_per_mtok), agentModel: run.agent_model, judgeModel: run.judge_model,
     provider: run.provider, paidBy: run.paid_by as PaidBy, tokenCap: run.token_cap === null ? null : Number(run.token_cap), tokensUsed: Number(run.tokens_used),
     conversation: run.conversation,
+    prPlan: run.pr_plan ? plannedFor(run.pr_plan as unknown as PrPlanRecord, (run.pull_request as unknown as PullRequest | null)?.number ?? null, snapshot) : null,
     createdAt: run.created_at, startedAt: run.started_at, finishedAt: run.finished_at,
     jobs,
     findings: findings.map((f) => ({
@@ -394,6 +400,11 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
 }
 
 const CONVERSATION_SHOWN = 60;
+
+function plannedFor(record: PrPlanRecord, number: number | null, snapshot: ConfigSnapshot) {
+  const chosen = new Set(record.goalIds);
+  return { number, mode: record.mode, note: record.note ?? null, goals: snapshot.goals.filter((g) => chosen.has(g.id)).map((g) => ({ id: g.id, instruction: g.instruction, personaId: g.personaId ?? null })) };
+}
 
 export type RunSummary = NonNullable<Awaited<ReturnType<typeof runSummary>>>;
 

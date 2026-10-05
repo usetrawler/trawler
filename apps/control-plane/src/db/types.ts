@@ -292,6 +292,7 @@ export interface Runs {
   paid_by: Generated<string>;
   plan_id: string | null;
   plan_name: string;
+  pr_plan: Json | null;
   project_id: string;
   prompt_usd_per_mtok: Numeric | null;
   provider: Generated<string>;
