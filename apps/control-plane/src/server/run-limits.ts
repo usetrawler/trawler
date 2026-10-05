@@ -1,4 +1,4 @@
-import { stopRunsPastLimits } from "../runs/queue.ts";
+import { stopRunsPastLimits, stopUnclaimedRuns } from "../runs/queue.ts";
 import { getDb } from "./db.ts";
 import { logError } from "./log.ts";
 
@@ -12,6 +12,8 @@ export function startRunLimitSweep(): () => void {
     void Promise.resolve()
       .then(() => stopRunsPastLimits(getDb()))
       .catch((err: unknown) => logError("runs past their limits could not be stopped", { err }))
+      .then(() => stopUnclaimedRuns(getDb()))
+      .catch((err: unknown) => logError("runs no runner picked up could not be stopped", { err }))
       .finally(() => {
         sweeping = false;
       });

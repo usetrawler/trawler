@@ -20,6 +20,8 @@ export interface CliDeps {
   pollMs?: number;
   startRunner?: typeof startRunner;
   readFile?: (path: string) => string;
+  onSignals?: typeof onSignals;
+  exit?: (code: number) => void;
 }
 
 export const defaultDeps: CliDeps = {
@@ -28,7 +30,7 @@ export const defaultDeps: CliDeps = {
   err: (line) => console.error(line),
 };
 
-function onSignals(handler: (signal: NodeJS.Signals) => void): () => void {
+export function onSignals(handler: (signal: NodeJS.Signals) => void): () => void {
   const signals = ["SIGINT", "SIGTERM"] as const;
   for (const s of signals) process.on(s, handler);
   return () => {
@@ -68,16 +70,26 @@ async function execute(options: Options, deps: CliDeps): Promise<number> {
 
   const runners: RunnerProcess[] = [];
   let disposeSignals = () => {};
+  let ended = false;
+  const stopRun = async (why: string) => {
+    if (ended) return;
+    ended = true;
+    try {
+      const stopped = await api.stopRun(started.id);
+      if (stopped.stopped) deps.err(`Run #${started.number} stopped (${why}).`);
+    } catch (err) {
+      deps.err(`warning: could not stop run #${started.number}: ${err instanceof Error ? err.message : String(err)}. Stop it from ${started.reportUrl}`);
+    }
+  };
   try {
+    disposeSignals = (deps.onSignals ?? onSignals)((signal) => {
+      void Promise.all([stopRun(`the job received ${signal}`), ...runners.map((r) => r.stop())]).finally(() => (deps.exit ?? process.exit)(signal === "SIGINT" ? 130 : 143));
+    });
     if (options.execution === "own") {
       const count = options.conversation ? Math.max(1, started.people ?? 1) : 1;
       for (let i = 0; i < count; i++) {
-        runners.push((deps.startRunner ?? startRunner)({ api: options.api, token: options.token, env: deps.env, log: deps.err, accountsFile: accounts?.file }));
+        runners.push((deps.startRunner ?? startRunner)({ api: options.api, token: options.token, env: deps.env, log: deps.err, accountsFile: accounts?.file, runId: started.id }));
       }
-      const stoppable = runners;
-      disposeSignals = onSignals((signal) => {
-        void Promise.all(stoppable.map((r) => r.stop())).finally(() => process.exit(signal === "SIGINT" ? 130 : 143));
-      });
     }
     const waited = await waitForRun({
       api, id: started.id, timeoutMs: options.timeoutMinutes * 60_000, pollMs: deps.pollMs ?? POLL_MS, now: deps.now ?? Date.now,
@@ -89,10 +101,12 @@ async function execute(options: Options, deps: CliDeps): Promise<number> {
       },
     });
     if (waited.timedOut) {
-      deps.err(`Run #${started.number} did not finish within ${options.timeoutMinutes} minutes, so it does not pass or fail the job. Report: ${started.reportUrl}`);
+      await stopRun(`it did not finish within ${options.timeoutMinutes} minutes`);
+      deps.err(`Run #${started.number} did not finish within ${options.timeoutMinutes} minutes, so it was stopped and does not pass or fail the job. Report: ${started.reportUrl}`);
       return 0;
     }
     const { result } = waited;
+    ended = true;
     deps.out(result.commentMarkdown);
     try {
       adapter.summary?.(deps.env, result.commentMarkdown);
@@ -112,6 +126,7 @@ async function execute(options: Options, deps: CliDeps): Promise<number> {
     return decision.exitCode;
   } finally {
     disposeSignals();
+    await stopRun("the CLI left before the run finished");
     await Promise.all(runners.map((r) => r.stop()));
   }
 }

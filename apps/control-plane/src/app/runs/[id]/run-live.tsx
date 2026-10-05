@@ -603,12 +603,13 @@ export function RunLive({ initial, closedBeta }: { initial: Data; closedBeta?: s
         ) : (
           <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
             <a href={`/projects/${run.projectId}#start`} className={`${secondary} w-full md:w-auto`}>Start another run</a>
-            {!closedBeta && <RunAgainButton runId={run.id} again={again} />}
+            {!closedBeta && run.execution !== "own" && <RunAgainButton runId={run.id} again={again} />}
           </div>
         )}
       </div>
       {!view.live && again.error && <div className="mt-3 flex wide:justify-end"><RunAgainError again={again} /></div>}
-      {!view.live && closedBeta && <p className="mt-3 max-w-md self-end border-l-2 border-warn pl-3 text-sm max-wide:self-start">{closedBeta}</p>}
+      {!view.live && run.execution === "own" && <p className="mt-3 max-w-md self-end text-sm text-muted max-wide:self-start">This run came from CI. Start it again from there.</p>}
+      {!view.live && closedBeta && run.execution !== "own" && <p className="mt-3 max-w-md self-end border-l-2 border-warn pl-3 text-sm max-wide:self-start">{closedBeta}</p>}
       {run.botProtection && <BotProtectionNotice met={run.botProtection} />}
       <PullRequestPlan run={run} />
 

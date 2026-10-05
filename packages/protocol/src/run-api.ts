@@ -100,4 +100,11 @@ export const RunResultSchema = z.object({
 });
 export type RunResult = z.infer<typeof RunResultSchema>;
 
+export const StopRunResponseSchema = z.object({
+  id: z.string().uuid(),
+  status: z.enum(RUN_STATUSES),
+  stopped: z.boolean(),
+});
+export type StopRunResponse = z.infer<typeof StopRunResponseSchema>;
+
 export const RunApiErrorSchema = z.object({ error: z.string() });

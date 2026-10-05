@@ -229,7 +229,7 @@ export class RunNotFound extends Error {
   }
 }
 
-export type CancelReason = "stopped" | "key_removed" | "account_refused" | "time_limit" | "workspace_budget" | "paused" | "halted";
+export type CancelReason = "stopped" | "key_removed" | "account_refused" | "time_limit" | "workspace_budget" | "paused" | "halted" | "stopped_from_ci" | "unclaimed";
 
 export const ACCOUNT_REFUSED = "The product refused the username and password of";
 
@@ -339,7 +339,7 @@ export async function runIdByNumber(tx: Tx, orgId: string, number: number): Prom
 export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const run = await tx
     .selectFrom("runs")
-    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason", "paid_by", "conversation", "provided_accounts", "plan_id", "plan_name", "pull_request", "pr_plan", sql<string>`(select count(*) from plans p where p.project_id = runs.project_id and p.org_id = runs.org_id)`.as("plan_count")])
+    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason", "paid_by", "conversation", "provided_accounts", "plan_id", "plan_name", "pull_request", "pr_plan", "execution", sql<string>`(select count(*) from plans p where p.project_id = runs.project_id and p.org_id = runs.org_id)`.as("plan_count")])
     .where("id", "=", runId)
     .where("org_id", "=", orgId)
     .executeTakeFirst();
@@ -409,6 +409,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
     costUsd: Number(run.cost_usd), budgetUsd: Number(run.budget_usd), completionUsdPerMtok: run.completion_usd_per_mtok === null ? null : Number(run.completion_usd_per_mtok), agentModel: run.agent_model, judgeModel: run.judge_model,
     provider: run.provider, paidBy: run.paid_by as PaidBy, tokenCap: run.token_cap === null ? null : Number(run.token_cap), tokensUsed: Number(run.tokens_used),
     conversation: run.conversation,
+    execution: run.execution as Execution,
     providedAccounts: run.provided_accounts as string[],
     prPlan: run.pr_plan ? plannedFor(record!, (run.pull_request as unknown as PullRequest | null)?.number ?? null, snapshot, origin?.number ?? null) : null,
     createdAt: run.created_at, startedAt: run.started_at, finishedAt: run.finished_at,

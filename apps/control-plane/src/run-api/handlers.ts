@@ -11,7 +11,7 @@ import { planOf, PlanNotFound, projectExists, ProjectNotFound } from "../project
 import { runResultOf } from "../runs/comment.ts";
 import { DEFAULT_RUN, FIRST_RUN_ON_US } from "../runs/models.ts";
 import { workspacePlan } from "../runs/plans.ts";
-import { firstRunOnUsLeft, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunRefused, runSummary, startRun, type PaidBy } from "../runs/runs.ts";
+import { cancelRun, firstRunOnUsLeft, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunRefused, runSummary, startRun, type PaidBy } from "../runs/runs.ts";
 import { runPath } from "../runs/status.ts";
 import { tokenWorkspace } from "../server/api-token.ts";
 
@@ -127,4 +127,19 @@ export async function handleGetRun(req: Request, id: string, deps: RunApiDeps): 
   const summary = await withOrg(deps.db, holder.orgId, (tx) => runSummary(tx, holder.orgId, id));
   if (!summary || (holder.projectId && summary.projectId !== holder.projectId)) return fail(404, "Run not found.");
   return ok(runResultOf(summary, deps.baseUrl));
+}
+
+export async function handleStopRun(req: Request, id: string, deps: RunApiDeps): Promise<Response> {
+  const auth = await tokenWorkspace(req.headers, deps.db);
+  if (!auth.ok) return auth.response;
+  const { holder } = auth;
+  if (!UUID.test(id)) return fail(404, "Run not found.");
+  const outcome = await withOrg(deps.db, holder.orgId, async (tx) => {
+    const run = await tx.selectFrom("runs").select("project_id").where("id", "=", id).where("org_id", "=", holder.orgId).executeTakeFirst();
+    if (!run || (holder.projectId && run.project_id !== holder.projectId)) return null;
+    const stopped = await cancelRun(tx, holder.orgId, id, "stopped_from_ci");
+    const { status } = await tx.selectFrom("runs").select("status").where("id", "=", id).executeTakeFirstOrThrow();
+    return { id, status, stopped };
+  });
+  return outcome ? ok(outcome) : fail(404, "Run not found.");
 }

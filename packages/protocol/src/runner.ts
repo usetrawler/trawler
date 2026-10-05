@@ -100,6 +100,9 @@ export const JobAssignmentSchema = z.object({
 });
 export type JobAssignment = z.infer<typeof JobAssignmentSchema>;
 
+export const ClaimRequestSchema = z.object({ run: z.string().uuid().optional() });
+export type ClaimRequest = z.infer<typeof ClaimRequestSchema>;
+
 export const EventBatchSchema = z.object({ events: z.array(RunEventSchema).max(MAX_EVENTS_PER_BATCH) });
 export type EventBatch = z.infer<typeof EventBatchSchema>;
 

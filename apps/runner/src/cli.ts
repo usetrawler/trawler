@@ -4,11 +4,12 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import type { LanguageModel } from "ai";
 import YAML from "yaml";
+import { z } from "zod";
 import { Budget, createModel, openBrowser, proposeProject, SecretScrubber } from "@usetrawler/core";
 import { parseAccountsFile, ProjectConfigSchema, type RunEventInput } from "@usetrawler/protocol";
 import { localRun, type OpenBrowser } from "./local-run.ts";
 import { RunDir, renderReport } from "./run-dir.ts";
-import { workLoop, workOnce, type WorkerDeps } from "./worker.ts";
+import { FatalClaim, workLoop, workOnce, type WorkerDeps } from "./worker.ts";
 import { egressClient } from "./egress-client.ts";
 import type { BlockedAttempt } from "./egress-proxy.ts";
 import { startReporting, workerLog } from "./report.ts";
@@ -28,6 +29,7 @@ const USAGE = `Usage:
   trawler-runner work --control-plane https://app.usetrawler.com [--once]
 
 Set OPENROUTER_API_KEY for setup and run. work needs only TRAWLER_RUNNER_TOKEN: its model calls go through the control plane.
+Set TRAWLER_RUN_ID to a run's id for work to take jobs of that run only.
 Set TRAWLER_ACCOUNTS_FILE to a JSON file of {"<person>": {"username", "password"}} for work to sign in people whose accounts come from the CI job.
 Set TRAWLER_LOOK=1 for run or work to let people and replays see the page as a picture, or to a comma-separated list of
 target origins to allow it only for those products (experimental; the model must take images).`;
@@ -163,6 +165,8 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
   const browserLauncher = deps.env.TRAWLER_BROWSER_LAUNCHER?.trim() || undefined;
   const sharedDownloads = deps.env.TRAWLER_BROWSER_DOWNLOADS?.trim() || undefined;
   if (!browserLauncher && deps.env.TRAWLER_REQUIRE_EGRESS === "1") throw new UsageError("this runner must start the browser as its own user, and TRAWLER_BROWSER_LAUNCHER is not set; use the runner image");
+  const runId = deps.env.TRAWLER_RUN_ID?.trim() || undefined;
+  if (runId && !z.string().uuid().safeParse(runId).success) throw new UsageError("TRAWLER_RUN_ID must be a run's id");
   const accountsFile = deps.env.TRAWLER_ACCOUNTS_FILE?.trim();
   let accounts: ReturnType<typeof parseAccountsFile> | undefined;
   if (accountsFile) {
@@ -244,6 +248,7 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
     maskReportsWith: reporting.maskWith,
     fetch: deps.fetchImpl,
     secrets: [runnerToken],
+    runId,
     accounts,
     betweenJobs,
   };
@@ -256,8 +261,15 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
   }
   for (const signal of ["SIGTERM", "SIGINT"] as const) process.once(signal, () => stop.abort());
   log(`working for ${new URL(controlPlane).origin}${egress ? `, browsing through the egress proxy at ${egressServer}` : ""}`);
-  await workLoop(workerDeps, stop.signal);
+  let fatal = false;
+  try {
+    await workLoop(workerDeps, stop.signal);
+  } catch (err) {
+    if (!(err instanceof FatalClaim)) throw err;
+    fatal = true;
+  }
   await reporting.close();
+  if (fatal) return 1;
   if (egressDown) deps.err(EGRESS_DOWN);
   return egressDown ? 1 : 0;
 }
