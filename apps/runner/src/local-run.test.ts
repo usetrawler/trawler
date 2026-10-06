@@ -260,6 +260,43 @@ test("people take turns in the plan's order, each told what happened before, and
   expect(/priya\.[0-9a-f]{8}@example\.com/.exec(prompts[5]!)![0]).toBe(/priya\.[0-9a-f]{8}@example\.com/.exec(prompts[0]!)![0]);
 });
 
+test("the account a person made in their first turn is in their next turn's prompt as the exact username they typed", async () => {
+  const team = ProjectConfigSchema.parse({
+    name: "Pitches", targetUrl: "https://a.test",
+    personas: [{ id: "priya", name: "Priya", brief: "b" }, { id: "marco", name: "Marco", brief: "b", accountRef: "acct" }],
+    goals: [
+      { id: "submit", instruction: "Submit a pitch.", personaId: "priya" },
+      { id: "review", instruction: "Accept Priya's pitch.", personaId: "marco" },
+      { id: "decision", instruction: "See the decision.", personaId: "priya" },
+    ],
+    accounts: [{ ref: "acct", username: "a@a.test", password: "hunter22-secret" }],
+  });
+  const agent = scriptedModel([signedIn,
+    toolCall("type_own_password", { fields: ["e4"] }), toolCall("goal_status", { goal: "submit", status: "reached", note: "" }), toolCall("finish", { summary: "ok" }),
+    toolCall("goal_status", { goal: "review", status: "reached", note: "" }), toolCall("finish", { summary: "ok" }),
+    toolCall("goal_status", { goal: "decision", status: "reached", note: "" }), toolCall("finish", { summary: "ok" }),
+  ]);
+  const typed: string[] = [];
+  const open: OpenBrowser = async () => ({
+    tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => "page" }) },
+    fillField: async (_ref, text) => (typed.push(text), "typed the password"),
+    accountForm: async () => ({ fields: [{ label: "Username", value: "priya42", type: "text", autocomplete: "username", name: "username" }] }),
+    screenshot: async () => null,
+    pageUrl: () => "https://a.test/signup",
+    close: async () => {},
+  });
+  const events: RunEventInput[] = [];
+  await localRun({
+    project: team, agentModel: agent, agentModelId: "m", judgeModel: scriptedModel([]), judgeModelId: "m",
+    budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: (e) => events.push(e), openBrowser: open,
+  });
+  const prompts = agent.doGenerateCalls.slice(1).map((c) => JSON.stringify(c.prompt));
+  expect(prompts[5]).toContain('You signed up earlier as Username \\"priya42\\"');
+  expect(prompts[5]).toContain("https://a.test/signup");
+  expect(prompts[3]).not.toMatch(/priya42/);
+  expect(JSON.stringify([events, prompts])).not.toContain(typed[0]);
+});
+
 test("a test account the product refuses stops the run before any person spends the budget", async () => {
   const agent = scriptedModel([
     toolCall("sign_in", { account: "acct", usernameField: "e1", passwordField: "e2" }),

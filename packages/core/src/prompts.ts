@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { accountFromStory, identityOf, isAccountNote, type AccountRecord } from "./account-note.ts";
 import type { DefectToGroup, Finding, Goal, GoalOutcome, NotABug, Persona, ReplayObservation, StoryEntry } from "@usetrawler/protocol";
 
 const LOOKING = "browser_snapshot gives the page's text, not how it looks. To see the page as a picture, call look_at_page: when you reach a page you will work on, and whenever how it looks matters, such as its pictures, its layout, or something covered, cut off or out of place. You see the picture on the next turn only, so note what you need from it.";
@@ -8,7 +9,19 @@ function storyLine(e: StoryEntry): string {
   return `- ${e.name} noted: ${e.text}`;
 }
 
+const INVITATION_USED = "If the product says an invitation link has already been used (for example \"This invitation has already been used. Sign in instead.\"), your account already exists: do not open that link again, find the product's sign-in page and sign in as described here.";
+
+function returningSignIn(account: AccountRecord | null, signUpEmail: string | undefined): string {
+  if (!account) {
+    return ` If you signed up in an earlier turn, sign in instead of signing up again, with type_own_password for the password. For the identity field, first try the username you chose when you signed up (a form that asks for a username does not take an email address), and only then the email address ${signUpEmail}. ${INVITATION_USED}`;
+  }
+  const identity = identityOf(account);
+  const others = account.fields.filter((f) => f !== identity).map((f) => `${f.label} ${JSON.stringify(f.value)}`);
+  return ` You signed up earlier as ${identity.label} ${JSON.stringify(identity.value)}${others.length ? ` (the same form also held ${others.join(", ")})` : ""}${account.page ? `; the form where you typed your password was at ${account.page}, and the sign-in page may be another one` : ""}. Sign in with exactly that and type_own_password for the password; do not sign up again, and do not use the email address if the form asks for a username. ${INVITATION_USED}`;
+}
+
 function storySoFar(story: StoryEntry[], returning: boolean): string {
+  story = story.filter((e) => e.goal || !isAccountNote(e.text));
   if (story.length === 0 && !returning) return "";
   const tag = randomUUID().replaceAll("-", "");
   return `
@@ -66,7 +79,7 @@ export function rolePrompt(p: { persona: Persona; targetUrl: string; docsUrl?: s
   const goalLines = p.goals.map((g, i) => `${i + 1}. [${g.id}] ${g.instruction}`).join("\n");
   const signIn = p.accountRef
     ? `You have an account "${p.accountRef}". To sign in, take a snapshot, then call sign_in with the account and the refs of the username and password fields. You will never see the password.`
-    : `You have no account. If the product lets people sign up, sign up the way a new user would, with the email address ${p.signUpEmail}: it is yours, and no mail sent to it arrives. If the product refuses that address or asks you to confirm it by email, that is a limit of the address, not a defect: note it and move on. Fill password fields only with type_own_password: it types a password made up for you, the same one all session, so use it again to sign in to the account you created. You will never see it.${p.returning ? " If you signed up in an earlier turn, sign in with that email address and type_own_password instead of signing up again." : ""}`;
+    : `You have no account. If the product lets people sign up, sign up the way a new user would, with the email address ${p.signUpEmail}: it is yours, and no mail sent to it arrives. If the product refuses that address or asks you to confirm it by email, that is a limit of the address, not a defect: note it and move on. Fill password fields only with type_own_password: it types a password made up for you, the same one all session, so use it again to sign in to the account you created. You will never see it.${p.returning ? returningSignIn(accountFromStory(p.story ?? [], p.persona.id), p.signUpEmail) : " When you sign up, write down with note exactly what you typed as username or email, and the page where you sign in."}`;
   const docs = p.docsUrl ? ` Its documentation is at ${p.docsUrl}; read it if and when you would, in character.` : "";
   return `You are ${p.persona.name}. ${p.persona.brief}
 

@@ -7,7 +7,7 @@ import { Budget, createModel } from "./llm.ts";
 import { rolePrompt, sessionStatus, standbyPrompt } from "./prompts.ts";
 import { runRoleSession } from "./role-session.ts";
 import { SecretScrubber } from "./secrets.ts";
-import { STANDBY } from "./session-tools.ts";
+import { madeUpPassword, STANDBY } from "./session-tools.ts";
 import { proxyRefusal, reasoning, scriptedModel, text, toolCall } from "./testing.ts";
 
 const project = ProjectConfigSchema.parse({
@@ -621,7 +621,8 @@ describe("a turn of a team session", () => {
     const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
     expect(prompt).toContain("Accepted EcoLoop.");
     expect(prompt).toContain("you started using earlier in this session");
-    expect(prompt).toMatch(/sign in with that email address and type_own_password instead of signing up again/);
+    expect(prompt).toMatch(/sign in instead of signing up again, with type_own_password for the password\. For the identity field, first try the username you chose when you signed up/);
+    expect(prompt).toMatch(/only then the email address priya\.[0-9a-f]{8}@example\.com/);
     expect(prompt).not.toContain("Submit a pitch.\\n");
   });
 
@@ -642,6 +643,106 @@ describe("a turn of a team session", () => {
     };
     expect(await email("run-1")).toBe(await email("run-1"));
     expect(await email("run-1")).not.toBe(await email("run-2"));
+  });
+});
+
+describe("the account a person makes carries into their next turn", () => {
+  const team = ProjectConfigSchema.parse({
+    ...project,
+    personas: [{ id: "maya", name: "Maya", brief: "You join the team." }],
+    goals: [{ id: "join", instruction: "Join the team.", personaId: "maya" }, { id: "board", instruction: "See the board.", personaId: "maya" }],
+  });
+  const signUpForm = { fields: [{ label: "Email", value: "maya.demo@example.com", type: "email", autocomplete: "", name: "email" }, { label: "Choose a username", value: "maya", type: "text", autocomplete: "", name: "username" }] };
+  const turn = (model: ReturnType<typeof scriptedModel>, over: Partial<Parameters<typeof runRoleSession>[0]> = {}) =>
+    run(model, { project: team, persona: team.personas[0]!, scrubber: SecretScrubber.forProject(team), signUpSeed: "run-1", ...over });
+
+  async function firstTurn(form: typeof signUpForm | null = signUpForm, page = "https://acme.test/join/accept") {
+    const typed: string[] = [];
+    const model = scriptedModel([look, toolCall("type_own_password", { fields: ["e4", "e5"] }), reached("join"), finish]);
+    const t = turn(model, { goalIds: ["join"], fillField: async (_ref, text) => (typed.push(text), "typed the password"), accountForm: async () => form, pageUrl: () => page });
+    await t.promise;
+    return { events: t.events, password: typed[0]!, model };
+  }
+
+  const storyOf = (events: RunEventInput[]) => events.flatMap((e) => (e.type === "note" ? [{ personaId: "maya", name: "Maya", text: e.text }] : []));
+
+  test("the username typed into the form next to the password is recorded as a note, without the password", async () => {
+    const { events, password, model } = await firstTurn();
+    const notes = events.filter((e) => e.type === "note").map((e) => (e as { text: string }).text);
+    expect(notes).toEqual(['Account form filled with your own password on https://acme.test/join/accept: Choose a username "maya", Email "maya.demo@example.com"']);
+    expect(JSON.stringify(events)).not.toContain(password);
+    expect(JSON.stringify(model.doGenerateCalls.map((c) => c.prompt))).not.toContain(password);
+  });
+
+  test("the next turn is told the exact username, the page and not to use the email, with nothing secret in it", async () => {
+    const first = await firstTurn();
+    const model = scriptedModel([reached("board"), finish]);
+    const second = turn(model, { goalIds: ["board"], story: storyOf(first.events), returning: true });
+    await second.promise;
+    const prompt = (model.doGenerateCalls[0]!.prompt[0] as { content: string }).content;
+    expect(prompt).toContain('You signed up earlier as Choose a username "maya" (the same form also held Email "maya.demo@example.com"); the form where you typed your password was at https://acme.test/join/accept, and the sign-in page may be another one. Sign in with exactly that and type_own_password for the password; do not sign up again, and do not use the email address if the form asks for a username.');
+    expect(prompt).not.toContain("Account form filled");
+    expect(prompt).not.toContain(first.password);
+    expect(JSON.stringify([first.events, second.events])).not.toContain(first.password);
+  });
+
+  test("the account is written again in the returning turn, so a long story cannot push it out of the third turn", async () => {
+    const first = await firstTurn();
+    const second = turn(scriptedModel([reached("board"), finish]), { goalIds: ["board"], story: storyOf(first.events), returning: true });
+    await second.promise;
+    const third = scriptedModel([reached("board"), finish]);
+    await turn(third, { goalIds: ["board"], story: [...storyOf(first.events), ...storyOf(second.events)].slice(-1), returning: true }).promise;
+    expect(JSON.stringify(third.doGenerateCalls[0]!.prompt[0])).toContain('You signed up earlier as Choose a username');
+  });
+
+  test("a sign-in typed again in a later turn replaces the record only when something changed", async () => {
+    const first = await firstTurn();
+    const again = turn(scriptedModel([look, toolCall("type_own_password", { fields: ["e4"] }), reached("board"), finish]), { goalIds: ["board"], story: storyOf(first.events), returning: true, accountForm: async () => signUpForm, pageUrl: () => "https://acme.test/join/accept" });
+    await again.promise;
+    expect(again.events.filter((e) => e.type === "note")).toHaveLength(1);
+    const changed = turn(scriptedModel([look, toolCall("type_own_password", { fields: ["e4"] }), reached("board"), finish]), { goalIds: ["board"], story: storyOf(first.events), returning: true, accountForm: async () => ({ fields: [signUpForm.fields[1]!] }), pageUrl: () => "https://acme.test/login?next=%2Fboard" });
+    await changed.promise;
+    expect(changed.events.filter((e) => e.type === "note").map((e) => (e as { text: string }).text).at(-1)).toBe('Account form filled with your own password on https://acme.test/login: Choose a username "maya"');
+  });
+
+  test("nobody else sees the account in the story, and the person's own note is not repeated as raw text", async () => {
+    const first = await firstTurn();
+    const other = scriptedModel([reached("board"), finish]);
+    await turn(other, { goalIds: ["board"], story: storyOf(first.events) }).promise;
+    expect(JSON.stringify(other.doGenerateCalls[0]!.prompt[0])).not.toMatch(/maya\.demo|Account form filled|Choose a username/);
+  });
+
+  test("a value that is the password, and a page address that carries a token, are left out", async () => {
+    const { events, password } = await firstTurn({ fields: [{ label: "Username", value: madeUpPassword("run-1:maya"), type: "text", autocomplete: "", name: "username" }, { label: "Email", value: "maya.demo@example.com", type: "email", autocomplete: "", name: "email" }] }, "https://acme.test/invitations/Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MA/accept?token=abc");
+    const note = events.filter((e) => e.type === "note").map((e) => (e as { text: string }).text);
+    expect(note).toEqual(['Account form filled with your own password: Email "maya.demo@example.com"']);
+    expect(JSON.stringify(events)).not.toContain(password);
+  });
+
+  test("when the form could not be read nothing is recorded and the next turn gets the fallback wording", async () => {
+    const first = await firstTurn(null);
+    expect(first.events.filter((e) => e.type === "note")).toEqual([]);
+    const model = scriptedModel([reached("board"), finish]);
+    await turn(model, { goalIds: ["board"], story: [], returning: true }).promise;
+    const prompt = (model.doGenerateCalls[0]!.prompt[0] as { content: string }).content;
+    expect(prompt).toMatch(/If you signed up in an earlier turn, sign in instead of signing up again, with type_own_password for the password\. For the identity field, first try the username you chose when you signed up \(a form that asks for a username does not take an email address\), and only then the email address maya\.[0-9a-f]{8}@example\.com\./);
+  });
+
+  test("a returning person is told that a used invitation link means the account exists", async () => {
+    const first = await firstTurn();
+    for (const story of [storyOf(first.events), []]) {
+      const model = scriptedModel([reached("board"), finish]);
+      await turn(model, { goalIds: ["board"], story, returning: true }).promise;
+      expect((model.doGenerateCalls[0]!.prompt[0] as { content: string }).content).toContain('If the product says an invitation link has already been used (for example "This invitation has already been used. Sign in instead."), your account already exists: do not open that link again, find the product\'s sign-in page and sign in as described here.');
+    }
+  });
+
+  test("a person on their first turn is asked to write down what they typed, and is not told to sign in", async () => {
+    const model = scriptedModel([reached("join"), finish]);
+    await turn(model, { goalIds: ["join"] }).promise;
+    const prompt = (model.doGenerateCalls[0]!.prompt[0] as { content: string }).content;
+    expect(prompt).toContain("write down with note exactly what you typed as username or email, and the page where you sign in");
+    expect(prompt).not.toContain("invitation link has already been used");
   });
 });
 
