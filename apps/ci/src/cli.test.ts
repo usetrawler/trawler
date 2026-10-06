@@ -324,6 +324,116 @@ describe("runCli", () => {
     expect(h.err.join("\n")).toContain("HTTP 401: invalid token");
   });
 
+  describe("when the server will not start the run", () => {
+    const refusing = (h: ReturnType<typeof harness>, answers: Array<{ status: number; json: unknown }>) => {
+      const base = h.deps.fetch!;
+      let asked = 0;
+      h.deps.fetch = ((url: string, init?: RequestInit) => {
+        if (!String(url).endsWith("/api/v1/runs") || init?.method !== "POST") return base(url, init);
+        h.calls.push({ method: "POST", url: String(url), body: JSON.parse(String(init?.body)) });
+        const answer = answers[asked++];
+        return Promise.resolve(answer ? new Response(JSON.stringify(answer.json), { status: answer.status }) : base(url, init));
+      }) as typeof fetch;
+      return { asked: () => asked };
+    };
+    const busy = { status: 409, json: { error: "Run 0003 is still going on this project. Wait for it to finish or stop it, then start again." } };
+    const slept = (h: ReturnType<typeof harness>) => {
+      const waits: number[] = [];
+      h.deps.sleep = (async (ms: number) => void waits.push(ms)) as typeof h.deps.sleep;
+      return waits;
+    };
+    const pullRequestEnv = () => {
+      const dir = mkdtempSync(join(tmpdir(), "trawler-ci-"));
+      const event = join(dir, "event.json");
+      const summary = join(dir, "summary.md");
+      writeFileSync(event, JSON.stringify({ number: 12, pull_request: { number: 12, title: "t", head: { ref: "h", sha: "abc" }, base: { ref: "main" } } }));
+      writeFileSync(summary, "");
+      return { summary, env: { GITHUB_ACTIONS: "true", GITHUB_EVENT_PATH: event, GITHUB_REPOSITORY: "acme/shop", GITHUB_TOKEN: "ghs_x", GITHUB_STEP_SUMMARY: summary } };
+    };
+
+    it("waits with a growing delay, one line per retry, and starts once the project is free", async () => {
+      const h = harness([result({ defects: { confirmed: 0, refuted: 0, inconclusive: 0 } })], {});
+      const waits = slept(h);
+      const refusal = refusing(h, [busy, busy]);
+      expect(await runCli(argv, h.deps)).toBe(0);
+      expect(refusal.asked()).toBe(3);
+      expect(waits).toEqual([10_000, 20_000]);
+      const lines = h.err.filter((l) => l.includes("cannot start a run yet"));
+      expect(lines).toHaveLength(2);
+      expect(lines[0]).toContain("Run 0003 is still going");
+      expect(lines[0]).toContain("Retry 1 in 10s");
+      expect(h.err.join("\n")).toContain("Trawler run #7 started");
+    });
+
+    it("waits out a workspace at its limit of runs in CI jobs the same way", async () => {
+      const h = harness([result({})], {});
+      const waits = slept(h);
+      refusing(h, [{ status: 429, json: { error: "This workspace already has 5 runs going in CI jobs." } }]);
+      expect(await runCli([...argv, "--fail-on", "never"], h.deps)).toBe(0);
+      expect(waits).toEqual([10_000]);
+    });
+
+    it("gives up after ten minutes with a neutral exit, a job summary and no pull request comment", async () => {
+      const { summary, env } = pullRequestEnv();
+      const h = harness([result({})], env);
+      const waits = slept(h);
+      const refusal = refusing(h, Array.from({ length: 50 }, () => busy));
+      expect(await runCli(argv, h.deps)).toBe(0);
+      const total = waits.reduce((sum, ms) => sum + ms, 0);
+      expect(total).toBeLessThanOrEqual(600_000);
+      expect(total).toBeGreaterThan(400_000);
+      expect(refusal.asked()).toBe(waits.length + 1);
+      expect(h.err.at(-1)).toContain("could not start a run within 10 minutes");
+      expect(h.err.at(-1)).toContain("not caused by the pull request");
+      expect(h.out).toEqual([]);
+      expect(h.calls.some((c) => c.url.includes("/comments"))).toBe(false);
+      expect(h.calls.some((c) => c.url.includes("/stop"))).toBe(false);
+      expect(readFileSync(summary, "utf8")).toContain("Run 0003 is still going");
+      expect(readFileSync(summary, "utf8")).not.toContain("could not finish");
+    });
+
+    it.each([[422], [503]])("is neutral, with a short summary and no comment, when the model key is refused with %i", async (status) => {
+      const { summary, env } = pullRequestEnv();
+      const h = harness([result({})], env);
+      const waits = slept(h);
+      const refusal = refusing(h, [{ status, json: { error: "OpenRouter did not accept this key (401).", code: "model_key" } }]);
+      expect(await runCli(argv, h.deps)).toBe(0);
+      expect(refusal.asked()).toBe(1);
+      expect(waits).toEqual([]);
+      expect(h.err.join("\n")).toContain("OpenRouter did not accept this key (401).");
+      expect(h.err.join("\n")).toContain("not a problem with the pull request");
+      expect(readFileSync(summary, "utf8")).toContain("OpenRouter did not accept this key (401).");
+      expect(h.calls.some((c) => c.url.includes("/comments"))).toBe(false);
+    });
+
+    it("still fails the job on a refusal that is not about the model key", async () => {
+      const h = harness([result({})], {});
+      slept(h);
+      refusing(h, [{ status: 422, json: { error: "Runs on this project are paused." } }]);
+      expect(await runCli(argv, h.deps)).toBe(1);
+      expect(h.err.join("\n")).toContain("HTTP 422: Runs on this project are paused.");
+    });
+
+    it("does not retry an error that is neither busy nor about the model key", async () => {
+      const h = harness([result({})], {});
+      const waits = slept(h);
+      const refusal = refusing(h, [{ status: 404, json: { error: "That project is not in this workspace." } }]);
+      expect(await runCli(argv, h.deps)).toBe(1);
+      expect(refusal.asked()).toBe(1);
+      expect(waits).toEqual([]);
+    });
+
+    it("exits neutral without a comment when a newer push stopped the run", async () => {
+      const { summary, env } = pullRequestEnv();
+      const h = harness([result({ status: "running", finished: false }), result({ status: "cancelled", cancelReason: "superseded", defects: { confirmed: 0, refuted: 0, inconclusive: 0 } })], env);
+      expect(await runCli(argv, h.deps)).toBe(0);
+      expect(h.err.join("\n")).toContain("a newer push to this pull request started another run");
+      expect(h.out).toEqual([]);
+      expect(readFileSync(summary, "utf8")).toBe("");
+      expect(h.calls.some((c) => c.url.includes("/comments"))).toBe(false);
+    });
+  });
+
   it("exits 2 on a usage error", async () => {
     const h = harness([], {});
     expect(await runCli(["run"], h.deps)).toBe(2);

@@ -96,6 +96,7 @@ export const RunResultSchema = z.object({
   confirmed: z.array(ConfirmedDefectSchema),
   costUsd: z.number().nonnegative(),
   unverified: z.number().int().nonnegative().optional(),
+  cancelReason: z.string().optional(),
   commentMarkdown: z.string(),
 });
 export type RunResult = z.infer<typeof RunResultSchema>;
@@ -107,4 +108,4 @@ export const StopRunResponseSchema = z.object({
 });
 export type StopRunResponse = z.infer<typeof StopRunResponseSchema>;
 
-export const RunApiErrorSchema = z.object({ error: z.string() });
+export const RunApiErrorSchema = z.object({ error: z.string(), code: z.string().optional() });
