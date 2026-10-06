@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { BROWSER_TOOLS, openBrowser, type Browser, type Screenshot } from "./browser.ts";
 import { MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
 import { newSessionState, ownPasswordTool, type FillField } from "./session-tools.ts";
+import { accountFields } from "./account-note.ts";
 
 const ctx = { toolCallId: "t", messages: [], context: {} };
 const PASSWORD = "hunter22-secret";
@@ -170,6 +171,10 @@ beforeAll(async () => {
         });
         return;
       }
+      case "/join":
+        return html(`<form><label>Email <input name="email" type="email" value="maya@example.com" readonly></label><label>Choose a username <input name="username" autocomplete="username"></label><input aria-label="Search" type="search" style="display:none" value="hidden"><label>Password <input type="password" aria-label="Password"></label><label>Repeat password <input type="password" aria-label="Repeat password"></label><input type="checkbox" aria-label="Terms" checked></form>`);
+      case "/join-without-form":
+        return html(`<div><p>Other</p></div><div id="box"><input aria-label="Login" placeholder="Login"><input aria-label="Password" type="password"></div>`);
       case "/echo":
         return html(`<p>Your password is ${PASSWORD}</p>`);
       case "/opens-alerting-popup":
@@ -1073,6 +1078,35 @@ describe("password fields", () => {
       expect(signups).toEqual([{ email: "ama@acme.test", password, confirm: password }]);
       expect(password).toHaveLength(16);
     }, { scrubber });
+  }, 60_000);
+
+  test("the identity fields typed next to the password are read back from the same form, never the password", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/join`);
+      const snap = await snapshot(b);
+      await b.tools.browser_type!.execute!({ target: refOf(snap, "Choose a username"), text: "maya", element: "username" }, ctx);
+      const refs = [refOf(snap, "Password"), refOf(snap, "Repeat password")];
+      let password = "";
+      const fillField: FillField = (ref, text, kind) => ((password = text), b.fillField(ref, text, kind));
+      const scrubber = new SecretScrubber();
+      const { type_own_password } = ownPasswordTool({ state: newSessionState([]), fillField, inBrowser: (action) => action(), scrubber });
+      await type_own_password.execute!({ fields: refs }, ctx);
+      const read = await b.accountForm!(refs[0]!);
+      expect(read?.fields.map((f) => [f.label, f.value])).toEqual([["Email", "maya@example.com"], ["Choose a username", "maya"]]);
+      expect(JSON.stringify(read)).not.toContain(password);
+      expect(accountFields(read!)).toEqual([{ label: "Choose a username", value: "maya" }, { label: "Email", value: "maya@example.com" }]);
+    });
+  }, 60_000);
+
+  test("a sign-in box that is not a form still gives its login field, and a field that is not a password field gives nothing", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/join-without-form`);
+      const snap = await snapshot(b);
+      await b.tools.browser_type!.execute!({ target: refOf(snap, "Login"), text: "maya", element: "login" }, ctx);
+      expect((await b.accountForm!(refOf(snap, "Password")))?.fields.map((f) => [f.label, f.value])).toEqual([["Login", "maya"]]);
+      expect(await b.accountForm!(refOf(snap, "Login"))).toBeNull();
+      expect(await b.accountForm!("e9999")).toBeNull();
+    });
   }, 60_000);
 
   for (const [page, kept] of [["/short", "Kx7mPq2Rz9Lw"], ["/strip", "Kx7mPq2Rz9LwAa7"]] as const) {

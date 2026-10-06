@@ -8,6 +8,7 @@ import type { SecretScrubber } from "./secrets.ts";
 import { findingUrl, madeUpEmail, madeUpPassword, newSessionState, noteBotProtection, ownPasswordTool, sessionTools, STANDBY, teamTools, type FillField, type TeamChannel } from "./session-tools.ts";
 import type { BotProtection } from "./bot-protection.ts";
 import { LOOK_TOOL, lookTool } from "./look.ts";
+import { accountFromStory, accountNote, type AccountFormRead, type AccountRecord } from "./account-note.ts";
 
 const NOTHING_NEWER = 999_999_999_999_999;
 const NUDGE = "Every turn must call a tool; plain text does nothing. Continue with the goals, and call finish once every goal has a status.";
@@ -19,6 +20,7 @@ export async function runRoleSession(opts: {
   project: ProjectConfig;
   browserTools: ToolSet;
   fillField: FillField;
+  accountForm?: (passwordRef: string) => Promise<AccountFormRead | null>;
   scrubber: SecretScrubber;
   budget: Budget;
   maxSteps: number;
@@ -45,6 +47,14 @@ export async function runRoleSession(opts: {
   if (goals.length === 0) throw new RangeError(`this turn gives ${opts.persona.id} no goals of theirs`);
   const seed = opts.signUpSeed === undefined ? undefined : `${opts.signUpSeed}:${opts.persona.id}`;
   const state = newSessionState(goals);
+  const earlierAccount = opts.returning ? accountFromStory(opts.story ?? [], opts.persona.id) : null;
+  let lastAccountNote = earlierAccount ? accountNote(earlierAccount) : undefined;
+  const rememberAccount = (record: AccountRecord) => {
+    const text = accountNote(record);
+    if (text === lastAccountNote) return;
+    lastAccountNote = text;
+    emit({ type: "note", jobId, text });
+  };
   const queue = browserQueue(opts.browserTools, (ok) => {
     state.page = ok ? "seen" : "stale";
     if (ok) noteBotProtection(state, opts.botProtection?.() ?? null, emit, jobId);
@@ -79,7 +89,7 @@ export async function runRoleSession(opts: {
       } : undefined,
     }),
     ...(conversation ? teamTools({ state, emit, jobId, channel: conversation.channel, scrubber: opts.scrubber }) : {}),
-    ...(opts.persona.accountRef ? {} : ownPasswordTool({ state, fillField: opts.fillField, inBrowser: queue.run, scrubber: opts.scrubber, password: seed === undefined ? undefined : madeUpPassword(seed) })),
+    ...(opts.persona.accountRef ? {} : ownPasswordTool({ state, fillField: opts.fillField, inBrowser: queue.run, scrubber: opts.scrubber, password: seed === undefined ? undefined : madeUpPassword(seed), accountForm: opts.accountForm, pageUrl: opts.pageUrl, onAccount: rememberAccount })),
   };
   const base = rolePrompt({
     persona: opts.persona, targetUrl: opts.project.targetUrl, docsUrl: opts.project.docsUrl,
@@ -93,6 +103,7 @@ export async function runRoleSession(opts: {
   const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
 
   emit({ type: "job_started", jobId, kind: "role_session" });
+  if (earlierAccount) emit({ type: "note", jobId, text: accountNote(earlierAccount) });
   const { stoppedBy, error } = await runAgentLoop({
     model: opts.model,
     tools,
