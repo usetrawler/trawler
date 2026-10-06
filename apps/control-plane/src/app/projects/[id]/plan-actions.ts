@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import { z } from "zod";
 import { GoalSchema, MAX_GOALS, MAX_PERSONAS, PersonaSchema, TargetAccountSchema } from "@usetrawler/protocol";
 import { withOrg } from "../../../db/tenancy.ts";
-import { AccountLimit, addAccount, LastPlan, PlanInUse, PlanNameTaken, PlanNotFound, projectForEditing, ProjectNotFound, removeAccount, removePlan, renamePlan, replacePlan, UnknownAccount } from "../../../projects/projects.ts";
+import { AccountLimit, addAccount, LastPlan, PlanInUse, PlanNameTaken, PlanNotFound, PlanReadOnly, projectForEditing, ProjectNotFound, removeAccount, removePlan, renamePlan, replacePlan, UnknownAccount } from "../../../projects/projects.ts";
 import { signedInMember } from "../../../server/auth.ts";
 import { getDb, getKeyring } from "../../../server/db.ts";
 import { logError, scrubberWith } from "../../../server/log.ts";
@@ -30,6 +30,7 @@ async function activeOrg(projectId: string): Promise<string | null> {
 }
 
 const PLAN_GONE = "This plan was removed. Reload the page and choose another.";
+const READ_ONLY = "This plan was made by Trawler from a pull request, so it cannot be changed.";
 
 async function accountsOf(orgId: string, projectId: string, planId: string): Promise<AccountView[]> {
   const project = await withOrg(getDb(), orgId, (tx) => projectForEditing(tx, orgId, projectId, planId));
@@ -52,6 +53,7 @@ export async function savePlanAction(projectId: string, planId: string, plan: un
   } catch (err) {
     if (err instanceof UnknownAccount) return { ok: false, error: "An account you picked was removed. Choose another one and save again.", accounts: await accountsOf(orgId, projectId, planId) };
     if (err instanceof PlanNotFound) return { ok: false, error: PLAN_GONE };
+    if (err instanceof PlanReadOnly) return { ok: false, error: READ_ONLY };
     if (!(err instanceof ProjectNotFound)) await logError("plan could not be saved", { orgId, projectId, planId, err });
     return { ok: false, error: "The plan could not be saved. Try again." };
   }
@@ -71,6 +73,7 @@ export async function addAccountAction(projectId: string, planId: string, input:
   } catch (err) {
     if (err instanceof AccountLimit) return { ok: false, error: err.message.replace(/^a/, "A") + "." };
     if (err instanceof PlanNotFound) return { ok: false, error: PLAN_GONE };
+    if (err instanceof PlanReadOnly) return { ok: false, error: READ_ONLY };
     if (!(err instanceof ProjectNotFound)) await logError("account could not be added", { orgId, projectId, planId, err }, scrubberWith([parsed.data.password]));
     return { ok: false, error: "The account could not be added." };
   }
@@ -84,6 +87,7 @@ export async function removeAccountAction(projectId: string, planId: string, ref
     return { ok: true, accounts: await accountsOf(orgId, projectId, planId) };
   } catch (err) {
     if (err instanceof PlanNotFound) return { ok: false, error: PLAN_GONE };
+    if (err instanceof PlanReadOnly) return { ok: false, error: READ_ONLY };
     if (!(err instanceof ProjectNotFound)) await logError("account could not be removed", { orgId, projectId, planId, err });
     return { ok: false, error: "The account could not be removed." };
   }
@@ -101,6 +105,7 @@ export async function renamePlanAction(projectId: string, planId: string, name: 
   } catch (err) {
     if (err instanceof PlanNameTaken) return { ok: false, error: "Another plan of this project already has that name." };
     if (err instanceof PlanNotFound) return { ok: false, error: PLAN_GONE };
+    if (err instanceof PlanReadOnly) return { ok: false, error: READ_ONLY };
     if (!(err instanceof ProjectNotFound)) await logError("plan could not be renamed", { orgId, projectId, planId, err });
     return { ok: false, error: "The plan could not be renamed. Try again." };
   }
@@ -116,6 +121,7 @@ export async function removePlanAction(projectId: string, planId: string): Promi
     if (err instanceof LastPlan) return { ok: false, error: "A project keeps at least one plan." };
     if (err instanceof PlanInUse) return { ok: false, error: "A run of this plan is going. Stop it or wait for it to finish, then remove the plan." };
     if (err instanceof PlanNotFound) return { ok: false, error: PLAN_GONE };
+    if (err instanceof PlanReadOnly) return { ok: false, error: READ_ONLY };
     if (!(err instanceof ProjectNotFound)) await logError("plan could not be removed", { orgId, projectId, planId, err });
     return { ok: false, error: "The plan could not be removed. Try again." };
   }

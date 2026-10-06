@@ -83,7 +83,7 @@ export async function startDraft(deps: SetupDeps, input: { orgId: string; url?: 
     if (!project) throw new ProjectNotFound();
     if (input.planName !== undefined) {
       await withOrg(deps.db, input.orgId, async (tx) => {
-        const { n } = await tx.selectFrom("plans").select(sql<string>`count(*)`.as("n")).where("project_id", "=", input.projectId!).executeTakeFirstOrThrow();
+        const { n } = await tx.selectFrom("plans").select(sql<string>`count(*)`.as("n")).where("project_id", "=", input.projectId!).where("kind", "=", "standard").executeTakeFirstOrThrow();
         if (Number(n) >= MAX_PLANS) throw new PlanLimit();
         await nameFree(tx, input.projectId!, input.planName!.trim());
       });

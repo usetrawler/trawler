@@ -10,7 +10,7 @@ import { loadProjectConfig, planOf, ProjectNotFound } from "../projects/projects
 import { budgetLeft, budgetSpentMessage, HALTED, monthlyBudget, PAUSED, projectPaused, runsHalted, type MonthlyBudget } from "./limits.ts";
 import { FIRST_RUN_ON_US } from "./models.ts";
 import { accountsFor, DEFAULT_PLAN_MODE, hasPullRequestDetails, NOTHING, PR_PLAN_POSITION, storedPlanFor, type PrPlanRecord } from "./pr-plan.ts";
-import { markPrPlanUsed } from "./pr-plan-store.ts";
+import { runPlanName, usePrPlan } from "./pr-plan-store.ts";
 import { peopleLimitMessage, runsPerDayMessage, type WorkspacePlan } from "./plan-limits.ts";
 import { runsToday, workspacePlan } from "./plans.ts";
 import { gaveNoVerdict } from "./report.ts";
@@ -171,8 +171,8 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
   const plan = await planOf(tx, orgId, projectId, options.planId);
   const execution = options.execution ?? "hosted";
   if (options.targetUrl !== undefined && execution !== "own") throw new TargetOverrideRefused();
-  const loaded = await loadProjectConfig(tx, orgId, projectId, keys, plan.id);
-  const config = options.targetUrl === undefined ? loaded : { ...loaded, targetUrl: options.targetUrl, allowedOrigins: [...new Set([new URL(options.targetUrl).origin, ...loaded.allowedOrigins])] };
+  const withTarget = (loaded: ProjectConfig) => (options.targetUrl === undefined ? loaded : { ...loaded, targetUrl: options.targetUrl, allowedOrigins: [...new Set([new URL(options.targetUrl).origin, ...loaded.allowedOrigins])] });
+  const config = withTarget(await loadProjectConfig(tx, orgId, projectId, keys, plan.id));
   if (options.providedAccounts?.length && execution !== "own") throw new ProvidedAccountsRefused();
   const without = await personWithoutAccount(tx, plan.id, options.providedAccounts);
   if (without) throw new NeedsAccount(without);
@@ -186,10 +186,19 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
   const refused = await refusalToStart(tx, orgId, projectId, paidBy, plan.id);
   if (refused) throw refused;
   let planned = config;
-  const reuse = prPlan && !options.replan ? await storedPlanFor(tx, orgId, projectId, plan.id, options.pullRequest!, prPlan.mode, config) : null;
+  let ranOn = { id: plan.id, name: plan.name };
+  const found = prPlan && !options.replan ? await storedPlanFor(tx, orgId, projectId, plan.id, options.pullRequest!, prPlan.mode, config) : null;
+  const reuse = found && (found.merged || prPlan!.mode === "both") ? found : null;
   if (reuse) {
     const { merged, stored } = reuse;
-    if (merged) planned = { ...config, personas: merged.personas, goals: merged.goals };
+    if (prPlan!.mode === "change") {
+      await usePrPlan(tx, { orgId, projectId, id: stored.id, sourceId: plan.id, content: { personas: merged!.personas, goals: merged!.added } });
+      planned = withTarget(await loadProjectConfig(tx, orgId, projectId, keys, stored.id));
+      ranOn = { id: stored.id, name: runPlanName(stored.name, stored.version) };
+    } else {
+      if (merged) planned = { ...config, personas: merged.personas, goals: merged.goals };
+      await tx.updateTable("plans").set({ last_used_at: new Date() }).where("id", "=", stored.id).execute();
+    }
     const flow = await accountsFor(tx, plan.id, providedAccounts, stored.accountFlow);
     providedAccounts = flow.accounts;
     prPlan = {
@@ -204,7 +213,7 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
   const run = await tx
     .insertInto("runs")
     .values({
-      org_id: orgId, project_id: projectId, plan_id: plan.id, plan_name: plan.name, number: next, config_snapshot: JSON.stringify(withoutSecrets(planned)),
+      org_id: orgId, project_id: projectId, plan_id: ranOn.id, plan_name: ranOn.name, number: next, config_snapshot: JSON.stringify(withoutSecrets(planned)),
       agent_model: options.agentModel, judge_model: options.judgeModel, budget_usd: options.budgetUsd.toFixed(4),
       max_steps: options.maxSteps, replay_steps: options.replaySteps, created_by: options.createdBy,
       provider: options.provider ?? "openrouter", provider_base_url: options.providerBaseUrl ?? null, token_cap: options.tokenCap ? String(options.tokenCap) : null,
@@ -218,8 +227,7 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
     if (!claimed) throw new FirstRunOnUsUsed();
   }
   await tx.updateTable("runs").set({ sign_up_seed: keys.encrypt(randomBytes(24).toString("base64url"), signUpSeedContext(orgId, run.id)) }).where("id", "=", run.id).execute();
-  if (reuse) await markPrPlanUsed(tx, reuse.stored.id, run.id);
-  else if (prPlan) await tx.insertInto("jobs").values({ org_id: orgId, run_id: run.id, kind: "pr_plan", position: PR_PLAN_POSITION }).execute();
+  if (!reuse && prPlan) await tx.insertInto("jobs").values({ org_id: orgId, run_id: run.id, kind: "pr_plan", position: PR_PLAN_POSITION }).execute();
   const accounts = [...new Set(planned.personas.flatMap((p) => (p.accountRef ? [p.accountRef] : [])))];
   if (accounts.length) {
     await tx.insertInto("jobs").values(accounts.map((ref, i) => ({ org_id: orgId, run_id: run.id, kind: "account_check", position: i - accounts.length, account_ref: ref }))).execute();
@@ -234,7 +242,7 @@ export class RunNotFound extends Error {
   }
 }
 
-export type CancelReason = "stopped" | "key_removed" | "account_refused" | "time_limit" | "workspace_budget" | "paused" | "halted" | "stopped_from_ci" | "unclaimed" | "ci_gone";
+export type CancelReason = "stopped" | "key_removed" | "account_refused" | "time_limit" | "workspace_budget" | "paused" | "halted" | "stopped_from_ci" | "unclaimed" | "ci_gone" | "nothing_to_test";
 
 export const ACCOUNT_REFUSED = "The product refused the username and password of";
 
@@ -344,7 +352,7 @@ export async function runIdByNumber(tx: Tx, orgId: string, number: number): Prom
 export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const run = await tx
     .selectFrom("runs")
-    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason", "paid_by", "conversation", "provided_accounts", "plan_id", "plan_name", "pull_request", "pr_plan", "execution", sql<string>`(select count(*) from plans p where p.project_id = runs.project_id and p.org_id = runs.org_id)`.as("plan_count")])
+    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason", "paid_by", "conversation", "provided_accounts", "plan_id", "plan_name", "pull_request", "pr_plan", "execution", sql<string>`(select count(*) from plans p where p.project_id = runs.project_id and p.org_id = runs.org_id and p.kind = 'standard')`.as("plan_count"), sql<boolean>`exists (select 1 from plans p where p.id = runs.plan_id and p.kind = 'pull_request')`.as("on_pull_request_plan")])
     .where("id", "=", runId)
     .where("org_id", "=", orgId)
     .executeTakeFirst();
@@ -352,7 +360,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const snapshot = run.config_snapshot as unknown as ConfigSnapshot;
   const goalText = new Map(snapshot.goals.map((g) => [g.id, g.instruction]));
   const record = run.pr_plan as unknown as PrPlanRecord | null;
-  const origin = record?.prPlanId ? await tx.selectFrom("pr_plans as p").leftJoin("runs as r", "r.id", "p.created_by_run_id").select("r.number").where("p.id", "=", record.prPlanId).executeTakeFirst() : undefined;
+  const origin = record?.prPlanId ? await tx.selectFrom("plans as p").leftJoin("runs as r", "r.id", "p.created_by_run_id").select("r.number").where("p.id", "=", record.prPlanId).executeTakeFirst() : undefined;
   const [jobs, findings, goals, activity, screenshots, botProtection, dismissals, said] = await Promise.all([
     tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error", sql<boolean>`requested_by is not null`.as("requested"), sql<boolean>`status = 'leased' and exists (select 1 from run_events e where e.job_id = jobs.id and e.type = 'standby')`.as("on_standby")]).where("run_id", "=", runId).orderBy("position").execute(),
     tx.selectFrom("findings").select(["key", "persona_key", "kind", "filed_as", "goal", "title", "observed", "reproduction", "severity", "replay", "verdict", "same_as", "url", "quote", "step_people"]).where("run_id", "=", runId).orderBy("created_at").orderBy("key").execute(),
@@ -410,7 +418,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const findingTitle = new Map(findings.map((f) => [f.key, f.title]));
   const latestScreenshot = (key: string, kind: string) => screenshots.filter((a) => a.finding_key === key && a.kind === kind).at(-1)?.id ?? null;
   return {
-    id: run.id, number: run.number, status: run.status, cancelReason: run.cancel_reason as CancelReason | null, projectId: run.project_id, planName: run.plan_id === null || Number(run.plan_count) > 1 ? run.plan_name : null,
+    id: run.id, number: run.number, status: run.status, cancelReason: run.cancel_reason as CancelReason | null, projectId: run.project_id, planName: run.plan_id === null || run.on_pull_request_plan || Number(run.plan_count) > 1 ? run.plan_name : null,
     costUsd: Number(run.cost_usd), budgetUsd: Number(run.budget_usd), completionUsdPerMtok: run.completion_usd_per_mtok === null ? null : Number(run.completion_usd_per_mtok), agentModel: run.agent_model, judgeModel: run.judge_model,
     provider: run.provider, paidBy: run.paid_by as PaidBy, tokenCap: run.token_cap === null ? null : Number(run.token_cap), tokensUsed: Number(run.tokens_used),
     conversation: run.conversation,

@@ -27,7 +27,7 @@ export function goalsPerPerson(personas: Persona[], goals: Goal[]): (Goal & { pe
 }
 
 export async function firstPlan(tx: Tx, orgId: string, projectId: string): Promise<{ id: string; name: string }> {
-  const plan = await tx.selectFrom("plans").select(["id", "name"]).where("project_id", "=", projectId).where("org_id", "=", orgId).orderBy("position").orderBy("created_at").orderBy("id").executeTakeFirst();
+  const plan = await tx.selectFrom("plans").select(["id", "name"]).where("project_id", "=", projectId).where("org_id", "=", orgId).where("kind", "=", "standard").orderBy("position").orderBy("created_at").orderBy("id").executeTakeFirst();
   if (!plan) throw new ProjectNotFound();
   return plan;
 }
@@ -49,6 +49,12 @@ export class PlanNameTaken extends Error {
 export class PlanLimit extends Error {
   constructor() {
     super(`a project can hold at most ${MAX_PLANS} plans`);
+  }
+}
+
+export class PlanReadOnly extends Error {
+  constructor() {
+    super("a plan made from a pull request cannot be edited");
   }
 }
 
@@ -74,22 +80,46 @@ export async function planOf(tx: Tx, orgId: string, projectId: string, planId?: 
   return plan;
 }
 
+async function editablePlanOf(tx: Tx, orgId: string, projectId: string, planId?: string): Promise<{ id: string; name: string }> {
+  const plan = await planOf(tx, orgId, projectId, planId);
+  const { kind } = await tx.selectFrom("plans").select("kind").where("id", "=", plan.id).executeTakeFirstOrThrow();
+  if (kind !== "standard") throw new PlanReadOnly();
+  return plan;
+}
+
 export async function listPlans(tx: Tx, orgId: string, projectId: string): Promise<{ id: string; name: string; features: string[]; people: number }[]> {
-  const plans = await tx.selectFrom("plans").select(["id", "name", "features"]).where("project_id", "=", projectId).where("org_id", "=", orgId).orderBy("position").orderBy("created_at").orderBy("id").execute();
+  const plans = await tx.selectFrom("plans").select(["id", "name", "features"]).where("project_id", "=", projectId).where("org_id", "=", orgId).where("kind", "=", "standard").orderBy("position").orderBy("created_at").orderBy("id").execute();
   const counts = await tx.selectFrom("personas").select(["plan_id", sql<string>`count(*)`.as("n")]).where("project_id", "=", projectId).groupBy("plan_id").execute();
   const people = new Map(counts.map((c) => [c.plan_id, Number(c.n)]));
   return plans.map((p) => ({ ...p, people: people.get(p.id) ?? 0 }));
 }
 
+export interface PullRequestPlanTab {
+  id: string;
+  name: string;
+  repo: string;
+  number: number;
+  version: number;
+  lastUsedAt: Date;
+  people: number;
+}
+
+export async function listPullRequestPlans(tx: Tx, orgId: string, projectId: string): Promise<PullRequestPlanTab[]> {
+  const plans = await tx.selectFrom("plans").select(["id", "name", "repo", "pr_number", "version", "last_used_at"]).where("project_id", "=", projectId).where("org_id", "=", orgId).where("kind", "=", "pull_request").orderBy("last_used_at", "desc").orderBy("id").execute();
+  const counts = await tx.selectFrom("personas").select(["plan_id", sql<string>`count(*)`.as("n")]).where("project_id", "=", projectId).groupBy("plan_id").execute();
+  const people = new Map(counts.map((c) => [c.plan_id, Number(c.n)]));
+  return plans.map((p) => ({ id: p.id, name: p.name, repo: p.repo!, number: p.pr_number!, version: p.version!, lastUsedAt: p.last_used_at!, people: people.get(p.id) ?? 0 }));
+}
+
 export async function nextPlanName(tx: Tx, orgId: string, projectId: string): Promise<string> {
-  const taken = new Set((await tx.selectFrom("plans").select("name").where("project_id", "=", projectId).where("org_id", "=", orgId).execute()).map((p) => p.name.toLowerCase()));
+  const taken = new Set((await tx.selectFrom("plans").select("name").where("project_id", "=", projectId).where("org_id", "=", orgId).where("kind", "=", "standard").execute()).map((p) => p.name.toLowerCase()));
   let n = taken.size + 1;
   while (taken.has(`plan ${n}`)) n++;
   return `Plan ${n}`;
 }
 
 export async function nameFree(tx: Tx, projectId: string, name: string, except?: string): Promise<void> {
-  let query = tx.selectFrom("plans").select("id").where("project_id", "=", projectId).where(sql<boolean>`lower(name) = lower(${name})`);
+  let query = tx.selectFrom("plans").select("id").where("project_id", "=", projectId).where("kind", "=", "standard").where(sql<boolean>`lower(name) = lower(${name})`);
   if (except) query = query.where("id", "<>", except);
   if (await query.executeTakeFirst()) throw new PlanNameTaken();
 }
@@ -214,7 +244,7 @@ async function checkedPlan(targetUrl: string, plan: { personas: Persona[]; goals
 export async function replacePlan(tx: Tx, orgId: string, projectId: string, plan: { personas: Persona[]; goals: Goal[] }, signsIn?: string[], target: { planId?: string; features?: string[] } = {}): Promise<void> {
   const project = await tx.selectFrom("projects").select("target_url").where("id", "=", projectId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
   if (!project) throw new ProjectNotFound();
-  const { id: planId } = await planOf(tx, orgId, projectId, target.planId);
+  const { id: planId } = await editablePlanOf(tx, orgId, projectId, target.planId);
   const refs = (await tx.selectFrom("target_accounts").select("ref").where("plan_id", "=", planId).execute()).map((a) => a.ref);
   const checked = await checkedPlan(project.target_url, plan, refs);
   const signing = new Set(signsIn ?? (await tx.selectFrom("personas").select("key").where("plan_id", "=", planId).where("signs_in", "=", true).execute()).map((p) => p.key));
@@ -229,7 +259,7 @@ export async function createPlan(tx: Tx, orgId: string, projectId: string, input
   const project = await tx.selectFrom("projects").select("target_url").where("id", "=", projectId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
   if (!project) throw new ProjectNotFound();
   const name = PlanNameSchema.parse(input.name);
-  const existing = await tx.selectFrom("plans").select("position").where("project_id", "=", projectId).execute();
+  const existing = await tx.selectFrom("plans").select("position").where("project_id", "=", projectId).where("kind", "=", "standard").execute();
   if (existing.length >= MAX_PLANS) throw new PlanLimit();
   await nameFree(tx, projectId, name);
   const checked = await checkedPlan(project.target_url, input, []);
@@ -241,7 +271,7 @@ export async function createPlan(tx: Tx, orgId: string, projectId: string, input
 
 export async function renamePlan(tx: Tx, orgId: string, projectId: string, planId: string, name: string): Promise<string> {
   if (!(await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forUpdate().executeTakeFirst())) throw new ProjectNotFound();
-  const plan = await planOf(tx, orgId, projectId, planId);
+  const plan = await editablePlanOf(tx, orgId, projectId, planId);
   const clean = PlanNameSchema.parse(name);
   await nameFree(tx, projectId, clean, plan.id);
   await tx.updateTable("plans").set({ name: clean, updated_at: new Date() }).where("id", "=", plan.id).execute();
@@ -251,10 +281,10 @@ export async function renamePlan(tx: Tx, orgId: string, projectId: string, planI
 
 export async function removePlan(tx: Tx, orgId: string, projectId: string, planId: string): Promise<void> {
   if (!(await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forUpdate().executeTakeFirst())) throw new ProjectNotFound();
-  const plan = await planOf(tx, orgId, projectId, planId);
-  const { n } = await tx.selectFrom("plans").select(sql<string>`count(*)`.as("n")).where("project_id", "=", projectId).executeTakeFirstOrThrow();
+  const plan = await editablePlanOf(tx, orgId, projectId, planId);
+  const { n } = await tx.selectFrom("plans").select(sql<string>`count(*)`.as("n")).where("project_id", "=", projectId).where("kind", "=", "standard").executeTakeFirstOrThrow();
   if (Number(n) <= 1) throw new LastPlan();
-  const live = await tx.selectFrom("runs").select("id").where("plan_id", "=", plan.id).where("status", "in", ["queued", "running"]).executeTakeFirst();
+  const live = await tx.selectFrom("runs").select("id").where("status", "in", ["queued", "running"]).where((eb) => eb.or([eb("plan_id", "=", plan.id), eb("plan_id", "in", eb.selectFrom("plans").select("id").where("source_plan_id", "=", plan.id))])).executeTakeFirst();
   if (live) throw new PlanInUse();
   await tx.deleteFrom("plans").where("id", "=", plan.id).execute();
 }
@@ -270,7 +300,7 @@ export class UnknownAccount extends Error {}
 export async function addAccount(tx: Tx, orgId: string, projectId: string, input: { username: string; password: string }, keys: Keyring, targetPlanId?: string): Promise<string> {
   const project = await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
   if (!project) throw new ProjectNotFound();
-  const { id: planId } = await planOf(tx, orgId, projectId, targetPlanId);
+  const { id: planId } = await editablePlanOf(tx, orgId, projectId, targetPlanId);
   const existing = await tx.selectFrom("target_accounts").select(["ref", "position"]).where("plan_id", "=", planId).execute();
   if (existing.length >= MAX_ACCOUNTS) throw new AccountLimit();
   const account = TargetAccountSchema.parse({ ref: `account-${randomBytes(6).toString("hex")}`, username: input.username.trim(), password: input.password });
@@ -284,7 +314,7 @@ export async function addAccount(tx: Tx, orgId: string, projectId: string, input
 export async function removeAccount(tx: Tx, orgId: string, projectId: string, ref: string, targetPlanId?: string): Promise<void> {
   const project = await tx.selectFrom("projects").select("id").where("id", "=", projectId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
   if (!project) throw new ProjectNotFound();
-  const { id: planId } = await planOf(tx, orgId, projectId, targetPlanId);
+  const { id: planId } = await editablePlanOf(tx, orgId, projectId, targetPlanId);
   await tx.updateTable("personas").set({ account_ref: null }).where("plan_id", "=", planId).where("account_ref", "=", ref).execute();
   await tx.deleteFrom("target_accounts").where("plan_id", "=", planId).where("ref", "=", ref).execute();
 }

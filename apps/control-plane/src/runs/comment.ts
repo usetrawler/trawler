@@ -1,7 +1,7 @@
 import type { RunResult } from "@usetrawler/protocol";
 import { runView } from "./report.ts";
 import type { RunSummary } from "./runs.ts";
-import { runPath } from "./status.ts";
+import { NOTHING_TO_TEST, runPath } from "./status.ts";
 
 export const COMMENT_MARKER = "<!-- trawler-ci -->";
 
@@ -38,6 +38,7 @@ function defectBlock(d: RunResult["confirmed"][number]): string {
 }
 
 export function renderComment(r: CommentInput): string {
+  if (r.skipped) return [COMMENT_MARKER, `### ${NOTHING_TO_TEST}`, `[Full report](${r.reportUrl})`].join("\n\n");
   const sections = [COMMENT_MARKER, `### ${headline(r)}`];
   if (r.finished && r.status === "stopped_budget") sections.push(budgetLine(r));
   if (r.finished && r.confirmed.length > 0) sections.push(r.confirmed.map(defectBlock).join("\n\n"));
@@ -54,15 +55,16 @@ export function renderComment(r: CommentInput): string {
 
 export function runResultOf(s: RunSummary, baseUrl: string): RunResult {
   const view = runView(s);
+  const skipped = s.cancelReason === "nothing_to_test";
   const result: CommentInput = {
     id: s.id,
     number: s.number,
     status: s.status as RunResult["status"],
     finished: !view.live,
     reportUrl: `${baseUrl.replace(/\/+$/, "")}${runPath(s.number)}`,
-    people: s.personas.length,
+    people: skipped ? 0 : s.personas.length,
     goalsReached: view.goalsReached,
-    goalsTotal: view.goalsTotal,
+    goalsTotal: skipped ? 0 : view.goalsTotal,
     defects: { confirmed: view.report.confirmed.length, refuted: view.report.refuted.length, inconclusive: view.report.inconclusive.length },
     confirmed: view.report.confirmed.map((f) => ({
       title: f.title,
@@ -74,6 +76,7 @@ export function runResultOf(s: RunSummary, baseUrl: string): RunResult {
     })),
     costUsd: s.costUsd,
     unverified: view.report.couldNotJudge.length + view.report.notJudged.length,
+    ...(skipped ? { skipped: true } : {}),
   };
   return { ...result, commentMarkdown: renderComment({ ...result, peopleFailed: view.personas.filter((p) => p.state === "failed").length }) };
 }

@@ -48,7 +48,7 @@ const summary = (runId: string) => withOrg(t.db, "org-a", (tx) => runSummary(tx,
 const kinds = async (runId: string) => (await sql<{ kind: string; status: string; persona_key: string | null }>`select kind, status, persona_key from jobs where run_id = ${runId} order by position`.execute(t.db)).rows;
 
 test("both: nobody is claimed until the lead has planned, then the stored plan runs first and the lead's goals follow", async () => {
-  const { project, run } = await start("both");
+  const { project, run } = await start("both", { planMode: "both" });
   expect((await kinds(run.id))[0]).toEqual({ kind: "pr_plan", status: "queued", persona_key: null });
   expect(await claimJob(t.db, keys)).toBeNull();
   const model = scriptedModel([answer([
@@ -72,8 +72,9 @@ test("both: nobody is claimed until the lead has planned, then the stored plan r
     number: 482, mode: "both", note: null, version: 1, reused: false, createdByRun: run.number,
     goals: [{ id: "pr-goal-1", instruction: "Last month's invoices come out as one spreadsheet", personaId: "lee" }, { id: "pr-goal-2", instruction: "Ana opens the spreadsheet Lee downloaded and finds her invoice in it", personaId: "ana" }],
   });
-  const stored = await sql<{ n: string }>`select count(*) as n from goals where project_id = ${project}`.execute(t.db);
+  const stored = await sql<{ n: string }>`select count(*) as n from goals g join plans p on p.id = g.plan_id where g.project_id = ${project} and p.kind = 'standard'`.execute(t.db);
   expect(Number(stored.rows[0]!.n)).toBe(2);
+  expect((await sql<{ plan_name: string }>`select plan_name from runs where id = ${run.id}`.execute(t.db)).rows[0]!.plan_name).toBe("Plan 1");
   const { rows } = await sql<{ usage: { model: string } }>`select usage from jobs where run_id = ${run.id} and kind = 'pr_plan'`.execute(t.db);
   expect(rows[0]!.usage.model).toBe("setup-model");
   await finish(run.id);
@@ -96,6 +97,58 @@ test("change: only the lead's people and goals run, the others' sign-in checks a
   await finish(run.id);
 });
 
+const planRows = async (project: string) => (await sql<{ id: string; name: string; kind: string; version: number | null; updated_at: Date }>`select id, name, kind, version, updated_at from plans where project_id = ${project} order by created_at, id`.execute(t.db)).rows;
+const peopleOf = async (planId: string) => (await sql<{ key: string; name: string; brief: string; signs_in: boolean; account_ref: string | null }>`select key, name, brief, signs_in, account_ref from personas where plan_id = ${planId} order by position`.execute(t.db)).rows;
+const goalsOf = async (planId: string) => (await sql<{ key: string; persona_key: string; instruction: string }>`select key, persona_key, instruction from goals where plan_id = ${planId} order by position`.execute(t.db)).rows;
+const runPlan = async (runId: string) => (await sql<{ plan_id: string | null; plan_name: string }>`select plan_id, plan_name from runs where id = ${runId}`.execute(t.db)).rows[0]!;
+
+test("change: the first run with details makes a pull request plan of its own with copies of the chosen people and the lead's goals, and runs on it while Plan 1 stays as it was", async () => {
+  const { project, run } = await start("own-plan");
+  const [standing] = await planRows(project);
+  const before = { people: await peopleOf(standing!.id), goals: await goalsOf(standing!.id) };
+  await planDueRuns(lead(scriptedModel([answer([
+    { person: "lee", goals: [{ id: "export", instruction: "Last month's invoices come out as one spreadsheet" }] },
+    { person: "ana", goals: [{ id: "see-export", instruction: "Ana opens the spreadsheet Lee downloaded and finds her invoice in it" }] },
+  ])])));
+  const rows = await planRows(project);
+  expect(rows.map((r) => [r.name, r.kind, r.version])).toEqual([["Plan 1", "standard", null], ["PR #482", "pull_request", 1]]);
+  const made = rows[1]!;
+  expect(await runPlan(run.id)).toEqual({ plan_id: made.id, plan_name: "PR #482 v1" });
+  expect(await peopleOf(made.id)).toEqual([
+    { key: "ana", name: "Ana", brief: "b", signs_in: true, account_ref: "ana-account" },
+    { key: "lee", name: "Lee", brief: "b", signs_in: true, account_ref: "lee-account" },
+  ]);
+  expect(await goalsOf(made.id)).toEqual([
+    { key: "pr-goal-1", persona_key: "lee", instruction: "Last month's invoices come out as one spreadsheet" },
+    { key: "pr-goal-2", persona_key: "ana", instruction: "Ana opens the spreadsheet Lee downloaded and finds her invoice in it" },
+  ]);
+  expect((await sql<{ ref: string }>`select ref from target_accounts where plan_id = ${made.id} order by position`.execute(t.db)).rows.map((a) => a.ref)).toEqual(["ana-account", "lee-account"]);
+  expect({ people: await peopleOf(standing!.id), goals: await goalsOf(standing!.id), updated: (await planRows(project))[0]!.updated_at }).toEqual({ ...before, updated: standing!.updated_at });
+  const turns = [];
+  for (let job = await claimJob(t.db, keys); job; job = await claimJob(t.db, keys)) {
+    if (job.kind === "role_session") turns.push([job.personaKey, job.goalIds]);
+    await completeJob(t.db, job.token, { ...done, ...(job.kind === "account_check" ? { signIn: { outcome: "signed_in" as const, observed: "ok" } } : {}) });
+  }
+  expect(turns).toEqual([["lee", ["pr-goal-1"]], ["ana", ["pr-goal-2"]]]);
+  const seen = (await summary(run.id))!;
+  expect(seen).toMatchObject({ planName: "PR #482 v1", prPlan: { mode: "change", version: 1, reused: false } });
+  await finish(run.id);
+});
+
+test("change: nothing the people can try means no run is spent: the run ends as skipped, nobody is claimed, and the stored plan does not run as a fallback", async () => {
+  const { project, run } = await start("nothing");
+  expect(await claimJob(t.db, keys)).toBeNull();
+  await planDueRuns(lead(scriptedModel([answer([])])));
+  const seen = (await summary(run.id))!;
+  expect(seen).toMatchObject({ status: "cancelled", cancelReason: "nothing_to_test", prPlan: { mode: "change", goals: [], note: "Nothing in this change can be tested through the product's UI, so Trawler did not start a run." } });
+  expect((await kinds(run.id)).filter((j) => j.kind !== "pr_plan").every((j) => j.status === "cancelled")).toBe(true);
+  expect(await claimJob(t.db, keys)).toBeNull();
+  expect((await planRows(project)).map((r) => r.kind)).toEqual(["standard"]);
+  const next = await startOn(project);
+  expect(next.id).not.toBe(run.id);
+  await finish(next.id);
+});
+
 test("a failing lead never fails the run: the stored plan runs and the run says why", async () => {
   const { run } = await start("broken");
   await planDueRuns(lead(scriptedModel([new Error("provider is down"), new Error("provider is down")])));
@@ -108,9 +161,9 @@ test("a failing lead never fails the run: the stored plan runs and the run says 
   await finish(run.id);
 });
 
-test("a lead whose goals all copy the pull request leaves the stored plan alone, and without a setup model the run still goes ahead", async () => {
+test("both: a lead whose goals all copy the pull request leaves the stored plan alone, and without a setup model the run still goes ahead", async () => {
   const leaky = answer([{ person: "ana", goals: [{ id: "a", instruction: "Click the InvoiceExportButton" }, { id: "b", instruction: "Add CSV export for invoices" }] }]);
-  const { run } = await start("leaky");
+  const { run } = await start("leaky", { planMode: "both" });
   await planDueRuns(lead(scriptedModel([leaky, leaky])));
   expect((await summary(run.id))!.prPlan).toMatchObject({ goals: [], note: expect.stringContaining("Nothing in this pull request points at a feature") });
   expect((await kinds(run.id)).filter((j) => j.kind === "role_session")).toHaveLength(2);
@@ -152,7 +205,7 @@ test("stopping the run while the lead plans keeps the lead from changing it", as
 const LEE_GOAL = [{ person: "lee", goals: [{ id: "export", instruction: "Last month's invoices come out as one spreadsheet" }] }];
 const startOn = (project: string, over: Partial<Parameters<typeof startRun>[4]> = {}) => withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { ...options, pullRequest, ...over }));
 const snapshotOf = async (runId: string) => (await sql<{ config_snapshot: { personas: Array<{ id: string }>; goals: Array<{ id: string; instruction: string }> } }>`select config_snapshot from runs where id = ${runId}`.execute(t.db)).rows[0]!.config_snapshot;
-const stored = async (project: string) => (await sql<{ number: number; version: number; superseded_at: Date | null; last_used_run_id: string | null; created_by_run_id: string | null }>`select number, version, superseded_at, last_used_run_id, created_by_run_id from pr_plans where project_id = ${project} order by number, version`.execute(t.db)).rows;
+const stored = async (project: string) => (await sql<{ id: string; pr_number: number; version: number; created_by_run_id: string | null }>`select id, pr_number, version, created_by_run_id from plans where project_id = ${project} and kind = 'pull_request' order by pr_number`.execute(t.db)).rows;
 
 async function planned(project: string, answerTurns: unknown, over: Partial<Parameters<typeof startRun>[4]> = {}) {
   const run = await startOn(project, over);
@@ -161,7 +214,7 @@ async function planned(project: string, answerTurns: unknown, over: Partial<Para
   return run;
 }
 
-test("the first run with details stores version 1; an identical pull request reuses it without asking the lead and runs the same goals", async () => {
+test("the first run with details stores version 1; an identical pull request reuses its plan without asking the lead and runs the same goals on it", async () => {
   const { project, run: first } = await start("reuse");
   await planDueRuns(lead(scriptedModel([answer(LEE_GOAL)])));
   expect((await summary(first.id))!.prPlan).toMatchObject({ version: 1, reused: false, createdByRun: first.number });
@@ -171,20 +224,27 @@ test("the first run with details stores version 1; an identical pull request reu
   expect(await planDueRuns(lead(null))).toBe(0);
   const reused = (await summary(second.id))!;
   expect(reused.prPlan).toMatchObject({ number: 482, version: 1, reused: true, createdByRun: first.number, note: null, goals: [{ id: "pr-goal-1", personaId: "lee" }] });
-  expect(await snapshotOf(second.id)).toEqual(await snapshotOf(first.id));
-  expect((await kinds(second.id)).filter((j) => j.kind === "role_session").map((j) => j.persona_key)).toEqual(["ana", "lee"]);
-  const rows = await stored(project);
-  expect(rows).toEqual([{ number: 482, version: 1, superseded_at: null, last_used_run_id: second.id, created_by_run_id: first.id }]);
+  const [row] = await stored(project);
+  expect(await runPlan(second.id)).toEqual({ plan_id: row!.id, plan_name: "PR #482 v1" });
+  const [a, b] = [await snapshotOf(first.id), await snapshotOf(second.id)];
+  expect([b.personas, b.goals]).toEqual([a.personas, a.goals]);
+  expect((await kinds(second.id)).filter((j) => j.kind === "role_session").map((j) => j.persona_key)).toEqual(["lee"]);
+  expect(await stored(project)).toEqual([{ id: row!.id, pr_number: 482, version: 1, created_by_run_id: first.id }]);
   await finish(second.id);
 });
 
-test("a changed description makes version 2 and supersedes version 1; --replan makes a new version of an unchanged pull request", async () => {
+test("a changed description updates the same plan to version 2; --replan makes a new version of an unchanged pull request; runs keep the version they ran", async () => {
   const { project, run } = await start("versions");
   await planDueRuns(lead(scriptedModel([answer(LEE_GOAL)])));
   await finish(run.id);
   const changed = { ...pullRequest, description: `${pullRequest.description} It also adds a schedule.` };
-  const second = await planned(project, LEE_GOAL, { pullRequest: changed });
-  expect((await stored(project)).map((r) => [r.version, r.superseded_at !== null])).toEqual([[1, true], [2, false]]);
+  const second = await planned(project, [{ person: "ana", goals: [{ id: "x", instruction: "Ana sees the spreadsheet in her downloads" }] }], { pullRequest: changed });
+  const [v2] = await stored(project);
+  expect(v2).toMatchObject({ pr_number: 482, version: 2 });
+  expect(await goalsOf(v2!.id)).toEqual([{ key: "pr-goal-1", persona_key: "ana", instruction: "Ana sees the spreadsheet in her downloads" }]);
+  expect((await planRows(project)).filter((r) => r.kind === "pull_request")).toHaveLength(1);
+  expect((await runPlan(run.id)).plan_name).toBe("PR #482 v1");
+  expect(await runPlan(second.id)).toEqual({ plan_id: v2!.id, plan_name: "PR #482 v2" });
   const spaced = { ...changed, title: ` ${changed.title}  `, changedFiles: [...changed.changedFiles].reverse() };
   const third = await startOn(project, { pullRequest: spaced });
   expect((await kinds(third.id)).some((j) => j.kind === "pr_plan")).toBe(false);
@@ -192,9 +252,9 @@ test("a changed description makes version 2 and supersedes version 1; --replan m
   const replanned = await startOn(project, { pullRequest: changed, replan: true });
   expect((await kinds(replanned.id))[0]).toMatchObject({ kind: "pr_plan", status: "queued" });
   await planDueRuns(lead(scriptedModel([answer(LEE_GOAL)])));
-  expect((await stored(project)).map((r) => [r.version, r.superseded_at !== null])).toEqual([[1, true], [2, true], [3, false]]);
+  expect(await stored(project)).toEqual([expect.objectContaining({ id: v2!.id, version: 3 })]);
   expect((await summary(replanned.id))!.prPlan).toMatchObject({ version: 3, reused: false });
-  expect(second.id).not.toBe(replanned.id);
+  expect(await runPlan(replanned.id)).toEqual({ plan_id: v2!.id, plan_name: "PR #482 v3" });
   await finish(replanned.id);
 });
 
@@ -204,7 +264,7 @@ test("a failed or empty lead stores nothing, so the next run asks again", async 
   await finish(run.id);
   const empty = await startOn(project);
   await planDueRuns(lead(scriptedModel([answer([])])));
-  await finish(empty.id);
+  expect((await summary(empty.id))!.cancelReason).toBe("nothing_to_test");
   expect(await stored(project)).toEqual([]);
   const again = await startOn(project);
   expect((await kinds(again.id))[0]).toMatchObject({ kind: "pr_plan", status: "queued" });
@@ -215,8 +275,8 @@ test("a person removed from the stored plan is dropped on reuse, and goals follo
   const { project, run } = await start("removed");
   await planDueRuns(lead(scriptedModel([answer([...LEE_GOAL, { person: "ana", goals: [{ id: "see", instruction: "Ana finds her invoice in the spreadsheet" }] }])])));
   await finish(run.id);
-  await sql`delete from goals where project_id = ${project} and persona_key = 'lee'`.execute(t.db);
-  await sql`delete from personas where project_id = ${project} and key = 'lee'`.execute(t.db);
+  await sql`delete from goals where project_id = ${project} and persona_key = 'lee' and plan_id = (select id from plans where project_id = ${project} and kind = 'standard')`.execute(t.db);
+  await sql`delete from personas where project_id = ${project} and key = 'lee' and plan_id = (select id from plans where project_id = ${project} and kind = 'standard')`.execute(t.db);
   const next = await startOn(project);
   const reused = (await summary(next.id))!.prPlan;
   expect(reused).toMatchObject({ reused: true, goals: [{ id: "pr-goal-1", personaId: "ana", instruction: "Ana finds her invoice in the spreadsheet" }] });
@@ -232,6 +292,7 @@ test("two pull requests of one project keep separate plans", async () => {
   await planned(project, [{ person: "ana", goals: [{ id: "x", instruction: "Ana sees the spreadsheet in her downloads" }] }], { pullRequest: other });
   const back = await startOn(project);
   expect((await summary(back.id))!.prPlan).toMatchObject({ number: 482, version: 1, reused: true, goals: [{ personaId: "lee" }] });
-  expect((await stored(project)).map((r) => [r.number, r.version, r.superseded_at])).toEqual([[482, 1, null], [483, 1, null]]);
+  expect((await runPlan(back.id)).plan_name).toBe("PR #482 v1");
+  expect((await stored(project)).map((r) => [r.pr_number, r.version])).toEqual([[482, 1], [483, 1]]);
   await finish(back.id);
 });
