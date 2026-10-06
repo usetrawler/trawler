@@ -328,6 +328,7 @@ export interface Runs {
   sign_up_seed: string | null;
   started_at: Timestamp | null;
   status: Generated<string>;
+  target_override: Generated<boolean>;
   token_cap: Int8 | null;
   tokens_used: Generated<Int8>;
 }

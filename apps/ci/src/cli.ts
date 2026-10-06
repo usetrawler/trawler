@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { parseAccountsFile } from "@usetrawler/protocol";
+import { parseAccountsFile, type StartRunRequest, type StartRunResponse } from "@usetrawler/protocol";
 import { runApi, ApiError, type RunApi } from "./api.ts";
 import { parseCliArgs, UsageError, USAGE, type Options } from "./args.ts";
 import { detectAdapter } from "./adapters/index.ts";
@@ -9,6 +9,9 @@ import { startRunner, type RunnerProcess } from "./runner-process.ts";
 import { waitForRun } from "./wait.ts";
 
 const POLL_MS = 5_000;
+const START_PATIENCE_MS = 10 * 60_000;
+const START_FIRST_RETRY_MS = 10_000;
+const START_MAX_RETRY_MS = 60_000;
 
 export interface CliDeps {
   env: Record<string, string | undefined>;
@@ -58,6 +61,31 @@ function readAccounts(path: string, deps: CliDeps): { file: string; names: strin
   }
 }
 
+type Started = { run: StartRunResponse } | { neutral: string };
+
+async function startWhenAllowed(api: RunApi, request: StartRunRequest, deps: CliDeps): Promise<Started> {
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  let waited = 0;
+  for (let retry = 1; ; retry++) {
+    try {
+      return { run: await api.startRun(request) };
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      if (err.code === "model_key" && (err.status === 422 || err.status === 503)) {
+        return { neutral: `Trawler did not test this change: ${err.message} This is not a problem with the pull request, so the job does not fail.` };
+      }
+      if (err.status !== 409 && err.status !== 429) throw err;
+      const delay = Math.min(START_FIRST_RETRY_MS * 2 ** (retry - 1), START_MAX_RETRY_MS);
+      if (waited + delay > START_PATIENCE_MS) {
+        return { neutral: `Trawler could not start a run within ${START_PATIENCE_MS / 60_000} minutes: ${err.message} This is not caused by the pull request, so the job does not fail.` };
+      }
+      deps.err(`Trawler cannot start a run yet (${err.message}) Retry ${retry} in ${delay / 1000}s.`);
+      await sleep(delay);
+      waited += delay;
+    }
+  }
+}
+
 async function execute(options: Options, deps: CliDeps): Promise<number> {
   const accounts = options.accounts === undefined ? undefined : readAccounts(options.accounts, deps);
   const adapter = detectAdapter(deps.env);
@@ -74,9 +102,19 @@ async function execute(options: Options, deps: CliDeps): Promise<number> {
   if (options.execution === "hosted" && options.url && /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])/.test(options.url)) {
     deps.err("warning: a hosted runner cannot reach localhost; use --runner own for a server started in this job");
   }
-  const started = await api.startRun({
+  const beginning = await startWhenAllowed(api, {
     project: options.project, plan: options.plan, url: options.url, execution: options.execution, cap: options.cap, model: options.model, conversation: options.conversation || undefined, accounts: accounts?.names, pullRequest, planMode: pullRequest ? options.planMode : undefined, replan: options.replan || undefined,
-  });
+  }, deps);
+  if ("neutral" in beginning) {
+    deps.err(beginning.neutral);
+    try {
+      adapter.summary?.(deps.env, `### Trawler did not test this change\n\n${beginning.neutral}`);
+    } catch (err) {
+      deps.err(`warning: could not write the job summary: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return 0;
+  }
+  const started = beginning.run;
   deps.err(`Trawler run #${started.number} started (${adapter.name}${pullRequest?.number ? `, pull request #${pullRequest.number}` : ""})`);
   deps.err(`Report: ${started.reportUrl}`);
 
@@ -122,6 +160,10 @@ async function execute(options: Options, deps: CliDeps): Promise<number> {
     }
     const { result } = waited;
     ended = true;
+    if (result.cancelReason === "superseded") {
+      deps.err(`Run #${started.number} was stopped because a newer push to this pull request started another run, so it does not pass or fail the job. Report: ${started.reportUrl}`);
+      return 0;
+    }
     deps.out(result.commentMarkdown);
     try {
       adapter.summary?.(deps.env, result.commentMarkdown);

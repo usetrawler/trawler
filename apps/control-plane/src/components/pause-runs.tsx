@@ -8,7 +8,9 @@ import { updatedSinceOpened } from "./updated-since-opened.ts";
 const secondary = "flex h-[50px] shrink-0 items-center border border-line px-[18px] font-mono text-xs uppercase hover:border-ink aria-disabled:cursor-wait aria-disabled:opacity-60";
 const alert = "max-w-md border-l-2 border-bad pl-3 text-sm text-bad";
 
-type Run = { id: string; number: number };
+type Run = { id: string; number: number; more?: number };
+
+const others = (run: Run) => (run.more ? ` and ${run.more} more` : "");
 
 const call = (act: () => Promise<PauseState>, then: string): Promise<PauseState> =>
   act().catch((err: unknown) => {
@@ -47,7 +49,7 @@ export function PauseRuns({ projectId, paused, liveRun }: { projectId: string; p
         }
         switched.current = true;
         setAsking(null);
-        setSaid(outcome.stopped ? `Runs paused. ${runTitle(outcome.stopped.number)} was stopped.` : "Runs paused.");
+        setSaid(outcome.stopped ? `Runs paused. ${runTitle(outcome.stopped.number)}${outcome.alsoStopped ? ` and ${outcome.alsoStopped} more` : ""} ${outcome.alsoStopped ? "were" : "was"} stopped.` : "Runs paused.");
       });
     });
   const resume = () =>
@@ -81,12 +83,12 @@ export function PauseRuns({ projectId, paused, liveRun }: { projectId: string; p
         </div>
       ) : asking ? (
         <div role="group" aria-labelledby="pause-confirm" onKeyDown={(e) => { if (e.key === "Escape") keepRunning(); }} className="flex max-w-md flex-col items-start gap-3 border border-line bg-panel p-4 md:items-end">
-          <p id="pause-confirm" className="text-sm">Pausing stops <a href={runPath(asking.number)} className="underline underline-offset-4">{runTitle(asking.number)}</a> now. What it found so far is kept.</p>
+          <p id="pause-confirm" className="text-sm">Pausing stops <a href={runPath(asking.number)} className="underline underline-offset-4">{runTitle(asking.number)}</a>{others(asking)} now. What {asking.more ? "they" : "it"} found so far is kept.</p>
           <div className="flex flex-wrap gap-3">
             <button type="button" aria-describedby="pause-confirm" aria-disabled={pending || undefined} onClick={(e) => { hold(e); if (!pending) pause(asking); }} className="flex h-[50px] shrink-0 items-center border border-bad px-[18px] font-mono text-xs text-bad uppercase aria-disabled:cursor-wait aria-disabled:opacity-60">
-              {pending ? "Pausing…" : `Pause and stop ${runTitle(asking.number)}`}
+              {pending ? "Pausing…" : `Pause and stop ${runTitle(asking.number)}${others(asking)}`}
             </button>
-            <button type="button" ref={keep} aria-describedby="pause-confirm" aria-disabled={pending || undefined} onClick={keepRunning} className="h-[50px] px-3 text-sm text-muted hover:text-ink aria-disabled:cursor-wait aria-disabled:opacity-60">Keep it running</button>
+            <button type="button" ref={keep} aria-describedby="pause-confirm" aria-disabled={pending || undefined} onClick={keepRunning} className="h-[50px] px-3 text-sm text-muted hover:text-ink aria-disabled:cursor-wait aria-disabled:opacity-60">{asking.more ? "Keep them running" : "Keep it running"}</button>
           </div>
           {error && <p role="alert" className={alert}>{error}</p>}
         </div>

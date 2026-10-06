@@ -10,7 +10,7 @@ import { loadProjectConfig, planOf, ProjectNotFound } from "../projects/projects
 import { budgetLeft, budgetSpentMessage, HALTED, monthlyBudget, PAUSED, projectPaused, runsHalted, type MonthlyBudget } from "./limits.ts";
 import { FIRST_RUN_ON_US } from "./models.ts";
 import { accountsFor, DEFAULT_PLAN_MODE, hasPullRequestDetails, NOTHING, PR_PLAN_POSITION, storedPlanFor, type PrPlanRecord } from "./pr-plan.ts";
-import { markPrPlanUsed } from "./pr-plan-store.ts";
+import { markPrPlanUsed, prKey, type PrKey } from "./pr-plan-store.ts";
 import { peopleLimitMessage, runsPerDayMessage, type WorkspacePlan } from "./plan-limits.ts";
 import { runsToday, workspacePlan } from "./plans.ts";
 import { gaveNoVerdict } from "./report.ts";
@@ -128,24 +128,86 @@ export async function giveBackUnusedFirstRun(tx: Tx, runId: string): Promise<voi
     .execute();
 }
 
-export async function activeRunOf(tx: Tx, projectId: string): Promise<{ id: string; number: number } | null> {
-  return (await tx.selectFrom("runs").select(["id", "number"]).where("project_id", "=", projectId).where("status", "in", ["queued", "running"]).executeTakeFirst()) ?? null;
+export const MAX_LIVE_OWN_RUNS = 5;
+
+export class TooManyOwnRuns extends RunRefused {
+  constructor() {
+    super(`This workspace already has ${MAX_LIVE_OWN_RUNS} runs going in CI jobs, the most it may have at once. Wait for one to finish or stop one, then start again. A newer push to a pull request replaces its earlier run, so that does not add to the count.`);
+  }
+}
+
+export interface LiveRun {
+  id: string;
+  number: number;
+}
+
+export interface StartScope {
+  execution?: Execution;
+  targetUrl?: string;
+  pullRequest?: PullRequest;
+}
+
+const LIVE = ["queued", "running"];
+
+const liveRuns = (tx: Tx, projectId: string) => tx.selectFrom("runs").select(["id", "number"]).where("project_id", "=", projectId).where("status", "in", LIVE).orderBy("number");
+
+const ofPullRequest = (tx: Tx, projectId: string, key: PrKey) =>
+  liveRuns(tx, projectId)
+    .where(sql<boolean>`lower(btrim(coalesce(pull_request->>'repository', ''))) = ${key.repo}`)
+    .where(sql<boolean>`pull_request->>'number' = ${String(key.number)}`);
+
+const isolated = (scope: StartScope) => scope.execution === "own" && scope.targetUrl !== undefined;
+
+export async function liveRunsOf(tx: Tx, projectId: string): Promise<LiveRun[]> {
+  return liveRuns(tx, projectId).execute();
+}
+
+async function sharedRunOf(tx: Tx, projectId: string, except: string[]): Promise<LiveRun | null> {
+  return (await liveRuns(tx, projectId).where("target_override", "=", false).$if(except.length > 0, (q) => q.where("id", "not in", except)).executeTakeFirst()) ?? null;
+}
+
+async function liveOwnRuns(tx: Tx, orgId: string, except: string[]): Promise<number> {
+  const row = await tx
+    .selectFrom("runs")
+    .select(sql<string>`count(*)`.as("n"))
+    .where("org_id", "=", orgId)
+    .where("execution", "=", "own")
+    .where("status", "in", LIVE)
+    .$if(except.length > 0, (q) => q.where("id", "not in", except))
+    .executeTakeFirstOrThrow();
+  return Number(row.n);
+}
+
+async function replacedBy(tx: Tx, projectId: string, pullRequest: PullRequest | undefined): Promise<string[]> {
+  const key = prKey(pullRequest);
+  return key ? (await ofPullRequest(tx, projectId, key).execute()).map((r) => r.id) : [];
+}
+
+async function supersedeEarlierRuns(tx: Tx, orgId: string, projectId: string, pullRequest: PullRequest | undefined): Promise<void> {
+  for (const id of await replacedBy(tx, projectId, pullRequest)) await cancelRun(tx, orgId, id, "superseded");
 }
 
 export interface ProjectRunState {
   paused: boolean;
-  liveRun: { id: string; number: number } | null;
+  liveRun: (LiveRun & { more?: number }) | null;
 }
+
+const withMore = (live: LiveRun[]) => (live[0] ? { ...live[0], ...(live.length > 1 ? { more: live.length - 1 } : {}) } : null);
 
 export async function projectRunState(tx: Tx, orgId: string, projectId: string): Promise<ProjectRunState | null> {
   const project = await tx.selectFrom("projects").select("paused_at").where("id", "=", projectId).where("org_id", "=", orgId).executeTakeFirst();
   if (!project) return null;
-  return { paused: project.paused_at !== null, liveRun: await activeRunOf(tx, projectId) };
+  return { paused: project.paused_at !== null, liveRun: withMore(await liveRunsOf(tx, projectId)) };
 }
 
-export async function refusalToStart(tx: Tx, orgId: string, projectId: string, paidBy: PaidBy = "workspace", planId?: string): Promise<RunRefused | null> {
-  const active = await activeRunOf(tx, projectId);
-  return active ? new RunInProgress(active) : refusalToRun(tx, orgId, projectId, paidBy, planId);
+export async function refusalToStart(tx: Tx, orgId: string, projectId: string, paidBy: PaidBy = "workspace", planId?: string, scope: StartScope = {}): Promise<RunRefused | null> {
+  const replaced = await replacedBy(tx, projectId, scope.pullRequest);
+  if (!isolated(scope)) {
+    const shared = await sharedRunOf(tx, projectId, replaced);
+    if (shared) return new RunInProgress(shared);
+  }
+  if (scope.execution === "own" && (await liveOwnRuns(tx, orgId, replaced)) >= MAX_LIVE_OWN_RUNS) return new TooManyOwnRuns();
+  return refusalToRun(tx, orgId, projectId, paidBy, planId);
 }
 
 async function peopleOn(tx: Tx, planId: string): Promise<number> {
@@ -183,7 +245,8 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
   const usesFirstRunOnUs = paidBy === "trawler" && options.usesFirstRunOnUs !== false;
   if (usesFirstRunOnUs && config.personas.length > FIRST_RUN_ON_US.maxPeople) throw new TooManyForFirstRun(config.personas.length);
   await sql`select pg_advisory_xact_lock(hashtextextended(${`runs:${orgId}`}, 0))`.execute(tx);
-  const refused = await refusalToStart(tx, orgId, projectId, paidBy, plan.id);
+  await supersedeEarlierRuns(tx, orgId, projectId, options.pullRequest);
+  const refused = await refusalToStart(tx, orgId, projectId, paidBy, plan.id, { execution, targetUrl: options.targetUrl, pullRequest: options.pullRequest });
   if (refused) throw refused;
   let planned = config;
   const reuse = prPlan && !options.replan ? await storedPlanFor(tx, orgId, projectId, plan.id, options.pullRequest!, prPlan.mode, config) : null;
@@ -209,7 +272,7 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
       max_steps: options.maxSteps, replay_steps: options.replaySteps, created_by: options.createdBy,
       provider: options.provider ?? "openrouter", provider_base_url: options.providerBaseUrl ?? null, token_cap: options.tokenCap ? String(options.tokenCap) : null,
       prompt_usd_per_mtok: options.price ? options.price.promptUsdPerMtok.toFixed(6) : null, completion_usd_per_mtok: options.price ? options.price.completionUsdPerMtok.toFixed(6) : null,
-      paid_by: paidBy, execution, conversation, provided_accounts: JSON.stringify(providedAccounts), pull_request: options.pullRequest ? JSON.stringify(options.pullRequest) : null, pr_plan: prPlan ? JSON.stringify(prPlan) : null,
+      paid_by: paidBy, execution, target_override: options.targetUrl !== undefined, conversation, provided_accounts: JSON.stringify(providedAccounts), pull_request: options.pullRequest ? JSON.stringify(options.pullRequest) : null, pr_plan: prPlan ? JSON.stringify(prPlan) : null,
     })
     .returning(["id", "number"])
     .executeTakeFirstOrThrow();
@@ -234,7 +297,7 @@ export class RunNotFound extends Error {
   }
 }
 
-export type CancelReason = "stopped" | "key_removed" | "account_refused" | "time_limit" | "workspace_budget" | "paused" | "halted" | "stopped_from_ci" | "unclaimed" | "ci_gone";
+export type CancelReason = "stopped" | "key_removed" | "account_refused" | "time_limit" | "workspace_budget" | "paused" | "halted" | "stopped_from_ci" | "unclaimed" | "ci_gone" | "superseded";
 
 export const ACCOUNT_REFUSED = "The product refused the username and password of";
 
@@ -266,15 +329,19 @@ export async function cancelLiveRuns(tx: Tx, orgId: string, reason: CancelReason
   return cancelled;
 }
 
-export type PauseOutcome = { stopped: { id: string; number: number } | null } | { unconfirmed: { id: string; number: number } };
+export type PauseOutcome = { stopped: LiveRun | null; alsoStopped?: number } | { unconfirmed: LiveRun & { more?: number } };
 
 export async function pauseProject(tx: Tx, orgId: string, projectId: string, userId: string, confirmedRunId: string | null = null): Promise<PauseOutcome> {
   const project = await tx.selectFrom("projects").select("paused_at").where("id", "=", projectId).where("org_id", "=", orgId).forNoKeyUpdate().executeTakeFirst();
   if (!project) throw new ProjectNotFound();
-  const live = await activeRunOf(tx, projectId);
-  if (live && live.id !== confirmedRunId) return { unconfirmed: live };
+  const live = await liveRunsOf(tx, projectId);
+  const [first] = live;
+  if (first && first.id !== confirmedRunId) return { unconfirmed: withMore(live)! };
   if (project.paused_at === null) await tx.updateTable("projects").set({ paused_at: new Date(), paused_by: userId }).where("id", "=", projectId).execute();
-  return { stopped: live && (await cancelRun(tx, orgId, live.id, "paused")) ? live : null };
+  const stoppedIds = new Set<string>();
+  for (const run of live) if (await cancelRun(tx, orgId, run.id, "paused")) stoppedIds.add(run.id);
+  const alsoStopped = stoppedIds.size - (first && stoppedIds.has(first.id) ? 1 : 0);
+  return { stopped: first && stoppedIds.has(first.id) ? first : null, ...(alsoStopped > 0 ? { alsoStopped } : {}) };
 }
 
 export async function resumeProject(tx: Tx, orgId: string, projectId: string): Promise<void> {

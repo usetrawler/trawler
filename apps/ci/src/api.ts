@@ -5,9 +5,11 @@ const STOP_TIMEOUT_MS = 5_000;
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  code?: string;
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
   get transient(): boolean {
     return this.status === 0 || this.status >= 500 || this.status === 408 || this.status === 429;
@@ -42,7 +44,7 @@ export function runApi(api: string, token: string, fetchImpl: typeof fetch = fet
     }
     if (!res.ok) {
       const parsed = RunApiErrorSchema.safeParse(json);
-      throw new ApiError(res.status, parsed.success ? parsed.data.error : `HTTP ${res.status}${text ? `: ${text.slice(0, 200)}` : ""}`);
+      throw new ApiError(res.status, parsed.success ? parsed.data.error : `HTTP ${res.status}${text ? `: ${text.slice(0, 200)}` : ""}`, parsed.success ? parsed.data.code : undefined);
     }
     return json;
   }

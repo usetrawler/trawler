@@ -12,7 +12,7 @@ import { planOf, PlanNotFound, projectExists, ProjectNotFound } from "../project
 import { runResultOf } from "../runs/comment.ts";
 import { DEFAULT_RUN, FIRST_RUN_ON_US } from "../runs/models.ts";
 import { workspacePlan } from "../runs/plans.ts";
-import { cancelRun, firstRunOnUsLeft, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunRefused, runSummary, startRun, type PaidBy } from "../runs/runs.ts";
+import { cancelRun, FirstRunOnUsUsed, firstRunOnUsLeft, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunRefused, runSummary, startRun, TooManyOwnRuns, type PaidBy } from "../runs/runs.ts";
 import { runPath } from "../runs/status.ts";
 import { tokenWorkspace } from "../server/api-token.ts";
 
@@ -29,11 +29,16 @@ export interface RunApiDeps {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MODEL_ID = /^[A-Za-z0-9._:\/@-]{1,200}$/;
-const fail = (status: number, error: string) => Response.json({ error }, { status, headers: { "cache-control": "no-store" } });
+const fail = (status: number, error: string, code?: "model_key") => Response.json({ error, ...(code ? { code } : {}) }, { status, headers: { "cache-control": "no-store" } });
 const ok = (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "no-store" } });
 
 class KeyGone extends Error {}
 class FirstRunFromApp extends Error {}
+class NoModelKey extends RunRefused {
+  constructor() {
+    super("Add a model key in Settings to start runs.");
+  }
+}
 
 const CHECK_STATUS = { key: 422, model: 422, unavailable: 503 } as const;
 
@@ -87,15 +92,15 @@ export async function handleStartRun(req: Request, deps: RunApiDeps): Promise<Re
       } else if (deps.trawlerPays && (await firstRunOnUsLeft(tx, orgId))) {
         payer = trawlerPayer(body.cap, true);
       } else {
-        throw new RunRefused("Add a model key in Settings to start runs.");
+        throw new NoModelKey();
       }
-      const refused = await refusalToStart(tx, orgId, body.project, payer.paidBy, plan.id);
+      const refused = await refusalToStart(tx, orgId, body.project, payer.paidBy, plan.id, { execution: body.execution, targetUrl: body.url, pullRequest: body.pullRequest });
       if (refused) throw refused;
       return { plan, payer, endpoint };
     });
     if (endpoint) {
       const checkRefusal = await modelCheckRefusal(endpoint, payer.model, deps.modelCheck);
-      if (checkRefusal) return fail(CHECK_STATUS[checkRefusal.reason], checkRefusal.error);
+      if (checkRefusal) return fail(CHECK_STATUS[checkRefusal.reason], checkRefusal.error, "model_key");
     }
     const run = await withOrg(deps.db, orgId, async (tx) => {
       if (payer.paidBy === "workspace" && !(await keyStillStored(tx, orgId, payer.provider, payer.providerBaseUrl))) throw new KeyGone();
@@ -116,6 +121,8 @@ export async function handleStartRun(req: Request, deps: RunApiDeps): Promise<Re
     if (err instanceof PlanNotFound) return fail(404, "That plan is not on this project.");
     if (err instanceof NeedsAccount) return fail(422, err.message);
     if (err instanceof RunInProgress) return fail(409, err.message);
+    if (err instanceof TooManyOwnRuns) return fail(429, err.message);
+    if (err instanceof NoModelKey || err instanceof FirstRunOnUsUsed) return fail(422, err.message, "model_key");
     if (err instanceof RunRefused) return fail(422, err.message);
     if (err instanceof KeyGone) return fail(409, "The workspace's model key was removed or changed while the run was starting. Try again.");
     throw err;

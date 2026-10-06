@@ -150,6 +150,7 @@ describe("a run no runner picks up", () => {
 });
 
 describe("a run whose CI job stopped asking about it", () => {
+  beforeAll(() => withOrg(t.db, "org-x", (tx) => cancelLiveRuns(tx, "org-x", "stopped")).then(() => undefined));
   const seen = (id: string) => asSystem(t.db, (tx) => tx.selectFrom("runs").select(sql<number | null>`extract(epoch from now() - client_seen_at)`.as("ago")).where("id", "=", id).executeTakeFirstOrThrow()).then((r) => (r.ago === null ? null : Number(r.ago)));
   const lastSeen = (id: string, minutesAgo: number) => asSystem(t.db, (tx) => tx.updateTable("runs").set({ client_seen_at: sql<Date>`now() - make_interval(mins => ${minutesAgo})` }).where("id", "=", id).execute());
   const post = (token: string, project: string) =>
