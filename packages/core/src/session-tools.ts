@@ -4,6 +4,7 @@ import { z } from "zod";
 import { FindingSchema, type ChannelMessage, type Finding, type Goal, type GoalOutcome, type RunEventInput, type TargetAccount, MAX_GOAL_NOTE, MAX_NOTE, MAX_QUOTE, MAX_URL } from "@usetrawler/protocol";
 import { MIN_SECRET_LENGTH, type SecretScrubber } from "./secrets.ts";
 import { botProtectionRefusal, type BotProtection } from "./bot-protection.ts";
+import { accountFields, type AccountFormRead, type AccountRecord } from "./account-note.ts";
 
 export interface SessionState {
   notes: string[];
@@ -335,9 +336,36 @@ export function teamTools(opts: { state: SessionState; emit: (e: RunEventInput) 
   };
 }
 
-export function ownPasswordTool(opts: { state: SessionState; fillField: FillField; inBrowser: InBrowser; scrubber: SecretScrubber; password?: string }) {
+function accountPage(raw: string | null | undefined): string | undefined {
+  const url = findingUrl(raw);
+  if (!url || url.includes(MASKED)) return undefined;
+  return url.split("?")[0];
+}
+
+export function ownPasswordTool(opts: {
+  state: SessionState;
+  fillField: FillField;
+  inBrowser: InBrowser;
+  scrubber: SecretScrubber;
+  password?: string;
+  accountForm?: (passwordRef: string) => Promise<AccountFormRead | null>;
+  pageUrl?: () => string | null;
+  onAccount?: (record: AccountRecord) => void;
+}) {
   const password = opts.password ?? madeUpPassword();
   for (let length = MIN_SECRET_LENGTH; length <= password.length; length++) opts.scrubber.add(password.slice(0, length));
+  const remember = async (ref: string) => {
+    try {
+      const read = await opts.accountForm!(ref);
+      if (!read) return;
+      const fields = accountFields({ fields: read.fields.filter((f) => opts.scrubber.scrub(f.value) === f.value && !f.value.includes(password)) });
+      if (fields.length === 0) return;
+      const page = accountPage(opts.pageUrl?.());
+      opts.onAccount!({ ...(page ? { page } : {}), fields });
+    } catch {
+      return;
+    }
+  };
   return {
     type_own_password: tool({
       description: "Type your own password into password fields, by their snapshot refs: when you sign up, the password field and any field that asks for it again; when you sign in to the account you created, the password field. The password is made up for you and stays the same all session. You never see it.",
@@ -348,13 +376,17 @@ export function ownPasswordTool(opts: { state: SessionState; fillField: FillFiel
         if (refs.length === 0) return "rejected: fields: give the refs of the password fields";
         return opts.inBrowser(async () => {
           const typed: string[] = [];
+          let first: string | undefined;
           for (const ref of refs) {
             try {
-              typed.push(`${ref}: ${await opts.fillField(ref, password, "password")}`);
+              const out = await opts.fillField(ref, password, "password");
+              if (!out.startsWith("failed")) first ??= ref;
+              typed.push(`${ref}: ${out}`);
             } catch (err) {
               typed.push(`${ref}: failed: ${err instanceof Error ? err.message : String(err)}`);
             }
           }
+          if (first && opts.accountForm && opts.onAccount) await remember(first);
           return opts.scrubber.scrub(typed.join("\n"));
         });
       },

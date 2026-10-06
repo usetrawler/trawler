@@ -10,6 +10,7 @@ import { botProtection, botProtectionNote, clearedNote, COLLECT_PAGE_SIGNALS, ty
 
 export type { BotProtection } from "./bot-protection.ts";
 import type { FieldKind } from "./session-tools.ts";
+import type { AccountFormRead } from "./account-note.ts";
 
 export const BROWSER_TOOLS = [
   "browser_navigate",
@@ -317,6 +318,26 @@ function fieldStateOf(el: any, mark: string) {
     value: !el ? "" : el.isContentEditable ? String(el.textContent ?? "") : typeof el.value === "string" ? el.value : "",
   };
 }
+const ACCOUNT_FORM = `(el) => {
+  if (!(el instanceof HTMLInputElement) || el.type !== "password") return null;
+  const textual = 'input:not([type=password]):not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button])';
+  let root = el.form;
+  if (!root) {
+    root = el.parentElement;
+    while (root && root !== document.body && !root.querySelector(textual)) root = root.parentElement;
+  }
+  const fields = [];
+  for (const input of (root || document).querySelectorAll(textual)) {
+    const type = (input.getAttribute("type") || "text").toLowerCase();
+    if (input === el || !["text", "email", "tel", "search", "url"].includes(type) || input.disabled || input.getClientRects().length === 0) continue;
+    const value = (input.value || "").trim();
+    const autocomplete = (input.getAttribute("autocomplete") || "").toLowerCase();
+    if (!value || value.length > 120 || /one-time-code|^cc-|password/.test(autocomplete)) continue;
+    const label = (input.labels && input.labels[0] && input.labels[0].textContent) || input.getAttribute("aria-label") || input.getAttribute("placeholder") || input.name || input.id || type;
+    fields.push({ label: String(label).replace(/\\s+/g, " ").trim(), value, type, autocomplete, name: input.name || "" });
+  }
+  return { fields: fields.slice(0, 8) };
+}`;
 const CLOSED = /Target page, context or browser has been closed|Browser has been closed/;
 const INTERRUPTED = /is interrupted by another navigation/;
 const DEEPEST_ACTIVE = `(() => {
@@ -361,6 +382,7 @@ export interface Screenshot {
 export interface Browser {
   tools: ToolSet;
   fillField(ref: string, text: string, kind: FieldKind): Promise<string>;
+  accountForm?(passwordRef: string): Promise<AccountFormRead | null>;
   screenshot(): Promise<Screenshot | null>;
   pageUrl(): string | null;
   botProtection?(): BotProtection | null;
@@ -861,6 +883,16 @@ export async function openBrowser(opts: {
           if (out?.isError) return failure(out);
           return kind === "password" ? "typed the password" : "typed the username";
         });
+      },
+      async accountForm(passwordRef) {
+        try {
+          const raw = (await evaluate({ element: "password field", target: passwordRef, function: ACCOUNT_FORM }, internalCall)) as McpResult;
+          if (raw?.isError) return null;
+          const read = evaluatedValue(raw) as AccountFormRead | null | undefined;
+          return read && Array.isArray(read.fields) ? read : null;
+        } catch {
+          return null;
+        }
       },
       async screenshot() {
         const page = context.pages()[0];
