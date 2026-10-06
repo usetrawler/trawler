@@ -283,7 +283,7 @@ The product's features, as its team described them:
 ${JSON.stringify(p.features, null, 1)}
 The people you can choose from (id, name, brief, and the name of the test account they sign in with, if any):
 ${JSON.stringify(p.people, null, 1)}
-The goals they already play in every run, so do not repeat them:
+The goals the project's standing plan plays in its own runs, so do not repeat them, apart from getting in (the plan you write is the only one this pull request runs):
 ${JSON.stringify(p.goals, null, 1)}
 
 Work out which feature of the product the change touches. If nothing a user could see or do changes (documentation, tests, build or release files, refactoring with no visible effect), answer with no turns.
@@ -292,6 +292,7 @@ Otherwise answer with turns, in the order the people play them:
 - Each goal has an id (lowercase words joined by dashes) and an instruction phrased as the outcome that person wants, in the words of a user who has never heard of the pull request ("the invoices of last month are downloaded as one CSV file"). Never quote or closely paraphrase the pull request, and never name a file, component, function, route, address, variable or setting, or say that anything was added, changed or fixed. Do not describe steps or how the change was built.
 - When a goal needs something another person does first, put that person's turn before it and phrase the later goal so it points at that exact thing, calling them by the first name they have in the list.
 - Choose only people whose role can reach the change; skip the rest.
+- When the people need an account to use the product, the first turn starts with a short goal about getting in (signing in or signing up and reaching the product's home page), so the plan never depends on a standing sign-in check; the goals for the change follow it.
 
 Also decide how the people get their accounts, and answer it as accountFlow:
 - "exercise" only when the pull request's title, description or changed file paths clearly show that it changes how people sign up, sign in, are invited, reset their passwords, or get roles or permissions (path words such as login, signin, signup, register, auth, session, invite, invitation, password, permission, role, membership, account). Then the people who have to sign up or be invited go through that real flow instead of being handed an account, and you write at least one goal for such a person about getting access, phrased as the outcome ("a new colleague joins the team and sees its workspace").

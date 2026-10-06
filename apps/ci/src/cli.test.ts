@@ -165,7 +165,7 @@ describe("runCli", () => {
     const base = good.deps.fetch!;
     good.deps.fetch = ((url: string, init?: RequestInit) => (String(url).includes("/pulls/4/files") ? Promise.resolve(Response.json([{ filename: "src/cart.ts" }])) : base(url, init))) as typeof fetch;
     await runCli([...argv, "--fail-on", "never", "--no-comment"], good.deps);
-    expect(good.calls.find((c) => c.url.endsWith("/api/v1/runs"))?.body).toMatchObject({ planMode: "both", pullRequest: { number: 4, title: "Add cart", description: "Adds a cart.", changedFiles: ["src/cart.ts"] } });
+    expect(good.calls.find((c) => c.url.endsWith("/api/v1/runs"))?.body).toMatchObject({ planMode: "change", pullRequest: { number: 4, title: "Add cart", description: "Adds a cart.", changedFiles: ["src/cart.ts"] } });
     expect(good.calls.find((c) => c.url.endsWith("/api/v1/runs"))?.body.replan).toBeUndefined();
     const replanned = harness([result({})], env);
     await runCli([...argv, "--fail-on", "never", "--no-comment", "--replan"], replanned.deps);
@@ -195,6 +195,15 @@ describe("runCli", () => {
     h.deps.fetch = ((url: string, init?: RequestInit) => (String(url).includes("api.github.com") ? Promise.resolve(new Response("nope", { status: 500 })) : original(url, init))) as typeof fetch;
     expect(await runCli(argv, h.deps)).toBe(0);
     expect(h.err.join("\n")).toContain("could not post the pull request comment");
+  });
+
+  it("passes a run that was skipped because nothing in the change can be tested, and prints why", async () => {
+    const note = "Nothing in this change can be tested through the product's UI, so Trawler did not start a run.";
+    const h = harness([result({ status: "cancelled", skipped: true, people: 0, goalsTotal: 0, defects: { confirmed: 0, refuted: 0, inconclusive: 0 }, commentMarkdown: `<!-- trawler-ci -->\n\n### ${note}` })], {});
+    expect(await runCli(argv, h.deps)).toBe(0);
+    expect(h.out.join("\n")).toContain(note);
+    expect(h.err.join("\n")).toContain("was skipped");
+    expect(stops(h)).toHaveLength(0);
   });
 
   it("is neutral when the run was stopped by its cap", async () => {
