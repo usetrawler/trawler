@@ -10,7 +10,7 @@ import { loadProjectConfig, planOf, ProjectNotFound } from "../projects/projects
 import { budgetLeft, budgetSpentMessage, HALTED, monthlyBudget, PAUSED, projectPaused, runsHalted, type MonthlyBudget } from "./limits.ts";
 import { FIRST_RUN_ON_US } from "./models.ts";
 import { accountsFor, DEFAULT_PLAN_MODE, hasPullRequestDetails, NOTHING, PR_PLAN_POSITION, storedPlanFor, type PrPlanRecord } from "./pr-plan.ts";
-import { markPrPlanUsed, prKey, runPlanName, usePrPlan, type PrKey } from "./pr-plan-store.ts";
+import { prKey, runPlanName, usePrPlan, type PrKey } from "./pr-plan-store.ts";
 import { peopleLimitMessage, runsPerDayMessage, type WorkspacePlan } from "./plan-limits.ts";
 import { runsToday, workspacePlan } from "./plans.ts";
 import { gaveNoVerdict } from "./report.ts";
