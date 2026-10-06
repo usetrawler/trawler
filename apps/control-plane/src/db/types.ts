@@ -241,14 +241,24 @@ export interface Personas {
 }
 
 export interface Plans {
+  account_flow: string | null;
+  account_reason: string | null;
   created_at: Generated<Timestamp>;
+  created_by_run_id: string | null;
   features: Generated<string[]>;
   id: Generated<string>;
+  inputs_hash: string | null;
+  kind: Generated<string>;
+  last_used_at: Timestamp | null;
   name: string;
   org_id: string;
   position: Generated<number>;
+  pr_number: number | null;
   project_id: string;
+  repo: string | null;
+  source_plan_id: string | null;
   updated_at: Generated<Timestamp>;
+  version: number | null;
 }
 
 export interface Projects {
@@ -266,23 +276,6 @@ export interface Projects {
   paused_by: string | null;
   target_url: string;
   updated_at: Generated<Timestamp>;
-}
-
-export interface PrPlans {
-  created_at: Generated<Timestamp>;
-  created_by_run_id: string | null;
-  id: Generated<string>;
-  inputs_hash: string;
-  last_used_at: Generated<Timestamp>;
-  last_used_run_id: string | null;
-  lead_output: Json;
-  number: number;
-  org_id: string;
-  plan_id: string;
-  project_id: string;
-  repo: Generated<string>;
-  superseded_at: Timestamp | null;
-  version: number;
 }
 
 export interface RunEvents {
@@ -452,7 +445,6 @@ export interface DB {
   organization: Organization;
   personas: Personas;
   plans: Plans;
-  pr_plans: PrPlans;
   projects: Projects;
   run_events: RunEvents;
   runs: Runs;

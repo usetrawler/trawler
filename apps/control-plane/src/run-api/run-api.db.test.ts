@@ -126,7 +126,7 @@ describe("run api", () => {
     expect((await post(token, { project: projects.ent })).status).toBe(404);
   });
 
-  test("pull request details and a plan mode are stored with the run, plan by default, and the planner is kicked", async () => {
+  test("pull request details and a plan mode are stored with the run, change by default, and the planner is kicked", async () => {
     const { token } = await mint("org-ent");
     await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
     let kicked = 0;
@@ -135,7 +135,7 @@ describe("run api", () => {
     expect(kicked).toBe(1);
     const row = await asSystem(t.db, (tx) => tx.selectFrom("runs").select(["pull_request", "pr_plan"]).where("id", "=", started.id).executeTakeFirstOrThrow());
     expect(row.pull_request).toMatchObject(pullRequest);
-    expect(row.pr_plan).toEqual({ mode: "both", goalIds: [] });
+    expect(row.pr_plan).toEqual({ mode: "change", goalIds: [] });
     await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
     const regression = await (await post(token, { project: projects.ent, pullRequest, planMode: "regression" })).json();
     expect((await asSystem(t.db, (tx) => tx.selectFrom("runs").select("pr_plan").where("id", "=", regression.id).executeTakeFirstOrThrow())).pr_plan).toBeNull();

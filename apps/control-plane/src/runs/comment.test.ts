@@ -26,6 +26,11 @@ describe("renderComment", () => {
     expect(md).toContain("[Full report](https://app.trawler.test/runs/0012)");
   });
 
+  test("says a skipped run was not started because nothing in the change can be tested through the UI", () => {
+    const md = renderComment({ ...base, status: "cancelled", skipped: true, people: 0, goalsTotal: 0, goalsReached: 0 });
+    expect(md).toBe(`${COMMENT_MARKER}\n\n### Nothing in this change can be tested through the product's UI, so Trawler did not start a run.\n\n[Full report](https://app.trawler.test/runs/0012)`);
+  });
+
   test("does not call a run clean when people could not finish", () => {
     const md = renderComment({ ...base, people: 2, goalsReached: 5, goalsTotal: 12, peopleFailed: 2 });
     expect(md).toContain("### Trawler could not finish testing this change");

@@ -1,6 +1,7 @@
 import { goalsFor } from "@usetrawler/protocol";
 import { RUN_TIME_LIMIT_HOURS, UNCLAIMED_RUN_MINUTES } from "./limits.ts";
 import { ACCOUNT_REFUSED, outOfBudget, type CancelReason, type RunSummary } from "./runs.ts";
+import { NOTHING_TO_TEST } from "./status.ts";
 
 export type StageState = "waiting" | "active" | "done" | "skipped";
 function useDetail(people: number, turns: number): string {
@@ -160,6 +161,7 @@ const STOPPED_BECAUSE: Record<CancelReason, string> = {
   unclaimed: `No runner picked this run up within ${UNCLAIMED_RUN_MINUTES} minutes, so it was stopped.`,
   ci_gone: "The CI job that started this run stopped asking about it, so the run was stopped.",
   superseded: "A newer push to the same pull request started another run, so this one was stopped.",
+  nothing_to_test: NOTHING_TO_TEST,
 };
 
 function headline(s: RunSummary, confirmed: number, defects: number, replaysAllFailed: boolean, defectsDismissed: boolean): string {
