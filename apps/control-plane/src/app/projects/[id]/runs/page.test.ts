@@ -5,7 +5,7 @@ import type { RunLine } from "../../../../projects/overview.ts";
 type Asked = { orgId: string; projectId?: string; planId?: string; show?: string; before?: number };
 const state = vi.hoisted(() => ({
   signedIn: true, found: true, runs: [] as RunLine[], olderThan: null as number | null,
-  tenants: [] as string[], heads: [] as Array<[string, string]>, asked: [] as Array<{ orgId: string; projectId?: string; planId?: string; show?: string; before?: number }>, plans: [{ id: "11111111-1111-4111-8111-111111111111", name: "Plan 1", features: [], people: 2 }, { id: "22222222-2222-4222-8222-222222222222", name: "Invitations", features: [], people: 1 }], planCounted: [] as Array<string | undefined>,
+  tenants: [] as string[], heads: [] as Array<[string, string]>, asked: [] as Array<{ orgId: string; projectId?: string; planId?: string; show?: string; before?: number }>, plans: [{ id: "11111111-1111-4111-8111-111111111111", name: "Plan 1", features: [], people: 2 }, { id: "22222222-2222-4222-8222-222222222222", name: "Invitations", features: [], people: 1 }], planCounted: [] as Array<string | undefined>, prPlans: [] as Array<{ id: string; name: string; version: number }>,
   counted: [] as Array<[string, string | undefined]>, shells: [] as Array<string | null | undefined>,
 }));
 const ID = vi.hoisted(() => "0f8fad5b-d9cb-469f-a165-70867728950e");
@@ -27,7 +27,7 @@ vi.mock("../../../../server/shell.ts", () => ({
 }));
 vi.mock("../../../../runs/runs.ts", () => ({ projectRunState: async () => (state.found ? { paused: false, liveRun: null } : null) }));
 vi.mock("../../../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
-vi.mock("../../../../projects/projects.ts", () => ({ listPlans: async () => state.plans }));
+vi.mock("../../../../projects/projects.ts", () => ({ listPlans: async () => state.plans, listPullRequestPlans: async () => state.prPlans }));
 vi.mock("../../../../projects/overview.ts", async (original) => ({
   hostOf: (await original<typeof import("../../../../projects/overview.ts")>()).hostOf,
   projectHead: async (_tx: unknown, orgId: string, projectId: string) => {
@@ -63,6 +63,7 @@ beforeEach(() => {
   state.planCounted = [];
   state.counted = [];
   state.shells = [];
+  state.prPlans = [];
 });
 
 test("the project's runs are the workspace's history narrowed to it, read in the signed-in workspace, with the address's filter and page", async () => {
@@ -135,4 +136,16 @@ test("a plan of the project narrows the runs and their counts, a plan it does no
   await open(ID, { plan: "33333333-3333-4333-8333-333333333333" });
   expect(state.asked.at(-1)).not.toHaveProperty("planId");
   expect(state.planCounted.at(-1)).toBeUndefined();
+});
+
+test("pull request plans are offered with the plans, the newest few always and an older one when it is the one asked for", async () => {
+  state.prPlans = Array.from({ length: 10 }, (_, i) => ({ id: `aaaaaaaa-aaaa-4aaa-8aaa-${String(i).padStart(12, "0")}`, name: `PR #${600 - i}`, version: 2 }));
+  const html = renderToStaticMarkup(await open(ID));
+  expect(html).toContain("PR #600 · v2");
+  expect(html).toContain("PR #593 · v2");
+  expect(html).not.toContain("PR #592");
+  const old = state.prPlans[9]!;
+  const asked = renderToStaticMarkup(await open(ID, { plan: old.id }));
+  expect(state.asked.at(-1)).toMatchObject({ planId: old.id });
+  expect(asked).toContain("PR #591 · v2");
 });
