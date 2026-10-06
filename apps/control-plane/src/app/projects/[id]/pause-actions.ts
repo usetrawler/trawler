@@ -11,7 +11,8 @@ import { logError } from "../../../server/log.ts";
 export interface PauseState {
   error?: string;
   stopped?: { id: string; number: number } | null;
-  liveRun?: { id: string; number: number };
+  alsoStopped?: number;
+  liveRun?: { id: string; number: number; more?: number };
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -37,7 +38,7 @@ export async function pauseRunsAction(projectId: string, confirmedRunId: string 
     projectId,
     async (orgId, userId) => {
       const outcome = await withOrg(getDb(), orgId, (tx) => pauseProject(tx, orgId, projectId, userId, confirmed));
-      return "unconfirmed" in outcome ? { liveRun: outcome.unconfirmed } : { stopped: outcome.stopped };
+      return "unconfirmed" in outcome ? { liveRun: outcome.unconfirmed } : { stopped: outcome.stopped, ...(outcome.alsoStopped ? { alsoStopped: outcome.alsoStopped } : {}) };
     },
     "runs could not be paused",
     "Runs could not be paused. Try again.",

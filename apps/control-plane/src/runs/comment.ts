@@ -12,6 +12,7 @@ const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? on
 
 function headline(r: CommentInput): string {
   if (!r.finished) return "Trawler is still testing this change";
+  if (r.cancelReason === "superseded") return "Trawler stopped this run because a newer push started another";
   if (r.status === "failed" || r.status === "cancelled") return "Trawler could not finish testing this change";
   if (r.defects.confirmed === 0 && (r.peopleFailed ?? 0) > 0) return "Trawler could not finish testing this change";
   if (r.status === "stopped_budget") return "Trawler ran out of its budget before it finished testing this change";
@@ -74,6 +75,7 @@ export function runResultOf(s: RunSummary, baseUrl: string): RunResult {
     })),
     costUsd: s.costUsd,
     unverified: view.report.couldNotJudge.length + view.report.notJudged.length,
+    ...(s.cancelReason ? { cancelReason: s.cancelReason } : {}),
   };
   return { ...result, commentMarkdown: renderComment({ ...result, peopleFailed: view.personas.filter((p) => p.state === "failed").length }) };
 }
