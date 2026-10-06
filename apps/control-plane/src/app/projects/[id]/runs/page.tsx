@@ -11,7 +11,7 @@ import { getDb } from "../../../../server/db.ts";
 import { shellFor } from "../../../../server/shell.ts";
 import { projectPageTitle } from "../../../../server/titles.ts";
 import { parsePlanQuery, parseRunsQuery, RunsView } from "../../../runs/runs-view.tsx";
-import { listPlans } from "../../../../projects/projects.ts";
+import { listPlans, listPullRequestPlans } from "../../../../projects/projects.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +20,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   return projectPageTitle(await headers(), id, "Runs");
 }
 
+const SHOWN_PULL_REQUEST_PLANS = 8;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export default async function ProjectRunsPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ show?: string | string[]; before?: string | string[]; plan?: string | string[] }> }) {
@@ -34,8 +35,9 @@ export default async function ProjectRunsPage({ params, searchParams }: { params
     const project = await projectHead(tx, orgId, id);
     const runState = await projectRunState(tx, orgId, id);
     if (!project || !runState) return null;
-    const plans = await listPlans(tx, orgId, id);
-    const plan = parsePlanQuery(query, plans);
+    const [standard, pullRequests] = await Promise.all([listPlans(tx, orgId, id), listPullRequestPlans(tx, orgId, id)]);
+    const plan = parsePlanQuery(query, [...standard, ...pullRequests]);
+    const plans = [...standard, ...pullRequests.filter((p, i) => i < SHOWN_PULL_REQUEST_PLANS || p.id === plan).map((p) => ({ id: p.id, name: `${p.name} · v${p.version}` }))];
     const [history, counts, total] = await Promise.all([workspaceRuns(tx, orgId, { projectId: id, ...(plan ? { planId: plan } : {}), show, before }), runCounts(tx, orgId, id, plan), plan ? runCounts(tx, orgId, id) : null]);
     return { project, runState, history, counts, total: total ?? counts, plans, plan };
   });
