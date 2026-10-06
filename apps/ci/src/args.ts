@@ -104,7 +104,7 @@ export function parseCliArgs(argv: string[], env: Record<string, string | undefi
       model: values.model,
       conversation: values.conversation === true,
       failOn: oneOf("fail-on", values["fail-on"], FAIL_ON, "new-confirmed"),
-      planMode: oneOf("plan-mode", values["plan-mode"], PLAN_MODES, "both"),
+      planMode: oneOf("plan-mode", values["plan-mode"], PLAN_MODES, "change"),
       replan: values.replan === true,
       timeoutMinutes,
       comment: !values["no-comment"],

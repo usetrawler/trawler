@@ -36,7 +36,7 @@ const newProject = (name: string) => withOrg(t.db, "org-a", (tx) => createProjec
 const startOn = (project: string, over: Partial<Parameters<typeof startRun>[4]> = {}) => withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { ...options, pullRequest, ...over }));
 const provided = async (runId: string) => (await sql<{ provided_accounts: string[] }>`select provided_accounts from runs where id = ${runId}`.execute(t.db)).rows[0]!.provided_accounts;
 const summary = (runId: string) => withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", runId));
-const leadOutput = async (project: string) => (await sql<{ lead_output: Record<string, unknown> }>`select lead_output from pr_plans where project_id = ${project} and superseded_at is null`.execute(t.db)).rows.map((r) => r.lead_output);
+const leadOutput = async (project: string) => (await sql<{ accountFlow: string; accountReason: string | null }>`select account_flow as "accountFlow", account_reason as "accountReason" from plans where project_id = ${project} and kind = 'pull_request'`.execute(t.db)).rows;
 
 async function finish(runId: string) {
   await sql`update runs set status = 'cancelled', cancel_reason = 'stopped', finished_at = now(), sign_up_seed = null where id = ${runId}`.execute(t.db);
@@ -64,7 +64,7 @@ test("exercise: only the people who sign in keep the CI account, and the change 
   expect(seen.providedAccounts).toEqual(["Ana"]);
   expect(seen.prPlan).toMatchObject({ signUps: ["Priya"], accountReason: "Changes how invited colleagues join a team." });
   expect((await claimTurn(project, "priya")).providedAccounts).toEqual(["Ana"]);
-  expect(await leadOutput(project)).toEqual([expect.objectContaining({ accountFlow: "exercise", accountReason: "Changes how invited colleagues join a team." })]);
+  expect(await leadOutput(project)).toEqual([{ accountFlow: "exercise", accountReason: "Changes how invited colleagues join a team." }]);
   await finish(run.id);
 });
 
@@ -88,7 +88,7 @@ test("a lead that gives no valid flow leaves the provided accounts as they are",
   await finish(run.id);
 });
 
-test("a reused stored plan applies its flow with no lead call, and a plan stored before the field existed behaves as provided", async () => {
+test("a reused stored plan applies its flow with no lead call", async () => {
   const project = await newProject("reuse");
   const first = await startOn(project);
   await planDueRuns(lead(scriptedModel([answer({ accountFlow: "exercise", accountReason: "Changes how invited colleagues join a team." })])));
@@ -101,13 +101,6 @@ test("a reused stored plan applies its flow with no lead call, and a plan stored
   expect((await summary(second.id))!.prPlan).toMatchObject({ reused: true, signUps: ["Priya"], accountReason: "Changes how invited colleagues join a team." });
   expect((await claimTurn(project, "priya")).providedAccounts).toEqual(["Ana"]);
   await finish(second.id);
-
-  await sql`update pr_plans set lead_output = lead_output - 'accountFlow' - 'accountReason' where project_id = ${project}`.execute(t.db);
-  const old = await startOn(project);
-  expect(await provided(old.id)).toEqual(["Ana", "Priya"]);
-  expect((await summary(old.id))!.prPlan).toMatchObject({ reused: true });
-  expect((await summary(old.id))!.prPlan).not.toHaveProperty("signUps");
-  await finish(old.id);
 });
 
 test("replan asks the lead again and takes its new flow", async () => {

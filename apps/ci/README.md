@@ -22,6 +22,7 @@ node apps/ci/src/main.ts run --project <uuid> [--plan <uuid>] [--url <address>] 
 ```
 
 - `TRAWLER_API_TOKEN` is a workspace API token (Settings). `TRAWLER_API` is the default for `--api`.
+- `--plan-mode` chooses what a pull request run executes. `change` (the default) runs only the plan Trawler makes for the pull request, with the people and goals the change calls for; if nothing in the change can be tried through the product's UI, no run is started: the CLI prints that, posts it as the pull request comment and exits 0. `regression` runs only the project's own plan, as for any run without a pull request. `both` runs the project's plan and adds the pull request's goals to it.
 - `--replan` plans the pull request again even if its title, description and changed files have not changed since the last run; by default a pull request keeps its plan until they change.
 - `--runner hosted` runs on Trawler's runners; `--runner own` runs the browser inside the CI job, so `--url` can be `http://localhost:...`.
 - A push to a pull request that already has a run going stops that older run (it ends as stopped by a newer push, and its job exits 0 without a comment) and starts a new one. Pull requests run in parallel with each other; a workspace has at most 5 runs going in CI jobs at once.

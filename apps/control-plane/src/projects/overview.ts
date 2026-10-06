@@ -55,8 +55,8 @@ function runLines(tx: Tx, orgId: string) {
     .innerJoin("projects as p", "p.id", "r.project_id")
     .where("r.org_id", "=", orgId)
     .select((eb) => [
-      "r.id", "r.number", "r.status", "r.created_at", "r.cost_usd", "r.token_cap", "r.tokens_used", "r.project_id", "r.plan_name", "p.name as project_name", "p.target_url as project_url",
-      sql<boolean>`r.plan_id IS NULL OR (SELECT count(*) FROM plans pl WHERE pl.project_id = r.project_id) > 1`.as("plan_shown"),
+      "r.id", "r.number", "r.status", "r.cancel_reason", "r.created_at", "r.cost_usd", "r.token_cap", "r.tokens_used", "r.project_id", "r.plan_name", "p.name as project_name", "p.target_url as project_url",
+      sql<boolean>`r.plan_id IS NULL OR (SELECT count(*) FROM plans pl WHERE pl.project_id = r.project_id AND pl.kind = 'standard') > 1 OR EXISTS (SELECT 1 FROM plans pl WHERE pl.id = r.plan_id AND pl.kind = 'pull_request')`.as("plan_shown"),
       eb.exists(eb.selectFrom("projects as twin").select("twin.id").whereRef("twin.org_id", "=", "p.org_id").whereRef("twin.name", "=", "p.name").whereRef("twin.id", "<>", "p.id")).as("name_shared"),
       eb.selectFrom("findings as f").select((f) => f.fn.countAll<string>().as("n")).whereRef("f.run_id", "=", "r.id").where("f.kind", "=", "defect").where("f.verdict", "=", "confirmed")
         .where((f) => f.not(f.exists(f.selectFrom("finding_dismissals as d").select("d.run_id").whereRef("d.run_id", "=", "f.run_id").whereRef("d.finding_key", "=", "f.key"))))
@@ -72,7 +72,7 @@ type RunRow = Awaited<ReturnType<ReturnType<typeof runLines>["execute"]>>[number
 
 function toLine(r: RunRow): RunLine {
   return {
-    id: r.id, number: r.number, status: r.status, createdAt: r.created_at,
+    id: r.id, number: r.number, status: r.cancel_reason === "nothing_to_test" ? "skipped" : r.status, createdAt: r.created_at,
     costUsd: Number(r.cost_usd), tokenCap: r.token_cap === null ? null : Number(r.token_cap), tokensUsed: Number(r.tokens_used),
     confirmed: Number(r.confirmed ?? 0), unchecked: !!r.unchecked, goalsReached: Number(r.goals_reached ?? 0), goalsTotal: Number(r.goals_total ?? 0),
     projectId: r.project_id, projectName: r.project_name, projectSite: r.name_shared ? siteOf(r.project_url) : null, planName: r.plan_shown ? r.plan_name : null,
@@ -115,6 +115,7 @@ export async function workspaceRuns(tx: Tx, orgId: string, options: { projectId?
   if (options.projectId !== undefined) query = query.where("r.project_id", "=", options.projectId);
   if (options.planId !== undefined) query = query.where("r.plan_id", "=", options.planId);
   if (show !== "all") query = query.where("r.status", "in", FILTER_STATUSES[show]);
+  if (show === "attention") query = query.where(sql<boolean>`r.cancel_reason IS DISTINCT FROM 'nothing_to_test'`);
   if (options.before !== undefined) query = query.where("r.number", "<", options.before);
   const rows = await query.execute();
   const runs = rows.slice(0, size).map(toLine);
@@ -128,7 +129,7 @@ export async function runCounts(tx: Tx, orgId: string, projectId?: string, planI
     .select([
       sql<string>`count(*)`.as("all"),
       sql<string>`count(*) filter (where status in (${sql.join(FILTER_STATUSES.completed)}))`.as("completed"),
-      sql<string>`count(*) filter (where status in (${sql.join(FILTER_STATUSES.attention)}))`.as("attention"),
+      sql<string>`count(*) filter (where status in (${sql.join(FILTER_STATUSES.attention)}) and cancel_reason is distinct from 'nothing_to_test')`.as("attention"),
     ]);
   if (projectId !== undefined) query = query.where("project_id", "=", projectId);
   if (planId !== undefined) query = query.where("plan_id", "=", planId);

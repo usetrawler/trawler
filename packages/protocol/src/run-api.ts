@@ -97,6 +97,7 @@ export const RunResultSchema = z.object({
   costUsd: z.number().nonnegative(),
   unverified: z.number().int().nonnegative().optional(),
   cancelReason: z.string().optional(),
+  skipped: z.boolean().optional(),
   commentMarkdown: z.string(),
 });
 export type RunResult = z.infer<typeof RunResultSchema>;

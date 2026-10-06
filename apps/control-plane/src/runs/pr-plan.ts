@@ -6,11 +6,12 @@ import type { Database } from "../db/index.ts";
 import { asSystem, type Tx } from "../db/tenancy.ts";
 import { logError, writeLog } from "../server/log.ts";
 import { workspacePlan } from "./plans.ts";
-import { currentPrPlan, inputsHash, prKey, storePrPlan } from "./pr-plan-store.ts";
-import type { ConfigSnapshot } from "./runs.ts";
+import { currentPrPlan, inputsHash, prKey, runPlanName, storePrPlan } from "./pr-plan-store.ts";
+import { endRun, type ConfigSnapshot } from "./runs.ts";
+import { NOTHING_TO_TEST } from "./status.ts";
 
 export const PR_PLAN_POSITION = -1000;
-export const DEFAULT_PLAN_MODE: PlanMode = "both";
+export const DEFAULT_PLAN_MODE: PlanMode = "change";
 const PR_PLAN_BUDGET_USD = 0.1;
 const PR_PLAN_MINUTES = 4;
 const PR_PLAN_STALE_MINUTES = 6;
@@ -149,15 +150,17 @@ async function finish(db: Database, job: Claimed, outcome: Outcome): Promise<voi
     const mode = (job.pr_plan as unknown as PrPlanRecord).mode;
     const snapshot = job.config_snapshot as unknown as ConfigSnapshot;
     const limit = await workspacePlan(tx, job.org_id);
-    const merged = "turns" in outcome ? withLeadsGoals(snapshot, outcome.turns, mode, limit.limits.people) : null;
+    const lead = "turns" in outcome ? withLeadsGoals(snapshot, outcome.turns, "change", limit.limits.people) : null;
+    const merged = mode === "both" && "turns" in outcome ? withLeadsGoals(snapshot, outcome.turns, "both", limit.limits.people) : lead;
     const pr = job.pull_request as unknown as PullRequest;
     const key = prKey(pr);
-    const stored = "turns" in outcome && outcome.turns.length > 0 && job.plan_id && key
-      ? await storePrPlan(tx, { orgId: job.org_id, projectId: run.project_id, planId: job.plan_id, key, hash: inputsHash(pr), turns: outcome.turns, accountFlow: outcome.accountFlow, accountReason: outcome.accountReason, runId: job.run_id })
+    const stored = lead && "turns" in outcome && job.plan_id && key
+      ? await storePrPlan(tx, { orgId: job.org_id, projectId: run.project_id, sourceId: job.plan_id, key, hash: inputsHash(pr), content: { personas: lead.personas, goals: lead.added }, accountFlow: outcome.accountFlow, accountReason: outcome.accountReason, runId: job.run_id })
       : null;
     const provided = "turns" in outcome ? await accountsFor(tx, job.plan_id, run.provided_accounts as string[], outcome.accountFlow) : null;
+    const nothingToTest = mode === "change" && "turns" in outcome && !merged;
     const record: PrPlanRecord = {
-      mode, goalIds: merged?.added.map((g) => g.id) ?? [], ...("failure" in outcome ? { note: noteOf(outcome.failure) } : merged ? {} : { note: NOTHING }), ...(stored ? { prPlanId: stored.id, version: stored.version } : {}),
+      mode, goalIds: merged?.added.map((g) => g.id) ?? [], ...("failure" in outcome ? { note: noteOf(outcome.failure) } : merged ? {} : { note: nothingToTest ? NOTHING_TO_TEST : NOTHING }), ...(stored ? { prPlanId: stored.id, version: stored.version } : {}),
       ...("turns" in outcome ? { accountFlow: outcome.accountFlow, ...(outcome.accountReason ? { accountReason: outcome.accountReason } : {}), signUps: provided!.signUps } : {}),
     };
     if (provided && provided.signUps.length > 0) await tx.updateTable("runs").set({ provided_accounts: JSON.stringify(provided.accounts) }).where("id", "=", job.run_id).execute();
@@ -169,7 +172,10 @@ async function finish(db: Database, job: Claimed, outcome: Outcome): Promise<voi
       await tx.deleteFrom("jobs").where("run_id", "=", job.run_id).where("kind", "=", "role_session").where("status", "=", "queued").execute();
       await tx.insertInto("jobs").values(next.map((turn, i) => ({ org_id: job.org_id, run_id: job.run_id, kind: "role_session", position: i, persona_key: turn.personaId, together }))).execute();
       await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date() }).where("run_id", "=", job.run_id).where("kind", "=", "account_check").where("status", "=", "queued").where("account_ref", "not in", [...used, ""]).execute();
-      await tx.updateTable("runs").set({ config_snapshot: JSON.stringify({ ...snapshot, personas: merged.personas, goals: merged.goals }), conversation: together }).where("id", "=", job.run_id).execute();
+      await tx.updateTable("runs").set({
+        config_snapshot: JSON.stringify({ ...snapshot, personas: merged.personas, goals: merged.goals }), conversation: together,
+        ...(mode === "change" && stored ? { plan_id: stored.id, plan_name: runPlanName(stored.name, stored.version) } : {}),
+      }).where("id", "=", job.run_id).execute();
     }
     const failed = "failure" in outcome;
     await tx
@@ -178,6 +184,7 @@ async function finish(db: Database, job: Claimed, outcome: Outcome): Promise<voi
       .where("id", "=", job.id)
       .execute();
     await tx.updateTable("runs").set({ pr_plan: JSON.stringify(record) }).where("id", "=", job.run_id).execute();
+    if (nothingToTest) await endRun(tx, job.run_id, { status: "cancelled", reason: "nothing_to_test" });
   });
 }
 

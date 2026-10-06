@@ -8,6 +8,8 @@ const state = vi.hoisted(() => ({
   runState: { paused: false, liveRun: null } as { paused: boolean; liveRun: { id: string; number: number } | null },
   refusal: null as Error | null,
   plans: [] as Array<{ id: string; name: string; features: string[]; people: number }>,
+  prPlans: [] as Array<{ id: string; name: string; repo: string; number: number; version: number; lastUsedAt: Date; people: number }>,
+  prGoals: [] as Array<{ key: string; instruction: string; persona_key: string }>,
   platformKey: true, onUsLeft: true, refusalFor: [] as unknown[], people: 0, beta: undefined as string[] | undefined,
 }));
 const ID = vi.hoisted(() => "0f8fad5b-d9cb-469f-a165-70867728950e");
@@ -37,9 +39,10 @@ const PLANS = [{ id: "11111111-1111-4111-8111-111111111111", name: "Plan 1", fea
 vi.mock("../../../projects/projects.ts", () => ({
   MAX_PLANS: 10,
   listPlans: async () => state.plans,
+  listPullRequestPlans: async () => state.prPlans,
   projectForEditing: async (_tx: unknown, _orgId: string, id: string, planId?: string) => ({
     id, plan: { id: planId, name: state.plans.find((p) => p.id === planId)?.name }, name: "Acme", target_url: "https://app.acme.test/", docs_url: null, description: "Invoices.", focus: null, features: ["Send an invoice"], allowed_origins: [],
-    personas: Array.from({ length: state.people }, (_, i) => ({ key: `p${i}`, name: `P${i}`, brief: "b", signs_in: false, account_ref: null })), goals: [], accounts: [], gates: [],
+    personas: Array.from({ length: state.people }, (_, i) => ({ key: `p${i}`, name: `P${i}`, brief: "b", signs_in: false, account_ref: null })), goals: state.prPlans.some((p) => p.id === planId) ? state.prGoals : [], accounts: [], gates: [],
   }),
 }));
 vi.mock("../../../projects/overview.ts", async (original) => ({
@@ -55,7 +58,6 @@ vi.mock("../../../runs/runs.ts", async (original) => ({
   refusalToStart: async (_tx: unknown, _org: string, _id: string, paidBy: unknown) => { state.refusalFor.push(paidBy); return state.refusal; },
 }));
 vi.mock("../../../runs/plans.ts", () => ({ workspacePlan: async () => FREE }));
-vi.mock("../../../runs/pr-plan-store.ts", () => ({ recentPrPlans: async () => [] }));
 vi.mock("./plan-workspace.tsx", () => ({ PlanWorkspace: (props: Record<string, unknown>) => { state.planned.push(props); return null; } }));
 
 const { default: ProjectPage } = await import("./page.tsx");
@@ -75,6 +77,8 @@ beforeEach(() => {
   state.refusalFor = [];
   state.people = 0;
   state.plans = [...PLANS];
+  state.prPlans = [];
+  state.prGoals = [];
   state.beta = undefined;
 });
 
@@ -193,4 +197,40 @@ test("a project with one plan cannot remove it", async () => {
   expect(html).not.toContain("Remove plan");
   state.plans = [...PLANS];
   expect(await render()).toContain("Remove plan");
+});
+
+const PR = { id: "44444444-4444-4444-8444-444444444444", name: "PR #578", repo: "acme/shop", number: 578, version: 2, lastUsedAt: new Date("2026-10-05T10:30:00Z"), people: 2 };
+
+test("pull request plans are a separate group next to the plan tabs, apart from the plans a project can add", async () => {
+  state.prPlans = [PR, { ...PR, id: "55555555-5555-4555-8555-555555555555", name: "PR #577", number: 577, version: 1 }];
+  const html = await render();
+  const group = html.match(/<nav aria-label="Pull request plans".*?<\/nav>/)?.[0] ?? "";
+  expect(group).toContain("Pull requests");
+  expect(group).toMatch(new RegExp(`href="/projects/${ID}\\?plan=${PR.id}"[^>]*>PR #578 · v2`));
+  expect(group).toContain("PR #577 · v1");
+  expect(html.match(/<nav aria-label="Plans".*?<\/nav>/)?.[0]).not.toContain("PR #");
+  expect(html).toContain("Add plan");
+});
+
+test("without pull request plans the tabs show no group", async () => {
+  expect(await render()).not.toContain("Pull request plans");
+});
+
+test("a pull request plan opens as a read-only plan view with its people's goals in the order of play, and no editor or Start panel", async () => {
+  state.people = 2;
+  state.prPlans = [PR];
+  state.prGoals = [
+    { key: "pr-goal-1", instruction: "Last month's invoices come out as one spreadsheet", persona_key: "p1" },
+    { key: "pr-goal-2", instruction: "Ana finds her invoice in the spreadsheet", persona_key: "p0" },
+  ];
+  const html = await render(PR.id);
+  expect(html).toContain("PR #578 · v2");
+  expect(html).toContain("Made by Trawler from the pull request; it is replaced when the pull request changes.");
+  expect(html).toContain(`href="/projects/${ID}/runs?plan=${PR.id}"`);
+  expect(html.indexOf("P1")).toBeLessThan(html.indexOf("P0"));
+  expect(html).toMatch(new RegExp(`<a [^>]*aria-current="page"[^>]*href="[^"]*plan=${PR.id}"|<a [^>]*href="[^"]*plan=${PR.id}"[^>]*aria-current="page"`));
+  expect(html).not.toContain("Remove plan");
+  expect(html).not.toContain("Change features");
+  expect(state.planned).toEqual([]);
+  expect(state.refusalFor).toEqual([]);
 });

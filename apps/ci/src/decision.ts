@@ -7,6 +7,7 @@ export interface Decision {
 
 export function decide(result: RunResult, failOn: FailOn): Decision {
   const confirmed = result.defects.confirmed;
+  if (result.skipped) return { exitCode: 0, message: `Run #${result.number} was skipped: nothing in this change can be tested through the product's UI, so it does not pass or fail the job.` };
   if (result.status === "stopped_budget") {
     const unverified = result.unverified ?? 0;
     const left = unverified > 0 ? `, ${unverified} reported defect(s) not replayed or judged` : "";

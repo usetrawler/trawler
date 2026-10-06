@@ -11,7 +11,7 @@ describe("parseCliArgs", () => {
     const parsed = parseCliArgs(["run", "--api", "https://staging.usetrawler.com/", "--project", PROJECT], env);
     expect(parsed).toEqual({
       help: false,
-      options: { api: "https://staging.usetrawler.com", token: "trw_secret", project: PROJECT, plan: undefined, url: undefined, execution: "hosted", cap: undefined, model: undefined, conversation: false, failOn: "new-confirmed", planMode: "both", replan: false, timeoutMinutes: 45, comment: true },
+      options: { api: "https://staging.usetrawler.com", token: "trw_secret", project: PROJECT, plan: undefined, url: undefined, execution: "hosted", cap: undefined, model: undefined, conversation: false, failOn: "new-confirmed", planMode: "change", replan: false, timeoutMinutes: 45, comment: true },
     });
   });
 
