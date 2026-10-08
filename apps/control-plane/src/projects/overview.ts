@@ -159,6 +159,20 @@ export async function workspaceNav(tx: Tx, orgId: string): Promise<{ projects: N
   };
 }
 
+export async function testingConfirmedAt(tx: Tx, orgId: string, projectId: string): Promise<Date | null> {
+  const row = await tx.selectFrom("projects").select("testing_confirmed_at").where("org_id", "=", orgId).where("id", "=", projectId).executeTakeFirst();
+  return row?.testing_confirmed_at ?? null;
+}
+
+export async function projectAuthorised(tx: Tx, orgId: string, projectId: string): Promise<boolean> {
+  return (await testingConfirmedAt(tx, orgId, projectId)) !== null || (await projectRunCount(tx, orgId, projectId)) > 0;
+}
+
+export async function confirmTesting(tx: Tx, orgId: string, projectId: string, userId: string): Promise<boolean> {
+  const updated = await tx.updateTable("projects").set({ testing_confirmed_at: new Date(), testing_confirmed_by: userId }).where("org_id", "=", orgId).where("id", "=", projectId).where("testing_confirmed_at", "is", null).returning("id").executeTakeFirst();
+  return Boolean(updated) || (await testingConfirmedAt(tx, orgId, projectId)) !== null;
+}
+
 export async function projectRunCount(tx: Tx, orgId: string, projectId: string): Promise<number> {
   const { n } = await tx.selectFrom("runs").select((eb) => eb.fn.countAll<string>().as("n")).where("org_id", "=", orgId).where("project_id", "=", projectId).executeTakeFirstOrThrow();
   return Number(n);

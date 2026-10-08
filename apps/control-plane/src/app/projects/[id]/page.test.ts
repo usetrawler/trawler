@@ -48,6 +48,7 @@ vi.mock("../../../projects/projects.ts", () => ({
 vi.mock("../../../projects/overview.ts", async (original) => ({
   hostOf: (await original<typeof import("../../../projects/overview.ts")>()).hostOf,
   projectRunCount: async (_tx: unknown, orgId: string, id: string) => { state.counted.push([orgId, id]); return state.runs; },
+  testingConfirmedAt: async () => null,
 }));
 vi.mock("../../../server/env.ts", () => ({ readEnv: () => ({ openRouterUrl: "https://openrouter.test/api/v1", ...(state.platformKey ? { setup: { apiKey: "sk-or-v1-" + "p".repeat(40), model: "m" } } : {}), ...(state.beta ? { betaEmails: state.beta } : {}) }) }));
 vi.mock("../../../runs/runs.ts", async (original) => ({

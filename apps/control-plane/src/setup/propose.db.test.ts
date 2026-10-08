@@ -332,3 +332,16 @@ test("a product on a private network is described by hand: no page is read, and 
 test("a hand-written draft needs a web address", async () => {
   await expect(startDraft(deps(scriptedModel([])), { orgId: "org-hand", url: "ftp://localhost/", byHand: { name: "R", description: "d" } })).rejects.toBeInstanceOf(FetchRefused);
 });
+
+test("a project on a private network chooses features and people again from its own description, without reading a page", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-hand-2', 'H2', 'hand-2', now())`.execute(t.db);
+  const refused: SetupDeps["fetchText"] = async () => { throw new FetchRefused("private", "private network"); };
+  const model = scriptedModel([text(JSON.stringify(people)), text(JSON.stringify(people))]);
+  const first = await startDraft(deps(model, refused), { orgId: "org-hand-2", url: "http://localhost:8080", byHand: { name: "Recurro", description: "Tracks renewals." } });
+  const id = await proposeFromDraft(deps(model, refused), { orgId: "org-hand-2", draftId: first, description: "Tracks renewals.", features: ["Ask to cancel a charge"] });
+  const again = await startDraft(deps(model, refused), { orgId: "org-hand-2", projectId: id, planName: "Second plan" });
+  expect(await describeDraft(deps(model, refused), { orgId: "org-hand-2", draftId: again })).toEqual({ name: "Recurro", description: "Tracks renewals.", signUp: "unclear", features: [{ title: "Ask to cancel a charge", summary: "" }] });
+  const result = await proposed(deps(model, refused), { orgId: "org-hand-2", draftId: again, description: "Tracks renewals.", features: ["Ask to cancel a charge"] });
+  expect(result).toMatchObject({ projectId: id, planId: expect.any(String) });
+  expect(model.doGenerateCalls).toHaveLength(2);
+});

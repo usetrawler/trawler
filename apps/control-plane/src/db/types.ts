@@ -276,6 +276,8 @@ export interface Projects {
   paused_at: Timestamp | null;
   paused_by: string | null;
   target_url: string;
+  testing_confirmed_at: Timestamp | null;
+  testing_confirmed_by: string | null;
   updated_at: Generated<Timestamp>;
 }
 
