@@ -73,6 +73,7 @@ CREATE TABLE mcp_rate_limits (
   calls integer NOT NULL,
   PRIMARY KEY (key, minute)
 );
+CREATE INDEX mcp_rate_limits_minute_idx ON mcp_rate_limits (minute);
 GRANT SELECT, INSERT, UPDATE, DELETE ON mcp_rate_limits TO trawler_auth;
 
 CREATE TABLE mcp_consent_contexts (

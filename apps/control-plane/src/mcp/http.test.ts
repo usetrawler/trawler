@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { canonicalOrigin, mcpResource } from "./config.ts";
+import { flowKey } from "./consent.ts";
 import { boundedBody } from "./http.ts";
 
 test("only a configured origin can identify a resource", () => {
@@ -24,4 +25,10 @@ test("a client published at an HTTPS URL is shown with its host, any other clien
   expect(clientHostOf("http://localhost/client.json")).toBeNull();
   expect(clientHostOf("nnMeibKMlaEBeiLyTLtasgDsdwirexuD")).toBeNull();
   expect(clientHostOf(null)).toBeNull();
+});
+
+test("one signed authorization request has one flow key, however its parameters are ordered", () => {
+  expect(flowKey("a=1&b=2&sig=x")).toBe(flowKey("sig=x&b=2&a=1"));
+  expect(flowKey("a=1&b=2")).not.toBe(flowKey("a=1&b=3"));
+  expect(flowKey("a=1&a=2")).not.toBe(flowKey("a=1"));
 });

@@ -1,5 +1,5 @@
 import type pg from "pg";
-import { consentWorkspace } from "./consent.ts";
+import { consentWorkspace, flowKey } from "./consent.ts";
 import { mcpResource, tokenHash } from "./config.ts";
 import { authenticateMcp, persistGrant } from "./oauth.ts";
 
@@ -43,8 +43,28 @@ export async function withinMcpRate(pool: pg.Pool, key: string, max: number): Pr
       WHERE mcp_rate_limits.calls < $3
     RETURNING calls
   `, [tokenHash(key), minute, max]);
-  if (minute % 10 === 0) await pool.query("DELETE FROM mcp_rate_limits WHERE minute < $1", [minute - 60]);
+  if (minute % 10 === 0 && prunedMinute !== minute) {
+    prunedMinute = minute;
+    await pruneMcp(pool, minute).catch(() => {});
+  }
   return !!result.rowCount;
+}
+
+let prunedMinute = -1;
+
+async function pruneMcp(pool: pg.Pool, minute: number): Promise<void> {
+  await pool.query("DELETE FROM mcp_rate_limits WHERE minute < $1", [minute - 60]);
+  await pool.query("DELETE FROM mcp_consent_contexts WHERE expires_at < now() - interval '1 hour'");
+  await pool.query('DELETE FROM "oauthAccessToken" WHERE "expiresAt" < now() - interval \'1 day\'');
+  await pool.query('DELETE FROM "oauthRefreshToken" WHERE "expiresAt" < now() - interval \'1 day\'');
+}
+
+function parseBody(contentType: string | null, raw: string): Record<string, unknown> | null {
+  if (raw === "") return {};
+  const type = (contentType ?? "").split(";", 1)[0]!.trim().toLowerCase();
+  if (type === "application/json") return JSON.parse(raw);
+  if (type === "application/x-www-form-urlencoded") return Object.fromEntries(new URLSearchParams(raw));
+  return null;
 }
 
 interface SessionLookup {
@@ -60,7 +80,7 @@ export function oauthBoundary(handler: (r: Request) => Promise<Response>, pool: 
       if (path.includes("/.well-known/")) return await handler(incoming);
       // Framework/admin client and consent mutations are not public MCP operations.
       const endpoint = path.slice(path.lastIndexOf("/oauth2/") + 8);
-      if (!["authorize", "token", "revoke", "consent", "continue", "register", "introspect"].includes(endpoint)) return oauthError("access_denied", 403);
+      if (!["authorize", "token", "revoke", "consent", "continue", "register"].includes(endpoint)) return oauthError("access_denied", 403);
       const address = incoming.headers.get("x-real-ip")?.slice(0, 128) ?? "unknown";
       if (!(await withinMcpRate(pool, `oauth:${endpoint}:${address}`, endpoint === "token" ? 120 : 30))) {
         const limited = oauthError("rate_limit_exceeded", 429);
@@ -72,22 +92,34 @@ export function oauthBoundary(handler: (r: Request) => Promise<Response>, pool: 
       if (incoming.method === "POST") {
         const raw = await boundedBody(incoming);
         if (raw instanceof Response) return raw;
+        let parsed: Record<string, unknown> | null;
         try {
-          body = incoming.headers.get("content-type")?.includes("application/json") ? JSON.parse(raw) : Object.fromEntries(new URLSearchParams(raw));
+          parsed = parseBody(incoming.headers.get("content-type"), raw);
         } catch { return oauthError("invalid_request"); }
-        if (!body || typeof body !== "object" || Array.isArray(body)) return oauthError("invalid_request");
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return oauthError("invalid_request", 415);
+        body = parsed;
         request = new Request(incoming.url, { method: incoming.method, headers: incoming.headers, body: raw });
       }
       if (endpoint === "authorize") {
-        const query = new URL(request.url).searchParams;
+        if (incoming.method !== "GET") return oauthError("invalid_request", 405);
+        const url = new URL(request.url);
+        const query = url.searchParams;
         if (query.getAll("resource").length !== 1 || query.get("resource") !== resource) return oauthError("invalid_target");
         if (query.get("code_challenge_method") !== "S256" || !/^[\w-]{43}$/.test(query.get("code_challenge") ?? "") ||
             !query.get("state") || query.get("state")!.length > 512) return oauthError("invalid_request");
+        if (!(query.get("scope") ?? "").split(" ").includes("trawler:read")) return oauthError("invalid_scope");
+        const prompts = (query.get("prompt") ?? "").split(" ").filter(Boolean);
+        if (prompts.includes("none")) return oauthError("consent_required");
+        if (!prompts.includes("consent")) {
+          url.searchParams.set("prompt", [...prompts, "consent"].join(" "));
+          request = new Request(url, { method: "GET", headers: request.headers });
+        }
       }
       if (endpoint === "token" && body.grant_type === "refresh_token") {
         if (typeof body.refresh_token !== "string") return oauthError("invalid_grant");
         const basic = /^Basic ([A-Za-z0-9+/=]+)$/i.exec(request.headers.get("authorization") ?? "");
-        let clientId = body.client_id;
+        let clientId: unknown = body.client_id;
+        if (clientId !== undefined && typeof clientId !== "string") return oauthError("invalid_request");
         if (basic) {
           const encodedId = Buffer.from(basic[1]!, "base64").toString("utf8").split(":", 1)[0]!;
           try { clientId = decodeURIComponent(encodedId.replace(/\+/g, " ")); } catch { return oauthError("invalid_client", 401); }
@@ -96,8 +128,8 @@ export function oauthBoundary(handler: (r: Request) => Promise<Response>, pool: 
           SELECT g.code_hash, r.revoked, g.revoked_at FROM "oauthRefreshToken" r
           JOIN mcp_grants g ON g.code_hash = r."authorizationCodeId"
           JOIN member m ON m."userId" = g.user_id AND m."organizationId" = g.org_id
-          WHERE r.token = $1 AND r."clientId" = $2 AND g.resource = $3
-        `, [tokenHash(body.refresh_token), clientId, resource]);
+          WHERE r.token = $1 AND ($2::text IS NULL OR r."clientId" = $2) AND g.resource = $3
+        `, [tokenHash(body.refresh_token), clientId ?? null, resource]);
         const found = rows[0];
         if (!found || found.revoked_at) return oauthError("invalid_grant");
       }
@@ -114,7 +146,7 @@ export function oauthBoundary(handler: (r: Request) => Promise<Response>, pool: 
       const invoke = async () => {
         const response = await handler(request);
         if (response.status >= 500) return oauthError("temporarily_unavailable", 503);
-        if (endpoint === "token" && response.ok) {
+        if (endpoint === "token" && body.grant_type === "authorization_code" && response.ok) {
           const tokens = await response.clone().json() as { access_token?: string };
           if (!tokens.access_token) return oauthError("temporarily_unavailable", 503);
           await persistGrant(pool, tokens.access_token, resource);
@@ -127,7 +159,7 @@ export function oauthBoundary(handler: (r: Request) => Promise<Response>, pool: 
         const { rows } = await pool.query<{ org_id: string }>(`
           SELECT f.org_id FROM mcp_consent_contexts f JOIN member m ON m."userId" = f.user_id AND m."organizationId" = f.org_id
           WHERE flow_hash = $1 AND user_id = $2 AND expires_at > now()
-        `, [tokenHash(body.oauth_query), person.user.id]);
+        `, [flowKey(body.oauth_query), person.user.id]);
         if (!rows[0]) return oauthError("access_denied", 403);
         return await consentWorkspace.run({ userId: person.user.id, orgId: rows[0].org_id }, invoke);
       }
@@ -143,14 +175,14 @@ export async function mcpAuthentication(pool: pg.Pool, origin: string, request: 
   const resource = mcpResource(origin);
   const authorization = request.headers.get("authorization");
   const token = /^Bearer ([A-Za-z0-9_-]{20,512})$/i.exec(authorization ?? "")?.[1];
-  const reject = () => Response.json({ jsonrpc: "2.0", id: null, error: { code: -32000, message: "Authentication required" } }, {
+  const reject = (invalid = false) => Response.json({ jsonrpc: "2.0", id: null, error: { code: -32000, message: "Authentication required" } }, {
     status: 401,
-    headers: { "Cache-Control": "no-store", "WWW-Authenticate": `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource/api/mcp", scope="trawler:read"` },
+    headers: { "Cache-Control": "no-store", "WWW-Authenticate": `Bearer ${invalid ? 'error="invalid_token", ' : ""}resource_metadata="${origin}/.well-known/oauth-protected-resource/api/mcp", scope="trawler:read"` },
   });
-  if (!token) return reject();
+  if (!token) return reject(authorization !== null);
   try {
     const principal = await authenticateMcp(pool, token, resource);
-    if (!principal) return reject();
+    if (!principal) return reject(true);
     if (!(await withinMcpRate(pool, `grant:${principal.grantId}`, 120))) return oauthError("rate_limit_exceeded", 429);
     return principal;
   } catch { return oauthError("temporarily_unavailable", 503); }
