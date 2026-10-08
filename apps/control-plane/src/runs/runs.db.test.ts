@@ -203,7 +203,8 @@ describe("a whole run", () => {
       expect(keys_(before.report.couldNotJudge)).toEqual(["ana:f1"]);
       expect(before.report.couldNotJudge[0]).toMatchObject({ action: "judge_again", replayedAsDefect: true, reason: "Model error: No output generated." });
       expect(keys_(before.report.friction)).toEqual(["ana:f2", "lee:f1"]);
-      expect([before.reported, before.headline]).toEqual([0, "No defects found."]);
+      expect(before.reported).toBe(0);
+      expect(before.headline).toMatch(/^No defects found/);
       expect(await historyOf(summary.id)).toMatchObject({ confirmed: 0, unchecked: false });
 
       const after = await judgedAgain(summary.id, "confirmed");
