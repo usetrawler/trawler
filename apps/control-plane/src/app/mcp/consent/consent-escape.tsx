@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { authClient } from "../../auth-client.ts";
 
-const link = "inline-block py-2 underline underline-offset-4 hover:text-ink";
+const link = "inline-block py-2 underline underline-offset-4 hover:text-ink aria-disabled:opacity-60";
 
 export function ConsentEscape({ query, signedIn = true }: { query?: string; signedIn?: boolean }) {
   const [state, setState] = useState<"idle" | "working" | "cancelled">("idle");

@@ -307,15 +307,22 @@ test("expired consent contexts are cleared when a new consent is prepared", asyn
 test("pruning removes tokens that expired more than a day ago and keeps newer ones", async () => {
   const f = await fixture();
   const keeper = await fixture();
+  const recent = await fixture();
   await f.issue();
   await keeper.issue();
+  await recent.issue();
   const count = (table: string, clientId: string) => onDatabase(t.name, async (c) => (await c.query(`SELECT 1 FROM "${table}" WHERE "clientId" = $1`, [clientId])).rowCount);
   await onDatabase(t.name, async (c) => {
     await c.query('UPDATE "oauthAccessToken" SET "expiresAt" = now() - interval \'2 days\' WHERE "clientId" = $1', [f.client.client_id]);
     await c.query('UPDATE "oauthRefreshToken" SET "expiresAt" = now() - interval \'2 days\' WHERE "clientId" = $1', [f.client.client_id]);
   });
+  await onDatabase(t.name, async (c) => {
+    await c.query('UPDATE "oauthAccessToken" SET "expiresAt" = now() - interval \'1 hour\' WHERE "clientId" = $1', [recent.client.client_id]);
+    await c.query('UPDATE "oauthRefreshToken" SET "expiresAt" = now() - interval \'1 hour\' WHERE "clientId" = $1', [recent.client.client_id]);
+  });
   await pruneMcp(pool, Math.floor(Date.now() / 60_000));
   expect([await count("oauthAccessToken", f.client.client_id), await count("oauthRefreshToken", f.client.client_id)]).toEqual([0, 0]);
+  expect([await count("oauthAccessToken", recent.client.client_id), await count("oauthRefreshToken", recent.client.client_id)]).toEqual([1, 1]);
   expect(await count("oauthAccessToken", keeper.client.client_id)).toBeGreaterThan(0);
   expect(await count("oauthRefreshToken", keeper.client.client_id)).toBeGreaterThan(0);
 });
@@ -462,22 +469,26 @@ test("a code issued before connections are switched off is refused afterwards, a
   expect(await onDatabase(t.name, async (c) => (await c.query("SELECT 1 FROM mcp_grants WHERE user_id = $1", [f.user.id])).rowCount)).toBe(0);
 });
 
-test("a grant can only shrink: it cannot be un-revoked or gain a scope, whoever writes it", async () => {
+test("a grant can only shrink: it cannot be un-revoked, gain a scope or change who, what, where or which project it is for, whoever writes it", async () => {
   const f = await fixture("none", WRITE);
-  await allow(f.session.activeOrganizationId, { connectionsAllowed: true, runControlAllowed: true });
-  await f.issue({ scope: "trawler:read offline_access" });
+  const org = f.session.activeOrganizationId;
+  await allow(org, { connectionsAllowed: true, runControlAllowed: true });
+  const project = await projectIn(org, "Pinned");
+  await f.issue({ scope: "trawler:read offline_access", project_id: project });
   const run = (sql: string) => onDatabase(t.name, (c) => c.query(sql, [f.user.id]));
   await expect(run("UPDATE mcp_grants SET scopes = scopes || ARRAY['trawler:runs:write'] WHERE user_id = $1")).rejects.toThrow(/never gains scopes/);
+  for (const change of ["project_id = NULL", "user_id = 'someone-else'", "org_id = 'elsewhere'", "client_id = 'another-client'", "code_hash = 'another-code'", "resource = 'https://elsewhere.test/api/mcp'"]) {
+    await expect(run(`UPDATE mcp_grants SET ${change} WHERE user_id = $1`), change).rejects.toThrow(/keeps its person, client, workspace and project/);
+  }
   await run("UPDATE mcp_grants SET revoked_at = now() WHERE user_id = $1");
   await expect(run("UPDATE mcp_grants SET revoked_at = NULL WHERE user_id = $1")).rejects.toThrow(/stays revoked/);
-  await expect(run("UPDATE mcp_grants SET project_id = NULL, resource = resource || 'x' WHERE user_id = $1")).rejects.toThrow(/keeps its person, client, workspace and project/);
-  await expect(run("UPDATE mcp_grants SET org_id = 'elsewhere' WHERE user_id = $1")).rejects.toThrow();
 });
 
 const keyring = new Keyring(randomBytes(32));
 const projectIn = (orgId: string, name: string) => withOrg(t.db, orgId, (tx) => createProject(tx, orgId, ProjectConfigSchema.parse({
   name, targetUrl: "https://app.acme.test/", personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "Get in." }],
 }), keyring, { demo: true }));
+
 
 test("a connection can be limited to one project of its own workspace, and nothing else", async () => {
   const f = await fixture();
@@ -561,13 +572,15 @@ test("only your own live connections in this workspace are listed, whether or no
   const dead = await idOf(await f.issue());
   const elsewhere = await idOf(await f.issue());
   const noRefresh = await idOf(await f.issue({ scope: "trawler:read" }));
+  const lapsed = await idOf(await f.issue());
   const theirs = await idOf(await colleague.issue());
   const ofGrant = (id: string) => `(SELECT code_hash FROM mcp_grants WHERE id = '${id}')`;
   await onDatabase(t.name, async (c) => {
     await c.query("SET session_replication_role = replica");
     await c.query("UPDATE mcp_grants SET org_id = $1 WHERE id = $2", [colleague.session.activeOrganizationId, elsewhere]);
     await c.query("UPDATE mcp_grants SET org_id = $1 WHERE id = $2", [org, theirs]);
-    await c.query(`UPDATE "oauthAccessToken" SET "expiresAt" = now() - interval '1 second' WHERE "authorizationCodeId" IN (${ofGrant(idle)}, ${ofGrant(dead)})`);
+    await c.query(`UPDATE "oauthAccessToken" SET "expiresAt" = now() - interval '1 second' WHERE "authorizationCodeId" IN (${ofGrant(idle)}, ${ofGrant(dead)}, ${ofGrant(lapsed)})`);
+    await c.query(`UPDATE "oauthRefreshToken" SET "expiresAt" = now() - interval '1 second' WHERE "authorizationCodeId" = ${ofGrant(lapsed)}`);
     await c.query(`UPDATE "oauthRefreshToken" SET revoked = now() WHERE "authorizationCodeId" = ${ofGrant(dead)}`);
   });
   const listed = async (userId: string, role: string) => (await connectionsOf(pool, userId, org, role)).map((c) => c.id).sort();
@@ -615,4 +628,12 @@ test("re-authorizing a project-limited client asks again, and the answer decides
   expect(new URL(again.headers.get("location")!, origin).pathname).toBe("/mcp/consent");
   const second = await f.issue();
   expect((await authenticateMcp(pool, second.access_token, resource))!.projectId).toBeNull();
+});
+
+test("an access token lasts about 15 minutes, which is what the consent page tells a client that does not stay connected", async () => {
+  const f = await fixture();
+  await f.issue();
+  const seconds = await onDatabase(t.name, async (c) => Number((await c.query<{ s: string }>('SELECT extract(epoch FROM "expiresAt" - "createdAt") AS s FROM "oauthAccessToken" WHERE "clientId" = $1', [f.client.client_id])).rows[0]!.s));
+  expect(seconds).toBeGreaterThan(14 * 60);
+  expect(seconds).toBeLessThan(16 * 60);
 });
