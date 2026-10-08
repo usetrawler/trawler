@@ -255,11 +255,11 @@ function verdictInText(reply: string): Verdict | null {
   }
 }
 
-async function askJudge(opts: { model: LanguageModel; finding: Finding; observation: ReplayObservation; scrubber: SecretScrubber; budget: Budget }, usage: JobUsage): Promise<{ verdict: Verdict | null; finishReason: string }> {
+async function askJudge(opts: { model: LanguageModel; finding: Finding; observation: ReplayObservation; brief?: string; scrubber: SecretScrubber; budget: Budget }, usage: JobUsage): Promise<{ verdict: Verdict | null; finishReason: string }> {
   const result = await generateText({
     model: opts.model,
     tools: { report_verdict: tool({ description: "Give your verdict on the claim.", inputSchema: Answer }) },
-    prompt: opts.scrubber.scrub(judgePrompt(opts.finding, opts.observation)),
+    prompt: opts.scrubber.scrub(judgePrompt(opts.finding, opts.observation, opts.brief)),
     maxOutputTokens: JUDGE_OUTPUT_TOKENS,
     onStepEnd: (step) => void tallyStep(usage, opts.budget, step),
   });
@@ -272,6 +272,7 @@ export async function judge(opts: {
   modelId: string;
   finding: Finding;
   observation: ReplayObservation;
+  brief?: string;
   scrubber: SecretScrubber;
   budget: Budget;
   emit: (e: RunEventInput) => void;

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { Budget } from "./llm.ts";
-import { leaksPullRequest, planForPullRequest, settleAccountFlow, settleTurns, type LeadPerson, type PullRequestText } from "./pr-plan.ts";
+import { leaksPullRequest, planForPullRequest, settleAccountFlow, settleBrief, settleTurns, type LeadPerson, type PullRequestText } from "./pr-plan.ts";
 import { scriptedModel, text } from "./testing.ts";
 
 const pr: PullRequestText = {
@@ -27,11 +27,9 @@ describe("leaksPullRequest", () => {
     ["Press the Invoice Export Button", "names a component"],
     ["Use the InvoiceExportButton", "uses a name from the code"],
     ["Call buildCsvRows for last month", "uses a name from the code"],
-    ["Add CSV export for invoices", "repeats the pull request's title"],
     ["Make sure it calls /api/invoices/export", "uses a name from the code"],
-    ["Open https://evil.example/steal", "mentions an address or the pull request"],
-    ["Check what #482 changed", "mentions an address or the pull request"],
-    ["Customers can now download every invoice", "repeats the pull request's words"],
+    ["Open https://evil.example/steal", "mentions an address or a number of an issue"],
+    ["Check what #482 changed", "mentions an address or a number of an issue"],
   ])("refuses %j", (instruction, why) => {
     expect(leaksPullRequest(instruction, pr)).toBe(why);
   });
@@ -39,6 +37,11 @@ describe("leaksPullRequest", () => {
   test("lets a goal phrased as what a user wants through", () => {
     expect(leaksPullRequest("Last month's invoices are downloaded as one spreadsheet", pr)).toBeNull();
     expect(leaksPullRequest("Tom opens the invoice Ana sent and sees its total", pr)).toBeNull();
+  });
+
+  test("lets a goal say what the change should do in the pull request's own words", () => {
+    expect(leaksPullRequest("Add CSV export for invoices", pr)).toBeNull();
+    expect(leaksPullRequest("Customers can now download every invoice of the last month as one file", pr)).toBeNull();
   });
 });
 
@@ -58,11 +61,11 @@ describe("planForPullRequest", () => {
     expect(model.doGenerateCalls).toHaveLength(1);
   });
 
-  test("fails a lead that copies the pull request's text or file names into a goal", async () => {
+  test("fails a lead that puts file, code or address names into a goal", async () => {
     const leaky = answer([{ person: "ana", goals: [
       { id: "a", instruction: "Click the InvoiceExportButton on the billing page" },
       { id: "b", instruction: "Open src/server/export_invoices.ts" },
-      { id: "c", instruction: "Add CSV export for invoices" },
+      { id: "c", instruction: "Open https://app.acme.test/export" },
       { id: "d", instruction: "All invoices come out as one spreadsheet" },
     ] }]);
     const model = scriptedModel([leaky, leaky]);
@@ -116,6 +119,34 @@ describe("planForPullRequest", () => {
     expect(new Set(turns[0]!.goals.map((g) => g.id)).size).toBe(8);
     expect(turns[0]!.goals[0]!.id).toBe("pr-goal-2");
     expect(dropped).toBe(4);
+  });
+
+  describe("the lead's brief", () => {
+    const goal = [{ person: "ana", goals: [{ id: "export", instruction: "Last month's invoices come out as one spreadsheet" }] }];
+    const withBrief = (turns: unknown, brief: unknown) => text(JSON.stringify({ turns, brief }));
+
+    test("comes back with the turns, and the prompt asks for it", async () => {
+      const model = scriptedModel([withBrief(goal, "Invoices of a month can now be downloaded as one CSV file. Try a month with no invoices too.")]);
+      const planned = await plan(model);
+      expect(planned.brief).toBe("Invoices of a month can now be downloaded as one CSV file. Try a month with no invoices too.");
+      expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toContain("Write brief");
+    });
+
+    test("is dropped without turns", async () => {
+      expect((await plan(scriptedModel([withBrief([], "Nothing to try.")]))).brief).toBeUndefined();
+    });
+
+    test("that names code is asked again and dropped when it still does", async () => {
+      const model = scriptedModel([withBrief(goal, "Press the InvoiceExportButton."), withBrief(goal, "Press the InvoiceExportButton.")]);
+      const planned = await plan(model);
+      expect(model.doGenerateCalls).toHaveLength(2);
+      expect(planned.brief).toBeUndefined();
+      expect(planned.turns).toHaveLength(1);
+    });
+
+    test("is cut to its limit", () => {
+      expect(settleBrief({ brief: "Try it. ".repeat(400) }, [{ person: "ana", goals: [] }], pr)!.length).toBeLessThanOrEqual(1200);
+    });
   });
 
   describe("a change the setup cannot show", () => {
@@ -186,9 +217,8 @@ describe("planForPullRequest", () => {
     });
 
     test.each([
-      ["names the pull request", "This pull request changes how people sign in."],
       ["names a file", "Touches invitations.ts and the invite page."],
-      ["repeats the pull request's words", "Admins can send an invitation link that expires"],
+      ["gives an address", "Changes https://app.acme.test/invite."],
       ["is empty", "   "],
     ])("the reason is dropped when it %s, and the flow stays", (_, reason) => {
       expect(settleAccountFlow({ accountFlow: "exercise", accountReason: reason }, invite)).toEqual({ accountFlow: "exercise" });

@@ -161,8 +161,8 @@ test("a failing lead never fails the run: the stored plan runs and the run says 
   await finish(run.id);
 });
 
-test("both: a lead whose goals all copy the pull request leaves the stored plan alone, and without a setup model the run still goes ahead", async () => {
-  const leaky = answer([{ person: "ana", goals: [{ id: "a", instruction: "Click the InvoiceExportButton" }, { id: "b", instruction: "Add CSV export for invoices" }] }]);
+test("both: a lead whose goals all name code or addresses leaves the stored plan alone, and without a setup model the run still goes ahead", async () => {
+  const leaky = answer([{ person: "ana", goals: [{ id: "a", instruction: "Click the InvoiceExportButton" }, { id: "b", instruction: "Open https://app.acme.test/export" }] }]);
   const { run } = await start("leaky", { planMode: "both" });
   await planDueRuns(lead(scriptedModel([leaky, leaky])));
   expect((await summary(run.id))!.prPlan).toMatchObject({ goals: [], note: expect.stringContaining("Nothing in this pull request points at a feature") });
@@ -204,7 +204,7 @@ test("stopping the run while the lead plans keeps the lead from changing it", as
 
 const LEE_GOAL = [{ person: "lee", goals: [{ id: "export", instruction: "Last month's invoices come out as one spreadsheet" }] }];
 const startOn = (project: string, over: Partial<Parameters<typeof startRun>[4]> = {}) => withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { ...options, pullRequest, ...over }));
-const snapshotOf = async (runId: string) => (await sql<{ config_snapshot: { personas: Array<{ id: string }>; goals: Array<{ id: string; instruction: string }> } }>`select config_snapshot from runs where id = ${runId}`.execute(t.db)).rows[0]!.config_snapshot;
+const snapshotOf = async (runId: string) => (await sql<{ config_snapshot: { personas: Array<{ id: string }>; goals: Array<{ id: string; instruction: string }>; brief?: string } }>`select config_snapshot from runs where id = ${runId}`.execute(t.db)).rows[0]!.config_snapshot;
 const stored = async (project: string) => (await sql<{ id: string; pr_number: number; version: number; created_by_run_id: string | null }>`select id, pr_number, version, created_by_run_id from plans where project_id = ${project} and kind = 'pull_request' order by pr_number`.execute(t.db)).rows;
 
 async function planned(project: string, answerTurns: unknown, over: Partial<Parameters<typeof startRun>[4]> = {}) {
@@ -295,4 +295,19 @@ test("two pull requests of one project keep separate plans", async () => {
   expect((await runPlan(back.id)).plan_name).toBe("PR #482 v1");
   expect((await stored(project)).map((r) => [r.pr_number, r.version])).toEqual([[482, 1], [483, 1]]);
   await finish(back.id);
+});
+
+test("the lead's brief reaches the run's config and its plan view, and is reused with the stored plan", async () => {
+  const brief = "Invoices of a month can now be downloaded as one CSV file. Try a month without invoices.";
+  const { project, run: first } = await start("brief");
+  await planDueRuns(lead(scriptedModel([text(JSON.stringify({ turns: LEE_GOAL, brief }))])));
+  expect((await snapshotOf(first.id)).brief).toBe(brief);
+  expect((await summary(first.id))!.prPlan).toMatchObject({ brief, reused: false });
+  const job = (await claimJob(t.db, keys))!;
+  expect(job.config.brief).toBe(brief);
+  await finish(first.id);
+  const second = await startOn(project);
+  expect((await snapshotOf(second.id)).brief).toBe(brief);
+  expect((await summary(second.id))!.prPlan).toMatchObject({ brief, reused: true });
+  await finish(second.id);
 });

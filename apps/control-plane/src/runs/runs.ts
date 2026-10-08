@@ -256,17 +256,17 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
     const { merged, stored } = reuse;
     if (prPlan!.mode === "change") {
       await usePrPlan(tx, { orgId, projectId, id: stored.id, sourceId: plan.id, content: { personas: merged!.personas, goals: merged!.added } });
-      planned = withTarget(await loadProjectConfig(tx, orgId, projectId, keys, stored.id));
+      planned = { ...withTarget(await loadProjectConfig(tx, orgId, projectId, keys, stored.id)), ...(stored.brief ? { brief: stored.brief } : {}) };
       ranOn = { id: stored.id, name: runPlanName(stored.name, stored.version) };
     } else {
-      if (merged) planned = { ...config, personas: merged.personas, goals: merged.goals };
+      if (merged) planned = { ...config, personas: merged.personas, goals: merged.goals, ...(stored.brief ? { brief: stored.brief } : {}) };
       await tx.updateTable("plans").set({ last_used_at: new Date() }).where("id", "=", stored.id).execute();
     }
     const flow = await accountsFor(tx, plan.id, providedAccounts, stored.accountFlow);
     providedAccounts = flow.accounts;
     prPlan = {
       mode: prPlan!.mode, goalIds: merged?.added.map((g) => g.id) ?? [], ...(merged ? {} : { note: NOTHING }), prPlanId: stored.id, version: stored.version, reused: true,
-      accountFlow: stored.accountFlow, ...(stored.accountReason ? { accountReason: stored.accountReason } : {}), signUps: flow.signUps,
+      accountFlow: stored.accountFlow, ...(stored.accountReason ? { accountReason: stored.accountReason } : {}), ...(merged && stored.brief ? { brief: stored.brief } : {}), signUps: flow.signUps,
     };
   }
   const turns = turnsOf(planned);
@@ -519,7 +519,7 @@ function pullRequestOf(pr: PullRequest | null) {
 
 function plannedFor(record: PrPlanRecord, number: number | null, snapshot: ConfigSnapshot, createdByRun: number | null) {
   const chosen = new Set(record.goalIds);
-  return { number, mode: record.mode, note: record.note ?? null, version: record.version ?? null, reused: record.reused === true, createdByRun, ...(record.signUps?.length ? { signUps: record.signUps } : {}), ...(record.accountReason ? { accountReason: record.accountReason } : {}), goals: snapshot.goals.filter((g) => chosen.has(g.id)).map((g) => ({ id: g.id, instruction: g.instruction, personaId: g.personaId ?? null })) };
+  return { number, mode: record.mode, note: record.note ?? null, version: record.version ?? null, reused: record.reused === true, createdByRun, ...(record.signUps?.length ? { signUps: record.signUps } : {}), ...(record.accountReason ? { accountReason: record.accountReason } : {}), ...(record.brief ? { brief: record.brief } : {}), goals: snapshot.goals.filter((g) => chosen.has(g.id)).map((g) => ({ id: g.id, instruction: g.instruction, personaId: g.personaId ?? null })) };
 }
 
 export type RunSummary = NonNullable<Awaited<ReturnType<typeof runSummary>>>;

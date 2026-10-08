@@ -1,13 +1,12 @@
 import type { LanguageModel } from "ai";
 import { z } from "zod";
-import type { JobUsage } from "@usetrawler/protocol";
+import { MAX_BRIEF, type JobUsage } from "@usetrawler/protocol";
 import type { Budget } from "./llm.ts";
 import { prPlanPrompt } from "./prompts.ts";
 import { ask, clip } from "./setup.ts";
 
 export const MAX_LEAD_GOALS = 8;
 const GOAL_CHARS = 300;
-const SHINGLE = 5;
 
 export interface PullRequestText {
   title?: string;
@@ -36,6 +35,7 @@ const Answer = z.object({
   accountFlow: z.string().optional().catch(undefined).describe('"provided" or "exercise"'),
   accountReason: z.string().optional().catch(undefined),
   notVisibleHere: z.string().optional().catch(undefined),
+  brief: z.string().optional().catch(undefined),
 });
 
 const words = (text: string) => text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
@@ -43,14 +43,10 @@ const identifierWords = (name: string) => words(name.replace(/([a-z\d])([A-Z])/g
 const contains = (haystack: string[], needle: string[]) => needle.length > 0 && haystack.some((_, i) => needle.every((w, j) => haystack[i + j] === w));
 const codeShaped = (token: string) => /[a-z\d][A-Z]/.test(token) || /[A-Za-z\d]_[A-Za-z\d]/.test(token) || token.includes("/") || /[A-Za-z]\.[a-z]{1,5}$/.test(token) || /\(\)$/.test(token);
 
-function shingles(list: string[]): Set<string> {
-  return new Set(list.map((_, i) => list.slice(i, i + SHINGLE)).filter((s) => s.length === SHINGLE).map((s) => s.join(" ")));
-}
-
 export function leaksPullRequest(instruction: string, pr: PullRequestText): string | null {
   const lower = instruction.toLowerCase();
   const goalWords = words(instruction);
-  if (/[a-z][a-z0-9+.-]*:\/\/|\bwww\.|#\d+|\bpull request\b|\bPR\b/i.test(instruction)) return "mentions an address or the pull request";
+  if (/[a-z][a-z0-9+.-]*:\/\/|\bwww\.|#\d+/i.test(instruction)) return "mentions an address or a number of an issue";
   for (const file of pr.changedFiles ?? []) {
     const path = file.toLowerCase();
     const base = path.split("/").at(-1)!;
@@ -68,10 +64,6 @@ export function leaksPullRequest(instruction: string, pr: PullRequestText): stri
   for (const [, code] of source.matchAll(/`([^`\n]{3,80})`/g)) {
     if (lower.includes(code!.toLowerCase())) return "uses a name from the code";
   }
-  const title = words(pr.title ?? "");
-  if (title.length >= 3 && contains(goalWords, title)) return "repeats the pull request's title";
-  const seen = shingles(words(source));
-  for (const s of shingles(goalWords)) if (seen.has(s)) return "repeats the pull request's words";
   return null;
 }
 
@@ -81,8 +73,9 @@ function problemsOf(answer: z.infer<typeof Answer>, people: LeadPerson[], pr: Pu
     ...(known.has(turn.person) ? [] : [`${JSON.stringify(turn.person)} is not one of the people; choose only ids from the list`]),
     ...turn.goals.flatMap((g) => {
       const leak = leaksPullRequest(g.instruction, pr);
-      return leak ? [`goal ${JSON.stringify(g.id)} ${leak}; write it as the outcome a user wants, in your own words, without anything from the pull request`] : [];
+      return leak ? [`goal ${JSON.stringify(g.id)} ${leak}; write it as the outcome a user should get, without file, code or address names`] : [];
     }),
+    ...(typeof answer.brief === "string" && leaksPullRequest(answer.brief, pr) ? [`the brief ${leaksPullRequest(answer.brief, pr)}; say what the feature does in a user's words, without file, code or address names`] : []),
   ]);
 }
 
@@ -126,6 +119,12 @@ export function settleNotVisible(answer: { notVisibleHere?: unknown }, turns: Le
   return reason && !leaksPullRequest(reason, pr) ? reason : undefined;
 }
 
+export function settleBrief(answer: { brief?: unknown }, turns: LeadTurn[], pr: PullRequestText): string | undefined {
+  if (turns.length === 0 || typeof answer.brief !== "string") return undefined;
+  const brief = clip(answer.brief, MAX_BRIEF);
+  return brief && !leaksPullRequest(brief, pr) ? brief : undefined;
+}
+
 export async function planForPullRequest(opts: {
   model: LanguageModel;
   modelId: string;
@@ -137,9 +136,10 @@ export async function planForPullRequest(opts: {
   goals: Array<{ person: string; instruction: string }>;
   takenGoalIds?: string[];
   page?: string;
-}): Promise<{ turns: LeadTurn[]; dropped: number; usage: JobUsage; accountFlow: AccountFlow; accountReason?: string; notVisibleHere?: string }> {
+}): Promise<{ turns: LeadTurn[]; dropped: number; usage: JobUsage; accountFlow: AccountFlow; accountReason?: string; notVisibleHere?: string; brief?: string }> {
   const { answer, usage } = await ask(opts, Answer, prPlanPrompt(opts), (a) => problemsOf(a, opts.people, opts.pullRequest));
   const settled = settleTurns(answer, opts.people, opts.pullRequest, opts.takenGoalIds);
   const notVisibleHere = settleNotVisible(answer, settled.turns, opts.pullRequest);
-  return { ...settled, ...settleAccountFlow(answer, opts.pullRequest), ...(notVisibleHere ? { notVisibleHere } : {}), usage };
+  const brief = settleBrief(answer, settled.turns, opts.pullRequest);
+  return { ...settled, ...settleAccountFlow(answer, opts.pullRequest), ...(notVisibleHere ? { notVisibleHere } : {}), ...(brief ? { brief } : {}), usage };
 }

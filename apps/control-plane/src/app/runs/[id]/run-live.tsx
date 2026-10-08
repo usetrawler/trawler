@@ -100,6 +100,12 @@ export function PullRequestPlan({ run }: { run: RunSummary }) {
             <p className="text-sm text-muted">{`Plan v${plan.version} of this pull request, ${plan.reused ? `reused${plan.createdByRun ? ` from run #${plan.createdByRun}` : ""}` : "created in this run"}.`}</p>
           )}
           <p className="text-sm text-muted">{plan.mode === "both" ? "The project's plan runs as it is, with these goals added for the change." : "Only these goals run, aimed at the change."}</p>
+          {plan.brief && (
+            <div className="flex flex-col gap-1">
+              <p className="text-sm font-bold">What the lead told the team</p>
+              <p className="border-l-2 border-line pl-3 text-sm break-words whitespace-pre-line">{plan.brief}</p>
+            </div>
+          )}
           <ul className="flex flex-col gap-1.5 border-l-2 border-action pl-3 text-sm">
             {plan.goals.map((g) => (
               <li key={g.id}><span className="font-bold">{name(g.personaId)}</span> <span className="text-muted">wants</span> {g.instruction}</li>
