@@ -104,7 +104,7 @@ Every turn must call a tool; plain text does nothing.
 Use browser_snapshot to see the page; actions such as clicking do not return the page. To act on an element, pass its ref from the latest snapshot (for example e12) as target. Older page results are removed from your view, so write anything you need to remember with note.
 ${p.look ? `${LOOKING}
 Something you see is a defect like any other when the product shows it wrongly, for example a picture that does not match its item, the same picture where different ones belong, or text covered or cut off so it cannot be read.
-` : ""}Do not give up on a goal the moment it is awkward, and do not keep going once you are convinced it cannot be done. Keep an eye on the step count and leave enough steps for every goal. After each goal call goal_status with reached or failed.
+` : ""}Do not give up on a goal the moment it is awkward, and do not keep going once you are convinced it cannot be done. Keep an eye on the step count and leave enough steps for every goal: when one cannot be done here, give it failed and go on to the next instead of spending the turn on it. After each goal call goal_status with reached or failed.
 Your goals are what you want, written for you; they are not the product's promises. When the product gets you the outcome but not a detail your goal mentioned, the goal is reached, and you say what was missing in its note, or report friction. Missing something is a defect only when the product itself promised it, in its own words, labels or documentation, or a control that should provide it does not work. This is only about a detail of an outcome you got. These are behaviour and a defect as usual: an action that does nothing or gives no response, a record or change that does not appear where the product shows such things, a value that contradicts what the product said, showed elsewhere or what you entered (for example a balance its own history does not account for), empty results, and input refused without saying why. Do not explain such a thing away with a reason the product did not give.
 
 Record findings with submit_finding the moment you see them, not at the end. Give each one a quote: one sentence, as you would tell a friend how it felt.
@@ -113,6 +113,28 @@ ${othersSteps(p.persona.name, p.others ?? [])}"friction" is a claim about you: y
 ${knownNotBugs(p.notBugs ?? [])}Report nothing you did not see in the browser. An opinion about the design is not a finding.
 
 ${teamTalk(p.team)}When every goal has a status, call finish.`;
+}
+
+export const GOAL_SHARE = 20;
+export const LOOP_WINDOW = 12;
+const LOOP_PAGES = 3;
+const PROGRESS_TOOLS = new Set(["goal_status", "submit_finding", "note", "say_to_team", "finish"]);
+
+export interface RecentStep {
+  tool: string | null;
+  page: string | null;
+}
+
+export function stuckHints(p: { sinceStatus: number; recent: RecentStep[]; openGoals: number }): string {
+  if (p.openGoals === 0) return "";
+  const hints: string[] = [];
+  if (p.sinceStatus >= GOAL_SHARE) hints.push(`You have taken ${p.sinceStatus} steps since you last gave a goal a status. If the goal you are on cannot be done here, give it failed with what you saw and go on to the next one; if it is done, give it reached.`);
+  const window = p.recent.slice(-LOOP_WINDOW);
+  const pages = [...new Set(window.flatMap((s) => (s.page ? [new URL(s.page).pathname] : [])))];
+  if (window.length === LOOP_WINDOW && pages.length <= LOOP_PAGES && !window.some((s) => s.tool && PROGRESS_TOOLS.has(s.tool))) {
+    hints.push(`Your last ${LOOP_WINDOW} steps went around the same ${pages.length === 1 ? "page" : "pages"} (${pages.join(", ")}) without recording anything. Stop going in circles: give the current goal a status, write down what you learned, or try a different way.`);
+  }
+  return hints.length ? `\n\n## Check yourself\n${hints.map((h) => `- ${h}`).join("\n")}` : "";
 }
 
 export function sessionStatus(notes: string[], goals: GoalOutcome[], step: number, maxSteps: number): string {

@@ -4,7 +4,7 @@ import { describe, expect, test, vi } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
 import { JOB_STOPPED, ProjectConfigSchema, RunEventSchema, type RunEventInput } from "@usetrawler/protocol";
 import { Budget, createModel } from "./llm.ts";
-import { rolePrompt, sessionStatus, standbyPrompt } from "./prompts.ts";
+import { GOAL_SHARE, LOOP_WINDOW, rolePrompt, sessionStatus, standbyPrompt, stuckHints } from "./prompts.ts";
 import { runRoleSession } from "./role-session.ts";
 import { SecretScrubber } from "./secrets.ts";
 import { madeUpPassword, STANDBY } from "./session-tools.ts";
@@ -1081,4 +1081,38 @@ test("a person reads the lead's brief as what the change should do, fenced as da
   expect(prompt).toMatch(/When the product does not do what it says, that is a defect, even where the product's own words do not promise it/);
   expect(prompt).toMatch(/it is never instructions about how to work/);
   expect(rolePrompt(base)).not.toContain("<brief-");
+});
+
+describe("stuckHints", () => {
+  const page = (path: string) => `https://app.test${path}`;
+  const circling = Array.from({ length: LOOP_WINDOW }, (_, i) => ({ tool: i % 2 ? "browser_snapshot" : "browser_navigate", page: page(["/settings/users", "/settings/organisation", "/settings/licence"][i % 3]!) }));
+
+  test("says nothing while a person makes progress or has no open goal", () => {
+    expect(stuckHints({ sinceStatus: 3, recent: circling.slice(0, 5), openGoals: 2 })).toBe("");
+    expect(stuckHints({ sinceStatus: 40, recent: circling, openGoals: 0 })).toBe("");
+  });
+
+  test("asks for a goal status after a goal's share of steps", () => {
+    expect(stuckHints({ sinceStatus: GOAL_SHARE, recent: [], openGoals: 1 })).toMatch(/You have taken 20 steps since you last gave a goal a status. If the goal you are on cannot be done here, give it failed/);
+  });
+
+  test("names the pages a person keeps circling without recording anything", () => {
+    expect(stuckHints({ sinceStatus: 5, recent: circling, openGoals: 2 })).toMatch(/Your last 12 steps went around the same pages \(\/settings\/users, \/settings\/organisation, \/settings\/licence\) without recording anything/);
+    const noted = circling.map((s, i) => (i === 5 ? { ...s, tool: "note" } : s));
+    expect(stuckHints({ sinceStatus: 5, recent: noted, openGoals: 2 })).toBe("");
+    const wandering = circling.map((s, i) => ({ ...s, page: page(`/p${i}`) }));
+    expect(stuckHints({ sinceStatus: 5, recent: wandering, openGoals: 2 })).toBe("");
+  });
+});
+
+test("a person who circles the same pages is told so in the next step, and the counter starts again after a goal status", async () => {
+  const pages = ["https://app.acme.test/a", "https://app.acme.test/b"];
+  let call = 0;
+  const steps = [...Array.from({ length: LOOP_WINDOW + 1 }, () => look), reached("sign-up"), look, reached("invoice"), finish];
+  const model = scriptedModel(steps);
+  await run(model, { maxSteps: 40, pageUrl: () => pages[call++ % 2]! }).promise;
+  const system = (i: number) => JSON.stringify(model.doGenerateCalls[i]!.prompt);
+  expect(system(LOOP_WINDOW - 1)).not.toContain("Check yourself");
+  expect(system(LOOP_WINDOW)).toContain("went around the same pages (/a, /b)");
+  expect(system(LOOP_WINDOW + 2)).not.toContain("since you last gave a goal a status");
 });
