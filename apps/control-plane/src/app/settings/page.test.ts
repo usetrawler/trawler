@@ -166,6 +166,7 @@ test("the plan shows what the workspace has used of its limits, and what to do p
 test("AI assistant access shows both choices to everyone, and only an owner or admin can change them", async () => {
   const ownerHtml = renderToStaticMarkup(await SettingsPage());
   expect(text(ownerHtml)).toContain("AI assistant access (MCP)");
+  expect(ownerHtml.match(/<input[^>]*name="org"[^>]*>/)?.[0]).toContain('value="org-1"');
   expect(ownerHtml.match(/<input[^>]*name="connections"[^>]*>/)?.[0]).toContain("checked");
   expect(ownerHtml.match(/<input[^>]*name="runControl"[^>]*>/)?.[0]).not.toContain("checked");
   state.mcp = { connectionsAllowed: false, runControlAllowed: false };

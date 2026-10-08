@@ -10,3 +10,16 @@ CREATE POLICY workspace_mcp_settings_auth ON workspace_mcp_settings FOR SELECT T
 GRANT SELECT ON workspace_mcp_settings TO trawler_auth;
 
 GRANT UPDATE (revoked_at, scopes) ON mcp_grants TO trawler_app;
+
+CREATE FUNCTION mcp_grants_only_shrink() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS NULL THEN
+    RAISE EXCEPTION 'a revoked MCP grant stays revoked';
+  END IF;
+  IF NOT (NEW.scopes <@ OLD.scopes) THEN
+    RAISE EXCEPTION 'an MCP grant never gains scopes';
+  END IF;
+  RETURN NEW;
+END
+$$;
+CREATE TRIGGER mcp_grants_only_shrink BEFORE UPDATE OF revoked_at, scopes ON mcp_grants FOR EACH ROW EXECUTE FUNCTION mcp_grants_only_shrink();

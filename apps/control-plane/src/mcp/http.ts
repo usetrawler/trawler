@@ -1,7 +1,7 @@
 import type pg from "pg";
 import { consentWorkspace, flowKey } from "./consent.ts";
 import { mcpResource, tokenHash } from "./config.ts";
-import { authenticateMcp, persistGrant } from "./oauth.ts";
+import { authenticateMcp, GrantRefused, persistGrant } from "./oauth.ts";
 import { mcpSettingsOf } from "./settings.ts";
 
 const MAX_BODY = 64 * 1024;
@@ -151,7 +151,12 @@ export function oauthBoundary(handler: (r: Request) => Promise<Response>, pool: 
         if (endpoint === "token" && body.grant_type === "authorization_code" && response.ok) {
           const tokens = await response.clone().json() as { access_token?: string };
           if (!tokens.access_token) return oauthError("temporarily_unavailable", 503);
-          await persistGrant(pool, tokens.access_token, resource);
+          try {
+            await persistGrant(pool, tokens.access_token, resource);
+          } catch (error) {
+            if (error instanceof GrantRefused) return oauthError("access_denied", 403);
+            throw error;
+          }
         }
         return response;
       };

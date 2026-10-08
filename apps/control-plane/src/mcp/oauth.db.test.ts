@@ -421,3 +421,48 @@ test("switching connections off disconnects this workspace at once, refuses cons
   expect(await authenticateMcp(pool, tokens.access_token, resource)).toBeNull();
   expect(await authenticateMcp(pool, (await f.issue()).access_token, resource)).toBeTruthy();
 });
+
+test("a run control choice narrowed to read at consent stays read-only although the workspace allows run control", async () => {
+  const f = await fixture("none", WRITE);
+  await allow(f.session.activeOrganizationId, { connectionsAllowed: true, runControlAllowed: true });
+  const narrowed = await f.issue({ scope: "trawler:read offline_access" });
+  expect((await authenticateMcp(pool, narrowed.access_token, resource))!.scopes).not.toContain("trawler:runs:write");
+  const wide = await f.issue();
+  expect((await authenticateMcp(pool, wide.access_token, resource))!.scopes).toContain("trawler:runs:write");
+});
+
+test("a code issued before run control is switched off is redeemed without it, and switching it on again does not give it back", async () => {
+  const f = await fixture("none", WRITE);
+  const org = f.session.activeOrganizationId;
+  await allow(org, { connectionsAllowed: true, runControlAllowed: true });
+  const code = await f.code();
+  await allow(org, { connectionsAllowed: true, runControlAllowed: false });
+  const redeemed = await f.redeem(code);
+  expect(redeemed.status, await redeemed.clone().text()).toBe(200);
+  const tokens = await redeemed.json() as { access_token: string };
+  await allow(org, { connectionsAllowed: true, runControlAllowed: true });
+  const principal = await authenticateMcp(pool, tokens.access_token, resource);
+  expect(principal!.scopes).toContain("trawler:read");
+  expect(principal!.scopes).not.toContain("trawler:runs:write");
+});
+
+test("a code issued before connections are switched off is refused afterwards, and no grant appears when they are switched on again", async () => {
+  const f = await fixture();
+  const org = f.session.activeOrganizationId;
+  const code = await f.code();
+  await allow(org, { connectionsAllowed: false, runControlAllowed: false });
+  const refused = await f.redeem(code);
+  expect(refused.status).toBe(403);
+  await allow(org, { connectionsAllowed: true, runControlAllowed: false });
+  expect(await onDatabase(t.name, async (c) => (await c.query("SELECT 1 FROM mcp_grants WHERE user_id = $1", [f.user.id])).rowCount)).toBe(0);
+});
+
+test("a grant can only shrink: it cannot be un-revoked or gain a scope, whoever writes it", async () => {
+  const f = await fixture("none", WRITE);
+  await allow(f.session.activeOrganizationId, { connectionsAllowed: true, runControlAllowed: true });
+  await f.issue({ scope: "trawler:read offline_access" });
+  const run = (sql: string) => onDatabase(t.name, (c) => c.query(sql, [f.user.id]));
+  await expect(run("UPDATE mcp_grants SET scopes = scopes || ARRAY['trawler:runs:write'] WHERE user_id = $1")).rejects.toThrow(/never gains scopes/);
+  await run("UPDATE mcp_grants SET revoked_at = now() WHERE user_id = $1");
+  await expect(run("UPDATE mcp_grants SET revoked_at = NULL WHERE user_id = $1")).rejects.toThrow(/stays revoked/);
+});

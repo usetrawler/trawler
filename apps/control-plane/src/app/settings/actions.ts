@@ -127,6 +127,7 @@ export interface McpAccessState {
 export async function setMcpAccessAction(_previous: McpAccessState, form: FormData): Promise<McpAccessState> {
   const member = await manager();
   if ("error" in member) return member;
+  if (form.get("org") !== member.orgId) return { error: "The workspace changed since this page was loaded. Reload the page, then change its MCP access." };
   const connectionsAllowed = form.get("connections") === "on";
   const runControlAllowed = connectionsAllowed && form.get("runControl") === "on";
   const changed = await withOrg(getDb(), member.orgId, (tx) => setMcpSettings(tx, member.orgId, { connectionsAllowed, runControlAllowed }, member.userId));

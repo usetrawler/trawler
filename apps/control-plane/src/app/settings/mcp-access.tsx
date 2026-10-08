@@ -1,6 +1,6 @@
 "use client";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
-import { startTransition, useActionState, useState } from "react";
+import { startTransition, useActionState, useEffect, useState } from "react";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { setMcpAccessAction, type McpAccessState } from "./actions.ts";
 import { button, heading, panel } from "./styles.ts";
@@ -24,16 +24,16 @@ export function saidAfterSaving(state: McpAccessState): string {
   return parts.join(" ");
 }
 
-export function McpAccess({ connectionsAllowed, runControlAllowed, canManage }: { connectionsAllowed: boolean; runControlAllowed: boolean; canManage: boolean }) {
+export function McpAccess({ orgId, connectionsAllowed, runControlAllowed, canManage }: { orgId: string; connectionsAllowed: boolean; runControlAllowed: boolean; canManage: boolean }) {
   return (
     <section aria-labelledby="mcp-heading" className={panel}>
       <h2 id="mcp-heading" className={heading}>AI assistant access (MCP)</h2>
       <p className="text-sm text-muted">
         Lets an AI assistant such as Claude or Cursor, signed in as a member, read this workspace&apos;s projects, runs and findings. Starting and stopping runs
-        spends the workspace&apos;s budget, so it is a separate choice and is off until an owner or admin turns it on.
+        spends the workspace&apos;s budget, so it is a separate choice and starts switched off.
       </p>
       {canManage
-        ? <McpAccessForm connectionsAllowed={connectionsAllowed} runControlAllowed={runControlAllowed} />
+        ? <McpAccessForm orgId={orgId} connectionsAllowed={connectionsAllowed} runControlAllowed={runControlAllowed} />
         : <p className="text-sm">
             <span className="text-muted">Connections: </span>{connectionsAllowed ? "allowed" : "off"}
             <span className="text-muted"> · Run control: </span>{runControlAllowed ? "allowed" : "off"}
@@ -43,12 +43,18 @@ export function McpAccess({ connectionsAllowed, runControlAllowed, canManage }: 
   );
 }
 
-function McpAccessForm({ connectionsAllowed, runControlAllowed }: { connectionsAllowed: boolean; runControlAllowed: boolean }) {
+function McpAccessForm({ orgId, connectionsAllowed, runControlAllowed }: { orgId: string; connectionsAllowed: boolean; runControlAllowed: boolean }) {
   const [state, action, pending] = useActionState<McpAccessState, FormData>(setMcpAccess, {});
   const [connections, setConnections] = useState(connectionsAllowed);
   const [runControl, setRunControl] = useState(runControlAllowed);
   const [touched, setTouched] = useState(false);
+  useEffect(() => {
+    setConnections(connectionsAllowed);
+    setRunControl(runControlAllowed);
+  }, [connectionsAllowed, runControlAllowed]);
   const said = touched || pending ? "" : saidAfterSaving(state);
+  const disconnecting = connectionsAllowed && !connections;
+  const takingControl = !disconnecting && runControlAllowed && !runControl;
   return (
     <form
       className="flex flex-col gap-3"
@@ -61,6 +67,7 @@ function McpAccessForm({ connectionsAllowed, runControlAllowed }: { connectionsA
         startTransition(() => action(data));
       }}
     >
+      <input type="hidden" name="org" value={orgId} />
       <label className="flex items-start gap-3 text-sm">
         <input type="checkbox" name="connections" checked={connections} onChange={(e) => { setConnections(e.target.checked); if (!e.target.checked) setRunControl(false); }} className="mt-1" />
         <span><strong>Allow AI assistants to connect.</strong> <span className="text-muted">Turning this off disconnects every connection of this workspace at once.</span></span>
@@ -69,8 +76,10 @@ function McpAccessForm({ connectionsAllowed, runControlAllowed }: { connectionsA
         <input type="checkbox" name="runControl" checked={runControl} disabled={!connections} onChange={(e) => setRunControl(e.target.checked)} className="mt-1" />
         <span><strong>Allow assistants to start and stop runs.</strong> <span className="text-muted">Turning this off removes that right from existing connections; turning it on again does not bring it back, so each person has to connect again and agree.</span></span>
       </label>
+      {disconnecting && <p className="border-l-2 border-bad pl-3 text-sm">Saving disconnects every AI assistant connection of this workspace, for everyone, at once. They have to connect again and agree again once you allow it.</p>}
+      {takingControl && <p className="border-l-2 border-line pl-3 text-sm">Saving removes the right to start and stop runs from every existing connection. Turning it on again later does not bring it back.</p>}
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" aria-disabled={pending || undefined} className={button}>{pending ? "Saving…" : "Save"}</button>
+        <button type="submit" aria-disabled={pending || undefined} className={button}>{pending ? "Saving…" : disconnecting ? "Disconnect everyone and save" : "Save"}</button>
         <span role="status" className="text-sm text-ok">{said}</span>
       </div>
       {state.error && !pending && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{state.error}</p>}

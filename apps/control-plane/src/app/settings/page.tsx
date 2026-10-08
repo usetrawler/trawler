@@ -68,7 +68,7 @@ export default async function SettingsPage() {
           projects={projectList.map((p) => ({ id: p.id, name: p.name }))}
           canManage={canManage}
         />
-        <McpAccess connectionsAllowed={mcp.connectionsAllowed} runControlAllowed={mcp.runControlAllowed} canManage={canManage} />
+        <McpAccess orgId={orgId} connectionsAllowed={mcp.connectionsAllowed} runControlAllowed={mcp.runControlAllowed} canManage={canManage} />
       </div>
     </AppShell>
   );

@@ -98,11 +98,11 @@ test("a budget outside $1 to $100,000, with more than cents, or not a number is 
 });
 
 test("an owner or admin chooses whether assistants may connect and whether they may control runs, and run control cannot outlive connections", async () => {
-  expect(await setMcpAccessAction({}, form({ connections: "on", runControl: "on" }))).toEqual({ saved: true, revokedGrants: 2, strippedGrants: 1 });
+  expect(await setMcpAccessAction({}, form({ org: "org-1", connections: "on", runControl: "on" }))).toEqual({ saved: true, revokedGrants: 2, strippedGrants: 1 });
   state.member = { ...owner, role: "admin" };
-  await setMcpAccessAction({}, form({ connections: "on" }));
-  await setMcpAccessAction({}, form({ runControl: "on" }));
-  await setMcpAccessAction({}, form({}));
+  await setMcpAccessAction({}, form({ org: "org-1", connections: "on" }));
+  await setMcpAccessAction({}, form({ org: "org-1", runControl: "on" }));
+  await setMcpAccessAction({}, form({ org: "org-1" }));
   expect(state.mcpSettings).toEqual([
     ["org-1", { connectionsAllowed: true, runControlAllowed: true }, "user-1"],
     ["org-1", { connectionsAllowed: true, runControlAllowed: false }, "user-1"],
@@ -112,9 +112,15 @@ test("an owner or admin chooses whether assistants may connect and whether they 
   expect(state.revalidated).toEqual([...EVERY_PAGE, ...EVERY_PAGE, ...EVERY_PAGE, ...EVERY_PAGE]);
 });
 
+test("a page left open for another workspace changes nothing", async () => {
+  expect(await setMcpAccessAction({}, form({ org: "org-2", connections: "on" }))).toEqual({ error: "The workspace changed since this page was loaded. Reload the page, then change its MCP access." });
+  expect(await setMcpAccessAction({}, form({ connections: "on" }))).toHaveProperty("error");
+  expect([state.mcpSettings, state.revalidated]).toEqual([[], []]);
+});
+
 test("a member who is neither owner nor admin changes no MCP setting", async () => {
   state.member = { ...owner, role: "member" };
-  expect(await setMcpAccessAction({}, form({ connections: "on", runControl: "on" }))).toEqual({ error: OWNERS_AND_ADMINS });
+  expect(await setMcpAccessAction({}, form({ org: "org-1", connections: "on", runControl: "on" }))).toEqual({ error: OWNERS_AND_ADMINS });
   expect([state.mcpSettings, state.revalidated]).toEqual([[], []]);
 });
 
