@@ -15,7 +15,7 @@ const resource = `${origin}/api/mcp`;
 const auth = createAuth({ pool, secret, baseURL: origin, mcp: { dcr: true } });
 afterAll(async () => { await pool.end(); await t.drop(); });
 
-async function fixture() {
+async function fixture(method = "none") {
   const ctx = await auth.$context;
   const user = await ctx.internalAdapter.createUser({ email: `${randomUUID()}@example.test`, emailVerified: true, name: "Alex" }, { method: "admin" });
   const session = await ctx.internalAdapter.createSession(user.id, false) as unknown as { id: string; token: string; activeOrganizationId: string };
@@ -32,10 +32,11 @@ async function fixture() {
   };
   const registered = await call("/api/auth/oauth2/register", {
     client_name: "Integration client", redirect_uris: ["http://localhost:9876/callback"],
-    token_endpoint_auth_method: "none", application_type: "native", grant_types: ["authorization_code", "refresh_token"], response_types: ["code"],
+    token_endpoint_auth_method: method, application_type: "native", grant_types: ["authorization_code", "refresh_token"], response_types: ["code"],
   }, false);
   expect(registered.status, await registered.clone().text()).toBe(201);
-  const client = await registered.json() as { client_id: string };
+  const client = await registered.json() as { client_id: string; client_secret?: string };
+  if (method === "client_secret_basic") headers.set("authorization", `Basic ${Buffer.from(`${client.client_id}:${client.client_secret}`).toString("base64")}`);
   const verifier = "a".repeat(64);
   const query = new URLSearchParams({ client_id: client.client_id, redirect_uri: "http://localhost:9876/callback", response_type: "code", prompt: "consent", scope: "trawler:read offline_access", resource, state: "state-for-this-flow", code_challenge_method: "S256", code_challenge: tokenHash(verifier) });
   const authorize = (q = query) => call(`/api/auth/oauth2/authorize?${q}`);
@@ -132,4 +133,70 @@ test("provider failures yield 503 without logging request credentials", async ()
     expect(JSON.stringify([...error.mock.calls, ...log.mock.calls])).not.toContain(tokens.access_token);
     expect(JSON.stringify([...error.mock.calls, ...log.mock.calls])).not.toContain(tokens.refresh_token);
   } finally { query.mockRestore(); error.mockRestore(); log.mockRestore(); }
+});
+
+test("provider adapter failures yield sanitized 503 without Better Call console output", async () => {
+  const f = await fixture();
+  const tokens = await f.issue();
+  const logs = [vi.spyOn(console, "error"), vi.spyOn(console, "warn"), vi.spyOn(console, "log")];
+  const query = vi.spyOn((await auth.$context).adapter, "findOne").mockRejectedValueOnce(new Error(`backend failed with ${tokens.access_token} ${tokens.refresh_token}`));
+  try {
+    const response = await f.call("/api/auth/oauth2/revoke", { token: tokens.access_token, token_type_hint: "access_token", client_id: f.client.client_id }, false);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "temporarily_unavailable" });
+    const output = JSON.stringify(logs.flatMap(log => log.mock.calls));
+    expect(output).not.toContain(tokens.access_token);
+    expect(output).not.toContain(tokens.refresh_token);
+  } finally { query.mockRestore(); for (const log of logs) log.mockRestore(); }
+});
+
+
+test("confidential refresh uses Basic authentication and a wrong secret cannot revoke a grant", async () => {
+  const f = await fixture("client_secret_basic");
+  const tokens = await f.issue();
+  const response = await f.refresh(tokens.refresh_token, { client_id: "" });
+  expect(response.status, await response.clone().text()).toBe(200);
+  const next = await response.json() as { access_token: string };
+  const bad = new Headers(f.headers);
+  bad.delete("cookie");
+  bad.set("content-type", "application/x-www-form-urlencoded");
+  bad.set("authorization", `Basic ${Buffer.from(`${f.client.client_id}:incorrect-secret`).toString("base64")}`);
+  const replay = await auth.handler(new Request(`${origin}/api/auth/oauth2/token`, {
+    method: "POST", headers: bad,
+    body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: tokens.refresh_token, resource }).toString(),
+  }));
+  expect(replay.status).toBe(401);
+  expect(await authenticateMcp(pool, next.access_token, resource)).toBeTruthy();
+  expect((await f.refresh(tokens.refresh_token)).status).toBe(400);
+  expect(await authenticateMcp(pool, next.access_token, resource)).toBeNull();
+});
+
+test("live membership, expiry, provider revocation and sender constraints are checked on every request", async () => {
+  const f = await fixture();
+  const tokens = await f.issue();
+  expect(await authenticateMcp(pool, tokens.access_token, resource)).toBeTruthy();
+  await pool.query(`UPDATE member SET role = 'member' WHERE "userId" = $1`, [f.user.id]);
+  expect((await authenticateMcp(pool, tokens.access_token, resource))?.role).toBe("member");
+  await pool.query('UPDATE "oauthAccessToken" SET confirmation = $2 WHERE token = $1', [tokenHash(tokens.access_token), { jkt: "sender-key" }]);
+  expect(await authenticateMcp(pool, tokens.access_token, resource)).toBeNull();
+  await pool.query(`UPDATE "oauthAccessToken" SET confirmation = NULL, "expiresAt" = now() - interval '1 second' WHERE token = $1`, [tokenHash(tokens.access_token)]);
+  expect(await authenticateMcp(pool, tokens.access_token, resource)).toBeNull();
+  const fresh = await f.issue();
+  const revoked = await f.call("/api/auth/oauth2/revoke", { token: fresh.access_token, token_type_hint: "access_token", client_id: f.client.client_id }, false);
+  expect(revoked.status).toBe(200);
+  expect(await authenticateMcp(pool, fresh.access_token, resource)).toBeNull();
+  const live = await f.issue();
+  await pool.query('DELETE FROM member WHERE "userId" = $1', [f.user.id]);
+  expect(await authenticateMcp(pool, live.access_token, resource)).toBeNull();
+  expect((await f.refresh(live.refresh_token)).status).toBe(400);
+});
+
+test("production discovery omits registration when DCR is disabled and foreign resources fail closed", async () => {
+  const prod = createAuth({ pool, secret, baseURL: "https://app.usetrawler.com", mcp: {} });
+  const meta = await prod.handler(new Request("https://app.usetrawler.com/.well-known/oauth-authorization-server/api/auth"));
+  expect((await meta.json()).registration_endpoint).toBeUndefined();
+  const f = await fixture();
+  const tokens = await f.issue();
+  const denied = await mcpAuthentication(pool, "https://app.usetrawler.com", new Request("https://app.usetrawler.com/api/mcp", { headers: { authorization: `Bearer ${tokens.access_token}` } }));
+  expect((denied as Response).status).toBe(401);
 });

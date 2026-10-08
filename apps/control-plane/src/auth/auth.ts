@@ -1,5 +1,5 @@
 import { betterAuth } from "better-auth";
-import { APIError } from "better-auth/api";
+import { APIError, isAPIError } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { Kysely, PostgresDialect, sql, type Transaction } from "kysely";
 import pg from "pg";
@@ -221,7 +221,12 @@ export function createAuth(options: AuthOptions) {
     emailAndPassword: { enabled: false },
     advanced: { ipAddress: { ipAddressHeaders: ["x-real-ip"] } },
     account: { encryptOAuthTokens: true },
-    ...(options.mcp ? { logger: { disabled: true } } : {}),
+    ...(options.mcp ? {
+      logger: { disabled: true },
+      onAPIError: { onError: (error: unknown) => {
+        if (!isAPIError(error) || error.statusCode >= 500) throw new APIError("SERVICE_UNAVAILABLE", { error: "temporarily_unavailable" });
+      } },
+    } : {}),
     socialProviders: {
       ...(options.github ? { github: { ...options.github, prompt: "select_account" as const } } : {}),
       ...(options.google ? { google: { ...options.google, prompt: "select_account" as const } } : {}),
