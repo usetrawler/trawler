@@ -38,6 +38,7 @@ export async function undoDismissal(tx: Tx, orgId: string, runId: string, findin
 }
 
 export const TRAWLER = "trawler";
+export const KNOWN_LIMIT = "Known limitation of this setup:";
 
 const notBugRef = (runId: string, findingKey: string) => `${runId}/${findingKey}`;
 

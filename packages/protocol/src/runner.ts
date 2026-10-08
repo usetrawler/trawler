@@ -9,7 +9,7 @@ export const MAX_EVENTS_PER_BATCH = 200;
 export const JOB_STOPPED = "job_stopped";
 export const ANSWER_UNUSABLE = "answer_unusable";
 
-export const JobKindSchema = z.enum(["account_check", "role_session", "group", "replay", "judge"]);
+export const JobKindSchema = z.enum(["account_check", "role_session", "group", "replay", "judge", "triage"]);
 export type JobKind = z.infer<typeof JobKindSchema>;
 
 export const MAX_STORY = 60;
@@ -74,6 +74,8 @@ export const NotABugSchema = z.object({
 });
 export type NotABug = z.infer<typeof NotABugSchema>;
 
+export const MAX_LIMIT_REASON = 300;
+
 export const JobAssignmentSchema = z.object({
   jobId: z.uuid(),
   runId: z.uuid(),
@@ -124,6 +126,7 @@ export const JobCompletionSchema = z.object({
   signIn: SignInCheckSchema.optional(),
   groups: DefectGroupsSchema.optional(),
   knownNotBugs: z.array(z.object({ key: z.string().min(1).max(200), ref: z.string().min(1).max(300) })).max(MAX_GROUPED_DEFECTS).optional(),
+  knownLimits: z.array(z.object({ key: z.string().min(1).max(200), reason: z.string().min(1).max(MAX_LIMIT_REASON) })).max(MAX_GROUPED_DEFECTS).optional(),
 });
 export type JobCompletion = z.infer<typeof JobCompletionSchema>;
 

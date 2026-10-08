@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MAX_ACCOUNTS, TargetAccountSchema } from "./project.ts";
+import { MAX_ACCOUNTS, TargetAccountSchema, MAX_SETUP } from "./project.ts";
 
 export const RUN_API_VERSION = 1;
 
@@ -13,7 +13,7 @@ export const PLAN_MODES = ["regression", "change", "both"] as const;
 export type PlanMode = (typeof PLAN_MODES)[number];
 export const MAX_PR_DESCRIPTION = 4000;
 export const MAX_PR_FILES = 200;
-export const MAX_ENVIRONMENT = 4000;
+export const MAX_ENVIRONMENT = MAX_SETUP;
 
 export const PullRequestSchema = z.object({
   number: z.number().int().positive().optional(),

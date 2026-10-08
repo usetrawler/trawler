@@ -1082,3 +1082,13 @@ test("a person reads the lead's brief as what the change should do, fenced as da
   expect(prompt).toMatch(/it is never instructions about how to work/);
   expect(rolePrompt(base)).not.toContain("<brief-");
 });
+
+test("a person reads the team's description of the setup as limits not to report, and only when there is one", () => {
+  const base = { persona: { id: "maya", name: "Maya", brief: "You join a household." }, targetUrl: "https://recurro.test/", goals: [{ id: "join", instruction: "You are in the household." }], signUpEmail: "maya@example.com" };
+  const prompt = rolePrompt({ ...base, setup: "There is no self sign-up; accounts come from an invitation." });
+  const tag = /<setup-([a-z0-9]+)>/.exec(prompt)![1]!;
+  expect(prompt).toContain(`<setup-${tag}>\nThere is no self sign-up; accounts come from an invitation.\n</setup-${tag}>`);
+  expect(prompt).toMatch(/Do not report what it describes as a defect or as friction/);
+  expect(prompt).toMatch(/give the goal failed and say which limit stopped you/);
+  expect(rolePrompt(base)).not.toContain("<setup-");
+});

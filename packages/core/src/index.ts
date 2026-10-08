@@ -8,6 +8,7 @@ export { runRoleSession } from "./role-session.ts";
 export { groupPrompt, judgePrompt, replayPrompt, rolePrompt, sessionStatus, setupPrompt } from "./prompts.ts";
 export { judge, runReplay } from "./replay.ts";
 export { groupDefects } from "./group.ts";
+export { triageFindings } from "./triage.ts";
 export { checkAccount } from "./account-check.ts";
 export { browserQueue, runAgentLoop } from "./agent-loop.ts";
 export { pageText, proposeProject, SetupModelFailed } from "./setup.ts";

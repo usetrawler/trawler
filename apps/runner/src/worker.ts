@@ -1,6 +1,6 @@
 import type { LanguageModel } from "ai";
 import { z } from "zod";
-import { type Browser, Budget, checkAccount, groupDefects, judge, MIN_SECRET_LENGTH, runReplay, runRoleSession, type Screenshot, SecretScrubber, type TeamChannel } from "@usetrawler/core";
+import { type Browser, Budget, checkAccount, groupDefects, judge, triageFindings, MIN_SECRET_LENGTH, runReplay, runRoleSession, type Screenshot, SecretScrubber, type TeamChannel } from "@usetrawler/core";
 import { withProvidedAccounts } from "./provided-accounts.ts";
 import {
   ChannelSchema, JobAssignmentSchema, MAX_EVENTS_PER_BATCH, MAX_URL, PROTOCOL_HEADER, PROTOCOL_VERSION,
@@ -313,6 +313,11 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
     if (!job.defects) throw new Error("the group job names no defects");
     const { groups, knownNotBugs, usage, stoppedBy, error } = await groupDefects({ model: deps.model(job.judgeModel, job.token), modelId: job.judgeModel, defects: job.defects, notBugs: job.notBugs, scrubber, budget, emit: events.emit });
     return { usage, stoppedBy, ...(groups ? { groups } : {}), ...(knownNotBugs.length > 0 ? { knownNotBugs } : {}), ...(error ? { error: clip(error) } : {}) };
+  }
+  if (job.kind === "triage") {
+    if (!job.defects || !config.setup) throw new Error("the triage job names no findings or no setup");
+    const { knownLimits, usage, stoppedBy, error } = await triageFindings({ model: deps.model(job.judgeModel, job.token), modelId: job.judgeModel, defects: job.defects, setup: config.setup, brief: config.brief, scrubber, budget, emit: events.emit });
+    return { usage, stoppedBy, ...(knownLimits.length > 0 ? { knownLimits } : {}), ...(error ? { error: clip(error) } : {}) };
   }
   if (!job.finding) throw new Error("the job has no finding");
   const finding = job.finding;
