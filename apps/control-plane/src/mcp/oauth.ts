@@ -1,0 +1,116 @@
+import { mcp } from "@better-auth/mcp";
+import { cimd } from "@better-auth/cimd";
+import { fetchClientMetadataResource } from "@better-auth/cimd/node";
+import { APIError } from "better-auth/api";
+import type pg from "pg";
+import { MCP_SCOPES, mcpResource, tokenHash } from "./config.ts";
+import { consentWorkspace } from "./consent.ts";
+
+export function oauthPlugins(pool: pg.Pool, origin: string, dcr: boolean) {
+  const resource = mcpResource(origin);
+  return [
+    mcp({
+      resource,
+      loginPage: "/sign-in",
+      consentPage: "/mcp/consent",
+      scopes: MCP_SCOPES,
+      grantTypes: ["authorization_code", "refresh_token"],
+      disableJwtPlugin: true,
+      storeTokens: "hashed",
+      accessTokenExpiresIn: 900,
+      refreshTokenExpiresIn: 30 * 24 * 60 * 60,
+      codeExpiresIn: 300,
+      refreshTokenReuseInterval: 0,
+      allowDynamicClientRegistration: dcr,
+      allowUnauthenticatedClientRegistration: dcr,
+      clientPrivileges: () => false,
+      validateRedirectUri: (uri, registered) => registered.includes(uri),
+      postLogin: {
+        page: "/welcome",
+        shouldRedirect: ({ session }) => !session.activeOrganizationId,
+        consentReferenceId: async ({ user, session }) => {
+          const chosen = consentWorkspace.getStore();
+          if (chosen && chosen.userId !== user.id) throw new APIError("FORBIDDEN", { error: "access_denied" });
+          const orgId = chosen?.orgId ?? session.activeOrganizationId;
+          const found = await pool.query('SELECT 1 FROM member WHERE "userId" = $1 AND "organizationId" = $2', [user.id, orgId]);
+          if (!orgId || !found.rowCount) throw new APIError("FORBIDDEN", { error: "access_denied" });
+          return String(orgId);
+        },
+      },
+      customTokenResponseFields: async ({ grantType, user, verificationValue, scopes }) => {
+        if (grantType !== "authorization_code") return {};
+        const orgId = verificationValue?.referenceId;
+        const query = verificationValue?.query;
+        if (!user || !orgId || !query?.client_id || !scopes.includes("trawler:read")) {
+          throw new APIError("FORBIDDEN", { error: "access_denied" });
+        }
+        // The provider has already consumed and verified this authorization code.
+        // Its original resource and workspace, rather than the current browser session, bind the grant.
+        const originalResource = verificationValue.resource;
+        if (!originalResource || originalResource.length !== 1 || originalResource[0] !== resource) {
+          throw new APIError("BAD_REQUEST", { error: "invalid_target" });
+        }
+        const found = await pool.query('SELECT 1 FROM member WHERE "userId" = $1 AND "organizationId" = $2', [user.id, orgId]);
+        if (!found.rowCount) throw new APIError("FORBIDDEN", { error: "access_denied" });
+        // The opaque token rows retain the same authorizationCodeId throughout refresh rotation.
+        // Filled by the HTTP boundary after the provider returns a successful token response.
+        return {};
+      },
+    }),
+    cimd({
+      fetchClientMetadataResource,
+      metadataProfile: "mcp-2026-07-28",
+      metadataFetchPolicy: { maximumConcurrentFetches: 8, maximumConcurrentFetchesPerOrigin: 2, maximumFetchesPerMinute: 60, maximumFetchesPerOriginPerMinute: 10 },
+      maxCacheEntries: 500,
+    }),
+  ];
+}
+
+export interface McpPrincipal {
+  grantId: string;
+  userId: string;
+  orgId: string;
+  projectId: string | null;
+  clientId: string;
+  scopes: string[];
+  role: string;
+  expiresAt: number;
+}
+
+export async function authenticateMcp(pool: pg.Pool, rawToken: string, resource: string): Promise<McpPrincipal | null> {
+  const { rows } = await pool.query<{
+    id: string; user_id: string; org_id: string; project_id: string | null; client_id: string; scopes: string[]; role: string; expires_at: Date;
+  }>(`
+    SELECT g.id, g.user_id, g.org_id, g.project_id, g.client_id,
+           ARRAY(SELECT jsonb_array_elements_text(a.scopes) INTERSECT SELECT unnest(g.scopes)) AS scopes,
+           m.role, a."expiresAt" AS expires_at
+    FROM "oauthAccessToken" a
+    JOIN mcp_grants g ON g.code_hash = a."authorizationCodeId"
+    JOIN "oauthClient" c ON c."clientId" = a."clientId"
+    JOIN member m ON m."userId" = g.user_id AND m."organizationId" = g.org_id
+    WHERE a.token = $1 AND a.revoked IS NULL AND a."expiresAt" > now()
+      AND g.revoked_at IS NULL AND g.resource = $2 AND a.resources = jsonb_build_array($2::text)
+      AND a."userId" = g.user_id AND a."clientId" = g.client_id AND a."referenceId" = g.org_id
+      AND COALESCE(c.disabled, false) = false
+      AND (a."sessionId" IS NULL OR EXISTS (SELECT FROM session s WHERE s.id = a."sessionId" AND s."expiresAt" > now()))
+  `, [tokenHash(rawToken), resource]);
+  const row = rows[0];
+  if (!row || !row.scopes.includes("trawler:read")) return null;
+  return { grantId: row.id, userId: row.user_id, orgId: row.org_id, projectId: row.project_id, clientId: row.client_id, scopes: row.scopes, role: row.role, expiresAt: Math.floor(row.expires_at.getTime() / 1000) };
+}
+
+export async function persistGrant(pool: pg.Pool, accessToken: string, resource: string): Promise<void> {
+  const result = await pool.query(`
+    INSERT INTO mcp_grants (id, code_hash, user_id, org_id, client_id, resource, scopes)
+    SELECT $1, a."authorizationCodeId", a."userId", a."referenceId", a."clientId", $2, ARRAY(SELECT jsonb_array_elements_text(a.scopes))
+    FROM "oauthAccessToken" a
+    JOIN member m ON m."userId" = a."userId" AND m."organizationId" = a."referenceId"
+    WHERE a.token = $3 AND a.resources = jsonb_build_array($2::text)
+    ON CONFLICT (code_hash) DO NOTHING
+  `, [crypto.randomUUID(), resource, tokenHash(accessToken)]);
+  if (!result.rowCount && !(await authenticateMcp(pool, accessToken, resource))) throw new Error("grant persistence failed");
+}
+
+export async function revokeGrant(pool: pg.Pool, grantId: string, userId: string): Promise<boolean> {
+  return !!(await pool.query("UPDATE mcp_grants SET revoked_at = COALESCE(revoked_at, now()) WHERE id = $1 AND user_id = $2 RETURNING id", [grantId, userId])).rowCount;
+}

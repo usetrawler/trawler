@@ -13,6 +13,7 @@ export function getAuth(): Auth {
       github: env.github,
       google: env.google,
       devOidc: env.devOidc,
+      mcp: env.mcp,
     });
   }
   return cached;
