@@ -8,5 +8,6 @@ export default defineConfig({
     testTimeout: 120_000,
     hookTimeout: 240_000,
     fileParallelism: false,
+    expect: { poll: { timeout: 20_000, interval: 250 } },
   },
 });
