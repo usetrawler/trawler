@@ -13,6 +13,7 @@ const job = (kind: string, status: string, extra: Partial<RunSummary["jobs"][num
 const finding = (key: string, persona: string, extra: Partial<RunSummary["findings"][number]> = {}) =>
   ({ key, personaKey: persona, kind: "defect", filedAs: null, goal: "g1", title: key, observed: "o", reproduction: ["Open Invoices.", "Save."], severity: "high", replay: null, verdict: null, sameAs: null, url: null, quote: null, stepPeople: null, screenshots: { reported: null, replayed: null }, dismissal: null, ...extra }) as RunSummary["findings"][number];
 const summary = (over: Partial<RunSummary>): RunSummary => ({
+  startedVia: null, stoppedVia: null,
   id: "run-1", number: 7, status: "succeeded", cancelReason: null, projectId: "project-1", planName: null, costUsd: 0.35, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash",
   provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0, createdAt: new Date("2026-09-25T19:40:00Z"), startedAt: new Date("2026-09-25T19:40:05Z"), finishedAt: new Date("2026-09-25T19:59:00Z"),
   jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [], conversation: false, pullRequest: null, prPlan: null, conversationMessages: [], execution: "hosted", providedAccounts: [],
@@ -463,4 +464,16 @@ test("a pull request plan shows what the lead told the team", () => {
   const html = text(render(summary({ ...finished, prPlan })));
   expect(html).toContain("What the lead told the team A member can now ask to cancel a charge.");
   expect(text(render(summary({ ...finished, prPlan: { ...prPlan, brief: undefined } })))).not.toContain("What the lead told the team");
+});
+
+test("a run started over MCP says which assistant started it, for whom, and a run started any other way says nothing of it", () => {
+  const via = { kind: "mcp" as const, client: "Claude Code", clientHost: "claude.ai", person: "Ana Lopez", grant: "g1" };
+  expect(text(head(render(summary({ startedVia: via }))))).toContain("Started over MCP by Claude Code for Ana Lopez");
+  expect(text(head(render(finished)))).not.toContain("Started over MCP");
+});
+
+test("a run an assistant stopped says who stopped it", () => {
+  const via = { kind: "mcp" as const, client: "Claude Code", clientHost: null, person: "Lee Park", grant: "g2" };
+  const stopped = summary({ status: "cancelled", cancelReason: "stopped_over_mcp", stoppedVia: via });
+  expect(head(render(stopped))).toMatch(/<h1[^>]*>Stopped by Claude Code for Lee Park over MCP\.<\/h1>/);
 });

@@ -6,7 +6,9 @@ import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { createProject } from "../projects/projects.ts";
-import { cancelLiveRuns, startRun } from "../runs/runs.ts";
+import { cancelLiveRuns, runSummary, startRun } from "../runs/runs.ts";
+import { runView } from "../runs/report.ts";
+import { workspaceRuns } from "../projects/overview.ts";
 import { createApiToken } from "../api-tokens/tokens.ts";
 import { handleStartRun } from "./handlers.ts";
 import { readRunFor, startRunFor, stopRunFor, type RunApiDeps, type RunPrincipal } from "./service.ts";
@@ -93,4 +95,37 @@ test("through REST a token's runs are recorded as started by that token, and a t
   const startedId = ((await started.json()) as { id: string }).id;
   const row = await asSystem(t.db, (tx) => tx.selectFrom("runs").select("created_by").where("id", "=", startedId).executeTakeFirstOrThrow());
   expect(row.created_by).toBe(`api-token:${id}`);
+});
+
+test("a run started and stopped over MCP records the client and the person, shows them in history and the report, and the filter finds it", async () => {
+  await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
+  const via = { kind: "mcp" as const, client: "Claude Code", clientHost: "claude.ai", person: "Ana Lopez", grant: "grant-1" };
+  const started = await startRunFor(principal("org-ent", { projectId: ids.ent!, actor: "mcp:grant-1:user-1", via }), { project: ids.ent!, execution: "hosted" }, deps);
+  if (!started.ok) throw new Error(started.error);
+  const id = started.value.id;
+  const row = async () => asSystem(t.db, (tx) => tx.selectFrom("runs").select(["started_via", "stopped_via", "cancel_reason", "created_by"]).where("id", "=", id).executeTakeFirstOrThrow());
+  expect(await row()).toMatchObject({ started_via: via, stopped_via: null, cancel_reason: null });
+  const byOrigin = (origin: "app" | "api" | "mcp") => withOrg(t.db, "org-ent", async (tx) => (await workspaceRuns(tx, "org-ent", { origin })).runs.map((r) => r.id));
+  expect(await byOrigin("mcp")).toEqual([id]);
+  expect(await byOrigin("app")).not.toContain(id);
+  expect(await byOrigin("api")).not.toContain(id);
+  const line = await withOrg(t.db, "org-ent", async (tx) => (await workspaceRuns(tx, "org-ent")).runs.find((r) => r.id === id));
+  expect(line).toMatchObject({ origin: "mcp", startedVia: via });
+
+  const stopper = { ...via, person: "Lee Park" };
+  expect((await stopRunFor(principal("org-ent", { via: stopper }), id, deps)).ok).toBe(true);
+  expect(await row()).toMatchObject({ stopped_via: stopper, cancel_reason: "stopped_over_mcp", started_via: via });
+  const summary = (await withOrg(t.db, "org-ent", (tx) => runSummary(tx, "org-ent", id)))!;
+  expect(summary).toMatchObject({ startedVia: via, stoppedVia: stopper });
+  expect(runView(summary).headline).toBe("Stopped by Claude Code for Lee Park over MCP.");
+});
+
+test("a run stopped without MCP keeps no stopping client, and the database refuses a malformed origin", async () => {
+  await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
+  const started = await startRunFor(principal("org-ent", { projectId: ids.ent! }), { project: ids.ent!, execution: "hosted" }, deps);
+  if (!started.ok) throw new Error(started.error);
+  expect((await stopRunFor(principal("org-ent"), started.value.id, deps)).ok).toBe(true);
+  expect(await asSystem(t.db, (tx) => tx.selectFrom("runs").select(["started_via", "stopped_via", "cancel_reason"]).where("id", "=", started.value.id).executeTakeFirstOrThrow())).toEqual({ started_via: null, stopped_via: null, cancel_reason: "stopped_from_ci" });
+  await expect(asSystem(t.db, (tx) => tx.updateTable("runs").set({ started_via: JSON.stringify({ kind: "ui" }) as never }).where("id", "=", started.value.id).execute())).rejects.toThrow(/runs_started_via_shape/);
+  await expect(asSystem(t.db, (tx) => tx.updateTable("runs").set({ stopped_via: JSON.stringify({ kind: "mcp", client: 3 }) as never }).where("id", "=", started.value.id).execute())).rejects.toThrow(/runs_stopped_via_shape/);
 });

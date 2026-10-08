@@ -1,5 +1,6 @@
 import type { RunLine } from "../projects/overview.ts";
 import { runPath, runStatusLabel, runStatusTone } from "../runs/status.ts";
+import { viaLabel } from "../runs/via.ts";
 import { LocalTime } from "./local-time.tsx";
 
 const cost = (r: RunLine) => (r.tokenCap !== null ? { value: `${(r.tokensUsed / 1_000_000).toFixed(2)}M`, label: "tokens" } : { value: `$${r.costUsd.toFixed(2)}`, label: "cost" });
@@ -30,6 +31,7 @@ export function RunTable({ runs, compact = false, project = true }: { runs: RunL
                     <small className={`mt-0.5 block text-[10px] md:hidden ${tone}`}>{narrowStatus}</small>
                   </>
                 )}
+                {r.startedVia && <small className="mt-0.5 block text-[10px] text-muted">{viaLabel(r.startedVia)}</small>}
                 <small className="mt-1 block text-[10px] text-muted wide:hidden">
                   {r.unchecked ? "not checked" : `${r.confirmed} confirmed`} · {r.goalsReached}/{r.goalsTotal} goals · {spent.value}{spent.label === "tokens" ? " tokens" : ""}
                 </small>

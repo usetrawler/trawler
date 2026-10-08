@@ -334,7 +334,9 @@ export interface Runs {
   replay_steps: number;
   sign_up_seed: string | null;
   started_at: Timestamp | null;
+  started_via: Json | null;
   status: Generated<string>;
+  stopped_via: Json | null;
   target_override: Generated<boolean>;
   token_cap: Int8 | null;
   tokens_used: Generated<Int8>;

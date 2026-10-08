@@ -15,6 +15,7 @@ import { DEFAULT_RUN, FIRST_RUN_ON_US } from "../runs/models.ts";
 import { workspacePlan } from "../runs/plans.ts";
 import { cancelRun, FirstRunOnUsUsed, firstRunOnUsLeft, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunRefused, runSummary, startRun, TooManyOwnRuns, type PaidBy } from "../runs/runs.ts";
 import { runPath } from "../runs/status.ts";
+import type { RunVia } from "../runs/via.ts";
 import { claimStart, keyHashOf, recordStart, requestHashOf, storedStart, type StoredStart } from "./idempotency.ts";
 
 export interface RunApiDeps {
@@ -33,6 +34,7 @@ export interface RunPrincipal {
   orgId: string;
   projectId: string | null;
   actor: string;
+  via?: RunVia;
   can: { read: boolean; control: boolean };
 }
 
@@ -142,7 +144,7 @@ export async function startRunFor(principal: RunPrincipal, body: ParsedStartRun,
       if (payer.paidBy === "workspace" && !(await keyStillStored(tx, orgId, payer.provider, payer.providerBaseUrl))) throw new KeyGone();
       const price = await priceOf(payer.provider, payer.model, deps.openRouterUrl);
       const started = await startRun(tx, orgId, body.project, deps.keys, {
-        budgetUsd: payer.budgetUsd, agentModel: payer.model, judgeModel: payer.model, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: principal.actor,
+        budgetUsd: payer.budgetUsd, agentModel: payer.model, judgeModel: payer.model, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: principal.actor, ...(principal.via ? { startedVia: principal.via } : {}),
         provider: payer.provider, providerBaseUrl: payer.providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap, paidBy: payer.paidBy,
         planId: plan.id, execution: body.execution, targetUrl: body.url, extraOrigins: body.allowedOrigins, pullRequest: body.pullRequest, planMode: body.planMode, replan: body.replan, conversation: body.conversation, providedAccounts: body.accounts, usesFirstRunOnUs: payer.usesFirstRunOnUs,
       });
@@ -197,7 +199,7 @@ export async function stopRunFor(principal: RunPrincipal, id: string, deps: RunA
   const outcome = await withOrg(deps.db, principal.orgId, async (tx) => {
     const run = await tx.selectFrom("runs").select("project_id").where("id", "=", id).where("org_id", "=", principal.orgId).executeTakeFirst();
     if (!run || (principal.projectId && run.project_id !== principal.projectId)) return null;
-    const stopped = await cancelRun(tx, principal.orgId, id, "stopped_from_ci");
+    const stopped = await cancelRun(tx, principal.orgId, id, principal.via ? "stopped_over_mcp" : "stopped_from_ci", principal.via);
     const { status } = await tx.selectFrom("runs").select("status").where("id", "=", id).executeTakeFirstOrThrow();
     return { id, status, stopped };
   });

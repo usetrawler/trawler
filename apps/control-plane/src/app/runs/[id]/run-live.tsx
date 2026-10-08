@@ -612,6 +612,7 @@ export function RunLive({ initial, closedBeta }: { initial: Data; closedBeta?: s
         <div className={`flex min-w-0 flex-col ${view.live ? "md:min-w-80 md:flex-1" : "wide:flex-1"}`}>
           <p className="font-mono text-base tracking-[0.1em] text-muted uppercase">{runStatusLabel(run.status)} · <LocalTime iso={new Date(when).toISOString()} /></p>
           {run.pullRequest && <PullRequestSubject pr={run.pullRequest} />}
+          {run.startedVia && <p className="mt-2.5 text-sm text-muted">Started over MCP by <strong className="font-semibold text-ink">{run.startedVia.client}</strong> for <strong className="font-semibold text-ink">{run.startedVia.person}</strong>.</p>}
           <h1 className={`my-2.5 font-bold wrap-anywhere ${view.live ? "text-[48px] leading-[0.94] tracking-[-0.06em] md:text-[clamp(48px,6vw,88px)]" : "text-[44px] leading-[0.96] tracking-[-0.055em] md:text-[clamp(44px,5vw,72px)]"}`}>{view.headline}</h1>
           <p className="text-base break-words text-muted">{host} · {run.planName && <>{run.prPlan ? "Plan: " : ""}{run.planName} · </>}{run.agentModel}</p>
           {run.providedAccounts.length > 0 && <p className="text-sm break-words text-muted">{run.providedAccounts.join(", ")} {run.providedAccounts.length === 1 ? "signs" : "sign"} in with {run.providedAccounts.length === 1 ? "an account" : "accounts"} provided by the CI job.</p>}

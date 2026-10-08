@@ -10,6 +10,7 @@ const finding = (key: string, persona: string, extra: Partial<RunSummary["findin
 
 function summary(over: Partial<RunSummary>): RunSummary {
   return {
+    startedVia: null, stoppedVia: null,
     id: "r", number: 1, status: "running", cancelReason: null, projectId: "p", planName: null, costUsd: 0.1, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "m", judgeModel: "m",
     provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0,
     createdAt: new Date(), startedAt: new Date(), finishedAt: null, jobs: [], findings: [], goals: [], botProtection: null, target: "https://a.test/",
@@ -414,4 +415,10 @@ test("a finished run with no defects says how few goals it reached when most wer
   expect(view.headline).toBe("No defects found, but only 1 of 3 goals were reached, so this run cannot say the change works.");
   expect(view.unreachedGoals).toEqual(["Add a task.", "See it."]);
   expect(finished([reached("g"), reached("h")]).headline).toBe("No defects found.");
+});
+
+test("a run an assistant stopped names the assistant and the person, and falls back to the plain reason without them", () => {
+  const via = { kind: "mcp" as const, client: "Claude Code", clientHost: null, person: "Lee Park", grant: "g2" };
+  expect(runView(summary({ status: "cancelled", cancelReason: "stopped_over_mcp", stoppedVia: via })).headline).toBe("Stopped by Claude Code for Lee Park over MCP.");
+  expect(runView(summary({ status: "cancelled", cancelReason: "stopped_over_mcp" })).headline).toBe("Stopped by an assistant over MCP.");
 });

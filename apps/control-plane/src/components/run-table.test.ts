@@ -5,6 +5,7 @@ import type { RunLine } from "../projects/overview.ts";
 import { RunTable } from "./run-table.tsx";
 
 const line = (over: Partial<RunLine> = {}): RunLine => ({
+  startedVia: null, origin: "app",
   id: "r1", number: 17, status: "succeeded", createdAt: new Date("2026-09-25T12:32:00Z"), costUsd: 3.08, tokenCap: null, tokensUsed: 0,
   confirmed: 3, unchecked: false, goalsReached: 2, goalsTotal: 3, projectId: "p1", projectName: "Acme Invoices", projectSite: null, planName: null, ...over,
 });
@@ -86,4 +87,11 @@ test("a run names its plan after the project, or after its date inside a project
   const [inProject] = rows(render([line({ planName: "Invitations" })], false));
   expect(inProject).toMatch(/<time[^>]*>[^<]*<\/time><span class="font-normal text-muted"> · Invitations<\/span>/);
   expect(rows(render([line()])[0] ? render([line()]) : "")[0]).not.toContain(" · Invitations");
+});
+
+test("a run started over MCP names the assistant and the person on its row, and any other run says nothing of it", () => {
+  const via = { kind: "mcp" as const, client: "Claude Code", clientHost: "claude.ai", person: "Ana Lopez", grant: "g1" };
+  const [over] = rows(render([line({ startedVia: via, origin: "mcp" })]));
+  expect(over).toContain("MCP · Claude Code · Ana Lopez</small>");
+  expect(rows(render([line()])).join("")).not.toContain("MCP");
 });
