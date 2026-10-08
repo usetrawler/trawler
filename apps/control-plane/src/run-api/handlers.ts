@@ -1,4 +1,4 @@
-import { StartRunRequestSchema } from "@usetrawler/protocol";
+import { IDEMPOTENCY_KEY, IDEMPOTENCY_KEY_HEADER, StartRunRequestSchema } from "@usetrawler/protocol";
 import { tokenWorkspace } from "../server/api-token.ts";
 import type { TokenHolder } from "../api-tokens/tokens.ts";
 import { readRunFor, startRunFor, stopRunFor, type Outcome, type RunApiDeps, type RunPrincipal } from "./service.ts";
@@ -7,7 +7,7 @@ export type { RunApiDeps } from "./service.ts";
 
 const NO_STORE = { "cache-control": "no-store" };
 const answer = (outcome: Outcome<unknown>): Response => outcome.ok
-  ? Response.json(outcome.value, { status: outcome.status, headers: NO_STORE })
+  ? Response.json(outcome.value, { status: outcome.status, headers: outcome.replayed ? { ...NO_STORE, "idempotent-replayed": "true" } : NO_STORE })
   : Response.json({ error: outcome.error, ...(outcome.code ? { code: outcome.code } : {}) }, { status: outcome.status, headers: NO_STORE });
 
 const principalOf = (holder: TokenHolder): RunPrincipal => ({
@@ -23,7 +23,9 @@ export async function handleStartRun(req: Request, deps: RunApiDeps): Promise<Re
     const issue = parsed.error.issues[0];
     return Response.json({ error: `Invalid request: ${issue ? `${issue.path.join(".") || "body"} ${issue.message}` : "unreadable body"}.` }, { status: 400, headers: NO_STORE });
   }
-  return answer(await startRunFor(principalOf(auth.holder), parsed.data, deps));
+  const key = req.headers.get(IDEMPOTENCY_KEY_HEADER);
+  if (key !== null && !IDEMPOTENCY_KEY.test(key)) return Response.json({ error: "Invalid request: Idempotency-Key must be 1 to 255 characters: letters, digits and . _ : -" }, { status: 400, headers: NO_STORE });
+  return answer(await startRunFor(principalOf(auth.holder), parsed.data, deps, key === null ? {} : { idempotencyKey: key }));
 }
 
 export async function handleGetRun(req: Request, id: string, deps: RunApiDeps): Promise<Response> {

@@ -292,6 +292,17 @@ export interface RunEvents {
   type: string;
 }
 
+export interface RunIdempotency {
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  key_hash: string;
+  org_id: string;
+  project_id: string;
+  request_hash: string;
+  response: Json | null;
+  run_id: string | null;
+}
+
 export interface Runs {
   agent_model: string;
   budget_usd: Numeric;
@@ -450,6 +461,7 @@ export interface DB {
   plans: Plans;
   projects: Projects;
   run_events: RunEvents;
+  run_idempotency: RunIdempotency;
   runs: Runs;
   session: Session;
   setup_attempts: SetupAttempts;
