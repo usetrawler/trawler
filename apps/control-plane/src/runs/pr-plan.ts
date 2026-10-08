@@ -25,6 +25,7 @@ export interface PrPlanRecord {
   prPlanId?: string;
   version?: number;
   reused?: boolean;
+  createdByRun?: number;
   accountFlow?: AccountFlow;
   accountReason?: string;
   brief?: string;
@@ -143,7 +144,7 @@ async function ask(deps: PrPlanDeps, job: Claimed): Promise<Outcome> {
 
 async function finish(db: Database, job: Claimed, outcome: Outcome): Promise<void> {
   await asSystem(db, async (tx) => {
-    const run = await tx.selectFrom("runs").select(["status", "conversation", "paid_by", "project_id", "provided_accounts"]).where("id", "=", job.run_id).forUpdate().executeTakeFirstOrThrow();
+    const run = await tx.selectFrom("runs").select(["status", "number", "conversation", "paid_by", "project_id", "provided_accounts"]).where("id", "=", job.run_id).forUpdate().executeTakeFirstOrThrow();
     if (!ACTIVE.includes(run.status)) {
       await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date(), lease_until: null }).where("id", "=", job.id).execute();
       return;
@@ -162,7 +163,7 @@ async function finish(db: Database, job: Claimed, outcome: Outcome): Promise<voi
     const nothingToTest = mode === "change" && "turns" in outcome && !merged;
     const notVisibleHere = "turns" in outcome ? outcome.notVisibleHere : undefined;
     const record: PrPlanRecord = {
-      mode, goalIds: merged?.added.map((g) => g.id) ?? [], ...("failure" in outcome ? { note: noteOf(outcome.failure) } : merged ? {} : { note: nothingToTest ? (notVisibleHere ? `${NOT_VISIBLE_HERE} ${notVisibleHere}` : NOTHING_TO_TEST) : NOTHING }), ...(stored ? { prPlanId: stored.id, version: stored.version } : {}),
+      mode, goalIds: merged?.added.map((g) => g.id) ?? [], ...("failure" in outcome ? { note: noteOf(outcome.failure) } : merged ? {} : { note: nothingToTest ? (notVisibleHere ? `${NOT_VISIBLE_HERE} ${notVisibleHere}` : NOTHING_TO_TEST) : NOTHING }), ...(stored ? { prPlanId: stored.id, version: stored.version, createdByRun: run.number } : {}),
       ...("turns" in outcome ? { accountFlow: outcome.accountFlow, ...(outcome.accountReason ? { accountReason: outcome.accountReason } : {}), signUps: provided!.signUps } : {}),
       ...(merged && "turns" in outcome && outcome.brief ? { brief: outcome.brief } : {}),
     };
