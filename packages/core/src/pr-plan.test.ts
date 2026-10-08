@@ -125,6 +125,12 @@ describe("planForPullRequest", () => {
     const goal = [{ person: "ana", goals: [{ id: "export", instruction: "Last month's invoices come out as one spreadsheet" }] }];
     const withBrief = (turns: unknown, brief: unknown) => text(JSON.stringify({ turns, brief }));
 
+    test("the prompt asks for a preparation goal when the change needs something that may not exist yet", async () => {
+      const model = scriptedModel([withBrief(goal, "Exports now work.")]);
+      await plan(model);
+      expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toContain("start with a short preparation goal for the person whose role can create it");
+    });
+
     test("comes back with the turns, and the prompt asks for it", async () => {
       const model = scriptedModel([withBrief(goal, "Invoices of a month can now be downloaded as one CSV file. Try a month with no invoices too.")]);
       const planned = await plan(model);
