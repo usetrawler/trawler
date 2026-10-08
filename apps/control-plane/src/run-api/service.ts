@@ -1,5 +1,6 @@
 import { sql } from "kysely";
-import type { StartRunRequest } from "@usetrawler/protocol";
+import type { StartRunRequestSchema } from "@usetrawler/protocol";
+import type { z } from "zod";
 import { keyStillStored, modelKey } from "../credentials/credentials.ts";
 import type { Database } from "../db/index.ts";
 import { withOrg } from "../db/tenancy.ts";
@@ -40,14 +41,14 @@ export interface StartedRun {
   id: string;
   number: number;
   reportUrl: string;
-  people: unknown;
+  people: Awaited<ReturnType<typeof startRun>>["people"];
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MODEL_ID = /^[A-Za-z0-9._:\/@-]{1,200}$/;
 const refuse = (status: number, error: string, code?: "model_key"): Outcome<never> => ({ ok: false, status, error, ...(code ? { code } : {}) });
 const succeed = <T>(value: T, status = 200): Outcome<T> => ({ ok: true, status, value });
-const NOT_ALLOWED = "This connection is not allowed to do that.";
+const notAllowed = (principal: RunPrincipal) => `This ${principal.subject} is not allowed to do that.`;
 
 class KeyGone extends Error {}
 class FirstRunFromApp extends Error {}
@@ -72,8 +73,10 @@ const trawlerPayer = (cap: number | undefined, usesFirstRunOnUs: boolean): Payer
   paidBy: "trawler", provider: "openrouter", providerBaseUrl: null, model: FIRST_RUN_ON_US.model, budgetUsd: Math.min(cap ?? FIRST_RUN_ON_US.budgetUsd, FIRST_RUN_ON_US.budgetUsd), usesFirstRunOnUs,
 });
 
-export async function startRunFor(principal: RunPrincipal, body: StartRunRequest, deps: RunApiDeps): Promise<Outcome<StartedRun>> {
-  if (!principal.can.control) return refuse(403, NOT_ALLOWED);
+export type ParsedStartRun = z.output<typeof StartRunRequestSchema>;
+
+export async function startRunFor(principal: RunPrincipal, body: ParsedStartRun, deps: RunApiDeps): Promise<Outcome<StartedRun>> {
+  if (!principal.can.control) return refuse(403, notAllowed(principal));
   if (principal.projectId && principal.projectId !== body.project) return refuse(403, `This ${principal.subject} is limited to another project.`);
   if (body.model !== undefined && !MODEL_ID.test(body.model)) return refuse(400, "Invalid request: model is not a valid model name.");
   if (body.url !== undefined && body.execution !== "own") return refuse(422, "A different target URL can only be tested by a runner in your own network. Use execution \"own\", or leave the URL out to test the project's target.");
@@ -126,7 +129,7 @@ export async function startRunFor(principal: RunPrincipal, body: StartRunRequest
     return succeed({ id: run.id, number: run.number, reportUrl: `${deps.baseUrl.replace(/\/+$/, "")}${runPath(run.number)}`, people: run.people }, 201);
   } catch (err) {
     if (err instanceof ProjectNotFound) return refuse(404, "That project is not in this workspace.");
-    if (err instanceof FirstRunFromApp) return refuse(412, "Start the first run of this project from the app, where you confirm you are authorised to test it. Runs started with an API token are available after that.");
+    if (err instanceof FirstRunFromApp) return refuse(412, `Start the first run of this project from the app, where you confirm you are authorised to test it. Runs started ${principal.subject === "API token" ? "with an API token" : "by an assistant"} are available after that.`);
     if (err instanceof PlanNotFound) return refuse(404, "That plan is not on this project.");
     if (err instanceof NeedsAccount) return refuse(422, err.message);
     if (err instanceof RunInProgress) return refuse(409, err.message);
@@ -139,7 +142,7 @@ export async function startRunFor(principal: RunPrincipal, body: StartRunRequest
 }
 
 export async function readRunFor(principal: RunPrincipal, id: string, deps: RunApiDeps): Promise<Outcome<ReturnType<typeof runResultOf>>> {
-  if (!principal.can.read) return refuse(403, NOT_ALLOWED);
+  if (!principal.can.read) return refuse(403, notAllowed(principal));
   if (!UUID.test(id)) return refuse(404, "Run not found.");
   const summary = await withOrg(deps.db, principal.orgId, async (tx) => {
     const found = await runSummary(tx, principal.orgId, id);
@@ -152,7 +155,7 @@ export async function readRunFor(principal: RunPrincipal, id: string, deps: RunA
 }
 
 export async function stopRunFor(principal: RunPrincipal, id: string, deps: RunApiDeps): Promise<Outcome<{ id: string; status: string; stopped: boolean }>> {
-  if (!principal.can.control) return refuse(403, NOT_ALLOWED);
+  if (!principal.can.control) return refuse(403, notAllowed(principal));
   if (!UUID.test(id)) return refuse(404, "Run not found.");
   const outcome = await withOrg(deps.db, principal.orgId, async (tx) => {
     const run = await tx.selectFrom("runs").select("project_id").where("id", "=", id).where("org_id", "=", principal.orgId).executeTakeFirst();

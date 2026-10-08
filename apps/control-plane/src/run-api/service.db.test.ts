@@ -7,6 +7,8 @@ import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { createProject } from "../projects/projects.ts";
 import { cancelLiveRuns, startRun } from "../runs/runs.ts";
+import { createApiToken } from "../api-tokens/tokens.ts";
+import { handleStartRun } from "./handlers.ts";
 import { readRunFor, startRunFor, stopRunFor, type RunApiDeps, type RunPrincipal } from "./service.ts";
 
 const t = await testDb();
@@ -63,4 +65,32 @@ test("starting a run needs run control, stays inside the workspace and the proje
   expect(started).toMatchObject({ ok: true, status: 201, value: { number: expect.any(Number), reportUrl: expect.stringContaining("https://app.trawler.test/") } });
   const row = await asSystem(t.db, (tx) => tx.selectFrom("runs").select("created_by").where("project_id", "=", ids.ent!).orderBy("created_at", "desc").executeTakeFirstOrThrow());
   expect(row.created_by).toBe("mcp:grant-1:user-1");
+});
+
+test("a principal that may not do something is refused before the database is touched", async () => {
+  const untouchable = { ...deps, db: new Proxy({}, { get: () => { throw new Error("the database was touched"); } }) as RunApiDeps["db"] };
+  const read = principal("org-a", { can: { read: false, control: false } });
+  expect(await readRunFor(read, runs.a2!, untouchable)).toMatchObject({ ok: false, status: 403, error: "This connection is not allowed to do that." });
+  expect(await stopRunFor(read, runs.a2!, untouchable)).toMatchObject({ ok: false, status: 403 });
+  expect(await startRunFor(read, { project: ids.a2!, execution: "hosted" }, untouchable)).toMatchObject({ ok: false, status: 403 });
+  expect(await startRunFor({ ...read, subject: "API token" }, { project: ids.a2!, execution: "hosted" }, untouchable)).toMatchObject({ error: "This API token is not allowed to do that." });
+});
+
+test("a malformed run id is a 404 for stop and read, not an error", async () => {
+  expect(await stopRunFor(principal("org-a"), "not-a-uuid", deps)).toMatchObject({ ok: false, status: 404, error: "Run not found." });
+  expect(await readRunFor(principal("org-a"), "not-a-uuid", deps)).toMatchObject({ ok: false, status: 404 });
+});
+
+test("through REST a token's runs are recorded as started by that token, and a token limited to another project is told so", async () => {
+  await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
+  const { id, token } = await withOrg(t.db, "org-ent", (tx) => createApiToken(tx, "org-ent", "u1", { name: "ci", projectId: ids.ent! }));
+  const call = (project: string) => handleStartRun(new Request("http://x/api/v1/runs", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ project, execution: "hosted" }) }), deps);
+  const refused = await call(ids.a1!);
+  expect(refused.status).toBe(403);
+  expect(await refused.json()).toEqual({ error: "This API token is limited to another project." });
+  const started = await call(ids.ent!);
+  expect(started.status).toBe(201);
+  const startedId = ((await started.json()) as { id: string }).id;
+  const row = await asSystem(t.db, (tx) => tx.selectFrom("runs").select("created_by").where("id", "=", startedId).executeTakeFirstOrThrow());
+  expect(row.created_by).toBe(`api-token:${id}`);
 });
