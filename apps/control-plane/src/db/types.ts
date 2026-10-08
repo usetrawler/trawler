@@ -570,6 +570,14 @@ export interface WorkspaceBudgets {
   set_by: string;
 }
 
+export interface WorkspaceMcpSettings {
+  connections_allowed: Generated<boolean>;
+  org_id: string;
+  run_control_allowed: Generated<boolean>;
+  updated_at: Generated<Timestamp>;
+  updated_by: string;
+}
+
 export interface WorkspacePlans {
   extra_projects: Generated<number>;
   org_id: string;
@@ -619,5 +627,6 @@ export interface DB {
   user: User;
   verification: Verification;
   workspace_budgets: WorkspaceBudgets;
+  workspace_mcp_settings: WorkspaceMcpSettings;
   workspace_plans: WorkspacePlans;
 }

@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { verifyOAuthQueryParams } from "@better-auth/oauth-provider";
 import type pg from "pg";
 import { mcpResource, tokenHash } from "./config.ts";
+import { mcpSettingsOf } from "./settings.ts";
 
 export function clientHostOf(clientId: string | null): string | null {
   if (!clientId) return null;
@@ -39,5 +40,5 @@ export async function prepareConsent(pool: pg.Pool, secret: string, origin: stri
     WHERE f.flow_hash = $1 AND f.user_id = $2 AND f.expires_at > now() AND COALESCE(c.disabled, false) = false
   `, [flowKey(query), userId, clientId]);
   const row = rows[0];
-  return row ? { ...row, scopes: (params.get("scope") ?? "").split(" "), clientId, clientHost: clientHostOf(clientId) } : null;
+  return row ? { ...row, scopes: (params.get("scope") ?? "").split(" "), clientId, clientHost: clientHostOf(clientId), settings: await mcpSettingsOf(pool, row.org_id) } : null;
 }

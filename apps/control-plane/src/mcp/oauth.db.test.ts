@@ -6,6 +6,8 @@ import { prepareConsent } from "./consent.ts";
 import { mcpAuthentication } from "./http.ts";
 import { authenticateMcp, revokeGrant } from "./oauth.ts";
 import { tokenHash } from "./config.ts";
+import { withOrg } from "../db/tenancy.ts";
+import { setMcpSettings, type McpSettings } from "./settings.ts";
 
 const t = await testDb();
 const pool = authPool(t.url, 6);
@@ -15,7 +17,7 @@ const resource = `${origin}/api/mcp`;
 const auth = createAuth({ pool, secret, baseURL: origin, mcp: { dcr: true } });
 afterAll(async () => { await pool.end(); await t.drop(); });
 
-async function fixture(method = "none") {
+async function fixture(method = "none", scope = "trawler:read offline_access") {
   const ctx = await auth.$context;
   const user = await ctx.internalAdapter.createUser({ email: `${randomUUID()}@example.test`, emailVerified: true, name: "Alex" }, { method: "admin" });
   const session = await ctx.internalAdapter.createSession(user.id, false) as unknown as { id: string; token: string; activeOrganizationId: string };
@@ -38,16 +40,16 @@ async function fixture(method = "none") {
   const client = await registered.json() as { client_id: string; client_secret?: string };
   if (method === "client_secret_basic") headers.set("authorization", `Basic ${Buffer.from(`${client.client_id}:${client.client_secret}`).toString("base64")}`);
   const verifier = "a".repeat(64);
-  const query = new URLSearchParams({ client_id: client.client_id, redirect_uri: "http://localhost:9876/callback", response_type: "code", prompt: "consent", scope: "trawler:read offline_access", resource, state: "state-for-this-flow", code_challenge_method: "S256", code_challenge: tokenHash(verifier) });
+  const query = new URLSearchParams({ client_id: client.client_id, redirect_uri: "http://localhost:9876/callback", response_type: "code", prompt: "consent", scope, resource, state: "state-for-this-flow", code_challenge_method: "S256", code_challenge: tokenHash(verifier) });
   const authorize = (q = query) => call(`/api/auth/oauth2/authorize?${q}`);
-  const code = async () => {
+  const code = async (consentExtra: Record<string, unknown> = {}) => {
     const response = await authorize();
     expect(response.status, await response.clone().text()).toBe(302);
     const consentUrl = new URL(response.headers.get("location")!, origin);
     expect(consentUrl.pathname).toBe("/mcp/consent");
     const oauthQuery = consentUrl.searchParams.toString();
     expect(await prepareConsent(pool, secret, origin, oauthQuery, user.id, session.activeOrganizationId)).toBeTruthy();
-    const accepted = await call("/api/auth/oauth2/consent", { accept: true, oauth_query: oauthQuery });
+    const accepted = await call("/api/auth/oauth2/consent", { accept: true, oauth_query: oauthQuery, ...consentExtra });
     expect(accepted.status, await accepted.clone().text()).toBe(200);
     const result = await accepted.json() as { url?: string; redirect_uri?: string };
     const redirect = new URL(result.url ?? result.redirect_uri!);
@@ -57,8 +59,8 @@ async function fixture(method = "none") {
   const redeem = (code: string, extra: Record<string, unknown> = {}) => call("/api/auth/oauth2/token", {
     grant_type: "authorization_code", client_id: client.client_id, redirect_uri: "http://localhost:9876/callback", code, code_verifier: verifier, resource, ...extra,
   }, false);
-  const issue = async () => {
-    const response = await redeem(await code());
+  const issue = async (consentExtra: Record<string, unknown> = {}) => {
+    const response = await redeem(await code(consentExtra));
     expect(response.status, await response.clone().text()).toBe(200);
     return await response.json() as { access_token: string; refresh_token: string };
   };
@@ -290,4 +292,71 @@ test("expired consent contexts are cleared when a new consent is prepared", asyn
   await onDatabase(t.name, (c) => c.query("INSERT INTO mcp_consent_contexts (flow_hash, user_id, org_id, expires_at) VALUES ('stale-flow', $1, $2, now() - interval '2 hours')", [f.user.id, f.session.activeOrganizationId]));
   await f.code();
   expect(await onDatabase(t.name, async (c) => (await c.query("SELECT 1 FROM mcp_consent_contexts WHERE flow_hash = 'stale-flow'")).rowCount)).toBe(0);
+});
+
+const WRITE = "trawler:read trawler:runs:write offline_access";
+const allow = (orgId: string, next: McpSettings) => withOrg(t.db, orgId, (tx) => setMcpSettings(tx, orgId, next, "owner-1"));
+const rejectedAtConsent = async (f: Awaited<ReturnType<typeof fixture>>, extra: Record<string, unknown> = {}) => {
+  const response = await f.authorize();
+  const consentUrl = new URL(response.headers.get("location")!, origin);
+  const oauthQuery = consentUrl.searchParams.toString();
+  await prepareConsent(pool, secret, origin, oauthQuery, f.user.id, f.session.activeOrganizationId);
+  return f.call("/api/auth/oauth2/consent", { accept: true, oauth_query: oauthQuery, ...extra });
+};
+
+test("run control is off until an owner turns it on, and a connection cannot be granted it before", async () => {
+  const f = await fixture("none", WRITE);
+  expect((await rejectedAtConsent(f)).status).toBe(403);
+  const readOnly = await f.issue({ scope: "trawler:read offline_access" });
+  expect((await authenticateMcp(pool, readOnly.access_token, resource))!.scopes).not.toContain("trawler:runs:write");
+  await allow(f.session.activeOrganizationId, { connectionsAllowed: true, runControlAllowed: true });
+  const control = await f.issue();
+  expect((await authenticateMcp(pool, control.access_token, resource))!.scopes).toContain("trawler:runs:write");
+});
+
+test("switching run control off takes the right from existing connections, keeps reading, and switching it on does not give it back", async () => {
+  const f = await fixture("none", WRITE);
+  const org = f.session.activeOrganizationId;
+  await allow(org, { connectionsAllowed: true, runControlAllowed: true });
+  const tokens = await f.issue();
+  expect((await authenticateMcp(pool, tokens.access_token, resource))!.scopes).toContain("trawler:runs:write");
+  expect(await allow(org, { connectionsAllowed: true, runControlAllowed: false })).toEqual({ revokedGrants: 0, strippedGrants: 1 });
+  const read = await authenticateMcp(pool, tokens.access_token, resource);
+  expect(read!.scopes).toContain("trawler:read");
+  expect(read!.scopes).not.toContain("trawler:runs:write");
+  await allow(org, { connectionsAllowed: true, runControlAllowed: true });
+  expect((await authenticateMcp(pool, tokens.access_token, resource))!.scopes).not.toContain("trawler:runs:write");
+  const refreshed = await f.refresh(tokens.refresh_token);
+  expect(refreshed.status).toBe(200);
+  const next = await refreshed.json() as { access_token: string };
+  expect((await authenticateMcp(pool, next.access_token, resource))!.scopes).not.toContain("trawler:runs:write");
+});
+
+test("the workspace setting is read on every call, so a switch made behind the grant still applies", async () => {
+  const f = await fixture("none", WRITE);
+  const org = f.session.activeOrganizationId;
+  await allow(org, { connectionsAllowed: true, runControlAllowed: true });
+  const tokens = await f.issue();
+  const behindTheGrant = (change: { run_control_allowed?: boolean; connections_allowed?: boolean }) =>
+    withOrg(t.db, org, (tx) => tx.updateTable("workspace_mcp_settings").set(change).where("org_id", "=", org).execute());
+  await behindTheGrant({ run_control_allowed: false });
+  expect((await authenticateMcp(pool, tokens.access_token, resource))!.scopes).not.toContain("trawler:runs:write");
+  await behindTheGrant({ connections_allowed: false });
+  expect(await authenticateMcp(pool, tokens.access_token, resource)).toBeNull();
+});
+
+test("switching connections off disconnects this workspace at once, refuses consent, and leaves other workspaces alone", async () => {
+  const f = await fixture();
+  const other = await fixture();
+  const org = f.session.activeOrganizationId;
+  const tokens = await f.issue();
+  const bystander = await other.issue();
+  expect(await allow(org, { connectionsAllowed: false, runControlAllowed: false })).toEqual({ revokedGrants: 1, strippedGrants: 0 });
+  expect(await authenticateMcp(pool, tokens.access_token, resource)).toBeNull();
+  expect((await f.refresh(tokens.refresh_token)).status).toBe(400);
+  expect((await rejectedAtConsent(f)).status).toBe(403);
+  expect(await authenticateMcp(pool, bystander.access_token, resource)).toBeTruthy();
+  await allow(org, { connectionsAllowed: true, runControlAllowed: false });
+  expect(await authenticateMcp(pool, tokens.access_token, resource)).toBeNull();
+  expect(await authenticateMcp(pool, (await f.issue()).access_token, resource)).toBeTruthy();
 });
