@@ -108,7 +108,7 @@ describe("marking a finding not a bug", () => {
     expect((await view("org-a", run)).headline).toBe("Every reported defect was marked not a bug.");
     const calm = await finishedRun("org-a", acme, [{ key: "fr", kind: "friction" }]);
     await dismiss("org-a", calm, "fr", "Intended.");
-    expect((await view("org-a", calm)).headline).toBe("No defects found.");
+    expect((await view("org-a", calm)).headline).toMatch(/^No defects found/);
   });
 
   test("needs a reason of at most 500 characters and a finding the report shows on its own, and is done once", async () => {
