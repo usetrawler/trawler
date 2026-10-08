@@ -105,16 +105,20 @@ export async function authenticateMcp(pool: pg.Pool, rawToken: string, resource:
     id: string; user_id: string; org_id: string; project_id: string | null; client_id: string; scopes: string[]; role: string; expires_at: Date;
   }>(`
     SELECT g.id, g.user_id, g.org_id, g.project_id, g.client_id,
-           ARRAY(SELECT jsonb_array_elements_text(a.scopes) INTERSECT SELECT unnest(g.scopes)) AS scopes,
+           ARRAY(
+             SELECT scope FROM (SELECT jsonb_array_elements_text(a.scopes) AS scope INTERSECT SELECT unnest(g.scopes)) held
+             WHERE scope <> 'trawler:runs:write' OR COALESCE(w.run_control_allowed, false)
+           ) AS scopes,
            m.role, a."expiresAt" AS expires_at
     FROM "oauthAccessToken" a
     JOIN mcp_grants g ON g.code_hash = a."authorizationCodeId"
     JOIN "oauthClient" c ON c."clientId" = a."clientId"
     JOIN member m ON m."userId" = g.user_id AND m."organizationId" = g.org_id
+    LEFT JOIN workspace_mcp_settings w ON w.org_id = g.org_id
     WHERE a.token = $1 AND a.revoked IS NULL AND a.confirmation IS NULL AND a."expiresAt" > now()
       AND g.revoked_at IS NULL AND g.resource = $2 AND a.resources = jsonb_build_array($2::text)
       AND a."userId" = g.user_id AND a."clientId" = g.client_id AND a."referenceId" = g.org_id
-      AND COALESCE(c.disabled, false) = false
+      AND COALESCE(c.disabled, false) = false AND COALESCE(w.connections_allowed, true)
   `, [tokenHash(rawToken), resource]);
   const row = rows[0];
   if (!row || !row.scopes.includes("trawler:read")) return null;

@@ -2,6 +2,7 @@ import type pg from "pg";
 import { consentWorkspace, flowKey } from "./consent.ts";
 import { mcpResource, tokenHash } from "./config.ts";
 import { authenticateMcp, persistGrant } from "./oauth.ts";
+import { mcpSettingsOf } from "./settings.ts";
 
 const MAX_BODY = 64 * 1024;
 
@@ -162,6 +163,9 @@ export function oauthBoundary(handler: (r: Request) => Promise<Response>, pool: 
           WHERE flow_hash = $1 AND user_id = $2 AND expires_at > now()
         `, [flowKey(body.oauth_query), person.user.id]);
         if (!rows[0]) return oauthError("access_denied", 403);
+        const settings = await mcpSettingsOf(pool, rows[0].org_id);
+        const granted = (typeof body.scope === "string" ? body.scope : new URLSearchParams(body.oauth_query).get("scope") ?? "").split(" ");
+        if (!settings.connectionsAllowed || (!settings.runControlAllowed && granted.includes("trawler:runs:write"))) return oauthError("access_denied", 403);
         const decided = await consentWorkspace.run({ userId: person.user.id, orgId: rows[0].org_id }, invoke);
         const clientId = new URLSearchParams(body.oauth_query).get("client_id");
         if (decided.ok && clientId) {

@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
   plan: { plan: "free", limits: { projects: 1, runsPerDay: 3, people: 4 } } as { plan: "free" | "team" | "enterprise"; limits: { projects: number; runsPerDay: number; people: number } },
   projects: 1,
   today: 0,
+  mcp: { connectionsAllowed: true, runControlAllowed: false },
 }));
 
 vi.mock("react", async (original) => ({
@@ -46,11 +47,12 @@ vi.mock("../../server/env.ts", () => ({ readEnv: () => ({ baseURL: "https://app.
 vi.mock("../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
 vi.mock("../../credentials/credentials.ts", () => ({ modelKeyDetails: async () => state.key }));
 vi.mock("../../runs/limits.ts", () => ({ monthlyBudget: async () => state.budget, monthSpent: async () => state.spent }));
+vi.mock("../../mcp/settings.ts", () => ({ mcpSettings: async () => state.mcp }));
 vi.mock("../../runs/plans.ts", () => ({ workspacePlan: async () => state.plan, projectsCounted: async () => state.projects, runsToday: async () => state.today }));
 vi.mock("../../api-tokens/tokens.ts", () => ({ listApiTokens: async () => [] }));
 vi.mock("../../projects/projects.ts", () => ({ listProjects: async () => [] }));
 vi.mock("./actions.ts", () => ({
-  setMonthlyBudgetAction: async () => ({}), removeMonthlyBudgetAction: async () => ({}),
+  setMcpAccessAction: async () => ({}), setMonthlyBudgetAction: async () => ({}), removeMonthlyBudgetAction: async () => ({}),
   renameWorkspaceAction: async () => ({}), replaceModelKeyAction: async () => ({}), removeModelKeyAction: async () => ({}),
   inviteMemberAction: async () => ({}), revokeInvitationAction: async () => ({}), removeMemberAction: async () => ({}), changeRoleAction: async () => ({}),
 }));
@@ -159,4 +161,21 @@ test("the plan shows what the workspace has used of its limits, and what to do p
   const html = renderToStaticMarkup(await SettingsPage());
   expect(html.indexOf('id="workspace-heading"')).toBeLessThan(html.indexOf('id="plan-heading"'));
   expect(html.indexOf('id="plan-heading"')).toBeLessThan(html.indexOf('id="members-heading"'));
+});
+
+test("AI assistant access shows both choices to everyone, and only an owner or admin can change them", async () => {
+  const ownerHtml = renderToStaticMarkup(await SettingsPage());
+  expect(text(ownerHtml)).toContain("AI assistant access (MCP)");
+  expect(ownerHtml.match(/<input[^>]*name="connections"[^>]*>/)?.[0]).toContain("checked");
+  expect(ownerHtml.match(/<input[^>]*name="runControl"[^>]*>/)?.[0]).not.toContain("checked");
+  state.mcp = { connectionsAllowed: false, runControlAllowed: false };
+  const off = renderToStaticMarkup(await SettingsPage());
+  expect(off.match(/<input[^>]*name="connections"[^>]*>/)?.[0]).not.toContain("checked");
+  expect(off.match(/<input[^>]*name="runControl"[^>]*>/)?.[0]).toContain("disabled");
+  state.member = { ...owner, role: "member" };
+  state.mcp = { connectionsAllowed: true, runControlAllowed: true };
+  const memberView = text(renderToStaticMarkup(await SettingsPage()));
+  expect(memberView).toContain("Connections: allowed · Run control: allowed");
+  expect(memberView).toContain("Only an owner or admin of this workspace can change this.");
+  expect(renderToStaticMarkup(await SettingsPage())).not.toContain('name="connections"');
 });
