@@ -1,11 +1,15 @@
 import { betterAuth } from "better-auth";
-import { APIError } from "better-auth/api";
+import { APIError, isAPIError } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { Kysely, PostgresDialect, sql, type Transaction } from "kysely";
 import pg from "pg";
 import { chooseWorkspace, onboard, type OnboardingStore, type WorkspaceChoice } from "./onboarding.ts";
 import { devSignIn, organizationPlugin } from "./plugins.ts";
 import { logError } from "../server/log.ts";
+import { canonicalOrigin } from "../mcp/config.ts";
+import type { ClientMetadataResourceFetch } from "@better-auth/oauth-provider";
+import { oauthPlugins } from "../mcp/oauth.ts";
+import { oauthBoundary } from "../mcp/http.ts";
 
 export interface AuthOptions {
   pool: pg.Pool;
@@ -14,6 +18,7 @@ export interface AuthOptions {
   github?: { clientId: string; clientSecret: string };
   google?: { clientId: string; clientSecret: string };
   devOidc?: { issuer: string; clientId: string; clientSecret: string };
+  mcp?: { dcr?: boolean; fetchClientMetadata?: ClientMetadataResourceFetch };
 }
 
 type AuthTables = {
@@ -212,16 +217,22 @@ export function createAuth(options: AuthOptions) {
 
   const auth = betterAuth({
     secret: options.secret,
-    baseURL: options.baseURL,
+    baseURL: options.mcp ? canonicalOrigin(options.baseURL) : options.baseURL,
     database: options.pool,
     emailAndPassword: { enabled: false },
     advanced: { ipAddress: { ipAddressHeaders: ["x-real-ip"] } },
     account: { encryptOAuthTokens: true },
+    ...(options.mcp ? {
+      logger: { disabled: true },
+      onAPIError: { onError: (error: unknown) => {
+        if (!isAPIError(error) || error.statusCode >= 500) throw new APIError("SERVICE_UNAVAILABLE", { error: "temporarily_unavailable" });
+      } },
+    } : {}),
     socialProviders: {
       ...(options.github ? { github: { ...options.github, prompt: "select_account" as const } } : {}),
       ...(options.google ? { google: { ...options.google, prompt: "select_account" as const } } : {}),
     },
-    plugins: [organizationPlugin(async (email) => (await workspaceOfEmail(email)) !== null), ...devSignIn(options.devOidc), nextCookies()],
+    plugins: [organizationPlugin(async (email) => (await workspaceOfEmail(email)) !== null), ...devSignIn(options.devOidc), ...(options.mcp ? oauthPlugins(options.pool, options.baseURL, options.mcp.dcr ?? false, options.mcp.fetchClientMetadata) : []), nextCookies()],
     disabledPaths: CLOSED_ORGANIZATION_PATHS.map((path) => `/organization/${path}`),
     databaseHooks: {
       session: {
@@ -239,7 +250,10 @@ export function createAuth(options: AuthOptions) {
       },
     },
   });
-  return Object.assign(auth, { workspaceOf, chooseWorkspace: chooseWorkspaceFor, invitationsFor, memberEmail, workspaceMembers, pendingInvitations });
+  const handler = options.mcp ? oauthBoundary(auth.handler, options.pool, canonicalOrigin(options.baseURL), (headers) => auth.api.getSession({ headers })) : auth.handler;
+  return Object.assign(auth, { handler, workspaceOf, chooseWorkspace: chooseWorkspaceFor, invitationsFor, memberEmail, workspaceMembers, pendingInvitations,
+    mcp: options.mcp ? { pool: options.pool, origin: canonicalOrigin(options.baseURL), secret: options.secret } : undefined,
+  });
 }
 
 export type Auth = ReturnType<typeof createAuth>;

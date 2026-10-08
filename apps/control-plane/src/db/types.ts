@@ -198,6 +198,46 @@ export interface LlmUsage {
   run_id: string;
 }
 
+export interface McpCodeClaims {
+  code_hash: string;
+  expires_at: Timestamp;
+}
+
+export interface McpCodeProjects {
+  code_hash: string;
+  expires_at: Timestamp;
+  org_id: string;
+  project_id: string;
+}
+
+export interface McpConsentContexts {
+  expires_at: Timestamp;
+  flow_hash: string;
+  org_id: string;
+  project_id: string | null;
+  user_id: string;
+}
+
+export interface McpGrants {
+  client_id: string;
+  code_hash: string;
+  created_at: Generated<Timestamp>;
+  id: string;
+  last_used_at: Timestamp | null;
+  org_id: string;
+  project_id: string | null;
+  resource: string;
+  revoked_at: Timestamp | null;
+  scopes: string[];
+  user_id: string;
+}
+
+export interface McpRateLimits {
+  calls: number;
+  key: string;
+  minute: Int8;
+}
+
 export interface Member {
   createdAt: Timestamp;
   id: string;
@@ -216,6 +256,127 @@ export interface ModelCatalog {
   prices_refreshed_at: Timestamp | null;
   prompt_usd_per_mtok: Numeric;
   recommended: Generated<boolean>;
+}
+
+export interface OauthAccessToken {
+  authorizationCodeId: string | null;
+  clientId: string;
+  confirmation: Json | null;
+  createdAt: Timestamp;
+  expiresAt: Timestamp;
+  id: string;
+  referenceId: string | null;
+  refreshId: string | null;
+  requestedUserInfoClaims: Json | null;
+  resources: Json | null;
+  revoked: Timestamp | null;
+  scopes: Json;
+  sessionId: string | null;
+  token: string;
+  userId: string | null;
+}
+
+export interface OauthClient {
+  applicationType: string | null;
+  backchannelLogoutSessionRequired: boolean | null;
+  backchannelLogoutUri: string | null;
+  clientCredentialsScopes: Json | null;
+  clientDiscoveryId: string | null;
+  clientId: string;
+  clientSecret: string | null;
+  contacts: Json | null;
+  createdAt: Timestamp | null;
+  disabled: boolean | null;
+  dpopBoundAccessTokens: boolean | null;
+  enableEndSession: boolean | null;
+  grantTypes: Json | null;
+  icon: string | null;
+  id: string;
+  jwks: string | null;
+  jwksUri: string | null;
+  metadata: Json | null;
+  name: string | null;
+  policy: string | null;
+  postLogoutRedirectUris: Json | null;
+  redirectUris: Json;
+  referenceId: string | null;
+  requirePKCE: boolean | null;
+  responseTypes: Json | null;
+  scopes: Json | null;
+  skipConsent: boolean | null;
+  softwareId: string | null;
+  softwareStatement: string | null;
+  softwareVersion: string | null;
+  subjectType: string | null;
+  tokenEndpointAuthMethod: string | null;
+  tos: string | null;
+  updatedAt: Timestamp | null;
+  uri: string | null;
+  userId: string | null;
+}
+
+export interface OauthClientAssertion {
+  expiresAt: Timestamp;
+  id: string;
+}
+
+export interface OauthClientResource {
+  clientId: string;
+  createdAt: Timestamp | null;
+  id: string;
+  metadata: Json | null;
+  resourceId: string;
+}
+
+export interface OauthConsent {
+  clientId: string;
+  createdAt: Timestamp;
+  id: string;
+  referenceId: string | null;
+  requestedUserInfoClaims: Json | null;
+  resources: Json | null;
+  scopes: Json;
+  updatedAt: Timestamp;
+  userId: string | null;
+}
+
+export interface OauthRefreshToken {
+  authorizationCodeId: string | null;
+  authTime: Timestamp | null;
+  clientId: string;
+  confirmation: Json | null;
+  createdAt: Timestamp;
+  expiresAt: Timestamp;
+  id: string;
+  referenceId: string | null;
+  requestedUserInfoClaims: Json | null;
+  resources: Json | null;
+  revoked: Timestamp | null;
+  rotatedAt: Timestamp | null;
+  rotationReplayExpiresAt: Timestamp | null;
+  rotationReplayResponse: string | null;
+  scopes: Json;
+  sessionId: string | null;
+  token: string;
+  userId: string;
+}
+
+export interface OauthResource {
+  accessTokenTtl: number | null;
+  allowedScopes: Json | null;
+  createdAt: Timestamp | null;
+  customClaims: Json | null;
+  disabled: boolean | null;
+  dpopBoundAccessTokensRequired: boolean | null;
+  id: string;
+  identifier: string;
+  metadata: Json | null;
+  name: string;
+  policyVersion: number | null;
+  refreshTokenTtl: number | null;
+  signingAlgorithm: string | null;
+  signingKeyId: string | null;
+  updatedAt: Timestamp | null;
 }
 
 export interface Organization {
@@ -434,6 +595,14 @@ export interface WorkspaceBudgets {
   set_by: string;
 }
 
+export interface WorkspaceMcpSettings {
+  connections_allowed: Generated<boolean>;
+  org_id: string;
+  run_control_allowed: Generated<boolean>;
+  updated_at: Generated<Timestamp>;
+  updated_by: string;
+}
+
 export interface WorkspacePlans {
   extra_projects: Generated<number>;
   org_id: string;
@@ -456,8 +625,20 @@ export interface DB {
   invitation: Invitation;
   jobs: Jobs;
   llm_usage: LlmUsage;
+  mcp_code_claims: McpCodeClaims;
+  mcp_code_projects: McpCodeProjects;
+  mcp_consent_contexts: McpConsentContexts;
+  mcp_grants: McpGrants;
+  mcp_rate_limits: McpRateLimits;
   member: Member;
   model_catalog: ModelCatalog;
+  oauthAccessToken: OauthAccessToken;
+  oauthClient: OauthClient;
+  oauthClientAssertion: OauthClientAssertion;
+  oauthClientResource: OauthClientResource;
+  oauthConsent: OauthConsent;
+  oauthRefreshToken: OauthRefreshToken;
+  oauthResource: OauthResource;
   organization: Organization;
   personas: Personas;
   plans: Plans;
@@ -473,5 +654,6 @@ export interface DB {
   user: User;
   verification: Verification;
   workspace_budgets: WorkspaceBudgets;
+  workspace_mcp_settings: WorkspaceMcpSettings;
   workspace_plans: WorkspacePlans;
 }

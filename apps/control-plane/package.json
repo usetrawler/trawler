@@ -12,19 +12,26 @@
     "dev:oidc": "tsx scripts/dev-oidc.ts"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.3.1",
+    "@modelcontextprotocol/ext-apps": "2.0.3",
     "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "kysely-codegen": "^0.20.0",
-    "oauth2-mock-server": "^9.2.0"
+    "oauth2-mock-server": "^9.2.0",
+    "playwright": "1.64.0-alpha-1789764292000"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1141.0",
+    "@better-auth/cimd": "1.7.7",
+    "@better-auth/mcp": "1.7.7",
+    "@better-auth/oauth-provider": "1.7.7",
+    "@modelcontextprotocol/server": "2.3.1",
     "@sentry/nextjs": "^11.0.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@usetrawler/core": "^0.0.0",
     "@usetrawler/protocol": "^0.0.0",
-    "better-auth": "^1.7.6",
+    "better-auth": "1.7.7",
     "kysely": "^0.29.6",
     "next": "^16.3.6",
     "pg": "^8.23.0",

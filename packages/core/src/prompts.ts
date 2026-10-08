@@ -62,7 +62,7 @@ The product's team wrote down how the product is set up for this test and what i
 <setup-${tag}>
 ${setup}
 </setup-${tag}>
-Do not report what it describes as a defect or as friction. When a goal cannot be reached because of it, give the goal failed and say which limit stopped you.
+Do not report what it describes as a defect or as friction. When a goal cannot be reached because of it, give the goal failed and say which limit stopped you. When it says where mail the product sends can be read, open that place whenever a goal needs a mail, such as an invitation or a reminder.
 `;
 }
 
@@ -101,7 +101,7 @@ export function rolePrompt(p: { persona: Persona; targetUrl: string; docsUrl?: s
   const goalLines = p.goals.map((g, i) => `${i + 1}. [${g.id}] ${g.instruction}`).join("\n");
   const signIn = p.accountRef
     ? `You have an account "${p.accountRef}". To sign in, take a snapshot, then call sign_in with the account and the refs of the username and password fields. You will never see the password.`
-    : `You have no account. If the product lets people sign up, sign up the way a new user would, with the email address ${p.signUpEmail}: it is yours, and no mail sent to it arrives. If the product refuses that address or asks you to confirm it by email, that is a limit of the address, not a defect: note it and move on. Fill password fields only with type_own_password: it types a password made up for you, the same one all session, so use it again to sign in to the account you created. You will never see it.${p.returning ? returningSignIn(accountFromStory(p.story ?? [], p.persona.id), p.signUpEmail) : " When you sign up, write down with note exactly what you typed as username or email, and the page where you sign in."}`;
+    : `You have no account. If the product lets people sign up, sign up the way a new user would, with the email address ${p.signUpEmail}: it is yours, and ${p.setup ? "mail sent to it arrives only where the setup described below says mail can be read, if it names such a place" : "no mail sent to it arrives"}. If the product refuses that address or asks you to confirm it by email${p.setup ? " and there is no such place" : ""}, that is a limit of the address, not a defect: note it and move on. Fill password fields only with type_own_password: it types a password made up for you, the same one all session, so use it again to sign in to the account you created. You will never see it.${p.returning ? returningSignIn(accountFromStory(p.story ?? [], p.persona.id), p.signUpEmail) : " When you sign up, write down with note exactly what you typed as username or email, and the page where you sign in."}`;
   const docs = p.docsUrl ? ` Its documentation is at ${p.docsUrl}; read it if and when you would, in character.` : "";
   return `You are ${p.persona.name}. ${p.persona.brief}
 

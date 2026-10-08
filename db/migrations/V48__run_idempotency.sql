@@ -7,7 +7,7 @@ CREATE TABLE run_idempotency (
   response jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   expires_at timestamptz NOT NULL,
-  PRIMARY KEY (org_id, key_hash),
+  PRIMARY KEY (org_id, project_id, key_hash),
   FOREIGN KEY (run_id, org_id) REFERENCES runs (id, org_id) ON DELETE CASCADE,
   FOREIGN KEY (project_id, org_id) REFERENCES projects (id, org_id) ON DELETE CASCADE,
   CHECK ((run_id IS NULL) = (response IS NULL))

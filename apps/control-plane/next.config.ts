@@ -4,6 +4,7 @@ import type { NextConfig } from "next";
 const config: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  logging: { incomingRequests: { ignore: [/\/api\/auth(?:\/|\?)/, /\/mcp\/consent(?:\?|$)/] } },
   typescript: { ignoreBuildErrors: true },
   output: "standalone",
   outputFileTracingRoot: fileURLToPath(new URL("../..", import.meta.url)),

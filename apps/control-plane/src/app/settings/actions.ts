@@ -9,6 +9,8 @@ import { modelKeyHint, removeModelKey, setModelKey } from "../../credentials/cre
 import { withOrg } from "../../db/tenancy.ts";
 import { freshEndpoint, withinListingLimit } from "../../llm/key-input.ts";
 import { checkKey, PROVIDER_LABEL } from "../../llm/providers.ts";
+import { revokeGrant } from "../../mcp/oauth.ts";
+import { setMcpSettings } from "../../mcp/settings.ts";
 import { MONTHLY_BUDGET_RANGE, removeMonthlyBudget, setMonthlyBudget } from "../../runs/limits.ts";
 import { cancelLiveRuns } from "../../runs/runs.ts";
 import { canManageBilling, getAuth, signedInMember, type Member } from "../../server/auth.ts";
@@ -114,6 +116,40 @@ export async function removeMonthlyBudgetAction(_previous: BudgetState): Promise
   await withOrg(getDb(), member.orgId, (tx) => removeMonthlyBudget(tx, member.orgId));
   revalidatePath("/", "layout");
   return { removed: true };
+}
+
+export interface McpAccessState {
+  error?: string;
+  saved?: boolean;
+  revokedGrants?: number;
+  strippedGrants?: number;
+}
+
+export async function setMcpAccessAction(_previous: McpAccessState, form: FormData): Promise<McpAccessState> {
+  const member = await manager();
+  if ("error" in member) return member;
+  if (form.get("org") !== member.orgId) return { error: "The workspace changed since this page was loaded. Reload the page, then change its MCP access." };
+  const connectionsAllowed = form.get("connections") === "on";
+  const runControlAllowed = connectionsAllowed && form.get("runControl") === "on";
+  const changed = await withOrg(getDb(), member.orgId, (tx) => setMcpSettings(tx, member.orgId, { connectionsAllowed, runControlAllowed }, member.userId));
+  revalidatePath("/", "layout");
+  return { saved: true, ...changed };
+}
+
+export interface McpConnectionState {
+  error?: string;
+  revoked?: boolean;
+}
+
+export async function revokeMcpConnectionAction(_previous: McpConnectionState, form: FormData): Promise<McpConnectionState> {
+  const member = await signedInMember(await headers());
+  if (!member) redirect("/sign-in");
+  const config = getAuth().mcp;
+  const id = String(form.get("id") ?? "");
+  if (!config || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return { error: "That connection is not there any more." };
+  const revoked = await revokeGrant(config.pool, id, member.userId);
+  revalidatePath("/settings");
+  return revoked ? { revoked: true } : { error: "That connection is not there any more." };
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

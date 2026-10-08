@@ -17,6 +17,9 @@ const state = vi.hoisted(() => ({
   tenants: [] as string[],
   revalidated: [] as unknown[][],
   budgets: [] as unknown[][],
+  mcpSettings: [] as unknown[][],
+  revoked: [] as unknown[][],
+  grantOwned: true,
 }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
@@ -25,7 +28,7 @@ vi.mock("next/navigation", () => ({ redirect: (to: string) => { throw Object.ass
 vi.mock("../../server/auth.ts", () => ({
   signedInMember: async () => state.member,
   canManageBilling: (member: { role: string }) => member.role === "owner" || member.role === "admin",
-  getAuth: () => ({ api: {
+  getAuth: () => ({ mcp: { pool: {} }, api: {
     updateOrganization: async (options: unknown) => {
       if (state.renameFails) throw state.renameFails;
       state.renamed.push(options);
@@ -47,6 +50,10 @@ vi.mock("../../runs/limits.ts", async (original) => ({
   setMonthlyBudget: async (_tx: unknown, orgId: string, usd: number, userId: string) => void state.budgets.push(["set", orgId, usd, userId]),
   removeMonthlyBudget: async (_tx: unknown, orgId: string) => void state.budgets.push(["removed", orgId]),
 }));
+vi.mock("../../mcp/oauth.ts", () => ({ revokeGrant: async (_pool: unknown, id: string, userId: string) => { state.revoked.push([id, userId]); return state.grantOwned; } }));
+vi.mock("../../mcp/settings.ts", () => ({
+  setMcpSettings: async (_tx: unknown, orgId: string, next: unknown, userId: string) => { state.mcpSettings.push([orgId, next, userId]); return { revokedGrants: 2, strippedGrants: 1 }; },
+}));
 vi.mock("../../runs/runs.ts", () => ({ cancelLiveRuns: async (tx: unknown, orgId: string, reason: string) => { state.cancelled.push({ orgId, tx, reason }); return state.live; } }));
 vi.mock("../../llm/providers.ts", async (original) => ({
   ...(await original<typeof import("../../llm/providers.ts")>()),
@@ -56,7 +63,7 @@ vi.mock("../../llm/providers.ts", async (original) => ({
   },
 }));
 
-const { removeModelKeyAction, removeMonthlyBudgetAction, renameWorkspaceAction, replaceModelKeyAction, setMonthlyBudgetAction } = await import("./actions.ts");
+const { removeModelKeyAction, removeMonthlyBudgetAction, renameWorkspaceAction, replaceModelKeyAction, revokeMcpConnectionAction, setMcpAccessAction, setMonthlyBudgetAction } = await import("./actions.ts");
 const { withinListingLimit } = await import("../../llm/key-input.ts");
 const ADDED_AT = "2026-09-26T10:21:33.123Z";
 const EVERY_PAGE = [["/", "layout"]];
@@ -71,7 +78,7 @@ const form = (fields: Record<string, string>) => {
 const OWNERS_AND_ADMINS = "Only an owner or admin of this workspace can change its settings.";
 
 beforeEach(() => {
-  Object.assign(state, { member: owner, renamed: [], renameFails: null, checked: [], check: { ok: true, checked: true }, saved: [], removed: [], removeMatches: true, keyRemains: true, cancelled: [], live: 0, tenants: [], revalidated: [], budgets: [] });
+  Object.assign(state, { member: owner, renamed: [], renameFails: null, checked: [], check: { ok: true, checked: true }, saved: [], removed: [], removeMatches: true, keyRemains: true, cancelled: [], live: 0, tenants: [], revalidated: [], budgets: [], mcpSettings: [], revoked: [], grantOwned: true });
 });
 
 test("an owner or admin sets the workspace's monthly budget in dollars and cents, or removes it, and every page shows it", async () => {
@@ -91,6 +98,45 @@ test("a budget outside $1 to $100,000, with more than cents, or not a number is 
   expect(await setMonthlyBudgetAction({}, form({ monthly: "20" }))).toEqual({ error: OWNERS_AND_ADMINS });
   expect(await removeMonthlyBudgetAction({})).toEqual({ error: OWNERS_AND_ADMINS });
   expect(state.budgets).toEqual([]);
+});
+
+test("an owner or admin chooses whether assistants may connect and whether they may control runs, and run control cannot outlive connections", async () => {
+  expect(await setMcpAccessAction({}, form({ org: "org-1", connections: "on", runControl: "on" }))).toEqual({ saved: true, revokedGrants: 2, strippedGrants: 1 });
+  state.member = { ...owner, role: "admin" };
+  await setMcpAccessAction({}, form({ org: "org-1", connections: "on" }));
+  await setMcpAccessAction({}, form({ org: "org-1", runControl: "on" }));
+  await setMcpAccessAction({}, form({ org: "org-1" }));
+  expect(state.mcpSettings).toEqual([
+    ["org-1", { connectionsAllowed: true, runControlAllowed: true }, "user-1"],
+    ["org-1", { connectionsAllowed: true, runControlAllowed: false }, "user-1"],
+    ["org-1", { connectionsAllowed: false, runControlAllowed: false }, "user-1"],
+    ["org-1", { connectionsAllowed: false, runControlAllowed: false }, "user-1"],
+  ]);
+  expect(state.revalidated).toEqual([...EVERY_PAGE, ...EVERY_PAGE, ...EVERY_PAGE, ...EVERY_PAGE]);
+});
+
+test("a page left open for another workspace changes nothing", async () => {
+  expect(await setMcpAccessAction({}, form({ org: "org-2", connections: "on" }))).toEqual({ error: "The workspace changed since this page was loaded. Reload the page, then change its MCP access." });
+  expect(await setMcpAccessAction({}, form({ connections: "on" }))).toHaveProperty("error");
+  expect([state.mcpSettings, state.revalidated]).toEqual([[], []]);
+});
+
+test("anyone disconnects their own assistant connection, and a connection that is gone says so", async () => {
+  state.member = { ...owner, role: "member" };
+  const id = "6f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f";
+  expect(await revokeMcpConnectionAction({}, form({ id }))).toEqual({ revoked: true });
+  expect(state.revoked).toEqual([[id, "user-1"]]);
+  expect(state.revalidated).toEqual([["/settings"]]);
+  state.grantOwned = false;
+  expect(await revokeMcpConnectionAction({}, form({ id }))).toEqual({ error: "That connection is not there any more." });
+  expect(await revokeMcpConnectionAction({}, form({ id: "../x" }))).toEqual({ error: "That connection is not there any more." });
+  expect(state.revoked).toHaveLength(2);
+});
+
+test("a member who is neither owner nor admin changes no MCP setting", async () => {
+  state.member = { ...owner, role: "member" };
+  expect(await setMcpAccessAction({}, form({ org: "org-1", connections: "on", runControl: "on" }))).toEqual({ error: OWNERS_AND_ADMINS });
+  expect([state.mcpSettings, state.revalidated]).toEqual([[], []]);
 });
 
 test("a member of this workspace who is neither owner nor admin renames nothing, and replaces or removes no key", async () => {
