@@ -92,6 +92,7 @@ export const RunResultSchema = z.object({
   people: z.number().int().nonnegative(),
   goalsReached: z.number().int().nonnegative(),
   goalsTotal: z.number().int().nonnegative(),
+  unreachedGoals: z.array(z.string()).optional(),
   defects: z.object({ confirmed: z.number().int().nonnegative(), refuted: z.number().int().nonnegative(), inconclusive: z.number().int().nonnegative() }),
   confirmed: z.array(ConfirmedDefectSchema),
   costUsd: z.number().nonnegative(),

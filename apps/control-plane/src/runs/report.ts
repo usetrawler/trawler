@@ -1,7 +1,7 @@
 import { goalsFor } from "@usetrawler/protocol";
 import { RUN_TIME_LIMIT_HOURS, UNCLAIMED_RUN_MINUTES } from "./limits.ts";
 import { ACCOUNT_REFUSED, outOfBudget, type CancelReason, type RunSummary } from "./runs.ts";
-import { NOTHING_TO_TEST } from "./status.ts";
+import { NOTHING_TO_TEST, thinCoverage } from "./status.ts";
 
 export type StageState = "waiting" | "active" | "done" | "skipped";
 function useDetail(people: number, turns: number): string {
@@ -144,9 +144,10 @@ export function runView(s: RunSummary) {
 
   const goalsReached = s.goals.filter((g) => g.status === "reached").length;
   const goalsTotal = s.personas.reduce((sum, p) => sum + goalsFor(s.goalTexts, p.id).length, 0);
+  const unreachedGoals = s.goalTexts.filter((t) => !s.goals.some((g) => g.goal === t.id && g.status === "reached")).map((t) => t.instruction);
   const replaysAllFailed = defects.length > 0 && defects.every((f) => failedReplay(f));
   const refreshes = live || s.jobs.some((j) => j.status === "leased" || (j.status === "queued" && j.requested));
-  return { live, rejudging, refreshes, stages, personas, report, reported: defects.length, goalsReached, goalsTotal, headline: headline(s, report.confirmed.length, defects.length, replaysAllFailed, dismissed.some((f) => f.kind === "defect")) };
+  return { live, rejudging, refreshes, stages, personas, report, reported: defects.length, goalsReached, goalsTotal, unreachedGoals, headline: headline(s, report.confirmed.length, defects.length, replaysAllFailed, dismissed.some((f) => f.kind === "defect"), goalsReached, goalsTotal) };
 }
 
 const STOPPED_BECAUSE: Record<CancelReason, string> = {
@@ -164,7 +165,7 @@ const STOPPED_BECAUSE: Record<CancelReason, string> = {
   nothing_to_test: NOTHING_TO_TEST,
 };
 
-function headline(s: RunSummary, confirmed: number, defects: number, replaysAllFailed: boolean, defectsDismissed: boolean): string {
+function headline(s: RunSummary, confirmed: number, defects: number, replaysAllFailed: boolean, defectsDismissed: boolean, goalsReached: number, goalsTotal: number): string {
   const { status, cancelReason } = s;
   const checks = s.jobs.filter((j) => j.kind === "account_check");
   if (status === "queued") return "Waiting for a runner.";
@@ -180,6 +181,7 @@ function headline(s: RunSummary, confirmed: number, defects: number, replaysAllF
   if (replaysAllFailed) return `${prefix}None of the reported defects could be checked: every replay failed.`;
   if (defects > 0) return `${prefix}None of the reported defects was confirmed.`;
   if (defectsDismissed) return `${prefix}Every reported defect was marked not a bug.`;
+  if (thinCoverage(goalsReached, goalsTotal)) return `${prefix}No defects found, but only ${goalsReached} of ${goalsTotal} goals were reached, so this run cannot say the change works.`;
   return `${prefix}No defects found.`;
 }
 
