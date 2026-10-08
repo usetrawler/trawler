@@ -328,7 +328,7 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
     return { usage, stoppedBy: events.finished?.stoppedBy ?? "error", observation, ...(events.finished?.error ? { error: clip(events.finished.error) } : {}) };
   }
   if (!job.observation) throw new Error("the judge job has no observation");
-  const { usage } = await judge({ model: deps.model(job.judgeModel, job.token), modelId: job.judgeModel, finding, observation: job.observation, scrubber, budget, emit: events.emit });
+  const { usage } = await judge({ model: deps.model(job.judgeModel, job.token), modelId: job.judgeModel, finding, observation: job.observation, brief: config.brief, scrubber, budget, emit: events.emit });
   return { usage, stoppedBy: events.finished?.stoppedBy ?? "done", ...(events.finished?.error ? { error: clip(events.finished.error) } : {}) };
 }
 

@@ -457,3 +457,10 @@ test("the pull request subject links only to web addresses and is absent for oth
   expect(unsafe).not.toContain("alert(1)");
   expect(text(head(render(finished)))).not.toContain("PR #");
 });
+
+test("a pull request plan shows what the lead told the team", () => {
+  const prPlan = { number: 12, mode: "change" as const, note: null, version: 1, reused: false, createdByRun: 7, brief: "A member can now ask to cancel a charge.", goals: [{ id: "pr-goal-1", instruction: "Your request reaches Ola.", personaId: "ana" }] };
+  const html = text(render(summary({ ...finished, prPlan })));
+  expect(html).toContain("What the lead told the team A member can now ask to cancel a charge.");
+  expect(text(render(summary({ ...finished, prPlan: { ...prPlan, brief: undefined } })))).not.toContain("What the lead told the team");
+});

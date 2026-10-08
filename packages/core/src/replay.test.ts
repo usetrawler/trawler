@@ -461,6 +461,21 @@ describe("judge", () => {
     expect(judgePrompt(finding, { completed: true, observed, blockedAt: null })).not.toContain(`<observation-${tag}>`);
   });
 
+  test("the judge treats the lead's brief as the change's promise, and sees none without it", () => {
+    const observation = { completed: true, observed: "The charge still counts in the monthly total.", blockedAt: null };
+    const prompt = judgePrompt(finding, observation, "After the owner approves, the charge leaves the monthly total.");
+    const tag = /<brief-([a-z0-9]+)>/.exec(prompt)![1]!;
+    expect(prompt).toContain(`<brief-${tag}>\nAfter the owner approves, the charge leaves the monthly total.\n</brief-${tag}>`);
+    expect(prompt).toMatch(/a result or detail it says the change should give counts as promised/);
+    expect(judgePrompt(finding, observation)).not.toContain("<brief-");
+  });
+
+  test("judge passes the brief to the model", async () => {
+    const model = scriptedModel([verdictCall("confirmed")]);
+    await judge({ model, modelId: "mock", finding, observation: { completed: true, observed: "o", blockedAt: null }, brief: "The total drops after approval.", scrubber: new SecretScrubber(), budget: new Budget(1), emit: () => {} });
+    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toContain("The total drops after approval.");
+  });
+
   test("records the verdict even when the event sink fails", async () => {
     const model = scriptedModel([verdictCall("confirmed")]);
     const { verdict } = await judgeWith(model, { emit: () => { throw new Error("sink down"); } }).promise;

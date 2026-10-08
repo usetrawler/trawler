@@ -243,6 +243,7 @@ export interface Personas {
 export interface Plans {
   account_flow: string | null;
   account_reason: string | null;
+  brief: string | null;
   created_at: Generated<Timestamp>;
   created_by_run_id: string | null;
   features: Generated<string[]>;
