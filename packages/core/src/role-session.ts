@@ -3,7 +3,7 @@ import type { Screenshot } from "./browser.ts";
 import { goalsFor, type JobUsage, type NotABug, type Persona, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
 import { browserQueue, runAgentLoop } from "./agent-loop.ts";
 import type { Budget } from "./llm.ts";
-import { rolePrompt, sessionStatus, standbyPrompt } from "./prompts.ts";
+import { LOOP_WINDOW, rolePrompt, sessionStatus, standbyPrompt, stuckHints, type RecentStep } from "./prompts.ts";
 import type { SecretScrubber } from "./secrets.ts";
 import { findingUrl, madeUpEmail, madeUpPassword, newSessionState, noteBotProtection, ownPasswordTool, sessionTools, STANDBY, teamTools, type FillField, type TeamChannel } from "./session-tools.ts";
 import type { BotProtection } from "./bot-protection.ts";
@@ -100,6 +100,8 @@ export async function runRoleSession(opts: {
     team: opts.conversation?.peers.map((p) => p.name),
   });
   let standbyFrom: number | undefined;
+  let sinceStatus = 0;
+  const recent: RecentStep[] = [];
   const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
 
   emit({ type: "job_started", jobId, kind: "role_session" });
@@ -107,7 +109,7 @@ export async function runRoleSession(opts: {
   const { stoppedBy, error } = await runAgentLoop({
     model: opts.model,
     tools,
-    instructions: () => base + sessionStatus(state.notes, [...state.goals.values()], usage.steps, opts.maxSteps) + (state.standby ? standbyPrompt() : ""),
+    instructions: () => base + sessionStatus(state.notes, [...state.goals.values()], usage.steps, opts.maxSteps) + (state.standby ? standbyPrompt() : stuckHints({ sinceStatus, recent, openGoals: [...state.goals.values()].filter((g) => g.status === "not_attempted").length })),
     nudge: NUDGE,
     scrubber: opts.scrubber,
     budget: opts.budget,
@@ -122,7 +124,11 @@ export async function runRoleSession(opts: {
         if (over) state.finished = state.standby.summary;
       }
       const url = findingUrl(opts.pageUrl?.());
-      emit({ type: "step", jobId, step: usage.steps, tool: step.toolCalls[0]?.toolName ?? null, costUsd, ...(url ? { url } : {}) });
+      const tool = step.toolCalls[0]?.toolName ?? null;
+      sinceStatus = step.toolCalls.some((c) => c.toolName === "goal_status") ? 0 : sinceStatus + 1;
+      recent.push({ tool, page: url ?? null });
+      if (recent.length > LOOP_WINDOW) recent.shift();
+      emit({ type: "step", jobId, step: usage.steps, tool, costUsd, ...(url ? { url } : {}) });
     },
   });
 
