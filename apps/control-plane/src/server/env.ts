@@ -1,4 +1,5 @@
 import type { ArtifactStorage } from "../artifacts/store.ts";
+import { canonicalOrigin } from "../mcp/config.ts";
 
 export interface ServerEnv {
   databaseUrl: string;
@@ -12,6 +13,7 @@ export interface ServerEnv {
   smokeToken?: string;
   openRouterUrl: string;
   betaEmails?: string[];
+  mcp?: { dcr: boolean };
 }
 
 export const DEFAULT_SETUP_MODEL = "deepseek/deepseek-v4.1-flash";
@@ -33,7 +35,8 @@ export function readEnv(env: Record<string, string | undefined> = process.env): 
   return {
     databaseUrl: env.DATABASE_URL!,
     authSecret: env.BETTER_AUTH_SECRET!,
-    baseURL: env.BETTER_AUTH_URL!,
+    baseURL: canonicalOrigin(env.BETTER_AUTH_URL!),
+    mcp: env.TRAWLER_MCP_ENABLED === "true" ? { dcr: env.TRAWLER_MCP_DCR_ENABLED === "true" } : undefined,
     github: pair(env.GITHUB_CLIENT_ID, env.GITHUB_CLIENT_SECRET),
     google: pair(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET),
     devOidc: devIssuer ? { issuer: devIssuer, clientId: "trawler-dev", clientSecret: "trawler-dev-secret" } : undefined,
