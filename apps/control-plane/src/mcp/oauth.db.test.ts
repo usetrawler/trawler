@@ -267,7 +267,7 @@ test("a request body is read the way the provider reads it, and any other type i
 test("a connection does not depend on the browser session that created it", async () => {
   const f = await fixture();
   const tokens = await f.issue();
-  await pool.query('DELETE FROM session WHERE "userId" = $1', [f.user.id]);
+  await pool.query('UPDATE session SET "expiresAt" = now() - interval \'1 day\' WHERE "userId" = $1', [f.user.id]);
   expect(await authenticateMcp(pool, tokens.access_token, resource)).toBeTruthy();
   const refreshed = await f.refresh(tokens.refresh_token);
   expect(refreshed.status, await refreshed.clone().text()).toBe(200);

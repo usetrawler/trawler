@@ -88,12 +88,14 @@ test("a client that is a metadata document URL connects end to end, on the port 
 });
 
 test("a metadata document is fetched once and reused while it is fresh", async () => {
-  documents.set(claudeCode, metadata());
-  const before = fetched.filter((url) => url === claudeCode).length;
+  const cached = "https://claude.ai/oauth/cached-client";
+  documents.set(cached, metadata({ client_id: cached }));
   const p = await person();
-  await p.authorize(claudeCode, "http://localhost:43188/callback");
-  await p.authorize(claudeCode, "http://127.0.0.1:50000/callback");
-  expect(fetched.filter((url) => url === claudeCode).length - before).toBeLessThanOrEqual(1);
+  const first = await p.authorize(cached, "http://localhost:43188/callback");
+  const second = await p.authorize(cached, "http://127.0.0.1:50000/callback");
+  expect(p.consentOf(first)).toBeTruthy();
+  expect(p.consentOf(second)).toBeTruthy();
+  expect(fetched.filter((url) => url === cached)).toHaveLength(1);
 });
 
 test.each([
