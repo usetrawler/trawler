@@ -146,7 +146,7 @@ export async function revokeMcpConnectionAction(_previous: McpConnectionState, f
   if (!member) redirect("/sign-in");
   const config = getAuth().mcp;
   const id = String(form.get("id") ?? "");
-  if (!config || !/^[0-9a-f-]{36}$/i.test(id)) return { error: "That connection is not there any more." };
+  if (!config || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return { error: "That connection is not there any more." };
   const revoked = await revokeGrant(config.pool, id, member.userId);
   revalidatePath("/settings");
   return revoked ? { revoked: true } : { error: "That connection is not there any more." };

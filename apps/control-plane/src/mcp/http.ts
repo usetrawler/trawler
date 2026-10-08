@@ -180,7 +180,8 @@ export function oauthBoundary(handler: (r: Request) => Promise<Response>, pool: 
         const projectId = typeof body.project_id === "string" && body.project_id ? body.project_id : null;
         if (projectId !== null && !UUID.test(projectId)) return oauthError("invalid_request");
         try {
-          await pool.query("UPDATE mcp_consent_contexts SET project_id = $2 WHERE flow_hash = $1", [tokenHash(body.oauth_query), projectId]);
+          const chosen = await pool.query("UPDATE mcp_consent_contexts SET project_id = $2 WHERE flow_hash = $1", [flowKey(body.oauth_query), projectId]);
+          if (chosen.rowCount !== 1) return oauthError("access_denied", 403);
         } catch (error) {
           if ((error as { code?: string }).code === "23503") return oauthError("access_denied", 403);
           throw error;

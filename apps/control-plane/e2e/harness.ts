@@ -4,7 +4,7 @@ import { createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { OAuth2Server } from "oauth2-mock-server";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Locator } from "playwright";
 
 const APP = fileURLToPath(new URL("..", import.meta.url));
 
@@ -40,33 +40,46 @@ export async function startStack(databaseUrl: string): Promise<Stack> {
   const server: ChildProcess = spawn("npx", ["next", "dev", "--port", String(port)], {
     cwd: APP,
     env: {
-      ...process.env,
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      NODE_ENV: "development",
+      NEXT_TELEMETRY_DISABLED: "1",
       DATABASE_URL: databaseUrl,
       BETTER_AUTH_SECRET: randomBytes(32).toString("base64url"),
       BETTER_AUTH_URL: origin,
       TRAWLER_MCP_ENABLED: "true",
       TRAWLER_MCP_DCR_ENABLED: "true",
       TRAWLER_DEV_OIDC_ISSUER: oidc.issuer.url!,
-      NEXT_TELEMETRY_DISABLED: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
   });
   server.stdout?.on("data", (chunk: Buffer) => output.push(String(chunk)));
   server.stderr?.on("data", (chunk: Buffer) => output.push(String(chunk)));
+  const killGroup = (signal: NodeJS.Signals) => {
+    if (server.pid) try { process.kill(-server.pid, signal); } catch { /* already gone */ }
+  };
+  const onExit = () => killGroup("SIGKILL");
+  process.once("exit", onExit);
   const stop = async () => {
-    if (server.pid) try { process.kill(-server.pid, "SIGTERM"); } catch { /* already gone */ }
+    process.off("exit", onExit);
+    killGroup("SIGTERM");
+    const gone = new Promise<void>((resolve) => server.once("exit", () => resolve()));
+    await Promise.race([gone, new Promise((resolve) => setTimeout(resolve, 5000))]);
+    killGroup("SIGKILL");
     await oidc.stop().catch(() => {});
   };
-  const deadline = Date.now() + 180_000;
-  for (;;) {
-    if (server.exitCode !== null) throw new Error(`the control plane exited early:\n${output.join("").slice(-2000)}`);
-    if (await fetch(`${origin}/healthz`).then((r) => r.ok).catch(() => false)) break;
-    if (Date.now() > deadline) {
-      await stop();
-      throw new Error(`the control plane did not become ready:\n${output.join("").slice(-2000)}`);
+  try {
+    const deadline = Date.now() + 180_000;
+    for (;;) {
+      if (server.exitCode !== null) throw new Error(`the control plane exited early:\n${output.join("").slice(-2000)}`);
+      if (await fetch(`${origin}/healthz`).then((r) => r.ok).catch(() => false)) break;
+      if (Date.now() > deadline) throw new Error(`the control plane did not become ready:\n${output.join("").slice(-2000)}`);
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    await new Promise((resolve) => setTimeout(resolve, 500));
+  } catch (error) {
+    await stop();
+    throw error;
   }
   return { origin, signInAs: (next) => { email = next; }, stop };
 }
@@ -96,7 +109,13 @@ export async function listenForRedirect(): Promise<Callback> {
   await new Promise<void>((resolve) => server.listen(port, "localhost", resolve));
   return {
     url: `http://localhost:${port}/callback`,
-    next: () => new Promise((resolve) => { const url = arrived.shift(); if (url) resolve(url); else waiting.push(resolve); }),
+    next: () => new Promise((resolve, reject) => {
+      const url = arrived.shift();
+      if (url) return resolve(url);
+      const timer = setTimeout(() => { waiting.splice(waiting.indexOf(deliver), 1); reject(new Error("no redirect reached the callback within 30 s")); }, 30_000);
+      const deliver = (found: URL) => { clearTimeout(timer); resolve(found); };
+      waiting.push(deliver);
+    }),
     close: () => server.close(),
   };
 }
@@ -120,11 +139,13 @@ export async function registerClient(origin: string, name: string, redirectUri: 
   return ((await response.json()) as { client_id: string }).client_id;
 }
 
-export function authorizeUrl(origin: string, clientId: string, redirectUri: string, challenge: string, scope: string, state = randomBytes(8).toString("hex")): string {
-  return `${origin}/api/auth/oauth2/authorize?${new URLSearchParams({
-    response_type: "code", client_id: clientId, redirect_uri: redirectUri, scope, state, prompt: "consent",
+export function authorizeUrl(origin: string, clientId: string, redirectUri: string, challenge: string, scope: string, options: { prompt?: boolean; state?: string } = {}): string {
+  const params = new URLSearchParams({
+    response_type: "code", client_id: clientId, redirect_uri: redirectUri, scope, state: options.state ?? randomBytes(8).toString("hex"),
     code_challenge: challenge, code_challenge_method: "S256", resource: `${origin}/api/mcp`,
-  })}`;
+  });
+  if (options.prompt !== false) params.set("prompt", "consent");
+  return `${origin}/api/auth/oauth2/authorize?${params}`;
 }
 
 export async function exchange(origin: string, params: Record<string, string>): Promise<{ status: number; body: { access_token?: string; refresh_token?: string; error?: string } }> {
@@ -132,4 +153,9 @@ export async function exchange(origin: string, params: Record<string, string>): 
     method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "x-real-ip": "127.0.0.1" }, body: new URLSearchParams({ resource: `${origin}/api/mcp`, ...params }).toString(),
   });
   return { status: response.status, body: await response.json() as { access_token?: string; refresh_token?: string; error?: string } };
+}
+
+export async function hydrated(locator: Locator): Promise<void> {
+  const handle = await locator.elementHandle({ timeout: 30_000 });
+  await locator.page().waitForFunction((element) => Object.keys(element as object).some((key) => key.startsWith("__reactProps$")), handle, { timeout: 30_000 });
 }

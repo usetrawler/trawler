@@ -17,6 +17,10 @@ export async function connectionsOf(pool: pg.Pool, userId: string, orgId: string
     SELECT g.id, g.client_id, c.name AS client_name, g.project_id, g.scopes, g.created_at, g.last_used_at
     FROM mcp_grants g JOIN "oauthClient" c ON c."clientId" = g.client_id
     WHERE g.user_id = $1 AND g.org_id = $2 AND g.revoked_at IS NULL
+      AND (
+        EXISTS (SELECT 1 FROM "oauthRefreshToken" r WHERE r."authorizationCodeId" = g.code_hash AND r.revoked IS NULL AND r."expiresAt" > now())
+        OR EXISTS (SELECT 1 FROM "oauthAccessToken" a WHERE a."authorizationCodeId" = g.code_hash AND a.revoked IS NULL AND a."expiresAt" > now())
+      )
     ORDER BY g.created_at DESC, g.id
   `, [userId, orgId]);
   return rows.map((row) => ({
