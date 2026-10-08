@@ -25,7 +25,7 @@ type Feature = { title: string; summary: string; chosen: boolean };
 type Stage =
   | { kind: "address" }
   | { kind: "byHand"; host: string; name: string; description: string }
-  | { kind: "working"; step: Step; host: string; checking?: boolean }
+  | { kind: "working"; step: Step; host: string; checking?: boolean; byHand?: boolean }
   | { kind: "context"; draftId: string; host: string; description: string; signUp: SignUp; features: Feature[]; byHand?: boolean };
 
 export const LOST = Symbol("the request did not come back");
@@ -115,19 +115,25 @@ function Working() {
   );
 }
 
-export function Progress({ step, host, checking = false }: { step: Step; host: string; checking?: boolean }) {
-  const at = STEPS.findIndex((s) => s.step === step);
+const BY_HAND_STEPS: typeof STEPS = [
+  { step: "describe", title: "What the product does", working: "", done: "Written by you" },
+  STEPS.find((s) => s.step === "propose")!,
+];
+
+export function Progress({ step, host, checking = false, byHand = false }: { step: Step; host: string; checking?: boolean; byHand?: boolean }) {
+  const steps = byHand ? BY_HAND_STEPS : STEPS;
+  const at = steps.findIndex((s) => s.step === step);
   return (
     <div role="status" className="flex flex-col gap-6">
       <Working />
       <div className="flex flex-col gap-3">
         <p className="font-mono text-xs tracking-[0.2em] text-action-ink uppercase">Building your test plan</p>
         <h2 className="text-3xl leading-tight font-bold tracking-tight break-words md:text-5xl">Understanding {host}</h2>
-        <p className="max-w-xl text-muted">Trawler reads the product&apos;s page, works out what it does, and then chooses people with different roles and goals. This usually takes 1–2 minutes; keep this page open.</p>
+        <p className="max-w-xl text-muted">{byHand ? "Trawler chooses people with different roles and goals from your description." : "Trawler reads the product's page, works out what it does, and then chooses people with different roles and goals."} This usually takes 1–2 minutes; keep this page open.</p>
         {checking && <p className="max-w-xl text-sm text-muted">Trawler did not answer. Checking whether setup finished…</p>}
       </div>
       <ol className="flex flex-col border-t border-line">
-        {STEPS.map((s, i) => (
+        {steps.map((s, i) => (
           <li key={s.step} aria-current={i === at ? "step" : undefined} className="flex items-start gap-3 border-b border-line py-3">
             <span aria-hidden className="grid h-5 w-4 place-items-center font-mono text-sm">
               {i < at ? <span className="text-ok">✓</span> : i === at ? <span className="h-3.5 w-3.5 rounded-full border-2 border-action border-t-transparent motion-safe:animate-spin" /> : <span className="text-muted">·</span>}
@@ -153,11 +159,11 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
   const router = useRouter();
   const polling = useRef<AbortController | null>(null);
   useEffect(() => () => polling.current?.abort(), []);
-  const settle = async (draftId: string, step: Step, host: string) => {
+  const settle = async (draftId: string, step: Step, host: string, byHand = false) => {
     polling.current?.abort();
     const controller = new AbortController();
     polling.current = controller;
-    setStage({ kind: "working", step, host, checking: true });
+    setStage({ kind: "working", step, host, checking: true, byHand });
     return untilSettled(draftId, { signal: controller.signal });
   };
 
@@ -284,7 +290,7 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
     );
   }
 
-  if (stage.kind === "working") return <Progress step={stage.step} host={stage.host} checking={stage.checking} />;
+  if (stage.kind === "working") return <Progress step={stage.step} host={stage.host} checking={stage.checking} byHand={stage.byHand} />;
 
   const chosen = stage.features.filter((f) => f.chosen);
   const update = (patch: Partial<Extract<Stage, { kind: "context" }>>) => setStage({ ...stage, ...patch });
@@ -299,11 +305,11 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
   const propose = () => {
     setError(null);
     const context = stage;
-    setStage({ kind: "working", step: "propose", host: stage.host });
+    setStage({ kind: "working", step: "propose", host: stage.host, byHand: stage.byHand });
     start(async () => {
       const res = await reached(() => proposePeopleAction({ draftId: context.draftId, description: context.description, signUp: context.signUp, features: context.features.filter((f) => f.chosen).map((f) => f.title) }), "Reload the page and start again.");
       if (res === LOST) {
-        const settled = await settle(context.draftId, "propose", context.host);
+        const settled = await settle(context.draftId, "propose", context.host, context.byHand);
         if (settled === "left") return;
         const after = afterLostProposal(settled);
         if ("open" in after) return router.push(after.open);
@@ -339,7 +345,7 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
             <option value="unclear">Not sure</option>
           </select>
         </label>
-        <p id="sign-up-note" className="text-xs text-muted">{SIGN_UP_NOTE[stage.signUp]}</p>
+        <p id="sign-up-note" className="text-xs text-muted">{stage.byHand && stage.signUp === "unclear" ? "Setup decides per person; you can change it on the plan." : SIGN_UP_NOTE[stage.signUp]}</p>
       </div>
       <section className="flex flex-col gap-3" aria-labelledby="features-heading">
         <div className="flex items-end justify-between gap-4">

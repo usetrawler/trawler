@@ -39,6 +39,15 @@ test("while setup works something moves, gently for those who ask for less motio
   expect(moving.every((c) => /motion-safe:animate-/.test(c))).toBe(true);
 });
 
+test("choosing people from a description written by hand does not say a page was read", async () => {
+  const { Progress } = await import("./setup-wizard.tsx");
+  const text = renderToStaticMarkup(createElement(Progress, { step: "propose", host: "localhost:8080", byHand: true })).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  expect(text).toContain("Trawler chooses people with different roles and goals from your description.");
+  expect(text).toContain("What the product does Written by you");
+  expect(text).not.toContain("The page");
+  expect(text).not.toContain("reads the product");
+});
+
 test("a request that never came back is told apart from an answer, and from Trawler having been updated", async () => {
   expect(await reached(async () => ({ ok: true }), "redo")).toEqual({ ok: true });
   expect(await reached(async () => { throw new TypeError("Failed to fetch"); }, "redo")).toBe(LOST);
