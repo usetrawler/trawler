@@ -113,3 +113,20 @@ test("proposing people opens the plan that was made, or the project when no plan
   state.planId = null;
   await expect(proposePeopleAction({ draftId: DRAFT, description: "d", features: ["Submit"] })).rejects.toMatchObject({ to: "/projects/p1" });
 });
+
+test("a private address says so, so the wizard can ask for a description, and a description by hand reaches the draft", async () => {
+  state.member = ana;
+  const { FetchRefused } = await import("../../setup/safe-fetch.ts");
+  state.failWith = new FetchRefused("private", "private network");
+  expect(await readProductAction({ url: "localhost:8080" })).toEqual({ ok: false, error: "That address is on a private network. Trawler can only read public pages from here.", privateAddress: true });
+  state.failWith = null;
+  expect(await readProductAction({ url: "http://localhost:8080", byHand: { name: " Recurro ", description: " Tracks renewals. " } })).toEqual({ ok: true, draftId: DRAFT });
+  expect(state.inputs.at(-1)).toMatchObject({ name: "start", url: "http://localhost:8080", byHand: { name: "Recurro", description: "Tracks renewals." } });
+});
+
+test("a description by hand needs a name and a description of a sane length", async () => {
+  state.member = ana;
+  expect(await readProductAction({ url: "http://localhost:8080", byHand: { name: " ", description: "d" } })).toMatchObject({ ok: false, error: expect.stringContaining("name") });
+  expect(await readProductAction({ url: "http://localhost:8080", byHand: { name: "R", description: "x".repeat(2001) } })).toMatchObject({ ok: false, error: expect.stringContaining("what the product does") });
+  expect(state.calls).toEqual([]);
+});

@@ -312,3 +312,23 @@ test("changing the features of one plan proposes people for that plan only", asy
   expect((await withOrg(t.db, "org-plans", (tx) => projectForEditing(tx, "org-plans", projectId)))).toMatchObject({ features: ["Send an invoice"], personas: [{ key: "ana" }, { key: "tom" }] });
   await expect(startDraft(deps(model), { orgId: "org-plans", projectId, planId: "11111111-1111-4111-8111-111111111111" })).rejects.toThrow();
 });
+
+test("a product on a private network is described by hand: no page is read, and the people are chosen from the description at its own address", async () => {
+  await sql`insert into organization (id, name, slug, "createdAt") values ('org-hand', 'H', 'hand', now())`.execute(t.db);
+  const model = scriptedModel([text(JSON.stringify(people))]);
+  const neverRead: SetupDeps["fetchText"] = async () => { throw new Error("the page must not be read"); };
+  const draftId = await startDraft(deps(model, neverRead), { orgId: "org-hand", url: "http://localhost:8080", byHand: { name: " Recurro ", description: " Tracks what renews and what it costs, for a household. " } });
+  const progress = await setupProgress({ db: t.db }, { orgId: "org-hand", draftId });
+  expect(progress).toMatchObject({ state: "described" });
+  const id = await proposeFromDraft(deps(model, neverRead), { orgId: "org-hand", draftId, description: "Tracks what renews and what it costs, for a household.", features: ["Ask to cancel a charge"], signUp: "closed" });
+  const config = await withOrg(t.db, "org-hand", (tx) => loadProjectConfig(tx, "org-hand", id, keys));
+  expect({ name: config.name, targetUrl: config.targetUrl, allowedOrigins: config.allowedOrigins }).toEqual({ name: "Recurro", targetUrl: "http://localhost:8080/", allowedOrigins: ["http://localhost:8080"] });
+  const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
+  expect(prompt).toContain("could not be read: it runs on a private network");
+  expect(prompt).toContain("Ask to cancel a charge");
+  expect(model.doGenerateCalls).toHaveLength(1);
+});
+
+test("a hand-written draft needs a web address", async () => {
+  await expect(startDraft(deps(scriptedModel([])), { orgId: "org-hand", url: "ftp://localhost/", byHand: { name: "R", description: "d" } })).rejects.toBeInstanceOf(FetchRefused);
+});

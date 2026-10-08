@@ -24,8 +24,9 @@ const SIGN_UP_NOTE: Record<SignUp, string> = {
 type Feature = { title: string; summary: string; chosen: boolean };
 type Stage =
   | { kind: "address" }
+  | { kind: "byHand"; host: string; name: string; description: string }
   | { kind: "working"; step: Step; host: string; checking?: boolean }
-  | { kind: "context"; draftId: string; host: string; description: string; signUp: SignUp; features: Feature[] };
+  | { kind: "context"; draftId: string; host: string; description: string; signUp: SignUp; features: Feature[]; byHand?: boolean };
 
 export const LOST = Symbol("the request did not come back");
 
@@ -170,6 +171,7 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
   const describe = async (host: string) => {
     const read = await reached(() => readProductAction(projectId ? { projectId, ...(planId ? { planId } : {}), ...(newPlanName !== undefined ? { planName } : {}) } : { url }), "Reload the page to analyse the product.");
     if (read === LOST) return (setError(LOST_MESSAGE.read), setStage({ kind: "address" }));
+    if (!read.ok && "privateAddress" in read) return (setError(null), setStage({ kind: "byHand", host, name: "", description: "" }));
     if (!read.ok) return (setError(read.error), setStage({ kind: "address" }));
     setStage({ kind: "working", step: "describe", host });
     const described = await reached(() => describeProductAction(read.draftId), "Reload the page to analyse the product.");
@@ -245,6 +247,43 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
     );
   }
 
+  if (stage.kind === "byHand") {
+    const typed = stage;
+    const describeByHand = () => {
+      setError(null);
+      start(async () => {
+        const read = await reached(() => readProductAction({ url, byHand: { name: typed.name, description: typed.description } }), "Reload the page to set up the product.");
+        if (read === LOST) return setError(LOST_MESSAGE.read);
+        if (!read.ok) return setError(read.error);
+        setStage({ kind: "context", draftId: read.draftId, host: typed.host, description: typed.description.trim(), signUp: "unclear", features: [], byHand: true });
+      });
+    };
+    return (
+      <form className="flex flex-col gap-6" onSubmit={(e) => { e.preventDefault(); describeByHand(); }}>
+        <div className="flex flex-col gap-3">
+          <p className="font-mono text-xs tracking-[0.2em] text-action-ink uppercase">{typed.host} is on a private network</p>
+          <h2 className="text-4xl leading-[0.95] font-bold tracking-tight md:text-6xl">Describe it yourself.</h2>
+          <p className="max-w-xl text-lg text-muted">Trawler cannot read a page that only your network or a CI job can reach, so tell it what the product is. The people still use it at {typed.host}, through a runner that can reach it.</p>
+        </div>
+        <label className="flex flex-col gap-2">
+          <span className="text-sm text-muted">Product name</span>
+          <input name="name" type="text" required maxLength={200} value={typed.name} onChange={(e) => setStage({ ...typed, name: e.target.value })} className="h-12 border border-line bg-soft px-4 text-base outline-none focus:border-ink" />
+        </label>
+        <label className="flex flex-col gap-2">
+          <span className="text-sm text-muted">What it does and who it is for</span>
+          <textarea name="description" required maxLength={2000} rows={4} value={typed.description} onChange={(e) => setStage({ ...typed, description: e.target.value })} className="resize-y border border-line bg-soft p-4 text-base outline-none focus:border-ink" />
+        </label>
+        {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
+        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
+          <button type="button" onClick={() => { setError(null); setStage({ kind: "address" }); }} className="text-sm text-muted hover:text-ink">← Back</button>
+          <button type="submit" disabled={pending} className="flex h-12 items-center justify-between gap-6 bg-action px-5 font-mono text-sm tracking-[0.12em] text-[#17191c] uppercase transition hover:brightness-110 disabled:opacity-70">
+            Choose the features <span aria-hidden>→</span>
+          </button>
+        </div>
+      </form>
+    );
+  }
+
   if (stage.kind === "working") return <Progress step={stage.step} host={stage.host} checking={stage.checking} />;
 
   const chosen = stage.features.filter((f) => f.chosen);
@@ -281,13 +320,13 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-3">
-        <p className="font-mono text-xs tracking-[0.2em] text-action-ink uppercase">Trawler understood the product</p>
+        <p className="font-mono text-xs tracking-[0.2em] text-action-ink uppercase">{stage.byHand ? "Your description" : "Trawler understood the product"}</p>
         <h2 className="text-4xl leading-[0.95] font-bold tracking-tight md:text-6xl">Confirm the context.</h2>
-        <p className="max-w-xl text-lg text-muted">We use this only to choose the people and their goals. Edit it if we misunderstood anything.</p>
+        <p className="max-w-xl text-lg text-muted">{stage.byHand ? "We use this only to choose the people and their goals." : "We use this only to choose the people and their goals. Edit it if we misunderstood anything."}</p>
       </div>
       <label className="flex flex-col border border-line bg-panel">
         <span className="flex items-center justify-between border-b border-line px-4 py-2 font-mono text-[11px] tracking-[0.15em] uppercase">
-          <span>Product context</span><span className="text-ok">AI draft · editable</span>
+          <span>Product context</span><span className="text-ok">{stage.byHand ? "Written by you · editable" : "AI draft · editable"}</span>
         </span>
         <textarea aria-label="What the product does" value={stage.description} maxLength={2000} rows={4} onChange={(e) => update({ description: e.target.value })} className="resize-y bg-transparent p-4 text-lg outline-none focus:bg-paper" />
       </label>
@@ -306,7 +345,7 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
         <div className="flex items-end justify-between gap-4">
           <div>
             <h3 id="features-heading" className="text-xl font-bold">What should the people try?</h3>
-            <p className="text-sm text-muted">We preselected the best match.</p>
+            <p className="text-sm text-muted">{stage.byHand ? "Add each feature the people should try." : "We preselected the best match."}</p>
           </div>
           <p className="font-mono text-[11px] tracking-[0.15em] text-muted uppercase">Select one or more</p>
         </div>
