@@ -48,7 +48,7 @@ export async function withinMcpRate(pool: pg.Pool, key: string, max: number): Pr
 }
 
 interface SessionLookup {
-  (headers: Headers): Promise<{ user: { id: string }; session: { activeOrganizationId?: string | null } } | null>;
+  (headers: Headers): Promise<{ user: { id: string } } | null>;
 }
 
 export function oauthBoundary(handler: (r: Request) => Promise<Response>, pool: pg.Pool, origin: string, session: SessionLookup) {
@@ -86,18 +86,20 @@ export function oauthBoundary(handler: (r: Request) => Promise<Response>, pool: 
       }
       if (endpoint === "token" && body.grant_type === "refresh_token") {
         if (typeof body.refresh_token !== "string") return oauthError("invalid_grant");
+        const basic = /^Basic ([A-Za-z0-9+/=]+)$/i.exec(request.headers.get("authorization") ?? "");
+        let clientId = body.client_id;
+        if (basic) {
+          const encodedId = Buffer.from(basic[1]!, "base64").toString("utf8").split(":", 1)[0]!;
+          try { clientId = decodeURIComponent(encodedId.replace(/\+/g, " ")); } catch { return oauthError("invalid_client", 401); }
+        }
         const { rows } = await pool.query<{ code_hash: string; revoked: Date | null; revoked_at: Date | null }>(`
           SELECT g.code_hash, r.revoked, g.revoked_at FROM "oauthRefreshToken" r
           JOIN mcp_grants g ON g.code_hash = r."authorizationCodeId"
           JOIN member m ON m."userId" = g.user_id AND m."organizationId" = g.org_id
           WHERE r.token = $1 AND r."clientId" = $2 AND g.resource = $3
-        `, [tokenHash(body.refresh_token), body.client_id, resource]);
+        `, [tokenHash(body.refresh_token), clientId, resource]);
         const found = rows[0];
         if (!found || found.revoked_at) return oauthError("invalid_grant");
-        if (found.revoked) {
-          await pool.query("UPDATE mcp_grants SET revoked_at = COALESCE(revoked_at, now()) WHERE code_hash = $1", [found.code_hash]);
-          return oauthError("invalid_grant");
-        }
       }
       if (endpoint === "token" && body.grant_type === "authorization_code") {
         if (typeof body.code !== "string") return oauthError("invalid_grant");
@@ -111,6 +113,7 @@ export function oauthBoundary(handler: (r: Request) => Promise<Response>, pool: 
       }
       const invoke = async () => {
         const response = await handler(request);
+        if (response.status >= 500) return oauthError("temporarily_unavailable", 503);
         if (endpoint === "token" && response.ok) {
           const tokens = await response.clone().json() as { access_token?: string };
           if (!tokens.access_token) return oauthError("temporarily_unavailable", 503);

@@ -1,15 +1,15 @@
 import { mcp } from "@better-auth/mcp";
 import { cimd } from "@better-auth/cimd";
 import { fetchClientMetadataResource } from "@better-auth/cimd/node";
-import { APIError } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
+import { getOAuthProviderApi } from "@better-auth/oauth-provider";
 import type pg from "pg";
 import { MCP_SCOPES, mcpResource, tokenHash } from "./config.ts";
 import { consentWorkspace } from "./consent.ts";
 
 export function oauthPlugins(pool: pg.Pool, origin: string, dcr: boolean) {
   const resource = mcpResource(origin);
-  return [
-    mcp({
+  const provider = mcp({
       resource,
       loginPage: "/sign-in",
       consentPage: "/mcp/consent",
@@ -56,7 +56,31 @@ export function oauthPlugins(pool: pg.Pool, origin: string, dcr: boolean) {
         // Filled by the HTTP boundary after the provider returns a successful token response.
         return {};
       },
-    }),
+    });
+  return [
+    provider,
+    {
+      id: "mcp-refresh-replay",
+      hooks: { before: [{
+        matcher: (ctx: { path?: string; body?: Record<string, unknown> }) => ctx.path === "/oauth2/token" && ctx.body?.grant_type === "refresh_token",
+        handler: createAuthMiddleware(async (ctx) => {
+          if (typeof ctx.body?.refresh_token !== "string") return;
+          const { rows } = await pool.query<{ client_id: string; code_hash: string }>(`
+            SELECT r."clientId" AS client_id, g.code_hash FROM "oauthRefreshToken" r
+            JOIN mcp_grants g ON g.code_hash = r."authorizationCodeId"
+            WHERE r.token = $1 AND r.revoked IS NOT NULL AND g.resource = $2
+          `, [tokenHash(ctx.body.refresh_token), resource]);
+          if (!rows[0]) return;
+          // Use the original token endpoint context: assertions bind to its
+          // audience, and public clients legitimately have no secret.
+          const client = await getOAuthProviderApi(ctx, provider.options, "refresh_token").authenticateClient({ requireCredentials: false });
+          if (client.clientId === rows[0].client_id) {
+            await pool.query("UPDATE mcp_grants SET revoked_at = COALESCE(revoked_at, now()) WHERE code_hash = $1", [rows[0].code_hash]);
+          }
+          throw new APIError("BAD_REQUEST", { error: "invalid_grant" });
+        }),
+      }] },
+    },
     cimd({
       fetchClientMetadataResource,
       metadataProfile: "mcp-2026-07-28",
@@ -88,7 +112,7 @@ export async function authenticateMcp(pool: pg.Pool, rawToken: string, resource:
     JOIN mcp_grants g ON g.code_hash = a."authorizationCodeId"
     JOIN "oauthClient" c ON c."clientId" = a."clientId"
     JOIN member m ON m."userId" = g.user_id AND m."organizationId" = g.org_id
-    WHERE a.token = $1 AND a.revoked IS NULL AND a."expiresAt" > now()
+    WHERE a.token = $1 AND a.revoked IS NULL AND a.confirmation IS NULL AND a."expiresAt" > now()
       AND g.revoked_at IS NULL AND g.resource = $2 AND a.resources = jsonb_build_array($2::text)
       AND a."userId" = g.user_id AND a."clientId" = g.client_id AND a."referenceId" = g.org_id
       AND COALESCE(c.disabled, false) = false
