@@ -92,7 +92,7 @@ export async function runRoleSession(opts: {
     ...(opts.persona.accountRef ? {} : ownPasswordTool({ state, fillField: opts.fillField, inBrowser: queue.run, scrubber: opts.scrubber, password: seed === undefined ? undefined : madeUpPassword(seed), accountForm: opts.accountForm, pageUrl: opts.pageUrl, onAccount: rememberAccount })),
   };
   const base = rolePrompt({
-    persona: opts.persona, targetUrl: opts.project.targetUrl, docsUrl: opts.project.docsUrl, brief: opts.project.brief,
+    persona: opts.persona, targetUrl: opts.project.targetUrl, docsUrl: opts.project.docsUrl, brief: opts.project.brief, setup: opts.project.setup,
     goals, accountRef: opts.persona.accountRef,
     signUpEmail: opts.persona.accountRef ? undefined : madeUpEmail(opts.persona.id, seed),
     story: opts.story, returning: opts.returning, notBugs: opts.notBugs, look: LOOK_TOOL in look,

@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "kysely";
 import { z } from "zod";
-import { MAX_CHANNEL_MESSAGES, DefectGroupsSchema, FindingSchema, JobCompletionSchema, JobUsageSchema, MAX_GROUPED_DEFECTS, settleGroups, JobStopReasonSchema, ReplayObservationSchema, RunEventSchema, SignInCheckSchema, ACCOUNT_CHECK_STEPS, providedAccountRef, trimStory, turnsOf, type ChannelMessage, type DefectToGroup, type Finding, type JobStopReason, type JobUsage, type NotABug, type ProjectConfig, type ReplayObservation, type RunEvent, type SignInCheck, type StoryEntry, type Turn } from "@usetrawler/protocol";
+import { MAX_CHANNEL_MESSAGES, MAX_NOT_BUG_REASON, DefectGroupsSchema, FindingSchema, JobCompletionSchema, JobUsageSchema, MAX_GROUPED_DEFECTS, settleGroups, JobStopReasonSchema, ReplayObservationSchema, RunEventSchema, SignInCheckSchema, ACCOUNT_CHECK_STEPS, providedAccountRef, trimStory, turnsOf, type ChannelMessage, type DefectToGroup, type Finding, type JobStopReason, type JobUsage, type NotABug, type ProjectConfig, type ReplayObservation, type RunEvent, type SignInCheck, type StoryEntry, type Turn } from "@usetrawler/protocol";
 import type { Database } from "../db/index.ts";
 import { asSystem, type Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -9,7 +9,7 @@ import { loadProjectConfig } from "../projects/projects.ts";
 import { logError } from "../server/log.ts";
 import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
-import { markKnownNotBugs, notBugsOf } from "./dismissals.ts";
+import { KNOWN_LIMIT, markKnownNotBugs, notBugsOf, TRAWLER } from "./dismissals.ts";
 import { budgetLeft, CLIENT_GONE_MINUTES, monthlyBudget, RUN_TIME_LIMIT_HOURS, runsHalted, UNCLAIMED_RUN_MINUTES } from "./limits.ts";
 import { turnSteps } from "./models.ts";
 import { ACCOUNT_REFUSED, affordableOutputTokens, cancelRun, capSpent, endRun, giveBackUnusedFirstRun, signUpSeedContext, type CancelReason, type ConfigSnapshot, type PaidBy } from "./runs.ts";
@@ -62,6 +62,7 @@ export interface JobResult {
   signIn?: SignInCheck;
   groups?: string[][];
   knownNotBugs?: Array<{ key: string; ref: string }>;
+  knownLimits?: Array<{ key: string; reason: string }>;
 }
 
 export class ForeignEvents extends Error {
@@ -208,7 +209,7 @@ async function claimOnce(db: Database, keys: Keyring, scope: ClaimScope): Promis
       const story = turn && !picked.conversation ? await storyBefore(tx, picked.run_id, picked.position, snapshot) : undefined;
       const peers = turn && picked.conversation ? peersOf(snapshot, picked.persona_key) : undefined;
       const returning = turn ? turnsOf(snapshot).slice(0, picked.position).some((t) => t.personaId === picked.persona_key) : undefined;
-      const defects = picked.kind === "group" ? await defectsToGroup(tx, picked.run_id, config) : undefined;
+      const defects = picked.kind === "group" ? await defectsToGroup(tx, picked.run_id, config) : picked.kind === "triage" ? await confirmedToTriage(tx, picked.run_id, config) : undefined;
       const notBugs = picked.kind === "role_session" || picked.kind === "group" ? await notBugsOf(tx, picked.org_id, picked.project_id) : [];
       return {
         assignment: {
@@ -326,8 +327,19 @@ async function frictionToCheck(tx: Tx, runId: string): Promise<string[]> {
   return rows.toSorted((a, b) => a.created_at.getTime() - b.created_at.getTime() || a.key.localeCompare(b.key)).map((r) => r.key);
 }
 
+const confirmedOf = (tx: Tx, runId: string) =>
+  defectsOf(tx, runId).where("verdict", "=", "confirmed").where("same_as", "is", null)
+    .where((eb) => eb.not(eb.exists(eb.selectFrom("finding_dismissals as d").select("d.finding_key").whereRef("d.run_id", "=", "findings.run_id").whereRef("d.finding_key", "=", "findings.key"))));
+
+async function confirmedToTriage(tx: Tx, runId: string, config: ProjectConfig): Promise<DefectToGroup[]> {
+  return toGroup(await confirmedOf(tx, runId).select(["key", "persona_key", "goal", "title", "observed", "reproduction"]).limit(MAX_GROUPED_DEFECTS).execute(), config);
+}
+
 async function defectsToGroup(tx: Tx, runId: string, config: ProjectConfig): Promise<DefectToGroup[]> {
-  const rows = await reportedDefectsOf(tx, runId).select(["key", "persona_key", "goal", "title", "observed", "reproduction"]).execute();
+  return toGroup(await reportedDefectsOf(tx, runId).select(["key", "persona_key", "goal", "title", "observed", "reproduction"]).execute(), config);
+}
+
+function toGroup(rows: Array<{ key: string; persona_key: string; goal: string; title: string; observed: string; reproduction: unknown }>, config: ProjectConfig): DefectToGroup[] {
   return rows.map((row) => ({
     key: row.key,
     person: config.personas.find((p) => p.id === row.persona_key)?.name ?? row.persona_key,
@@ -633,7 +645,7 @@ export async function recordLlmUsage(db: Database, call: LlmCall, usage: { model
 
 const noReport = (o?: ReplayObservation) => !o || (!o.completed && o.blockedAt === null && !o.botProtection);
 
-const JobResultSchema = z.object({ usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().max(2000).optional(), observation: ReplayObservationSchema.optional(), signIn: SignInCheckSchema.optional(), groups: DefectGroupsSchema.optional(), knownNotBugs: JobCompletionSchema.shape.knownNotBugs });
+const JobResultSchema = z.object({ usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().max(2000).optional(), observation: ReplayObservationSchema.optional(), signIn: SignInCheckSchema.optional(), groups: DefectGroupsSchema.optional(), knownNotBugs: JobCompletionSchema.shape.knownNotBugs, knownLimits: JobCompletionSchema.shape.knownLimits });
 
 async function refusal(tx: Tx, runId: string, accountRef: string, observed: string): Promise<string> {
   const run = await tx.selectFrom("runs").select("config_snapshot").where("id", "=", runId).executeTakeFirstOrThrow();
@@ -665,6 +677,20 @@ export async function completeJob(db: Database, token: string, input: JobResult,
     if (await stopIfOverLimits(tx, job.run_id)) return;
     await planNext(tx, job, result);
   });
+}
+
+async function queueTriage(tx: Tx, job: { run_id: string; org_id: string }, next: number): Promise<boolean> {
+  const run = await tx.selectFrom("runs").select("config_snapshot").where("id", "=", job.run_id).where("status", "in", ACTIVE).executeTakeFirst();
+  if (!(run?.config_snapshot as unknown as ConfigSnapshot | undefined)?.setup) return false;
+  if (!(await confirmedOf(tx, job.run_id).select("key").limit(1).executeTakeFirst())) return false;
+  await tx.insertInto("jobs").values({ org_id: job.org_id, run_id: job.run_id, kind: "triage", position: next }).execute();
+  return true;
+}
+
+async function markKnownLimits(tx: Tx, job: { run_id: string; org_id: string }, limits: Array<{ key: string; reason: string }>): Promise<void> {
+  const confirmed = new Set((await confirmedOf(tx, job.run_id).select("key").execute()).map((f) => f.key));
+  const values = limits.filter((l) => confirmed.has(l.key)).map((l) => ({ org_id: job.org_id, run_id: job.run_id, finding_key: l.key, reason: `${KNOWN_LIMIT} ${l.reason}`.slice(0, MAX_NOT_BUG_REASON), dismissed_by: TRAWLER }));
+  if (values.length) await tx.insertInto("finding_dismissals").values(values).onConflict((oc) => oc.columns(["run_id", "finding_key"]).doNothing()).execute();
 }
 
 async function queueReplays(tx: Tx, job: { run_id: string; org_id: string }, next: number, keys: string[]) {
@@ -715,7 +741,9 @@ async function planNext(tx: Tx, job: { run_id: string; org_id: string; kind: str
     const successor = await handOverToNextReport(tx, job.run_id, job.finding_key!);
     if (successor) await queueReplays(tx, job, next, [successor]);
   }
+  if (job.kind === "triage" && result.knownLimits?.length && result.stoppedBy !== "error") await markKnownLimits(tx, job, result.knownLimits);
   const open = await tx.selectFrom("jobs").select("id").where("run_id", "=", job.run_id).where("status", "in", ["queued", "leased"]).executeTakeFirst();
+  if (!open && job.kind !== "triage" && (await queueTriage(tx, job, next))) return;
   if (!open) {
     const roles = await tx.selectFrom("jobs").select("status").where("run_id", "=", job.run_id).where("kind", "=", "role_session").execute();
     const allFailed = roles.length > 0 && roles.every((r) => r.status === "failed");

@@ -45,6 +45,7 @@ export const MAX_GOALS_PER_PERSONA = 20;
 export const MAX_GOALS = MAX_PERSONAS * MAX_GOALS_PER_PERSONA;
 export const MAX_ACCOUNTS = 20;
 export const MAX_BRIEF = 1200;
+export const MAX_SETUP = 4000;
 export const MAX_SECRET_HEADERS = 20;
 
 const HEADER_NAME = z.string().regex(/^[A-Za-z0-9-]{1,100}$/, "header names are letters, digits and dashes");
@@ -68,6 +69,7 @@ export const ProjectConfigSchema = z
     targetUrl: httpUrl,
     description: z.string().max(2000).default(""),
     brief: z.string().max(MAX_BRIEF).optional(),
+    setup: z.string().max(MAX_SETUP).optional(),
     docsUrl: httpUrl.optional(),
     allowedOrigins: z.array(httpUrl.transform((u) => new URL(u).origin)).max(MAX_ORIGINS).default([]),
     personas: z.array(PersonaSchema).min(1).max(MAX_PERSONAS),

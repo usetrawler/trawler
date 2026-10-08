@@ -276,7 +276,7 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
   const run = await tx
     .insertInto("runs")
     .values({
-      org_id: orgId, project_id: projectId, plan_id: ranOn.id, plan_name: ranOn.name, number: next, config_snapshot: JSON.stringify(withoutSecrets(planned)),
+      org_id: orgId, project_id: projectId, plan_id: ranOn.id, plan_name: ranOn.name, number: next, config_snapshot: JSON.stringify(withoutSecrets(options.pullRequest?.environment ? { ...planned, setup: options.pullRequest.environment } : planned)),
       agent_model: options.agentModel, judge_model: options.judgeModel, budget_usd: options.budgetUsd.toFixed(4),
       max_steps: options.maxSteps, replay_steps: options.replaySteps, created_by: options.createdBy,
       provider: options.provider ?? "openrouter", provider_base_url: options.providerBaseUrl ?? null, token_cap: options.tokenCap ? String(options.tokenCap) : null,
