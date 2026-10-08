@@ -8,7 +8,9 @@ import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { createProject } from "../projects/projects.ts";
 import { cancelLiveRuns, startRun } from "../runs/runs.ts";
+import type { Database } from "../db/index.ts";
 import { handleStartRun, type RunApiDeps } from "./handlers.ts";
+import { keyHashOf } from "./idempotency.ts";
 import { startRunFor, type RunPrincipal } from "./service.ts";
 
 const t = await testDb();
@@ -140,7 +142,7 @@ test("a key stops matching after its window, and a request without a key behaves
   const first = await post(token, body, "ages");
   const firstRun = (await first.json()).id;
   await stop("org-i1");
-  await asSystem(t.db, (tx) => tx.updateTable("run_idempotency").set({ expires_at: sql<Date>`now() - interval '1 second'` }).where("org_id", "=", "org-i1").execute());
+  await asSystem(t.db, (tx) => tx.updateTable("run_idempotency").set({ expires_at: sql<Date>`now() - interval '1 second'` }).where("org_id", "=", "org-i1").where("key_hash", "=", keyHashOf("ages")).execute());
   const later = await post(token, body, "ages");
   expect(later.status).toBe(201);
   expect(later.headers.get("idempotent-replayed")).toBeNull();
@@ -160,4 +162,38 @@ test("a key that is not letters, digits and . _ : - up to 255 characters is refu
   const before = (await runsOf(projects["org-i2"]!)).length;
   for (const key of ["", "has space", "x".repeat(256), "ünï"]) expect((await post(token, body, key)).status).toBe(400);
   expect((await runsOf(projects["org-i2"]!)).length).toBe(before);
+});
+
+const racing = (beforeSecondTransaction: () => Promise<void>): Database => {
+  let started = 0;
+  return new Proxy(t.db, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop, target);
+      if (prop !== "transaction") return typeof value === "function" ? value.bind(target) : value;
+      return () => {
+        started += 1;
+        const builder = target.transaction();
+        if (started !== 2) return builder;
+        return { execute: async (work: Parameters<typeof builder.execute>[0]) => { await beforeSecondTransaction(); return builder.execute(work); } };
+      };
+    },
+  });
+};
+
+test("a retry that reaches Start's checks just after the first request committed still gets the first answer", async () => {
+  await stop("org-i2");
+  const request = { project: projects["org-i2"]!, execution: "hosted" as const };
+  const runsBefore = (await runsOf(projects["org-i2"]!)).length;
+  let first: Awaited<ReturnType<typeof startRunFor>> | undefined;
+  const second = await startRunFor(principal("org-i2"), request, deps({ db: racing(async () => { first = await startRunFor(principal("org-i2"), request, deps(), { idempotencyKey: "race" }); }) }), { idempotencyKey: "race" });
+  expect(first).toMatchObject({ ok: true, status: 201 });
+  expect(second).toMatchObject({ ok: true, status: 201, replayed: true, value: (first as { value: unknown }).value });
+  expect((await runsOf(projects["org-i2"]!)).length).toBe(runsBefore + 1);
+  await stop("org-i2");
+});
+
+test("the service refuses a malformed key itself, so every caller gets the same rule", async () => {
+  const request = { project: projects["org-i2"]!, execution: "hosted" as const };
+  expect(await startRunFor(principal("org-i2"), request, deps(), { idempotencyKey: "" })).toMatchObject({ ok: false, status: 400 });
+  expect(await startRunFor(principal("org-i2"), request, deps(), { idempotencyKey: "a b" })).toMatchObject({ ok: false, status: 400 });
 });

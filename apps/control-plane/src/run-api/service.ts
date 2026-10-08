@@ -1,5 +1,5 @@
 import { sql } from "kysely";
-import { StartRunRequestSchema } from "@usetrawler/protocol";
+import { IDEMPOTENCY_KEY, StartRunRequestSchema } from "@usetrawler/protocol";
 import type { z } from "zod";
 import { keyStillStored, modelKey } from "../credentials/credentials.ts";
 import type { Database } from "../db/index.ts";
@@ -96,6 +96,7 @@ export async function startRunFor(principal: RunPrincipal, body: ParsedStartRun,
   if (body.allowedOrigins?.length && (body.execution !== "own" || body.url === undefined)) return refuse(400, "Invalid request: other addresses can only be allowed with execution \"own\" and a target URL, because they are next to an app in your own network.");
   if (body.accounts?.length && body.execution !== "own") return refuse(400, "Invalid request: accounts can only be given with execution \"own\", because a hosted runner cannot read the CI job's accounts.");
   const { orgId } = principal;
+  if (options.idempotencyKey !== undefined && !IDEMPOTENCY_KEY.test(options.idempotencyKey)) return refuse(400, "Invalid request: Idempotency-Key must be 1 to 255 characters: letters, digits and . _ : -");
   const keyHash = options.idempotencyKey ? keyHashOf(options.idempotencyKey) : null;
   const requestHash = keyHash ? requestHashOf(StartRunRequestSchema.parse(body)) : null;
   if (keyHash && requestHash) {
@@ -154,17 +155,27 @@ export async function startRunFor(principal: RunPrincipal, body: ParsedStartRun,
     return succeed(run.response, 201);
   } catch (err) {
     if (err instanceof Replayed && requestHash) return replayOf(err.stored, requestHash);
-    if (err instanceof ProjectNotFound) return refuse(404, "That project is not in this workspace.");
-    if (err instanceof FirstRunFromApp) return refuse(412, `Start the first run of this project from the app, where you confirm you are authorised to test it. Runs started ${principal.subject === "API token" ? "with an API token" : "by an assistant"} are available after that.`);
-    if (err instanceof PlanNotFound) return refuse(404, "That plan is not on this project.");
-    if (err instanceof NeedsAccount) return refuse(422, err.message);
-    if (err instanceof RunInProgress) return refuse(409, err.message);
-    if (err instanceof TooManyOwnRuns) return refuse(429, err.message);
-    if (err instanceof NoModelKey || err instanceof FirstRunOnUsUsed) return refuse(422, err.message, "model_key");
-    if (err instanceof RunRefused) return refuse(422, err.message);
-    if (err instanceof KeyGone) return refuse(409, "The workspace's model key was removed or changed while the run was starting. Try again.");
-    throw err;
+    const refusal = refusalOf(err, principal);
+    if (!refusal) throw err;
+    if (keyHash && requestHash) {
+      const stored = await withOrg(deps.db, orgId, (tx) => storedStart(tx, orgId, keyHash));
+      if (stored) return replayOf(stored, requestHash);
+    }
+    return refusal;
   }
+}
+
+function refusalOf(err: unknown, principal: RunPrincipal): Outcome<never> | null {
+  if (err instanceof ProjectNotFound) return refuse(404, "That project is not in this workspace.");
+  if (err instanceof FirstRunFromApp) return refuse(412, `Start the first run of this project from the app, where you confirm you are authorised to test it. Runs started ${principal.subject === "API token" ? "with an API token" : "by an assistant"} are available after that.`);
+  if (err instanceof PlanNotFound) return refuse(404, "That plan is not on this project.");
+  if (err instanceof NeedsAccount) return refuse(422, err.message);
+  if (err instanceof RunInProgress) return refuse(409, err.message);
+  if (err instanceof TooManyOwnRuns) return refuse(429, err.message);
+  if (err instanceof NoModelKey || err instanceof FirstRunOnUsUsed) return refuse(422, err.message, "model_key");
+  if (err instanceof RunRefused) return refuse(422, err.message);
+  if (err instanceof KeyGone) return refuse(409, "The workspace's model key was removed or changed while the run was starting. Try again.");
+  return null;
 }
 
 export async function readRunFor(principal: RunPrincipal, id: string, deps: RunApiDeps): Promise<Outcome<ReturnType<typeof runResultOf>>> {

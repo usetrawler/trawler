@@ -12,5 +12,4 @@ CREATE TABLE run_idempotency (
   FOREIGN KEY (project_id, org_id) REFERENCES projects (id, org_id) ON DELETE CASCADE,
   CHECK ((run_id IS NULL) = (response IS NULL))
 );
-CREATE INDEX run_idempotency_expires_idx ON run_idempotency (org_id, expires_at);
 CALL make_tenant_table('run_idempotency');

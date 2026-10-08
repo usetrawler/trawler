@@ -30,7 +30,7 @@ export async function claimStart(tx: Tx, orgId: string, keyHash: string, request
   const expires = sql<Date>`now() + ${sql.lit(`${IDEMPOTENCY_WINDOW_HOURS} hours`)}::interval`;
   const claimed = await tx.insertInto("run_idempotency")
     .values({ org_id: orgId, key_hash: keyHash, request_hash: requestHash, project_id: projectId, expires_at: expires })
-    .onConflict((oc) => oc.columns(["org_id", "key_hash"]).doUpdateSet({ request_hash: requestHash, project_id: projectId, run_id: null, response: null, created_at: sql<Date>`now()`, expires_at: expires }).where("run_idempotency.expires_at", "<", sql<Date>`now()`))
+    .onConflict((oc) => oc.columns(["org_id", "key_hash"]).doUpdateSet({ request_hash: requestHash, project_id: projectId, run_id: null, response: null, created_at: sql<Date>`now()`, expires_at: expires }).where("run_idempotency.expires_at", "<=", sql<Date>`now()`))
     .returning("key_hash").executeTakeFirst();
   if (claimed) return null;
   const existing = await storedStart(tx, orgId, keyHash);
@@ -39,5 +39,6 @@ export async function claimStart(tx: Tx, orgId: string, keyHash: string, request
 }
 
 export async function recordStart(tx: Tx, orgId: string, keyHash: string, runId: string, response: unknown): Promise<void> {
-  await tx.updateTable("run_idempotency").set({ run_id: runId, response: JSON.stringify(response) }).where("org_id", "=", orgId).where("key_hash", "=", keyHash).execute();
+  const recorded = await tx.updateTable("run_idempotency").set({ run_id: runId, response: JSON.stringify(response) }).where("org_id", "=", orgId).where("key_hash", "=", keyHash).executeTakeFirst();
+  if (recorded.numUpdatedRows !== 1n) throw new Error("the idempotency key claimed by this start is gone");
 }

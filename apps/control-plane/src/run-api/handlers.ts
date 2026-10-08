@@ -1,4 +1,4 @@
-import { IDEMPOTENCY_KEY, IDEMPOTENCY_KEY_HEADER, StartRunRequestSchema } from "@usetrawler/protocol";
+import { IDEMPOTENCY_KEY_HEADER, StartRunRequestSchema } from "@usetrawler/protocol";
 import { tokenWorkspace } from "../server/api-token.ts";
 import type { TokenHolder } from "../api-tokens/tokens.ts";
 import { readRunFor, startRunFor, stopRunFor, type Outcome, type RunApiDeps, type RunPrincipal } from "./service.ts";
@@ -24,7 +24,6 @@ export async function handleStartRun(req: Request, deps: RunApiDeps): Promise<Re
     return Response.json({ error: `Invalid request: ${issue ? `${issue.path.join(".") || "body"} ${issue.message}` : "unreadable body"}.` }, { status: 400, headers: NO_STORE });
   }
   const key = req.headers.get(IDEMPOTENCY_KEY_HEADER);
-  if (key !== null && !IDEMPOTENCY_KEY.test(key)) return Response.json({ error: "Invalid request: Idempotency-Key must be 1 to 255 characters: letters, digits and . _ : -" }, { status: 400, headers: NO_STORE });
   return answer(await startRunFor(principalOf(auth.holder), parsed.data, deps, key === null ? {} : { idempotencyKey: key }));
 }
 
