@@ -26,6 +26,24 @@ describe("renderComment", () => {
     expect(md).toContain("[Full report](https://app.trawler.test/runs/0012)");
   });
 
+  test("does not call a run clean when most goals were not reached", () => {
+    const md = renderComment({ ...base, people: 2, goalsReached: 1, goalsTotal: 7, unreachedGoals: ["You invite Maya to the team", "You open the board"] });
+    expect(md).toContain("### Trawler could check only part of this change");
+    expect(md).not.toContain("found no confirmed defects");
+    expect(md).toContain("2 people used the product and reached 1 of 7 goals.");
+    expect(md).toContain("finding no defect is not proof that the change works. Not checked:\n- You invite Maya to the team\n- You open the board");
+    expect(renderComment({ ...base, goalsReached: 3, goalsTotal: 6 })).toContain("### Trawler found no confirmed defects");
+    const withDefect = renderComment({ ...base, goalsReached: 1, goalsTotal: 7, defects: { confirmed: 1, refuted: 0, inconclusive: 0 }, confirmed: [{ title: "T", page: null, severity: "low", person: "Ana", observed: "x", steps: ["a"] }] });
+    expect(withDefect).toContain("### Trawler: 1 defect confirmed by replay");
+    expect(withDefect).toContain("other defects may be missing");
+  });
+
+  test("lists at most five unreached goals", () => {
+    const md = renderComment({ ...base, goalsReached: 0, goalsTotal: 8, unreachedGoals: Array.from({ length: 8 }, (_, i) => `Goal ${i + 1}`) });
+    expect(md).toContain("- Goal 5\n- and 3 more, in the report");
+    expect(md).not.toContain("Goal 6");
+  });
+
   test("says a skipped run was not started because nothing in the change can be tested through the UI", () => {
     const md = renderComment({ ...base, status: "cancelled", skipped: true, people: 0, goalsTotal: 0, goalsReached: 0 });
     expect(md).toBe(`${COMMENT_MARKER}\n\n### Nothing in this change can be tested through the product's UI, so Trawler did not start a run.\n\n[Full report](https://app.trawler.test/runs/0012)`);

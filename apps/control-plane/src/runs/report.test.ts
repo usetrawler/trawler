@@ -406,3 +406,12 @@ test("friction being judged again keeps the judge stage active, and friction mar
   expect(marked.report.friction).toEqual([]);
   expect(marked.report.dismissed.map((f) => f.key)).toEqual(["ana:fr"]);
 });
+
+test("a finished run with no defects says how few goals it reached when most were missed", () => {
+  const finished = (goals: RunSummary["goals"]) => runView(summary({ status: "succeeded", personas: [{ id: "ana", name: "Ana" }], goalTexts: [{ id: "g", instruction: "Get in.", personaId: "ana" }, { id: "h", instruction: "Add a task.", personaId: "ana" }, { id: "i", instruction: "See it.", personaId: "ana" }], goals }));
+  const reached = (id: string) => ({ personaKey: "ana", goal: id, status: "reached" as const, note: "" });
+  const view = finished([reached("g")]);
+  expect(view.headline).toBe("No defects found, but only 1 of 3 goals were reached, so this run cannot say the change works.");
+  expect(view.unreachedGoals).toEqual(["Add a task.", "See it."]);
+  expect(finished([reached("g"), reached("h")]).headline).toBe("No defects found.");
+});

@@ -209,7 +209,7 @@ test("a run whose cost only the proxy can see is stopped at the cap by the proxy
   expect(summary.status).toBe("stopped_budget");
   expect(summary.costUsd).toBeCloseTo(0.00246, 6);
   expect(summary.jobs[0]).toMatchObject({ status: "succeeded", stopped_by: "budget", error: null, usage: expect.objectContaining({ steps: 2, costUsd: 0 }) });
-  expect(runView(summary).headline).toBe("Stopped at the cap. No defects found.");
+  expect(runView(summary).headline).toMatch(/^Stopped at the cap\. No defects found/);
 });
 
 test("the proxy marks the 402s that mean the run stopped the job, and only those", async () => {
