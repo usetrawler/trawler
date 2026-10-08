@@ -15,7 +15,7 @@ const finding = (key: string, persona: string, extra: Partial<RunSummary["findin
 const summary = (over: Partial<RunSummary>): RunSummary => ({
   id: "run-1", number: 7, status: "succeeded", cancelReason: null, projectId: "project-1", planName: null, costUsd: 0.35, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash",
   provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0, createdAt: new Date("2026-09-25T19:40:00Z"), startedAt: new Date("2026-09-25T19:40:05Z"), finishedAt: new Date("2026-09-25T19:59:00Z"),
-  jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [], conversation: false, prPlan: null, conversationMessages: [], execution: "hosted", providedAccounts: [],
+  jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [], conversation: false, pullRequest: null, prPlan: null, conversationMessages: [], execution: "hosted", providedAccounts: [],
   personas: [{ id: "ana", name: "Ana" }, { id: "lee", name: "Lee Park" }], goalTexts: [{ id: "g1", instruction: "Get an account." }, { id: "g2", instruction: "Send an invoice." }],
   ...over,
 });
@@ -439,4 +439,21 @@ test("a run planned for a pull request shows the PR and the goals the lead chose
   expect(text(render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: null, version: 2, reused: true, createdByRun: 31, goals } })))).toContain("Plan v2 of this pull request, reused from run #31.");
   expect(text(render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: null, version: 1, reused: false, createdByRun: 7, goals } })))).toContain("Plan v1 of this pull request, created in this run.");
   expect(text(render(finished))).not.toContain("PR #");
+});
+
+test("a run from a pull request says at the top which one, with a link, the branch and the commit", () => {
+  const pr = { number: 593, title: "feat: a Free organisation holds ten members", url: "https://github.com/acme/shop/pull/593", repository: "acme/shop", branch: "bp-948/free-member-cap", commit: "a1b2c3d4e5f6" };
+  const top = head(render(summary({ ...finished, pullRequest: pr })));
+  expect(text(top)).toContain("PR #593 · feat: a Free organisation holds ten members");
+  expect(text(top)).toContain("acme/shop · bp-948/free-member-cap · a1b2c3d");
+  expect(top).toContain('href="https://github.com/acme/shop/pull/593"');
+  expect(top.indexOf("PR #593")).toBeLessThan(top.indexOf("<h1"));
+});
+
+test("the pull request subject links only to web addresses and is absent for other runs", () => {
+  const unsafe = head(render(summary({ ...finished, pullRequest: { number: 5, title: "t", url: "javascript:alert(1)", repository: null, branch: null, commit: null } })));
+  expect(text(unsafe)).toContain("PR #5 · t");
+  expect(unsafe).not.toMatch(/href="javascript:/);
+  expect(unsafe).not.toContain("alert(1)");
+  expect(text(head(render(finished)))).not.toContain("PR #");
 });

@@ -254,6 +254,22 @@ function judgedText(report: View["report"], key: string): string {
   return "";
 }
 
+const webLink = (url: string | null) => (url && /^https?:\/\//i.test(url) ? url : null);
+
+function PullRequestSubject({ pr }: { pr: NonNullable<RunSummary["pullRequest"]> }) {
+  const label = `${pr.number ? `PR #${pr.number}` : "Pull request"}${pr.title ? ` · ${pr.title}` : ""}`;
+  const href = webLink(pr.url);
+  const where = [pr.repository, pr.branch, pr.commit?.slice(0, 7)].filter(Boolean).join(" · ");
+  return (
+    <div className="mt-2.5 flex flex-col gap-0.5">
+      <p className="text-xl font-semibold break-words">
+        {href ? <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:text-muted">{label}<span aria-hidden> ↗</span><span className="sr-only"> (opens in a new tab)</span></a> : label}
+      </p>
+      {where && <p className="font-mono text-sm break-words text-muted">{where}</p>}
+    </div>
+  );
+}
+
 export function FindingRow({ f, n, mark, note, detail, action, dismiss, focus, reveal, onFocused }: { f: ReportFinding; n: number; mark?: string; note?: string; detail?: string; action?: React.ReactNode; dismiss?: React.ReactNode; focus?: boolean; reveal?: boolean; onFocused?: () => void }) {
   const replay = f.replay as { observed: string } | null;
   const summary = useRef<HTMLElement>(null);
@@ -589,6 +605,7 @@ export function RunLive({ initial, closedBeta }: { initial: Data; closedBeta?: s
       <div className={`flex flex-col items-start gap-6 ${view.live ? "md:flex-row md:flex-wrap md:items-end md:justify-between md:gap-x-[60px]" : "wide:flex-row wide:items-end wide:justify-between"}`}>
         <div className={`flex min-w-0 flex-col ${view.live ? "md:min-w-80 md:flex-1" : "wide:flex-1"}`}>
           <p className="font-mono text-base tracking-[0.1em] text-muted uppercase">{runStatusLabel(run.status)} · <LocalTime iso={new Date(when).toISOString()} /></p>
+          {run.pullRequest && <PullRequestSubject pr={run.pullRequest} />}
           <h1 className={`my-2.5 font-bold wrap-anywhere ${view.live ? "text-[48px] leading-[0.94] tracking-[-0.06em] md:text-[clamp(48px,6vw,88px)]" : "text-[44px] leading-[0.96] tracking-[-0.055em] md:text-[clamp(44px,5vw,72px)]"}`}>{view.headline}</h1>
           <p className="text-base break-words text-muted">{host} · {run.planName && <>{run.prPlan ? "Plan: " : ""}{run.planName} · </>}{run.agentModel}</p>
           {run.providedAccounts.length > 0 && <p className="text-sm break-words text-muted">{run.providedAccounts.join(", ")} {run.providedAccounts.length === 1 ? "signs" : "sign"} in with {run.providedAccounts.length === 1 ? "an account" : "accounts"} provided by the CI job.</p>}

@@ -491,6 +491,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
     conversation: run.conversation,
     execution: run.execution as Execution,
     providedAccounts: run.provided_accounts as string[],
+    pullRequest: pullRequestOf(run.pull_request as unknown as PullRequest | null),
     prPlan: run.pr_plan ? plannedFor(record!, (run.pull_request as unknown as PullRequest | null)?.number ?? null, snapshot, origin?.number ?? null) : null,
     createdAt: run.created_at, startedAt: run.started_at, finishedAt: run.finished_at,
     jobs,
@@ -510,6 +511,11 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
 }
 
 const CONVERSATION_SHOWN = 60;
+
+function pullRequestOf(pr: PullRequest | null) {
+  if (!pr || (!pr.number && !pr.title)) return null;
+  return { number: pr.number ?? null, title: pr.title ?? null, url: pr.url ?? null, repository: pr.repository ?? null, branch: pr.headRef ?? null, commit: pr.commit ?? null };
+}
 
 function plannedFor(record: PrPlanRecord, number: number | null, snapshot: ConfigSnapshot, createdByRun: number | null) {
   const chosen = new Set(record.goalIds);
