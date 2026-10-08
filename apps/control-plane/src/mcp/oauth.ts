@@ -5,6 +5,7 @@ import { APIError, createAuthMiddleware } from "better-auth/api";
 import { getOAuthProviderApi, type ClientMetadataResourceFetch } from "@better-auth/oauth-provider";
 import type pg from "pg";
 import { MCP_SCOPES, mcpResource, tokenHash } from "./config.ts";
+import { canControlRuns } from "./access.ts";
 import { consentWorkspace } from "./consent.ts";
 
 export function oauthPlugins(pool: pg.Pool, origin: string, dcr: boolean, fetchMetadata: ClientMetadataResourceFetch = fetchClientMetadataResource) {
@@ -122,7 +123,8 @@ export async function authenticateMcp(pool: pg.Pool, rawToken: string, resource:
   `, [tokenHash(rawToken), resource]);
   const row = rows[0];
   if (!row || !row.scopes.includes("trawler:read")) return null;
-  return { grantId: row.id, userId: row.user_id, orgId: row.org_id, projectId: row.project_id, clientId: row.client_id, scopes: row.scopes, role: row.role, expiresAt: Math.floor(row.expires_at.getTime() / 1000) };
+  const scopes = canControlRuns(row.role) ? row.scopes : row.scopes.filter((scope) => scope !== "trawler:runs:write");
+  return { grantId: row.id, userId: row.user_id, orgId: row.org_id, projectId: row.project_id, clientId: row.client_id, scopes, role: row.role, expiresAt: Math.floor(row.expires_at.getTime() / 1000) };
 }
 
 export class GrantRefused extends Error {}
@@ -139,8 +141,10 @@ export async function persistGrant(pool: pg.Pool, accessToken: string, resource:
     if (!(settings.rows[0]?.connections_allowed ?? true)) throw new GrantRefused();
     const runControlAllowed = settings.rows[0]?.run_control_allowed ?? false;
     const result = await client.query(`
-      INSERT INTO mcp_grants (id, code_hash, user_id, org_id, client_id, resource, scopes)
-      SELECT $1, a."authorizationCodeId", a."userId", a."referenceId", a."clientId", $2,
+      INSERT INTO mcp_grants (id, code_hash, user_id, org_id, project_id, client_id, resource, scopes)
+      SELECT $1, a."authorizationCodeId", a."userId", a."referenceId",
+             (SELECT p.project_id FROM mcp_code_projects p WHERE p.code_hash = a."authorizationCodeId" AND p.org_id = a."referenceId"),
+             a."clientId", $2,
              ARRAY(SELECT scope FROM jsonb_array_elements_text(a.scopes) AS scope WHERE scope <> 'trawler:runs:write' OR $4::boolean)
       FROM "oauthAccessToken" a
       JOIN member m ON m."userId" = a."userId" AND m."organizationId" = a."referenceId"

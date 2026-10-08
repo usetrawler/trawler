@@ -2,9 +2,11 @@ import type pg from "pg";
 import { consentWorkspace, flowKey } from "./consent.ts";
 import { mcpResource, tokenHash } from "./config.ts";
 import { authenticateMcp, GrantRefused, persistGrant } from "./oauth.ts";
+import { canControlRuns } from "./access.ts";
 import { mcpSettingsOf } from "./settings.ts";
 
 const MAX_BODY = 64 * 1024;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function oauthError(error: string, status = 400): Response {
   return Response.json({ error }, { status, headers: { "Cache-Control": "no-store" } });
@@ -167,10 +169,31 @@ export function oauthBoundary(handler: (r: Request) => Promise<Response>, pool: 
           WHERE flow_hash = $1 AND user_id = $2 AND expires_at > now()
         `, [flowKey(body.oauth_query), person.user.id]);
         if (!rows[0]) return oauthError("access_denied", 403);
-        const settings = await mcpSettingsOf(pool, rows[0].org_id);
+        const orgId = rows[0].org_id;
+        const settings = await mcpSettingsOf(pool, orgId);
         const granted = (typeof body.scope === "string" ? body.scope : new URLSearchParams(body.oauth_query).get("scope") ?? "").split(" ");
-        if (!settings.connectionsAllowed || (!settings.runControlAllowed && granted.includes("trawler:runs:write"))) return oauthError("access_denied", 403);
-        return await consentWorkspace.run({ userId: person.user.id, orgId: rows[0].org_id }, invoke);
+        if (!settings.connectionsAllowed) return oauthError("access_denied", 403);
+        if (granted.includes("trawler:runs:write")) {
+          const role = await pool.query<{ role: string }>('SELECT role FROM member WHERE "userId" = $1 AND "organizationId" = $2', [person.user.id, orgId]);
+          if (!settings.runControlAllowed || !role.rows[0] || !canControlRuns(role.rows[0].role)) return oauthError("access_denied", 403);
+        }
+        const projectId = typeof body.project_id === "string" && body.project_id ? body.project_id : null;
+        if (projectId !== null && !UUID.test(projectId)) return oauthError("invalid_request");
+        try {
+          await pool.query("UPDATE mcp_consent_contexts SET project_id = $2 WHERE flow_hash = $1", [tokenHash(body.oauth_query), projectId]);
+        } catch (error) {
+          if ((error as { code?: string }).code === "23503") return oauthError("access_denied", 403);
+          throw error;
+        }
+        const response = await consentWorkspace.run({ userId: person.user.id, orgId }, invoke);
+        if (projectId && response.ok) {
+          const issued = await response.clone().json() as { url?: string; redirect_uri?: string };
+          const code = new URL(issued.url ?? issued.redirect_uri ?? "http://invalid.test").searchParams.get("code");
+          if (!code) return oauthError("temporarily_unavailable", 503);
+          await pool.query("INSERT INTO mcp_code_projects (code_hash, project_id, org_id, expires_at) VALUES ($1, $2, $3, now() + interval '10 minutes') ON CONFLICT (code_hash) DO NOTHING", [tokenHash(code), projectId, orgId]);
+          await pool.query("DELETE FROM mcp_code_projects WHERE expires_at < now() - interval '1 hour'");
+        }
+        return response;
       }
       return await invoke();
     } catch {
@@ -193,6 +216,7 @@ export async function mcpAuthentication(pool: pg.Pool, origin: string, request: 
     const principal = await authenticateMcp(pool, token, resource);
     if (!principal) return reject(true);
     if (!(await withinMcpRate(pool, `grant:${principal.grantId}`, 120))) return oauthError("rate_limit_exceeded", 429);
+    await pool.query("UPDATE mcp_grants SET last_used_at = now() WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute')", [principal.grantId]).catch(() => {});
     return principal;
   } catch { return oauthError("temporarily_unavailable", 503); }
 }

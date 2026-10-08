@@ -203,10 +203,18 @@ export interface McpCodeClaims {
   expires_at: Timestamp;
 }
 
+export interface McpCodeProjects {
+  code_hash: string;
+  expires_at: Timestamp;
+  org_id: string;
+  project_id: string;
+}
+
 export interface McpConsentContexts {
   expires_at: Timestamp;
   flow_hash: string;
   org_id: string;
+  project_id: string | null;
   user_id: string;
 }
 
@@ -215,6 +223,7 @@ export interface McpGrants {
   code_hash: string;
   created_at: Generated<Timestamp>;
   id: string;
+  last_used_at: Timestamp | null;
   org_id: string;
   project_id: string | null;
   resource: string;
@@ -601,6 +610,7 @@ export interface DB {
   jobs: Jobs;
   llm_usage: LlmUsage;
   mcp_code_claims: McpCodeClaims;
+  mcp_code_projects: McpCodeProjects;
   mcp_consent_contexts: McpConsentContexts;
   mcp_grants: McpGrants;
   mcp_rate_limits: McpRateLimits;

@@ -3,8 +3,12 @@ import { notFound } from "next/navigation";
 import { getAuth } from "../../../server/auth.ts";
 import { prepareConsent } from "../../../mcp/consent.ts";
 import { BrandMark } from "../../../components/brand-mark.tsx";
+import { canControlRuns, RUN_CONTROL_ROLE } from "../../../mcp/access.ts";
 import { CONNECTIONS_OFF, RUN_CONTROL_OFF } from "../../../mcp/settings.ts";
-import { ConsentButtons } from "./consent-buttons.tsx";
+import { withOrg } from "../../../db/tenancy.ts";
+import { listProjects } from "../../../projects/projects.ts";
+import { getDb } from "../../../server/db.ts";
+import { ConsentForm } from "./consent-form.tsx";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Connect to Trawler" };
@@ -24,22 +28,19 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
   const consent = person && workspace && workspace !== "choosing"
     ? await prepareConsent(config.pool, config.secret, config.origin, query, person.user.id, workspace.orgId) : null;
   const wantsControl = consent?.scopes.includes("trawler:runs:write") ?? false;
+  const role = workspace && workspace !== "choosing" ? workspace.role : "";
+  const controlOffered = wantsControl && Boolean(consent?.settings.runControlAllowed) && canControlRuns(role);
+  const controlNote = !wantsControl || controlOffered ? null : !consent!.settings.runControlAllowed ? RUN_CONTROL_OFF : RUN_CONTROL_ROLE;
+  const projects = consent?.settings.connectionsAllowed && workspace && workspace !== "choosing"
+    ? (await withOrg(getDb(), workspace.orgId, (tx) => listProjects(tx, workspace.orgId))).map((p) => ({ id: p.id, name: p.name })) : [];
   return <main className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center gap-6 px-4 py-12">
     <p className="flex items-center gap-2 text-2xl font-bold"><BrandMark className="h-8 w-8" />trawler</p>
     {consent ? <section className="flex flex-col gap-5 border border-line bg-panel p-6">
       <h1 className="text-2xl font-bold">Connect {consent.client_name}</h1>
       {consent.clientHost && <p className="text-sm text-muted">Client published by <strong>{consent.clientHost}</strong></p>}
-      <p>This connection will access <strong>{consent.org_name}</strong> as <strong>{person!.user.name}</strong>.</p>
-      {!consent.settings.connectionsAllowed ? <p role="alert" className="border-l-2 border-bad pl-3 text-sm">{CONNECTIONS_OFF}</p> : <>
-        <ul className="list-disc space-y-2 pl-5 text-sm">
-          <li>Read projects, plans, runs and their findings.</li>
-          {wantsControl && consent.settings.runControlAllowed && <li>Control runs where your workspace and role allow it.</li>}
-          {consent.scopes.includes("offline_access") && <li>Stay connected until you revoke access.</li>}
-        </ul>
-        {wantsControl && !consent.settings.runControlAllowed && <p className="border-l-2 border-line pl-3 text-sm text-muted">{RUN_CONTROL_OFF}</p>}
-        <p className="text-sm text-muted">The connection stays in this workspace when you switch workspaces in Trawler.</p>
-        <ConsentButtons query={query} {...(wantsControl && !consent.settings.runControlAllowed ? { scope: consent.scopes.filter((s) => s !== "trawler:runs:write").join(" "), label: "Allow read access" } : {})} />
-      </>}
+      {!consent.settings.connectionsAllowed
+        ? <p role="alert" className="border-l-2 border-bad pl-3 text-sm">{CONNECTIONS_OFF}</p>
+        : <ConsentForm query={query} requestedScopes={consent.scopes} account={{ name: person!.user.name, email: person!.user.email }} workspace={consent.org_name} controlOffered={controlOffered} controlNote={controlNote} projects={projects} />}
     </section> : <section className="flex flex-col gap-3 border border-line bg-panel p-6">
       <h1 className="text-2xl font-bold">Connection unavailable</h1>
       <p>This request has expired or you no longer have access to its workspace. Start the connection again from your client.</p>

@@ -17,6 +17,8 @@ const state = vi.hoisted(() => ({
   projects: 1,
   today: 0,
   mcp: { connectionsAllowed: true, runControlAllowed: false },
+  mcpOn: true,
+  connections: [] as Array<{ id: string; clientName: string; clientHost: string | null; projectId: string | null; runControl: boolean; createdAt: Date; lastUsedAt: Date | null }>,
 }));
 
 vi.mock("react", async (original) => ({
@@ -31,6 +33,7 @@ vi.mock("../../server/auth.ts", () => ({
   signedInMember: async () => state.member,
   canManageBilling: (member: { role: string }) => member.role === "owner" || member.role === "admin",
   getAuth: () => ({
+    mcp: state.mcpOn ? { pool: {} } : undefined,
     memberEmail: async (orgId: string, userId: string) => {
       state.lookedUp.push([orgId, userId]);
       return state.members[`${orgId}/${userId}`] ?? null;
@@ -47,12 +50,13 @@ vi.mock("../../server/env.ts", () => ({ readEnv: () => ({ baseURL: "https://app.
 vi.mock("../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
 vi.mock("../../credentials/credentials.ts", () => ({ modelKeyDetails: async () => state.key }));
 vi.mock("../../runs/limits.ts", () => ({ monthlyBudget: async () => state.budget, monthSpent: async () => state.spent }));
+vi.mock("../../mcp/connections.ts", () => ({ connectionsOf: async () => state.connections }));
 vi.mock("../../mcp/settings.ts", () => ({ mcpSettings: async () => state.mcp }));
 vi.mock("../../runs/plans.ts", () => ({ workspacePlan: async () => state.plan, projectsCounted: async () => state.projects, runsToday: async () => state.today }));
 vi.mock("../../api-tokens/tokens.ts", () => ({ listApiTokens: async () => [] }));
-vi.mock("../../projects/projects.ts", () => ({ listProjects: async () => [] }));
+vi.mock("../../projects/projects.ts", () => ({ listProjects: async () => [{ id: "p-1", name: "Checkout" }] }));
 vi.mock("./actions.ts", () => ({
-  setMcpAccessAction: async () => ({}), setMonthlyBudgetAction: async () => ({}), removeMonthlyBudgetAction: async () => ({}),
+  setMcpAccessAction: async () => ({}), revokeMcpConnectionAction: async () => ({}), setMonthlyBudgetAction: async () => ({}), removeMonthlyBudgetAction: async () => ({}),
   renameWorkspaceAction: async () => ({}), replaceModelKeyAction: async () => ({}), removeModelKeyAction: async () => ({}),
   inviteMemberAction: async () => ({}), revokeInvitationAction: async () => ({}), removeMemberAction: async () => ({}), changeRoleAction: async () => ({}),
 }));
@@ -179,4 +183,37 @@ test("AI assistant access shows both choices to everyone, and only an owner or a
   expect(memberView).toContain("Connections: allowed · Run control: allowed");
   expect(memberView).toContain("Only an owner or admin of this workspace can change this.");
   expect(renderToStaticMarkup(await SettingsPage())).not.toContain('name="connections"');
+});
+
+test("your connections are listed with who published the client, what it reaches and when it was used, and each can be disconnected", async () => {
+  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("No assistant is connected.");
+  state.connections = [
+    { id: "g-1", clientName: "Claude Code", clientHost: "claude.ai", projectId: "p-1", runControl: false, createdAt: new Date("2026-10-08T10:00:00Z"), lastUsedAt: null },
+    { id: "g-2", clientName: "Cursor", clientHost: null, projectId: "p-gone", runControl: true, createdAt: new Date("2026-10-07T10:00:00Z"), lastUsedAt: new Date("2026-10-08T09:00:00Z") },
+    { id: "g-3", clientName: "Plain", clientHost: null, projectId: null, runControl: false, createdAt: new Date("2026-10-06T10:00:00Z"), lastUsedAt: null },
+  ];
+  const html = renderToStaticMarkup(await SettingsPage());
+  const view = text(html);
+  expect(view).toContain("Your AI assistant connections");
+  expect(view).toContain("Claude Code · claude.ai read only · only Checkout");
+  expect(view).toContain("Cursor read and run control · only a project that no longer exists");
+  expect(view).toContain("Plain read only · whole workspace");
+  expect(view).toContain("never used");
+  expect(view).toContain("They are separate from the API tokens above");
+  expect(html).toContain('aria-label="Disconnect Claude Code"');
+  expect(html).toContain('aria-label="Disconnect Cursor"');
+});
+
+test("a member sees and disconnects their own connections too, since a connection acts as them", async () => {
+  state.member = { ...owner, role: "member" };
+  state.connections = [{ id: "g-1", clientName: "Claude Code", clientHost: null, projectId: null, runControl: false, createdAt: new Date("2026-10-08T10:00:00Z"), lastUsedAt: null }];
+  expect(renderToStaticMarkup(await SettingsPage())).toContain('aria-label="Disconnect Claude Code"');
+});
+
+test("a deployment without MCP shows neither MCP section", async () => {
+  state.mcpOn = false;
+  const view = text(renderToStaticMarkup(await SettingsPage()));
+  expect(view).not.toContain("AI assistant access (MCP)");
+  expect(view).not.toContain("Your AI assistant connections");
+  state.mcpOn = true;
 });
