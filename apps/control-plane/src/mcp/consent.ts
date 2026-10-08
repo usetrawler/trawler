@@ -12,6 +12,14 @@ export function clientHostOf(clientId: string | null): string | null {
   } catch { return null; }
 }
 
+export function redirectTargetOf(uri: string | null): string | null {
+  if (!uri) return null;
+  try {
+    const url = new URL(uri);
+    return url.origin !== "null" ? url.origin : `${url.protocol}//${url.host}`;
+  } catch { return null; }
+}
+
 export function flowKey(query: string): string {
   const pairs = [...new URLSearchParams(query)].map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).sort();
   return tokenHash(pairs.join("&"));
@@ -40,5 +48,5 @@ export async function prepareConsent(pool: pg.Pool, secret: string, origin: stri
     WHERE f.flow_hash = $1 AND f.user_id = $2 AND f.expires_at > now() AND COALESCE(c.disabled, false) = false
   `, [flowKey(query), userId, clientId]);
   const row = rows[0];
-  return row ? { ...row, scopes: (params.get("scope") ?? "").split(" "), clientId, clientHost: clientHostOf(clientId), settings: await mcpSettingsOf(pool, row.org_id) } : null;
+  return row ? { ...row, scopes: (params.get("scope") ?? "").split(" "), clientId, clientHost: clientHostOf(clientId), redirectTarget: redirectTargetOf(params.get("redirect_uri")), settings: await mcpSettingsOf(pool, row.org_id) } : null;
 }

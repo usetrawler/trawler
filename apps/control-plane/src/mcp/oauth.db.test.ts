@@ -550,3 +550,47 @@ test("you see only your own live connections, and disconnecting one ends its acc
   expect(await authenticateMcp(pool, theirs.access_token, resource)).toBeTruthy();
   expect(await connectionsOf(pool, f.user.id, org, "owner")).toHaveLength(1);
 });
+
+test("only your own live connections are listed: a co-member's are not, and a connection nobody can use any more is not", async () => {
+  const f = await fixture();
+  const org = f.session.activeOrganizationId;
+  const mine = await f.issue();
+  const colleague = await fixture();
+  const theirs = await colleague.issue();
+  await onDatabase(t.name, async (c) => {
+    await c.query('INSERT INTO member (id, "organizationId", "userId", role, "createdAt") VALUES ($1, $2, $3, \'member\', now())', [randomUUID(), org, colleague.user.id]);
+    await c.query("UPDATE mcp_grants SET org_id = $1 WHERE user_id = $2", [org, colleague.user.id]);
+  });
+  const listed = await connectionsOf(pool, f.user.id, org, "owner");
+  expect(listed).toHaveLength(1);
+  expect(await authenticateMcp(pool, theirs.access_token, resource)).toBeNull();
+  expect(await connectionsOf(pool, colleague.user.id, org, "member")).toHaveLength(1);
+  await onDatabase(t.name, (c) => c.query(`UPDATE "oauthAccessToken" SET "expiresAt" = now() - interval '1 second'; UPDATE "oauthRefreshToken" SET "expiresAt" = now() - interval '1 second'`));
+  expect(await connectionsOf(pool, f.user.id, org, "owner")).toHaveLength(0);
+  expect(mine.access_token).toBeTruthy();
+});
+
+test("a project deleted between consent and the token exchange refuses the exchange instead of widening the grant", async () => {
+  const f = await fixture();
+  const org = f.session.activeOrganizationId;
+  const project = await projectIn(org, "Doomed");
+  const code = await f.code({ project_id: project });
+  await onDatabase(t.name, (c) => c.query("DELETE FROM projects WHERE id = $1", [project]));
+  const redeemed = await f.redeem(code);
+  expect(redeemed.status).toBeGreaterThanOrEqual(400);
+  expect(await onDatabase(t.name, async (c) => (await c.query("SELECT 1 FROM mcp_grants WHERE user_id = $1", [f.user.id])).rowCount)).toBe(0);
+});
+
+test("re-authorizing a project-limited client asks again, and the answer decides the project again", async () => {
+  const f = await fixture();
+  const org = f.session.activeOrganizationId;
+  const project = await projectIn(org, "Checkout");
+  const first = await f.issue({ project_id: project });
+  expect((await authenticateMcp(pool, first.access_token, resource))!.projectId).toBe(project);
+  const bare = new URLSearchParams(f.query);
+  bare.delete("prompt");
+  const again = await f.authorize(bare);
+  expect(new URL(again.headers.get("location")!, origin).pathname).toBe("/mcp/consent");
+  const second = await f.issue();
+  expect((await authenticateMcp(pool, second.access_token, resource))!.projectId).toBeNull();
+});

@@ -10,6 +10,7 @@ const base = {
   controlOffered: true, controlNote: null as string | null, projects: [] as Array<{ id: string; name: string }>,
 };
 const render = (props: Partial<typeof base> = {}) => renderToStaticMarkup(createElement(ConsentForm, { ...base, ...props }));
+const words = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ");
 const radio = (html: string, value: string) => html.match(new RegExp(`<input[^>]*value="${value}"[^>]*>`))?.[0];
 
 test("read access is preselected, and run control is a second choice that is not", () => {
@@ -21,10 +22,11 @@ test("read access is preselected, and run control is a second choice that is not
   expect(html).not.toContain("Allow with run control");
 });
 
-test("the run control choice says plainly that the assistant spends the workspace's budget", () => {
-  const text = render().replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/\\s+/g, " ");
-  expect(text).toContain("spends this workspace's budget");
-  expect(text).toContain("the assistant decides when to start one");
+test("the run control choice says what the assistant can do on its own and what it spends", () => {
+  const text = words(render());
+  expect(text).toContain("spends this workspace's budget and visits your project's target app");
+  expect(text).toContain("may do so without asking you each time");
+  expect(text).toContain("does not give it permission to test a site you do not own or control");
 });
 
 test("run control is not offered when it is not allowed, and the reason is given", () => {
@@ -33,32 +35,41 @@ test("run control is not offered when it is not allowed, and the reason is given
   expect(html).toContain("Run control is switched off for this workspace.");
 });
 
-test("a client that asks only to read gets no run control choice", () => {
-  expect(radio(render({ requestedScopes: ["trawler:read", "offline_access"], controlOffered: false }), "control")).toBeUndefined();
-});
-
-test("who is signed in is shown with a way to switch, and the workspace is stated, not picked", () => {
-  const html = render();
-  const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+test("who is signed in is shown with a way to switch, and the workspace is stated with a way out of the wrong one", () => {
+  const text = words(render());
   expect(text).toContain("Signed in as Ana (ana@acme.test)");
   expect(text).toContain("Not you? Switch account");
   expect(text).toContain("This connection will act in Acme");
-  expect(html).not.toContain("<select");
+  expect(text).toContain("Wrong workspace? Cancel, switch it in Trawler, then connect again.");
+  expect(render()).not.toContain("<select");
 });
 
-test("a project restriction is offered only when the workspace has projects, and defaults to all of them", () => {
+test("a project restriction is offered only when the workspace has projects, defaults to all of them and says it limits both reading and run control", () => {
   const html = render({ projects: [{ id: "p-1", name: "Checkout" }, { id: "p-2", name: "Search" }] });
   expect(html).toContain("All projects in Acme");
   expect(html).toContain("Only Checkout");
   expect(html).toContain("Only Search");
   expect(html).toMatch(/<option value=""[^>]*selected/);
   expect(html).not.toMatch(/<option value="p-1"[^>]*selected/);
+  expect(words(html)).toContain("limits reading and run control alike");
 });
 
-test("the controls are reachable by keyboard: real radios, a real select, buttons", () => {
+test("the controls are real, keyboard-reachable elements, and a pending action keeps focus by using aria-disabled, not disabled", () => {
   const html = render({ projects: [{ id: "p-1", name: "Checkout" }] });
   expect(html).toContain("<fieldset");
   expect(html).toContain("<legend");
+  expect(html).toContain("<select");
   expect(html.match(/<input[^>]*type="radio"/g)).toHaveLength(2);
   expect(html.match(/<button[^>]*type="button"/g)!.length).toBeGreaterThanOrEqual(3);
+  expect(html).not.toMatch(/<(button|fieldset|select|input)[^>]*\sdisabled/);
+});
+
+test("the page tells how long a connection lasts and where to disconnect it, with a working link", () => {
+  const html = render();
+  expect(words(html)).toContain("a connection nobody has used for 30 days stops working");
+  expect(html).toMatch(/<a href="\/settings"[^>]*>Settings, Your AI assistant connections<\/a>/);
+});
+
+test("the outcome is announced in a live region that is always on the page", () => {
+  expect(render()).toMatch(/<p role="status"[^>]*><\/p>/);
 });

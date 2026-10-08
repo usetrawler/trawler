@@ -69,7 +69,7 @@ const addedAt = new Date("2026-09-25T18:50:00.000Z");
 beforeEach(() => {
   Object.assign(state, {
     member: owner, key: null, members: { "org-1/user-2": "lee@acme.test" }, lookedUp: [], tenants: [], listed: [], actionResult: null, budget: null, spent: 0,
-    plan: { plan: "free", limits: { projects: 1, runsPerDay: 3, people: 4 } }, projects: 1, today: 0,
+    plan: { plan: "free", limits: { projects: 1, runsPerDay: 3, people: 4 } }, projects: 1, today: 0, mcp: { connectionsAllowed: true, runControlAllowed: false }, mcpOn: true, connections: [],
     people: [
       { id: "m-1", userId: "user-1", role: "owner", joinedAt: new Date("2026-09-20T10:00:00Z"), name: "Ana", email: "ana@acme.test" },
       { id: "m-2", userId: "user-2", role: "member", joinedAt: new Date("2026-09-21T10:00:00Z"), name: "Lee", email: "lee@acme.test" },
@@ -200,14 +200,15 @@ test("your connections are listed with who published the client, what it reaches
   expect(view).toContain("Plain read only · whole workspace");
   expect(view).toContain("never used");
   expect(view).toContain("They are separate from the API tokens above");
-  expect(html).toContain('aria-label="Disconnect Claude Code"');
-  expect(html).toContain('aria-label="Disconnect Cursor"');
+  expect(html).toContain('aria-label="Disconnect Claude Code, only Checkout, connected 2026-10-08"');
+  expect(html).toContain('aria-label="Disconnect Cursor, only a project that no longer exists, connected 2026-10-07"');
+  expect(html).toContain('aria-label="Disconnect Plain, whole workspace, connected 2026-10-06"');
 });
 
 test("a member sees and disconnects their own connections too, since a connection acts as them", async () => {
   state.member = { ...owner, role: "member" };
-  state.connections = [{ id: "g-1", clientName: "Claude Code", clientHost: null, projectId: null, runControl: false, createdAt: new Date("2026-10-08T10:00:00Z"), lastUsedAt: null }];
-  expect(renderToStaticMarkup(await SettingsPage())).toContain('aria-label="Disconnect Claude Code"');
+  state.connections = [{ id: "g-1", clientName: "Claude Code", clientHost: null, projectId: "p-1", runControl: false, createdAt: new Date("2026-10-08T10:00:00Z"), lastUsedAt: null }];
+  expect(renderToStaticMarkup(await SettingsPage())).toContain('aria-label="Disconnect Claude Code, only Checkout, connected 2026-10-08"');
 });
 
 test("a deployment without MCP shows neither MCP section", async () => {
@@ -215,5 +216,4 @@ test("a deployment without MCP shows neither MCP section", async () => {
   const view = text(renderToStaticMarkup(await SettingsPage()));
   expect(view).not.toContain("AI assistant access (MCP)");
   expect(view).not.toContain("Your AI assistant connections");
-  state.mcpOn = true;
 });
