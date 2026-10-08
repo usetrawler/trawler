@@ -118,6 +118,37 @@ describe("planForPullRequest", () => {
     expect(dropped).toBe(4);
   });
 
+  describe("a change the setup cannot show", () => {
+    const withSetup: PullRequestText = { ...pr, environment: "Self-hosted instance with no licence, no domain and no mail." };
+    const hidden = (reason: unknown) => text(JSON.stringify({ turns: [], notVisibleHere: reason }));
+    const goal = [{ person: "ana", goals: [{ id: "sends", instruction: "A first invoice is sent to a client" }] }];
+
+    test("returns the lead's reason and shows the lead the setup", async () => {
+      const model = scriptedModel([hidden("The member limit only exists on the hosted service.")]);
+      const planned = await plan(model, { pullRequest: withSetup });
+      expect(planned.turns).toEqual([]);
+      expect(planned.notVisibleHere).toBe("The member limit only exists on the hosted service.");
+      const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
+      expect(prompt).toContain("Self-hosted instance with no licence");
+      expect(prompt).toContain("notVisibleHere");
+    });
+
+    test("says nothing about the setup when there is none", async () => {
+      const model = scriptedModel([hidden("The member limit only exists on the hosted service.")]);
+      const planned = await plan(model);
+      expect(planned.notVisibleHere).toBeUndefined();
+      expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).not.toContain("notVisibleHere");
+    });
+
+    test("ignores a reason next to goals and one that repeats the pull request", async () => {
+      const withGoals = await plan(scriptedModel([text(JSON.stringify({ turns: goal, notVisibleHere: "Needs a licence." }))]), { pullRequest: withSetup });
+      expect(withGoals.turns).toHaveLength(1);
+      expect(withGoals.notVisibleHere).toBeUndefined();
+      const leaking = await plan(scriptedModel([hidden("InvoiceExportButton needs a licence."), hidden("InvoiceExportButton needs a licence.")]), { pullRequest: withSetup }).catch(() => null);
+      expect(leaking?.notVisibleHere).toBeUndefined();
+    });
+  });
+
   describe("how the people get their accounts", () => {
     const invite: PullRequestText = { title: "Let admins invite colleagues by email", description: "Admins can send an invitation link that expires after a week.", changedFiles: ["src/server/invitations.ts", "src/app/team/invite/page.tsx"] };
     const withFlow = (turns: unknown, flow: Record<string, unknown>) => text(JSON.stringify({ turns, ...flow }));

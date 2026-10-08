@@ -3,7 +3,7 @@ import { EXECUTIONS, FAIL_ON, PLAN_MODES, type Execution, type FailOn, type Plan
 
 export const USAGE = `Usage:
   trawler-ci run --project <uuid> [--api <url>] [--plan <uuid>] [--url <address>] [--runner hosted|own]
-                 [--accounts <file>]
+                 [--accounts <file>] [--environment <file>]
                  [--cap <usd>] [--model <id>] [--conversation] [--fail-on new-confirmed|any-confirmed|never]
                  [--plan-mode regression|change|both] [--replan] [--timeout-minutes <n>] [--no-comment]
 
@@ -30,6 +30,7 @@ export interface Options {
   timeoutMinutes: number;
   comment: boolean;
   accounts?: string;
+  environment?: string;
 }
 
 export type Parsed = { help: true } | { help: false; options: Options };
@@ -67,7 +68,7 @@ export function parseCliArgs(argv: string[], env: Record<string, string | undefi
     options: {
       api: { type: "string" }, project: { type: "string" }, plan: { type: "string" }, url: { type: "string" }, runner: { type: "string" },
       cap: { type: "string" }, model: { type: "string" }, "fail-on": { type: "string" }, "plan-mode": { type: "string" }, "timeout-minutes": { type: "string" },
-      "no-comment": { type: "boolean" }, replan: { type: "boolean" }, accounts: { type: "string" }, conversation: { type: "boolean" }, help: { type: "boolean", short: "h" },
+      "no-comment": { type: "boolean" }, replan: { type: "boolean" }, accounts: { type: "string" }, environment: { type: "string" }, conversation: { type: "boolean" }, help: { type: "boolean", short: "h" },
     },
   });
   if (values.help) return { help: true };
@@ -109,6 +110,7 @@ export function parseCliArgs(argv: string[], env: Record<string, string | undefi
       timeoutMinutes,
       comment: !values["no-comment"],
       accounts: values.accounts,
+      environment: values.environment,
     },
   };
 }

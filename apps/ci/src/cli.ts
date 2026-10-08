@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { parseAccountsFile, type StartRunRequest, type StartRunResponse } from "@usetrawler/protocol";
+import { MAX_ENVIRONMENT, parseAccountsFile, type StartRunRequest, type StartRunResponse } from "@usetrawler/protocol";
 import { runApi, ApiError, type RunApi } from "./api.ts";
 import { parseCliArgs, UsageError, USAGE, type Options } from "./args.ts";
 import { detectAdapter } from "./adapters/index.ts";
@@ -8,6 +8,7 @@ import { decide } from "./decision.ts";
 import { startRunner, type RunnerProcess } from "./runner-process.ts";
 import { waitForRun } from "./wait.ts";
 
+const DEFAULT_ENVIRONMENT_FILE = ".github/trawler/environment.md";
 const POLL_MS = 5_000;
 const START_PATIENCE_MS = 10 * 60_000;
 const START_FIRST_RETRY_MS = 10_000;
@@ -61,6 +62,16 @@ function readAccounts(path: string, deps: CliDeps): { file: string; names: strin
   }
 }
 
+function readEnvironment(options: Options, deps: CliDeps): string | undefined {
+  const read = deps.readFile ?? ((p: string) => readFileSync(p, "utf8"));
+  try {
+    return read(options.environment ?? DEFAULT_ENVIRONMENT_FILE).trim().slice(0, MAX_ENVIRONMENT) || undefined;
+  } catch (err) {
+    if (options.environment === undefined && (err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw new UsageError(`--environment ${options.environment ?? DEFAULT_ENVIRONMENT_FILE} cannot be used: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 type Started = { run: StartRunResponse } | { neutral: string };
 
 async function startWhenAllowed(api: RunApi, request: StartRunRequest, deps: CliDeps): Promise<Started> {
@@ -99,6 +110,8 @@ async function execute(options: Options, deps: CliDeps): Promise<number> {
       deps.err(`warning: could not read the pull request's details, so the run plans without them: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+  const environment = pullRequest && options.planMode !== "regression" ? readEnvironment(options, deps) : undefined;
+  if (pullRequest && environment) pullRequest = { ...pullRequest, environment };
   if (options.execution === "hosted" && options.url && /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])/.test(options.url)) {
     deps.err("warning: a hosted runner cannot reach localhost; use --runner own for a server started in this job");
   }

@@ -13,12 +13,14 @@ export const PLAN_MODES = ["regression", "change", "both"] as const;
 export type PlanMode = (typeof PLAN_MODES)[number];
 export const MAX_PR_DESCRIPTION = 4000;
 export const MAX_PR_FILES = 200;
+export const MAX_ENVIRONMENT = 4000;
 
 export const PullRequestSchema = z.object({
   number: z.number().int().positive().optional(),
   title: z.string().max(300).optional(),
   description: z.string().max(MAX_PR_DESCRIPTION).optional(),
   changedFiles: z.array(z.string().min(1).max(300)).max(MAX_PR_FILES).optional(),
+  environment: z.string().max(MAX_ENVIRONMENT).optional(),
   baseRef: z.string().max(200).optional(),
   headRef: z.string().max(200).optional(),
   commit: z.string().max(64).optional(),
@@ -99,6 +101,7 @@ export const RunResultSchema = z.object({
   unverified: z.number().int().nonnegative().optional(),
   cancelReason: z.string().optional(),
   skipped: z.boolean().optional(),
+  skipNote: z.string().optional(),
   commentMarkdown: z.string(),
 });
 export type RunResult = z.infer<typeof RunResultSchema>;
