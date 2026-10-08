@@ -105,32 +105,61 @@ export async function authenticateMcp(pool: pg.Pool, rawToken: string, resource:
     id: string; user_id: string; org_id: string; project_id: string | null; client_id: string; scopes: string[]; role: string; expires_at: Date;
   }>(`
     SELECT g.id, g.user_id, g.org_id, g.project_id, g.client_id,
-           ARRAY(SELECT jsonb_array_elements_text(a.scopes) INTERSECT SELECT unnest(g.scopes)) AS scopes,
+           ARRAY(
+             SELECT scope FROM (SELECT jsonb_array_elements_text(a.scopes) AS scope INTERSECT SELECT unnest(g.scopes)) held
+             WHERE scope <> 'trawler:runs:write' OR COALESCE(w.run_control_allowed, false)
+           ) AS scopes,
            m.role, a."expiresAt" AS expires_at
     FROM "oauthAccessToken" a
     JOIN mcp_grants g ON g.code_hash = a."authorizationCodeId"
     JOIN "oauthClient" c ON c."clientId" = a."clientId"
     JOIN member m ON m."userId" = g.user_id AND m."organizationId" = g.org_id
+    LEFT JOIN workspace_mcp_settings w ON w.org_id = g.org_id
     WHERE a.token = $1 AND a.revoked IS NULL AND a.confirmation IS NULL AND a."expiresAt" > now()
       AND g.revoked_at IS NULL AND g.resource = $2 AND a.resources = jsonb_build_array($2::text)
       AND a."userId" = g.user_id AND a."clientId" = g.client_id AND a."referenceId" = g.org_id
-      AND COALESCE(c.disabled, false) = false
+      AND COALESCE(c.disabled, false) = false AND COALESCE(w.connections_allowed, true)
   `, [tokenHash(rawToken), resource]);
   const row = rows[0];
   if (!row || !row.scopes.includes("trawler:read")) return null;
   return { grantId: row.id, userId: row.user_id, orgId: row.org_id, projectId: row.project_id, clientId: row.client_id, scopes: row.scopes, role: row.role, expiresAt: Math.floor(row.expires_at.getTime() / 1000) };
 }
 
+export class GrantRefused extends Error {}
+
 export async function persistGrant(pool: pg.Pool, accessToken: string, resource: string): Promise<void> {
-  const result = await pool.query(`
-    INSERT INTO mcp_grants (id, code_hash, user_id, org_id, client_id, resource, scopes)
-    SELECT $1, a."authorizationCodeId", a."userId", a."referenceId", a."clientId", $2, ARRAY(SELECT jsonb_array_elements_text(a.scopes))
-    FROM "oauthAccessToken" a
-    JOIN member m ON m."userId" = a."userId" AND m."organizationId" = a."referenceId"
-    WHERE a.token = $3 AND a.resources = jsonb_build_array($2::text)
-    ON CONFLICT (code_hash) DO NOTHING
-  `, [crypto.randomUUID(), resource, tokenHash(accessToken)]);
-  if (!result.rowCount && !(await authenticateMcp(pool, accessToken, resource))) throw new Error("grant persistence failed");
+  const token = await pool.query<{ org: string }>('SELECT "referenceId" AS org FROM "oauthAccessToken" WHERE token = $1', [tokenHash(accessToken)]);
+  const org = token.rows[0]?.org;
+  if (!org) throw new Error("grant persistence failed");
+  const client = await pool.connect();
+  let failure: Error | undefined;
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`mcp-settings:${org}`]);
+    const settings = await client.query<{ connections_allowed: boolean; run_control_allowed: boolean }>("SELECT connections_allowed, run_control_allowed FROM workspace_mcp_settings WHERE org_id = $1", [org]);
+    if (!(settings.rows[0]?.connections_allowed ?? true)) throw new GrantRefused();
+    const runControlAllowed = settings.rows[0]?.run_control_allowed ?? false;
+    const result = await client.query(`
+      INSERT INTO mcp_grants (id, code_hash, user_id, org_id, client_id, resource, scopes)
+      SELECT $1, a."authorizationCodeId", a."userId", a."referenceId", a."clientId", $2,
+             ARRAY(SELECT scope FROM jsonb_array_elements_text(a.scopes) AS scope WHERE scope <> 'trawler:runs:write' OR $4::boolean)
+      FROM "oauthAccessToken" a
+      JOIN member m ON m."userId" = a."userId" AND m."organizationId" = a."referenceId"
+      WHERE a.token = $3 AND a.resources = jsonb_build_array($2::text)
+      ON CONFLICT (code_hash) DO NOTHING
+    `, [crypto.randomUUID(), resource, tokenHash(accessToken), runControlAllowed]);
+    if (!result.rowCount) {
+      const existing = await client.query("SELECT 1 FROM mcp_grants g JOIN \"oauthAccessToken\" a ON a.\"authorizationCodeId\" = g.code_hash WHERE a.token = $1", [tokenHash(accessToken)]);
+      if (!existing.rowCount) throw new Error("grant persistence failed");
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    if (!(error instanceof GrantRefused)) failure = error instanceof Error ? error : new Error(String(error));
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release(failure);
+  }
 }
 
 export async function revokeGrant(pool: pg.Pool, grantId: string, userId: string): Promise<boolean> {
@@ -144,3 +173,4 @@ export async function revokeGrant(pool: pg.Pool, grantId: string, userId: string
   `, [grantId, userId]);
   return !!rowCount;
 }
+

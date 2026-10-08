@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 
-export function ConsentButtons({ query }: { query: string }) {
+export function ConsentButtons({ query, scope, label = "Allow connection" }: { query: string; scope?: string; label?: string }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const decide = async (accept: boolean) => {
@@ -9,7 +9,7 @@ export function ConsentButtons({ query }: { query: string }) {
     setError(null);
     try {
       const response = await fetch("/api/auth/oauth2/consent", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accept, oauth_query: query }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accept, oauth_query: query, ...(accept && scope ? { scope } : {}) }),
       });
       const result = await response.json() as { url?: string; redirect_uri?: string };
       const url = result.url ?? result.redirect_uri;
@@ -22,7 +22,7 @@ export function ConsentButtons({ query }: { query: string }) {
   };
   return <>
     <div className="flex flex-wrap gap-3">
-      <button type="button" disabled={pending} onClick={() => decide(true)} className="min-h-12 border border-ink bg-ink px-5 py-3 font-medium text-paper disabled:opacity-60">{pending ? "Connecting…" : "Allow connection"}</button>
+      <button type="button" disabled={pending} onClick={() => decide(true)} className="min-h-12 border border-ink bg-ink px-5 py-3 font-medium text-paper disabled:opacity-60">{pending ? "Connecting…" : label}</button>
       <button type="button" disabled={pending} onClick={() => decide(false)} className="min-h-12 border border-line px-5 py-3 font-medium hover:border-ink disabled:opacity-60">Cancel</button>
     </div>
     {error && <p role="alert" className="text-sm text-bad">{error}</p>}

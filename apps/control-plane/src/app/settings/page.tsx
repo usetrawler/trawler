@@ -13,8 +13,10 @@ import { canManageBilling, getAuth, signedInMember } from "../../server/auth.ts"
 import { getDb } from "../../server/db.ts";
 import { readEnv } from "../../server/env.ts";
 import { shellFor } from "../../server/shell.ts";
+import { mcpSettings } from "../../mcp/settings.ts";
 import { ApiTokens } from "./api-tokens.tsx";
 import { Members } from "./members.tsx";
+import { McpAccess } from "./mcp-access.tsx";
 import { ModelKey } from "./model-key.tsx";
 import { MonthlyBudget } from "./monthly-budget.tsx";
 import { WorkspaceName } from "./workspace-name.tsx";
@@ -29,10 +31,10 @@ export default async function SettingsPage() {
   const { orgId } = member;
   const auth = getAuth();
   const canManage = canManageBilling(member);
-  const [{ details, budget, spent, plan, projects, today, tokens, projectList }, members, invitations] = await Promise.all([
+  const [{ details, budget, spent, plan, projects, today, tokens, projectList, mcp }, members, invitations] = await Promise.all([
     withOrg(getDb(), orgId, async (tx) => ({
       details: await modelKeyDetails(tx, orgId), budget: await monthlyBudget(tx, orgId), spent: await monthSpent(tx, orgId),
-      plan: await workspacePlan(tx, orgId), projects: await projectsCounted(tx, orgId), today: await runsToday(tx, orgId),
+      mcp: await mcpSettings(tx, orgId), plan: await workspacePlan(tx, orgId), projects: await projectsCounted(tx, orgId), today: await runsToday(tx, orgId),
       tokens: canManage ? await listApiTokens(tx, orgId) : [], projectList: canManage ? await listProjects(tx, orgId) : [],
     })),
     auth.workspaceMembers(orgId),
@@ -66,6 +68,7 @@ export default async function SettingsPage() {
           projects={projectList.map((p) => ({ id: p.id, name: p.name }))}
           canManage={canManage}
         />
+        <McpAccess orgId={orgId} connectionsAllowed={mcp.connectionsAllowed} runControlAllowed={mcp.runControlAllowed} canManage={canManage} />
       </div>
     </AppShell>
   );

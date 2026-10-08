@@ -9,6 +9,7 @@ import { modelKeyHint, removeModelKey, setModelKey } from "../../credentials/cre
 import { withOrg } from "../../db/tenancy.ts";
 import { freshEndpoint, withinListingLimit } from "../../llm/key-input.ts";
 import { checkKey, PROVIDER_LABEL } from "../../llm/providers.ts";
+import { setMcpSettings } from "../../mcp/settings.ts";
 import { MONTHLY_BUDGET_RANGE, removeMonthlyBudget, setMonthlyBudget } from "../../runs/limits.ts";
 import { cancelLiveRuns } from "../../runs/runs.ts";
 import { canManageBilling, getAuth, signedInMember, type Member } from "../../server/auth.ts";
@@ -114,6 +115,24 @@ export async function removeMonthlyBudgetAction(_previous: BudgetState): Promise
   await withOrg(getDb(), member.orgId, (tx) => removeMonthlyBudget(tx, member.orgId));
   revalidatePath("/", "layout");
   return { removed: true };
+}
+
+export interface McpAccessState {
+  error?: string;
+  saved?: boolean;
+  revokedGrants?: number;
+  strippedGrants?: number;
+}
+
+export async function setMcpAccessAction(_previous: McpAccessState, form: FormData): Promise<McpAccessState> {
+  const member = await manager();
+  if ("error" in member) return member;
+  if (form.get("org") !== member.orgId) return { error: "The workspace changed since this page was loaded. Reload the page, then change its MCP access." };
+  const connectionsAllowed = form.get("connections") === "on";
+  const runControlAllowed = connectionsAllowed && form.get("runControl") === "on";
+  const changed = await withOrg(getDb(), member.orgId, (tx) => setMcpSettings(tx, member.orgId, { connectionsAllowed, runControlAllowed }, member.userId));
+  revalidatePath("/", "layout");
+  return { saved: true, ...changed };
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
