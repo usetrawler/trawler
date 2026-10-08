@@ -26,7 +26,7 @@ export function oauthPlugins(pool: pg.Pool, origin: string, dcr: boolean, fetchM
       clientPrivileges: () => false,
       postLogin: {
         page: "/welcome",
-        shouldRedirect: ({ session }) => !session.activeOrganizationId,
+        shouldRedirect: () => false,
         consentReferenceId: async ({ user, session }) => {
           const chosen = consentWorkspace.getStore();
           if (chosen && chosen.userId !== user.id) throw new APIError("FORBIDDEN", { error: "access_denied" });
@@ -115,7 +115,6 @@ export async function authenticateMcp(pool: pg.Pool, rawToken: string, resource:
       AND g.revoked_at IS NULL AND g.resource = $2 AND a.resources = jsonb_build_array($2::text)
       AND a."userId" = g.user_id AND a."clientId" = g.client_id AND a."referenceId" = g.org_id
       AND COALESCE(c.disabled, false) = false
-      AND (a."sessionId" IS NULL OR EXISTS (SELECT FROM session s WHERE s.id = a."sessionId" AND s."expiresAt" > now()))
   `, [tokenHash(rawToken), resource]);
   const row = rows[0];
   if (!row || !row.scopes.includes("trawler:read")) return null;
@@ -135,5 +134,13 @@ export async function persistGrant(pool: pg.Pool, accessToken: string, resource:
 }
 
 export async function revokeGrant(pool: pg.Pool, grantId: string, userId: string): Promise<boolean> {
-  return !!(await pool.query("UPDATE mcp_grants SET revoked_at = COALESCE(revoked_at, now()) WHERE id = $1 AND user_id = $2 RETURNING id", [grantId, userId])).rowCount;
+  const { rowCount } = await pool.query(`
+    WITH revoked AS (
+      UPDATE mcp_grants SET revoked_at = COALESCE(revoked_at, now()) WHERE id = $1 AND user_id = $2 RETURNING client_id, user_id, org_id
+    ), forgotten AS (
+      DELETE FROM "oauthConsent" o USING revoked WHERE o."clientId" = revoked.client_id AND o."userId" = revoked.user_id AND o."referenceId" = revoked.org_id
+    )
+    SELECT 1 FROM revoked
+  `, [grantId, userId]);
+  return !!rowCount;
 }

@@ -1,7 +1,7 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { afterAll, expect, test, vi } from "vitest";
 import { authPool, createAuth } from "../auth/auth.ts";
-import { testDb } from "../db/test-db.ts";
+import { onDatabase, testDb } from "../db/test-db.ts";
 import { prepareConsent } from "./consent.ts";
 import { mcpAuthentication } from "./http.ts";
 import { authenticateMcp, revokeGrant } from "./oauth.ts";
@@ -217,4 +217,77 @@ test("production discovery omits registration when DCR is disabled and foreign r
   const tokens = await f.issue();
   const denied = await mcpAuthentication(pool, "https://app.usetrawler.com", new Request("https://app.usetrawler.com/api/mcp", { headers: { authorization: `Bearer ${tokens.access_token}` } }));
   expect((denied as Response).status).toBe(401);
+});
+
+test("every authorization shows the consent page, so a remembered consent never issues a code on its own", async () => {
+  const f = await fixture();
+  await f.issue();
+  const bare = new URLSearchParams(f.query);
+  bare.delete("prompt");
+  const again = await f.authorize(bare);
+  expect(again.status).toBe(302);
+  expect(new URL(again.headers.get("location")!, origin).pathname).toBe("/mcp/consent");
+  const silent = new URLSearchParams(f.query);
+  silent.set("prompt", "none");
+  expect((await f.authorize(silent)).status).toBe(400);
+});
+
+test("disconnecting a connection also forgets the consent behind it", async () => {
+  const f = await fixture();
+  const tokens = await f.issue();
+  const consents = () => pool.query('SELECT 1 FROM "oauthConsent" WHERE "clientId" = $1', [f.client.client_id]).then((r) => r.rowCount);
+  expect(await consents()).toBe(1);
+  const principal = await authenticateMcp(pool, tokens.access_token, resource);
+  expect(await revokeGrant(pool, principal!.grantId, f.user.id)).toBe(true);
+  expect(await consents()).toBe(0);
+});
+
+test("authorize accepts only GET and a request that asks to read, and introspection is closed", async () => {
+  const f = await fixture();
+  const posted = await f.call("/api/auth/oauth2/authorize", Object.fromEntries(f.query));
+  expect(posted.status).toBe(405);
+  const writeOnly = new URLSearchParams(f.query);
+  writeOnly.set("scope", "trawler:runs:write");
+  expect((await f.authorize(writeOnly)).status).toBe(400);
+  expect((await f.call("/api/auth/oauth2/introspect", { token: "x".repeat(30) }, false)).status).toBe(403);
+});
+
+test("a request body is read the way the provider reads it, and any other type is refused", async () => {
+  const f = await fixture();
+  const send = (contentType: string, body: string) => auth.handler(new Request(`${origin}/api/auth/oauth2/consent`, {
+    method: "POST", headers: new Headers({ ...Object.fromEntries(f.headers), "content-type": contentType }), body,
+  }));
+  const asJson = await send("Application/JSON; charset=utf-8", JSON.stringify({ accept: true, oauth_query: "not-a-flow" }));
+  expect(asJson.status).toBe(403);
+  expect(await asJson.json()).toEqual({ error: "access_denied" });
+  expect((await send("text/plain", JSON.stringify({ accept: true, oauth_query: "x" }))).status).toBe(415);
+  expect([400, 415]).toContain((await send("application/x-www-form-urlencoded;application/json", JSON.stringify({ accept: true, oauth_query: "x" }))).status);
+});
+
+test("a connection does not depend on the browser session that created it", async () => {
+  const f = await fixture();
+  const tokens = await f.issue();
+  await pool.query('DELETE FROM session WHERE "userId" = $1', [f.user.id]);
+  expect(await authenticateMcp(pool, tokens.access_token, resource)).toBeTruthy();
+  const refreshed = await f.refresh(tokens.refresh_token);
+  expect(refreshed.status, await refreshed.clone().text()).toBe(200);
+  const next = await refreshed.json() as { access_token: string };
+  expect(await authenticateMcp(pool, next.access_token, resource)).toBeTruthy();
+});
+
+test("a refresh never creates a grant: when the grant is gone the token is refused and nothing reappears", async () => {
+  const f = await fixture();
+  const tokens = await f.issue();
+  const grants = () => onDatabase(t.name, async (c) => (await c.query("SELECT 1 FROM mcp_grants WHERE user_id = $1", [f.user.id])).rowCount);
+  expect(await grants()).toBe(1);
+  await onDatabase(t.name, (c) => c.query("DELETE FROM mcp_grants WHERE user_id = $1", [f.user.id]));
+  expect((await f.refresh(tokens.refresh_token)).status).toBe(400);
+  expect(await grants()).toBe(0);
+});
+
+test("expired consent contexts are cleared when a new consent is prepared", async () => {
+  const f = await fixture();
+  await onDatabase(t.name, (c) => c.query("INSERT INTO mcp_consent_contexts (flow_hash, user_id, org_id, expires_at) VALUES ('stale-flow', $1, $2, now() - interval '2 hours')", [f.user.id, f.session.activeOrganizationId]));
+  await f.code();
+  expect(await onDatabase(t.name, async (c) => (await c.query("SELECT 1 FROM mcp_consent_contexts WHERE flow_hash = 'stale-flow'")).rowCount)).toBe(0);
 });

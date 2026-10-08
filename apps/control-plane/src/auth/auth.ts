@@ -217,7 +217,7 @@ export function createAuth(options: AuthOptions) {
 
   const auth = betterAuth({
     secret: options.secret,
-    baseURL: canonicalOrigin(options.baseURL),
+    baseURL: options.mcp ? canonicalOrigin(options.baseURL) : options.baseURL,
     database: options.pool,
     emailAndPassword: { enabled: false },
     advanced: { ipAddress: { ipAddressHeaders: ["x-real-ip"] } },
