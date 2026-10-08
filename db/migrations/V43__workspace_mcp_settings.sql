@@ -19,7 +19,11 @@ BEGIN
   IF NOT (NEW.scopes <@ OLD.scopes) THEN
     RAISE EXCEPTION 'an MCP grant never gains scopes';
   END IF;
+  IF NEW.user_id <> OLD.user_id OR NEW.org_id <> OLD.org_id OR NEW.client_id <> OLD.client_id OR NEW.code_hash <> OLD.code_hash
+     OR NEW.resource <> OLD.resource OR NEW.project_id IS DISTINCT FROM OLD.project_id THEN
+    RAISE EXCEPTION 'an MCP grant keeps its person, client, workspace and project';
+  END IF;
   RETURN NEW;
 END
 $$;
-CREATE TRIGGER mcp_grants_only_shrink BEFORE UPDATE OF revoked_at, scopes ON mcp_grants FOR EACH ROW EXECUTE FUNCTION mcp_grants_only_shrink();
+CREATE TRIGGER mcp_grants_only_shrink BEFORE UPDATE ON mcp_grants FOR EACH ROW EXECUTE FUNCTION mcp_grants_only_shrink();

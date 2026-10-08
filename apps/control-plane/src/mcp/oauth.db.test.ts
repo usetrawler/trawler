@@ -465,4 +465,6 @@ test("a grant can only shrink: it cannot be un-revoked or gain a scope, whoever 
   await expect(run("UPDATE mcp_grants SET scopes = scopes || ARRAY['trawler:runs:write'] WHERE user_id = $1")).rejects.toThrow(/never gains scopes/);
   await run("UPDATE mcp_grants SET revoked_at = now() WHERE user_id = $1");
   await expect(run("UPDATE mcp_grants SET revoked_at = NULL WHERE user_id = $1")).rejects.toThrow(/stays revoked/);
+  await expect(run("UPDATE mcp_grants SET project_id = NULL, resource = resource || 'x' WHERE user_id = $1")).rejects.toThrow(/keeps its person, client, workspace and project/);
+  await expect(run("UPDATE mcp_grants SET org_id = 'elsewhere' WHERE user_id = $1")).rejects.toThrow();
 });

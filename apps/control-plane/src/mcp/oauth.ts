@@ -132,9 +132,10 @@ export async function persistGrant(pool: pg.Pool, accessToken: string, resource:
   const org = token.rows[0]?.org;
   if (!org) throw new Error("grant persistence failed");
   const client = await pool.connect();
+  let failure: Error | undefined;
   try {
     await client.query("BEGIN");
-    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`mcp-settings:${org}`]);
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`mcp-settings:${org}`]);
     const settings = await client.query<{ connections_allowed: boolean; run_control_allowed: boolean }>("SELECT connections_allowed, run_control_allowed FROM workspace_mcp_settings WHERE org_id = $1", [org]);
     if (!(settings.rows[0]?.connections_allowed ?? true)) throw new GrantRefused();
     const runControlAllowed = settings.rows[0]?.run_control_allowed ?? false;
@@ -153,10 +154,11 @@ export async function persistGrant(pool: pg.Pool, accessToken: string, resource:
     }
     await client.query("COMMIT");
   } catch (error) {
+    if (!(error instanceof GrantRefused)) failure = error instanceof Error ? error : new Error(String(error));
     await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
-    client.release();
+    client.release(failure);
   }
 }
 
