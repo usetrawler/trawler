@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { sql } from "kysely";
-import { turnsOf, type Execution, type PlanMode, type ProjectConfig, type PullRequest, type RunEvent, type Verdict } from "@usetrawler/protocol";
+import { MAX_ORIGINS, turnsOf, type Execution, type PlanMode, type ProjectConfig, type PullRequest, type RunEvent, type Verdict } from "@usetrawler/protocol";
 import { modelKey } from "../credentials/credentials.ts";
 import type { Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -31,6 +31,7 @@ export interface StartRunOptions {
   planId?: string;
   execution?: Execution;
   targetUrl?: string;
+  extraOrigins?: string[];
   pullRequest?: PullRequest;
   planMode?: PlanMode;
   replan?: boolean;
@@ -233,7 +234,8 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
   const plan = await planOf(tx, orgId, projectId, options.planId);
   const execution = options.execution ?? "hosted";
   if (options.targetUrl !== undefined && execution !== "own") throw new TargetOverrideRefused();
-  const withTarget = (loaded: ProjectConfig) => (options.targetUrl === undefined ? loaded : { ...loaded, targetUrl: options.targetUrl, allowedOrigins: [...new Set([new URL(options.targetUrl).origin, ...loaded.allowedOrigins])] });
+  const extra = (options.extraOrigins ?? []).map((u) => new URL(u).origin);
+  const withTarget = (loaded: ProjectConfig) => (options.targetUrl === undefined ? loaded : { ...loaded, targetUrl: options.targetUrl, allowedOrigins: [...new Set([new URL(options.targetUrl).origin, ...extra, ...loaded.allowedOrigins])].slice(0, MAX_ORIGINS - 1) });
   const config = withTarget(await loadProjectConfig(tx, orgId, projectId, keys, plan.id));
   if (options.providedAccounts?.length && execution !== "own") throw new ProvidedAccountsRefused();
   const without = await personWithoutAccount(tx, plan.id, options.providedAccounts);

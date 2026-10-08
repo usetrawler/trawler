@@ -50,7 +50,7 @@ export const MAX_SECRET_HEADERS = 20;
 
 const HEADER_NAME = z.string().regex(/^[A-Za-z0-9-]{1,100}$/, "header names are letters, digits and dashes");
 const HEADER_VALUE = z.string().max(4000).regex(/^[\t\x20-\x7e\x80-\xff]*$/, "header values are plain Latin-1 text without line breaks");
-const MAX_ORIGINS = 20;
+export const MAX_ORIGINS = 20;
 
 export const TargetAccountSchema = z.strictObject({
   ref: z.string().min(1).max(100),

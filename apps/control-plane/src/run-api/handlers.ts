@@ -69,6 +69,7 @@ export async function handleStartRun(req: Request, deps: RunApiDeps): Promise<Re
   if (holder.projectId && holder.projectId !== body.project) return fail(403, "This API token is limited to another project.");
   if (body.model !== undefined && !MODEL_ID.test(body.model)) return fail(400, "Invalid request: model is not a valid model name.");
   if (body.url !== undefined && body.execution !== "own") return fail(422, "A different target URL can only be tested by a runner in your own network. Use execution \"own\", or leave the URL out to test the project's target.");
+  if (body.allowedOrigins?.length && (body.execution !== "own" || body.url === undefined)) return fail(400, "Invalid request: other addresses can only be allowed with execution \"own\" and a target URL, because they are next to an app in your own network.");
   if (body.accounts?.length && body.execution !== "own") return fail(400, "Invalid request: accounts can only be given with execution \"own\", because a hosted runner cannot read the CI job's accounts.");
   const { orgId } = holder;
   const priceOf = deps.priceOf ?? priceFor;
@@ -108,7 +109,7 @@ export async function handleStartRun(req: Request, deps: RunApiDeps): Promise<Re
       const started = await startRun(tx, orgId, body.project, deps.keys, {
         budgetUsd: payer.budgetUsd, agentModel: payer.model, judgeModel: payer.model, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: `api-token:${holder.tokenId}`,
         provider: payer.provider, providerBaseUrl: payer.providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap, paidBy: payer.paidBy,
-        planId: plan.id, execution: body.execution, targetUrl: body.url, pullRequest: body.pullRequest, planMode: body.planMode, replan: body.replan, conversation: body.conversation, providedAccounts: body.accounts, usesFirstRunOnUs: payer.usesFirstRunOnUs,
+        planId: plan.id, execution: body.execution, targetUrl: body.url, extraOrigins: body.allowedOrigins, pullRequest: body.pullRequest, planMode: body.planMode, replan: body.replan, conversation: body.conversation, providedAccounts: body.accounts, usesFirstRunOnUs: payer.usesFirstRunOnUs,
       });
       await tx.updateTable("runs").set({ client_seen_at: sql<Date>`now()` }).where("id", "=", started.id).execute();
       return started;

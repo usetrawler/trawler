@@ -116,7 +116,7 @@ async function execute(options: Options, deps: CliDeps): Promise<number> {
     deps.err("warning: a hosted runner cannot reach localhost; use --runner own for a server started in this job");
   }
   const beginning = await startWhenAllowed(api, {
-    project: options.project, plan: options.plan, url: options.url, execution: options.execution, cap: options.cap, model: options.model, conversation: options.conversation || undefined, accounts: accounts?.names, pullRequest, planMode: pullRequest ? options.planMode : undefined, replan: options.replan || undefined,
+    project: options.project, plan: options.plan, url: options.url, ...(options.allowOrigins.length > 0 ? { allowedOrigins: options.allowOrigins } : {}), execution: options.execution, cap: options.cap, model: options.model, conversation: options.conversation || undefined, accounts: accounts?.names, pullRequest, planMode: pullRequest ? options.planMode : undefined, replan: options.replan || undefined,
   }, deps);
   if ("neutral" in beginning) {
     deps.err(beginning.neutral);

@@ -14,6 +14,7 @@ export type PlanMode = (typeof PLAN_MODES)[number];
 export const MAX_PR_DESCRIPTION = 4000;
 export const MAX_PR_FILES = 200;
 export const MAX_ENVIRONMENT = MAX_SETUP;
+export const MAX_EXTRA_ORIGINS = 5;
 
 export const PullRequestSchema = z.object({
   number: z.number().int().positive().optional(),
@@ -33,6 +34,7 @@ export const StartRunRequestSchema = z.object({
   project: z.string().uuid(),
   plan: z.string().uuid().optional(),
   url: z.string().url().max(2048).optional(),
+  allowedOrigins: z.array(z.string().url().max(2048).refine((u) => /^https?:$/.test(new URL(u).protocol), "must be an http(s) address")).max(MAX_EXTRA_ORIGINS).optional(),
   execution: z.enum(EXECUTIONS).default("hosted"),
   cap: z.number().min(0.1).max(50).optional(),
   model: z.string().min(1).max(200).optional(),

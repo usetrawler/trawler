@@ -488,6 +488,15 @@ describe("runCli", () => {
     });
   });
 
+  it("sends the addresses allowed next to the app", async () => {
+    const h = harness([result({})], {});
+    await runCli([...argv, "--runner", "own", "--url", "http://localhost:8080", "--allow-origin", "http://localhost:8025", "--fail-on", "never"], { ...h.deps, startRunner: () => ({ failure: () => undefined, stop: async () => undefined }) });
+    expect(h.calls[0]?.body).toMatchObject({ url: "http://localhost:8080", allowedOrigins: ["http://localhost:8025"] });
+    const plain = harness([result({})], {});
+    await runCli([...argv, "--fail-on", "never"], plain.deps);
+    expect(plain.calls[0]?.body).not.toHaveProperty("allowedOrigins");
+  });
+
   describe("--environment", () => {
     const pullRequestEnv = () => {
       const event = join(mkdtempSync(join(tmpdir(), "trawler-ci-")), "event.json");
