@@ -1,5 +1,5 @@
 import { sql } from "kysely";
-import type { StartRunRequestSchema } from "@usetrawler/protocol";
+import { IDEMPOTENCY_KEY, StartRunRequestSchema } from "@usetrawler/protocol";
 import type { z } from "zod";
 import { keyStillStored, modelKey } from "../credentials/credentials.ts";
 import type { Database } from "../db/index.ts";
@@ -15,6 +15,7 @@ import { DEFAULT_RUN, FIRST_RUN_ON_US } from "../runs/models.ts";
 import { workspacePlan } from "../runs/plans.ts";
 import { cancelRun, FirstRunOnUsUsed, firstRunOnUsLeft, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunRefused, runSummary, startRun, TooManyOwnRuns, type PaidBy } from "../runs/runs.ts";
 import { runPath } from "../runs/status.ts";
+import { claimStart, keyHashOf, recordStart, requestHashOf, storedStart, type StoredStart } from "./idempotency.ts";
 
 export interface RunApiDeps {
   db: Database;
@@ -35,7 +36,7 @@ export interface RunPrincipal {
   can: { read: boolean; control: boolean };
 }
 
-export type Outcome<T> = { ok: true; status: number; value: T } | { ok: false; status: number; error: string; code?: "model_key" };
+export type Outcome<T> = { ok: true; status: number; value: T; replayed?: true } | { ok: false; status: number; error: string; code?: "model_key" };
 
 export interface StartedRun {
   id: string;
@@ -51,6 +52,14 @@ const succeed = <T>(value: T, status = 200): Outcome<T> => ({ ok: true, status, 
 const notAllowed = (principal: RunPrincipal) => `This ${principal.subject} is not allowed to do that.`;
 
 class KeyGone extends Error {}
+class ModelCheckRefused extends Error {
+  constructor(readonly outcome: Outcome<never>) { super("model check refused"); }
+}
+class Replayed extends Error {
+  constructor(readonly stored: StoredStart) {
+    super("replayed");
+  }
+}
 class FirstRunFromApp extends Error {}
 class NoModelKey extends RunRefused {
   constructor() {
@@ -75,7 +84,14 @@ const trawlerPayer = (cap: number | undefined, usesFirstRunOnUs: boolean): Payer
 
 export type ParsedStartRun = z.output<typeof StartRunRequestSchema>;
 
-export async function startRunFor(principal: RunPrincipal, body: ParsedStartRun, deps: RunApiDeps): Promise<Outcome<StartedRun>> {
+const DIFFERENT_REQUEST = "This Idempotency-Key was already used for a different request. Use a new key for a new run.";
+
+function replayOf(stored: StoredStart, requestHash: string): Outcome<StartedRun> {
+  if (stored.requestHash !== requestHash) return refuse(409, DIFFERENT_REQUEST);
+  return { ok: true, status: 201, value: stored.response as StartedRun, replayed: true };
+}
+
+export async function startRunFor(principal: RunPrincipal, body: ParsedStartRun, deps: RunApiDeps, options: { idempotencyKey?: string } = {}): Promise<Outcome<StartedRun>> {
   if (!principal.can.control) return refuse(403, notAllowed(principal));
   if (principal.projectId && principal.projectId !== body.project) return refuse(403, `This ${principal.subject} is limited to another project.`);
   if (body.model !== undefined && !MODEL_ID.test(body.model)) return refuse(400, "Invalid request: model is not a valid model name.");
@@ -83,6 +99,13 @@ export async function startRunFor(principal: RunPrincipal, body: ParsedStartRun,
   if (body.allowedOrigins?.length && (body.execution !== "own" || body.url === undefined)) return refuse(400, "Invalid request: other addresses can only be allowed with execution \"own\" and a target URL, because they are next to an app in your own network.");
   if (body.accounts?.length && body.execution !== "own") return refuse(400, "Invalid request: accounts can only be given with execution \"own\", because a hosted runner cannot read the CI job's accounts.");
   const { orgId } = principal;
+  if (options.idempotencyKey !== undefined && !IDEMPOTENCY_KEY.test(options.idempotencyKey)) return refuse(400, "Invalid request: Idempotency-Key must be 1 to 255 characters: letters, digits and . _ : -");
+  const keyHash = options.idempotencyKey ? keyHashOf(options.idempotencyKey) : null;
+  const requestHash = keyHash ? requestHashOf(StartRunRequestSchema.parse(body)) : null;
+  if (keyHash && requestHash) {
+    const stored = await withOrg(deps.db, orgId, (tx) => storedStart(tx, orgId, body.project, keyHash));
+    if (stored) return replayOf(stored, requestHash);
+  }
   const priceOf = deps.priceOf ?? priceFor;
   try {
     const { plan, payer, endpoint } = await withOrg(deps.db, orgId, async (tx) => {
@@ -112,9 +135,13 @@ export async function startRunFor(principal: RunPrincipal, body: ParsedStartRun,
     });
     if (endpoint) {
       const checkRefusal = await modelCheckRefusal(endpoint, payer.model, deps.modelCheck);
-      if (checkRefusal) return refuse(CHECK_STATUS[checkRefusal.reason], checkRefusal.error, "model_key");
+      if (checkRefusal) throw new ModelCheckRefused(refuse(CHECK_STATUS[checkRefusal.reason], checkRefusal.error, "model_key"));
     }
     const run = await withOrg(deps.db, orgId, async (tx) => {
+      if (keyHash && requestHash) {
+        const taken = await claimStart(tx, orgId, keyHash, requestHash, body.project);
+        if (taken) throw new Replayed(taken);
+      }
       if (payer.paidBy === "workspace" && !(await keyStillStored(tx, orgId, payer.provider, payer.providerBaseUrl))) throw new KeyGone();
       const price = await priceOf(payer.provider, payer.model, deps.openRouterUrl);
       const started = await startRun(tx, orgId, body.project, deps.keys, {
@@ -123,22 +150,35 @@ export async function startRunFor(principal: RunPrincipal, body: ParsedStartRun,
         planId: plan.id, execution: body.execution, targetUrl: body.url, extraOrigins: body.allowedOrigins, pullRequest: body.pullRequest, planMode: body.planMode, replan: body.replan, conversation: body.conversation, providedAccounts: body.accounts, usesFirstRunOnUs: payer.usesFirstRunOnUs,
       });
       await tx.updateTable("runs").set({ client_seen_at: sql<Date>`now()` }).where("id", "=", started.id).execute();
-      return started;
+      const response: StartedRun = { id: started.id, number: started.number, reportUrl: `${deps.baseUrl.replace(/\/+$/, "")}${runPath(started.number)}`, people: started.people };
+      if (keyHash) await recordStart(tx, orgId, body.project, keyHash, started.id, response);
+      return { started, response };
     });
     if (body.pullRequest) deps.afterStart?.();
-    return succeed({ id: run.id, number: run.number, reportUrl: `${deps.baseUrl.replace(/\/+$/, "")}${runPath(run.number)}`, people: run.people }, 201);
+    return succeed(run.response, 201);
   } catch (err) {
-    if (err instanceof ProjectNotFound) return refuse(404, "That project is not in this workspace.");
-    if (err instanceof FirstRunFromApp) return refuse(412, `Start the first run of this project from the app, where you confirm you are authorised to test it. Runs started ${principal.subject === "API token" ? "with an API token" : "by an assistant"} are available after that.`);
-    if (err instanceof PlanNotFound) return refuse(404, "That plan is not on this project.");
-    if (err instanceof NeedsAccount) return refuse(422, err.message);
-    if (err instanceof RunInProgress) return refuse(409, err.message);
-    if (err instanceof TooManyOwnRuns) return refuse(429, err.message);
-    if (err instanceof NoModelKey || err instanceof FirstRunOnUsUsed) return refuse(422, err.message, "model_key");
-    if (err instanceof RunRefused) return refuse(422, err.message);
-    if (err instanceof KeyGone) return refuse(409, "The workspace's model key was removed or changed while the run was starting. Try again.");
-    throw err;
+    if (err instanceof Replayed && requestHash) return replayOf(err.stored, requestHash);
+    const refusal = err instanceof ModelCheckRefused ? err.outcome : refusalOf(err, principal);
+    if (!refusal) throw err;
+    if (keyHash && requestHash) {
+      const stored = await withOrg(deps.db, orgId, (tx) => storedStart(tx, orgId, body.project, keyHash));
+      if (stored) return replayOf(stored, requestHash);
+    }
+    return refusal;
   }
+}
+
+function refusalOf(err: unknown, principal: RunPrincipal): Outcome<never> | null {
+  if (err instanceof ProjectNotFound) return refuse(404, "That project is not in this workspace.");
+  if (err instanceof FirstRunFromApp) return refuse(412, `Start the first run of this project from the app, where you confirm you are authorised to test it. Runs started ${principal.subject === "API token" ? "with an API token" : "by an assistant"} are available after that.`);
+  if (err instanceof PlanNotFound) return refuse(404, "That plan is not on this project.");
+  if (err instanceof NeedsAccount) return refuse(422, err.message);
+  if (err instanceof RunInProgress) return refuse(409, err.message);
+  if (err instanceof TooManyOwnRuns) return refuse(429, err.message);
+  if (err instanceof NoModelKey || err instanceof FirstRunOnUsUsed) return refuse(422, err.message, "model_key");
+  if (err instanceof RunRefused) return refuse(422, err.message);
+  if (err instanceof KeyGone) return refuse(409, "The workspace's model key was removed or changed while the run was starting. Try again.");
+  return null;
 }
 
 export async function readRunFor(principal: RunPrincipal, id: string, deps: RunApiDeps): Promise<Outcome<ReturnType<typeof runResultOf>>> {

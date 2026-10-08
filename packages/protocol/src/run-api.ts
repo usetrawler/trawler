@@ -46,6 +46,10 @@ export const StartRunRequestSchema = z.object({
 });
 export type StartRunRequest = z.input<typeof StartRunRequestSchema>;
 
+export const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
+export const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{1,255}$/;
+export const IDEMPOTENCY_WINDOW_HOURS = 24;
+
 export const MAX_ACCOUNTS_FILE_BYTES = 64_000;
 
 export const AccountsFileSchema = z.record(z.string().min(1).max(100), z.object(TargetAccountSchema.shape).omit({ ref: true })).refine((accounts) => Object.keys(accounts).length > 0 && Object.keys(accounts).length <= MAX_ACCOUNTS, { message: `must name between 1 and ${MAX_ACCOUNTS} people` });
