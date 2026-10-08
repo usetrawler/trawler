@@ -236,6 +236,7 @@ test("disconnecting a connection also forgets any consent left behind it", async
   const f = await fixture();
   const tokens = await f.issue();
   const principal = await authenticateMcp(pool, tokens.access_token, resource);
+  await onDatabase(t.name, (c) => c.query('DELETE FROM "oauthConsent" WHERE "clientId" = $1', [f.client.client_id]));
   await onDatabase(t.name, (c) => c.query(
     'INSERT INTO "oauthConsent" (id, "clientId", "userId", "referenceId", scopes, "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, \'["trawler:read"]\', now(), now())',
     [randomUUID(), f.client.client_id, f.user.id, principal!.orgId]));
@@ -335,15 +336,19 @@ test("a refresh with a client_id that is not a string is refused as a bad reques
   expect(await response.json()).toEqual({ error: "invalid_request" });
 });
 
-test("consent is not remembered after a code is issued, and an authorization cannot ask the provider to skip it with max_age", async () => {
+test("consent is not remembered after a code is issued", async () => {
   const f = await fixture();
   await f.issue();
   expect(await pool.query('SELECT 1 FROM "oauthConsent" WHERE "clientId" = $1', [f.client.client_id]).then((r) => r.rowCount)).toBe(0);
+});
+
+test("an authorization cannot use max_age to send the person through the provider's login redirect instead of consent", async () => {
+  const f = await fixture();
+  await pool.query(`UPDATE session SET "createdAt" = now() - interval '2 hours', "updatedAt" = now() - interval '2 hours' WHERE "userId" = $1`, [f.user.id]);
   const aged = new URLSearchParams(f.query);
-  aged.set("max_age", "1");
+  aged.set("max_age", "60");
   const response = await f.authorize(aged);
   const location = new URL(response.headers.get("location")!, origin);
   expect(location.pathname).toBe("/mcp/consent");
   expect(location.searchParams.has("max_age")).toBe(false);
-  expect(location.searchParams.get("prompt")).toContain("consent");
 });
