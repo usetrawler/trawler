@@ -63,7 +63,9 @@ async function failed(err: unknown, orgId: string, what: string): Promise<{ ok: 
   return { ok: false, error: friendly(err) };
 }
 
-export async function readProductAction(input: { url?: string; projectId?: string; planId?: string; planName?: string }): Promise<Result<{ draftId: string }>> {
+const MAX_NAME_CHARS = 200;
+
+export async function readProductAction(input: { url?: string; projectId?: string; planId?: string; planName?: string; byHand?: { name?: unknown; description?: unknown } }): Promise<Result<{ draftId: string }> | { ok: false; error: string; privateAddress: true }> {
   const url = typeof input.url === "string" ? input.url : "";
   const projectId = typeof input.projectId === "string" && UUID.test(input.projectId) ? input.projectId : undefined;
   const planId = projectId && typeof input.planId === "string" && UUID.test(input.planId) ? input.planId : undefined;
@@ -71,11 +73,16 @@ export async function readProductAction(input: { url?: string; projectId?: strin
   if (planName !== undefined && (planName.length === 0 || planName.length > 100)) return { ok: false, error: "Give the plan a name of up to 100 characters." };
   if (!projectId && !url.trim()) return { ok: false, error: "Paste the address of the product to test." };
   if (url.length > 2048) return { ok: false, error: MESSAGES.too_long };
+  const name = typeof input.byHand?.name === "string" ? input.byHand.name.trim() : "";
+  const description = typeof input.byHand?.description === "string" ? input.byHand.description.trim() : "";
+  if (input.byHand && !projectId && (!name || name.length > MAX_NAME_CHARS)) return { ok: false, error: `Give the product a name of up to ${MAX_NAME_CHARS} characters.` };
+  if (input.byHand && !projectId && (!description || description.length > MAX_DESCRIPTION_CHARS)) return { ok: false, error: `Say in up to ${MAX_DESCRIPTION_CHARS} characters what the product does and who it is for.` };
   const setup = await setupFor();
   if ("error" in setup) return { ok: false, error: setup.error };
   try {
-    return { ok: true, draftId: await startDraft(setup.deps, { orgId: setup.orgId, ...(projectId ? { projectId, ...(planId ? { planId } : {}), ...(planName !== undefined ? { planName } : {}) } : { url: normalise(url) }) }) };
+    return { ok: true, draftId: await startDraft(setup.deps, { orgId: setup.orgId, ...(projectId ? { projectId, ...(planId ? { planId } : {}), ...(planName !== undefined ? { planName } : {}) } : { url: normalise(url), ...(input.byHand ? { byHand: { name, description } } : {}) }) }) };
   } catch (err) {
+    if (err instanceof FetchRefused && err.reason === "private" && !projectId) return { ...(await failed(err, setup.orgId, "setup could not read the page")), privateAddress: true };
     return failed(err, setup.orgId, "setup could not read the page");
   }
 }

@@ -75,7 +75,12 @@ async function refuseAtProjectLimit(deps: SetupDeps, orgId: string): Promise<voi
   if (reached) throw new ProjectLimitReached(reached);
 }
 
-export async function startDraft(deps: SetupDeps, input: { orgId: string; url?: string; projectId?: string; planId?: string; planName?: string }): Promise<string> {
+export interface DescribedByHand {
+  name: string;
+  description: string;
+}
+
+export async function startDraft(deps: SetupDeps, input: { orgId: string; url?: string; projectId?: string; planId?: string; planName?: string; byHand?: DescribedByHand }): Promise<string> {
   let url = input.url ?? "";
   let docsUrl: string | undefined;
   if (input.projectId) {
@@ -99,6 +104,7 @@ export async function startDraft(deps: SetupDeps, input: { orgId: string; url?: 
   const origins = new Set<string>();
   let refusal: FetchRefused | undefined;
   let product: ProductPage;
+  if (input.byHand && !input.projectId) return draftByHand(deps, input.orgId, productUrl, input.byHand);
   try {
     product = await readProduct({
       url,
@@ -121,6 +127,16 @@ export async function startDraft(deps: SetupDeps, input: { orgId: string; url?: 
   return withOrg(deps.db, input.orgId, async (tx) => {
     const { id } = await tx.insertInto("setup_drafts").values({
       org_id: input.orgId, project_id: input.projectId ?? null, plan_id: input.planName === undefined ? input.planId ?? null : null, new_plan_name: input.planName?.trim() ?? null, url: product.url, docs_url: product.docsUrl ?? null, page: product.page, docs: product.docs ?? null, origins: [...origins],
+    }).returning("id").executeTakeFirstOrThrow();
+    return id;
+  });
+}
+
+async function draftByHand(deps: SetupDeps, orgId: string, url: string, byHand: DescribedByHand): Promise<string> {
+  if (!URL.canParse(url) || !/^https?:$/.test(new URL(url).protocol)) throw new FetchRefused("address", "not a web address");
+  return withOrg(deps.db, orgId, async (tx) => {
+    const { id } = await tx.insertInto("setup_drafts").values({
+      org_id: orgId, url, page: "", name: byHand.name.trim(), description: byHand.description.trim(), sign_up: "unclear", features: JSON.stringify([]), described_at: new Date(),
     }).returning("id").executeTakeFirstOrThrow();
     return id;
   });
