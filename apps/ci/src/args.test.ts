@@ -11,13 +11,18 @@ describe("parseCliArgs", () => {
     const parsed = parseCliArgs(["run", "--api", "https://staging.usetrawler.com/", "--project", PROJECT], env);
     expect(parsed).toEqual({
       help: false,
-      options: { api: "https://staging.usetrawler.com", token: "trw_secret", project: PROJECT, plan: undefined, url: undefined, execution: "hosted", cap: undefined, model: undefined, conversation: false, failOn: "new-confirmed", planMode: "change", replan: false, timeoutMinutes: 45, comment: true },
+      options: { api: "https://staging.usetrawler.com", token: "trw_secret", project: PROJECT, plan: undefined, url: undefined, execution: "hosted", cap: undefined, model: undefined, conversation: false, failOn: "new-confirmed", planMode: "change", replan: false, timeoutMinutes: 45, comment: true, allowOrigins: [] },
     });
   });
 
   it("reads every flag and TRAWLER_API", () => {
     const parsed = parseCliArgs(["run", "--project", PROJECT, "--plan", PROJECT, "--url", "http://localhost:3000", "--runner", "own", "--cap", "2.5", "--model", "x/y", "--fail-on", "never", "--timeout-minutes", "10", "--no-comment", "--conversation", "--plan-mode", "change", "--replan"], { ...env, TRAWLER_API: "http://localhost:8080" });
     expect(parsed).toMatchObject({ options: { api: "http://localhost:8080", plan: PROJECT, url: "http://localhost:3000", execution: "own", cap: 2.5, model: "x/y", failOn: "never", timeoutMinutes: 10, comment: false, conversation: true, planMode: "change", replan: true } });
+  });
+
+  it("reads --allow-origin, given several times, with --runner own and --url", () => {
+    const parsed = parseCliArgs(["run", "--api", "https://a.example", "--project", PROJECT, "--runner", "own", "--url", "http://localhost:8080", "--allow-origin", "http://localhost:8025", "--allow-origin", "http://localhost:9000/"], env);
+    expect(parsed).toMatchObject({ options: { allowOrigins: ["http://localhost:8025", "http://localhost:9000/"] } });
   });
 
   it("reads --accounts with --runner own", () => {
@@ -37,6 +42,10 @@ describe("parseCliArgs", () => {
     [["run", "--api", "https://a.example", "--project", PROJECT, "--cap", "100"], env, "--cap"],
     [["run", "--api", "https://a.example", "--project", PROJECT, "--timeout-minutes", "0"], env, "--timeout-minutes"],
     [["run", "--api", "https://a.example", "--project", PROJECT, "--plan-mode", "diff"], env, "--plan-mode"],
+    [["run", "--api", "https://a.example", "--project", PROJECT, "--allow-origin", "http://localhost:8025"], env, "--allow-origin needs --runner own and --url"],
+    [["run", "--api", "https://a.example", "--project", PROJECT, "--runner", "own", "--allow-origin", "http://localhost:8025"], env, "--allow-origin needs --runner own and --url"],
+    [["run", "--api", "https://a.example", "--project", PROJECT, "--runner", "own", "--url", "http://localhost:8080", "--allow-origin", "ftp://x"], env, "--allow-origin must be an http(s) address"],
+    [["run", "--api", "https://a.example", "--project", PROJECT, "--runner", "own", "--url", "http://localhost:8080", ...Array.from({ length: 6 }, (_, i) => ["--allow-origin", `http://localhost:${9000 + i}`]).flat()], env, "at most 5 times"],
     [["build"], env, "unknown command"],
     [[], env, "no command"],
   ])("rejects %j", (argv, e, message) => {
