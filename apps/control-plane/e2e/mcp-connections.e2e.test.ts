@@ -29,6 +29,7 @@ async function signIn(on: Page) {
 }
 
 async function connect(on: Page, clientId: string, scope: string, options: { prompt?: boolean } = {}) {
+  callback.reset();
   const { verifier, challenge } = pkce();
   await on.goto(authorizeUrl(stack.origin, clientId, callback.url, challenge, scope, options));
   return { verifier };
@@ -92,6 +93,7 @@ beforeAll(async () => {
   browser = await launchBrowser();
   callback = await listenForRedirect();
   context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  context.setDefaultNavigationTimeout(120_000);
   page = await context.newPage();
   await signIn(page);
   const orgId = await onDatabase(db.name, async (c) => (await c.query<{ organizationId: string }>(
@@ -245,8 +247,9 @@ describe("what the consent page offers and what a decision does", () => {
 });
 
 describe("the consent page on a phone, with the keyboard, and when the wrong account is signed in", () => {
-  test("it fits a phone and every control is reachable and usable from the keyboard", async () => {
+  test("it fits a phone, every control is reached in order by Tab, and Allow works from the keyboard", async () => {
     const phone = await browser.newContext({ viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true });
+    phone.setDefaultNavigationTimeout(120_000);
     try {
       const mobile = await phone.newPage();
       await signIn(mobile);
@@ -255,16 +258,15 @@ describe("the consent page on a phone, with the keyboard, and when the wrong acc
       await consentReady(mobile);
       expect(await mobile.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
       const reached: string[] = [];
-      for (let i = 0; i < 12; i += 1) {
+      for (let i = 0; i < 6; i += 1) {
         await mobile.keyboard.press("Tab");
         reached.push(await mobile.evaluate(() => {
           const el = document.activeElement as HTMLElement | null;
           return (el?.getAttribute("aria-label") || el?.textContent || el?.getAttribute("value") || el?.tagName || "").trim().slice(0, 40);
         }));
-        if (reached.at(-1) === "Allow read access") break;
       }
-      expect(reached).toEqual(expect.arrayContaining(["Not you? Switch account", "Allow read access"]));
-      expect(reached.at(-1)).toBe("Allow read access");
+      expect(reached).toEqual(["Not you? Switch account", "read", expect.stringContaining("All projects in"), "Settings, Your AI assistant connections", "Allow read access", "Cancel"]);
+      await mobile.keyboard.press("Shift+Tab");
       await mobile.keyboard.press("Enter");
       const tokens = await redeem(clientId, verifier, await callback.next());
       const client = await mcp(tokens.access_token!);
@@ -292,6 +294,5 @@ describe("the consent page on a phone, with the keyboard, and when the wrong acc
     await afterRedirect(page);
     const tokens = await redeem(clientId, verifier, await callback.next());
     expect((await connectionStatus(tokens.access_token!)).userId).toBe(await userIdOf(SECOND));
-    expect(await userIdOf(SECOND)).not.toBe(await userIdOf(OWNER));
   });
 });

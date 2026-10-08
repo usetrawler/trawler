@@ -54,7 +54,7 @@ test("a project restriction is offered only when the workspace has projects, def
   expect(words(html)).toContain("limits reading and run control alike");
 });
 
-test("the controls are real, keyboard-reachable elements, and a pending action keeps focus by using aria-disabled, not disabled", () => {
+test("the controls are real, keyboard-reachable elements, and none is disabled at rest", () => {
   const html = render({ projects: [{ id: "p-1", name: "Checkout" }] });
   expect(html).toContain("<fieldset");
   expect(html).toContain("<legend");
@@ -68,6 +68,12 @@ test("the page tells how long a connection lasts and where to disconnect it, wit
   const html = render();
   expect(words(html)).toContain("a connection nobody has used for 30 days stops working");
   expect(html).toMatch(/<a href="\/settings"[^>]*>Settings, Your AI assistant connections<\/a>/);
+});
+
+test("a client that does not ask to stay connected is told it works for about 15 minutes, not 30 days", () => {
+  const text = words(render({ requestedScopes: ["trawler:read"] }));
+  expect(text).toContain("It works for about 15 minutes, and then the assistant has to ask you again.");
+  expect(text).not.toContain("30 days");
 });
 
 test("the outcome is announced in a live region that is always on the page", () => {

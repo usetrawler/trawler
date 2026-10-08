@@ -81,6 +81,7 @@ export async function startStack(databaseUrl: string): Promise<Stack> {
     await stop();
     throw error;
   }
+  for (const path of ["/sign-in", "/settings", "/mcp/consent"]) await fetch(`${origin}${path}`, { redirect: "manual" }).catch(() => {});
   return { origin, signInAs: (next) => { email = next; }, stop };
 }
 
@@ -92,6 +93,7 @@ export async function launchBrowser(): Promise<Browser> {
 export interface Callback {
   url: string;
   next(): Promise<URL>;
+  reset(): void;
   close(): void;
 }
 
@@ -101,7 +103,8 @@ export async function listenForRedirect(): Promise<Callback> {
   const arrived: URL[] = [];
   const server = createHttpServer((request, response) => {
     const url = new URL(request.url ?? "/", `http://localhost:${port}`);
-    response.writeHead(200, { "content-type": "text/plain" }).end("Authorized. You can close this tab.");
+    response.writeHead(url.pathname === "/callback" ? 200 : 404, { "content-type": "text/plain" }).end(url.pathname === "/callback" ? "Authorized. You can close this tab." : "");
+    if (url.pathname !== "/callback") return;
     const waiter = waiting.shift();
     if (waiter) waiter(url);
     else arrived.push(url);
@@ -116,6 +119,7 @@ export async function listenForRedirect(): Promise<Callback> {
       const deliver = (found: URL) => { clearTimeout(timer); resolve(found); };
       waiting.push(deliver);
     }),
+    reset: () => { arrived.length = 0; },
     close: () => server.close(),
   };
 }

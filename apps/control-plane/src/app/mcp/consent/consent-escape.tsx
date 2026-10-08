@@ -2,12 +2,13 @@
 import { useState } from "react";
 import { authClient } from "../../auth-client.ts";
 
-const link = "inline-block py-2 underline underline-offset-4 hover:text-ink disabled:opacity-60";
+const link = "inline-block py-2 underline underline-offset-4 hover:text-ink";
 
 export function ConsentEscape({ query, signedIn = true }: { query?: string; signedIn?: boolean }) {
   const [state, setState] = useState<"idle" | "working" | "cancelled">("idle");
   const [error, setError] = useState<string | null>(null);
   const switchAccount = async () => {
+    if (state === "working") return;
     setState("working");
     setError(null);
     const result = await authClient.signOut().catch(() => ({ error: true }));

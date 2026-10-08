@@ -126,6 +126,7 @@ test("anyone disconnects their own assistant connection, and a connection that i
   const id = "6f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f";
   expect(await revokeMcpConnectionAction({}, form({ id }))).toEqual({ revoked: true });
   expect(state.revoked).toEqual([[id, "user-1"]]);
+  expect(state.revalidated).toEqual([["/settings"]]);
   state.grantOwned = false;
   expect(await revokeMcpConnectionAction({}, form({ id }))).toEqual({ error: "That connection is not there any more." });
   expect(await revokeMcpConnectionAction({}, form({ id: "../x" }))).toEqual({ error: "That connection is not there any more." });

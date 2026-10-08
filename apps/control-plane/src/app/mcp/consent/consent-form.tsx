@@ -92,7 +92,11 @@ export function ConsentForm({ query, requestedScopes, account, workspace, contro
       </label>
     )}
     <p className="text-sm text-muted">
-      Connecting an assistant does not give it permission to test a site you do not own or control. It stays connected while it is in use; a connection nobody has used for 30 days stops working. You can disconnect it any time under <a href="/settings" className="underline underline-offset-4 hover:text-ink">Settings, Your AI assistant connections</a>.
+      Connecting an assistant does not give it permission to test a site you do not own or control.{" "}
+      {requestedScopes.includes("offline_access")
+        ? "It stays connected while it is in use; a connection nobody has used for 30 days stops working."
+        : "It works for about 15 minutes, and then the assistant has to ask you again."}{" "}
+      You can disconnect it any time under <a href="/settings" className="underline underline-offset-4 hover:text-ink">Settings, Your AI assistant connections</a>.
     </p>
     <div className="flex flex-wrap gap-3">
       <button type="button" aria-disabled={busy || undefined} onClick={() => decide(true)} className="min-h-12 border border-ink bg-ink px-5 py-3 font-medium text-paper aria-disabled:opacity-60">{access === "control" ? "Allow with run control" : "Allow read access"}</button>

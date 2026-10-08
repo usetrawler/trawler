@@ -551,23 +551,45 @@ test("you see only your own live connections, and disconnecting one ends its acc
   expect(await connectionsOf(pool, f.user.id, org, "owner")).toHaveLength(1);
 });
 
-test("only your own live connections are listed: a co-member's are not, and a connection nobody can use any more is not", async () => {
+test("only your own live connections in this workspace are listed, whether or not the access token has expired", async () => {
   const f = await fixture();
   const org = f.session.activeOrganizationId;
-  const mine = await f.issue();
   const colleague = await fixture();
-  const theirs = await colleague.issue();
+  const idOf = async (tokens: { access_token: string }) => (await authenticateMcp(pool, tokens.access_token, resource))!.grantId;
+  const live = await idOf(await f.issue());
+  const idle = await idOf(await f.issue());
+  const dead = await idOf(await f.issue());
+  const elsewhere = await idOf(await f.issue());
+  const noRefresh = await idOf(await f.issue({ scope: "trawler:read" }));
+  const theirs = await idOf(await colleague.issue());
+  const ofGrant = (id: string) => `(SELECT code_hash FROM mcp_grants WHERE id = '${id}')`;
   await onDatabase(t.name, async (c) => {
-    await c.query('INSERT INTO member (id, "organizationId", "userId", role, "createdAt") VALUES ($1, $2, $3, \'member\', now())', [randomUUID(), org, colleague.user.id]);
-    await c.query("UPDATE mcp_grants SET org_id = $1 WHERE user_id = $2", [org, colleague.user.id]);
+    await c.query("SET session_replication_role = replica");
+    await c.query("UPDATE mcp_grants SET org_id = $1 WHERE id = $2", [colleague.session.activeOrganizationId, elsewhere]);
+    await c.query("UPDATE mcp_grants SET org_id = $1 WHERE id = $2", [org, theirs]);
+    await c.query(`UPDATE "oauthAccessToken" SET "expiresAt" = now() - interval '1 second' WHERE "authorizationCodeId" IN (${ofGrant(idle)}, ${ofGrant(dead)})`);
+    await c.query(`UPDATE "oauthRefreshToken" SET revoked = now() WHERE "authorizationCodeId" = ${ofGrant(dead)}`);
   });
-  const listed = await connectionsOf(pool, f.user.id, org, "owner");
-  expect(listed).toHaveLength(1);
-  expect(await authenticateMcp(pool, theirs.access_token, resource)).toBeNull();
-  expect(await connectionsOf(pool, colleague.user.id, org, "member")).toHaveLength(1);
-  await onDatabase(t.name, (c) => c.query(`UPDATE "oauthAccessToken" SET "expiresAt" = now() - interval '1 second'; UPDATE "oauthRefreshToken" SET "expiresAt" = now() - interval '1 second'`));
-  expect(await connectionsOf(pool, f.user.id, org, "owner")).toHaveLength(0);
-  expect(mine.access_token).toBeTruthy();
+  const listed = async (userId: string, role: string) => (await connectionsOf(pool, userId, org, role)).map((c) => c.id).sort();
+  expect(await listed(f.user.id, "owner")).toEqual([live, idle, noRefresh].sort());
+  expect(await listed(colleague.user.id, "member")).toEqual([theirs]);
+  await onDatabase(t.name, (c) => c.query(`UPDATE "oauthAccessToken" SET "expiresAt" = now() - interval '1 second' WHERE "authorizationCodeId" = ${ofGrant(noRefresh)}`));
+  expect(await listed(f.user.id, "owner")).toEqual([live, idle].sort());
+});
+
+test("a connection that keeps being used keeps working, and one that is not used for 30 days stops", async () => {
+  const f = await fixture();
+  const tokens = await f.issue();
+  const expiry = () => onDatabase(t.name, async (c) => (await c.query<{ at: Date }>('SELECT max("expiresAt") AS at FROM "oauthRefreshToken" WHERE "clientId" = $1 AND revoked IS NULL', [f.client.client_id])).rows[0]!.at.getTime());
+  await onDatabase(t.name, (c) => c.query(`UPDATE "oauthRefreshToken" SET "expiresAt" = now() + interval '1 day' WHERE "clientId" = $1`, [f.client.client_id]));
+  const refreshed = await f.refresh(tokens.refresh_token);
+  expect(refreshed.status).toBe(200);
+  const renewed = await expiry();
+  expect(renewed).toBeGreaterThan(Date.now() + 29 * 86_400_000);
+  expect(renewed).toBeLessThan(Date.now() + 31 * 86_400_000);
+  const next = await refreshed.json() as { refresh_token: string };
+  await onDatabase(t.name, (c) => c.query(`UPDATE "oauthRefreshToken" SET "expiresAt" = now() - interval '1 second' WHERE "clientId" = $1`, [f.client.client_id]));
+  expect((await f.refresh(next.refresh_token)).status).toBe(400);
 });
 
 test("a project deleted between consent and the token exchange refuses the exchange instead of widening the grant", async () => {
@@ -577,7 +599,7 @@ test("a project deleted between consent and the token exchange refuses the excha
   const code = await f.code({ project_id: project });
   await onDatabase(t.name, (c) => c.query("DELETE FROM projects WHERE id = $1", [project]));
   const redeemed = await f.redeem(code);
-  expect(redeemed.status).toBeGreaterThanOrEqual(400);
+  expect(redeemed.status).toBe(503);
   expect(await onDatabase(t.name, async (c) => (await c.query("SELECT 1 FROM mcp_grants WHERE user_id = $1", [f.user.id])).rowCount)).toBe(0);
 });
 
