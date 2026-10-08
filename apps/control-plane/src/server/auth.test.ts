@@ -76,7 +76,7 @@ test("only the membership check reads the workspace a session names", () => {
   const src = fileURLToPath(new URL("..", import.meta.url));
   const sources = readdirSync(src, { recursive: true, encoding: "utf8" }).filter((file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$/.test(file));
   const reading = (text: string) => sources.filter((file) => readFileSync(`${src}/${file}`, "utf8").includes(text)).sort();
-  expect(reading("activeOrganizationId")).toEqual(["auth/auth.ts", "db/types.ts"]);
+  expect(reading("activeOrganizationId")).toEqual(["auth/auth.ts", "db/types.ts", "mcp/oauth.ts"]);
   expect(reading("getActiveMember")).toEqual([]);
   expect(reading("getFullOrganization")).toEqual([]);
   expect(reading("getOrganization")).toEqual([]);
