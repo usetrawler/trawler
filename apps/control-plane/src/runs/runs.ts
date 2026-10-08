@@ -265,7 +265,7 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
     const flow = await accountsFor(tx, plan.id, providedAccounts, stored.accountFlow);
     providedAccounts = flow.accounts;
     prPlan = {
-      mode: prPlan!.mode, goalIds: merged?.added.map((g) => g.id) ?? [], ...(merged ? {} : { note: NOTHING }), prPlanId: stored.id, version: stored.version, reused: true,
+      mode: prPlan!.mode, goalIds: merged?.added.map((g) => g.id) ?? [], ...(merged ? {} : { note: NOTHING }), prPlanId: stored.id, version: stored.version, reused: true, ...(stored.createdByRun ? { createdByRun: stored.createdByRun } : {}),
       accountFlow: stored.accountFlow, ...(stored.accountReason ? { accountReason: stored.accountReason } : {}), ...(merged && stored.brief ? { brief: stored.brief } : {}), signUps: flow.signUps,
     };
   }
@@ -492,7 +492,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
     execution: run.execution as Execution,
     providedAccounts: run.provided_accounts as string[],
     pullRequest: pullRequestOf(run.pull_request as unknown as PullRequest | null),
-    prPlan: run.pr_plan ? plannedFor(record!, (run.pull_request as unknown as PullRequest | null)?.number ?? null, snapshot, origin?.number ?? null) : null,
+    prPlan: run.pr_plan ? plannedFor(record!, (run.pull_request as unknown as PullRequest | null)?.number ?? null, snapshot, record?.createdByRun ?? origin?.number ?? null) : null,
     createdAt: run.created_at, startedAt: run.started_at, finishedAt: run.finished_at,
     jobs,
     findings: findings.map((f) => ({

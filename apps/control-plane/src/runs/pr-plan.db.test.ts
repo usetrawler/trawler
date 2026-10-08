@@ -253,7 +253,9 @@ test("a changed description updates the same plan to version 2; --replan makes a
   expect((await kinds(replanned.id))[0]).toMatchObject({ kind: "pr_plan", status: "queued" });
   await planDueRuns(lead(scriptedModel([answer(LEE_GOAL)])));
   expect(await stored(project)).toEqual([expect.objectContaining({ id: v2!.id, version: 3 })]);
-  expect((await summary(replanned.id))!.prPlan).toMatchObject({ version: 3, reused: false });
+  expect((await summary(replanned.id))!.prPlan).toMatchObject({ version: 3, reused: false, createdByRun: replanned.number });
+  expect((await summary(run.id))!.prPlan).toMatchObject({ version: 1, createdByRun: run.number });
+  expect((await summary(third.id))!.prPlan).toMatchObject({ version: 2, reused: true, createdByRun: second.number });
   expect(await runPlan(replanned.id)).toEqual({ plan_id: v2!.id, plan_name: "PR #482 v3" });
   await finish(replanned.id);
 });
