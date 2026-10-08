@@ -418,7 +418,7 @@ test("a finished run with no defects says how few goals it reached when most wer
 });
 
 test("a run an assistant stopped names the assistant and the person, and falls back to the plain reason without them", () => {
-  const via = { kind: "mcp" as const, client: "Claude Code", clientHost: null, person: "Lee Park", grant: "g2" };
+  const via = { kind: "mcp" as const, client: "Claude Code", clientHost: null, person: "Lee Park" };
   expect(runView(summary({ status: "cancelled", cancelReason: "stopped_over_mcp", stoppedVia: via })).headline).toBe("Stopped by Claude Code for Lee Park over MCP.");
   expect(runView(summary({ status: "cancelled", cancelReason: "stopped_over_mcp" })).headline).toBe("Stopped by an assistant over MCP.");
 });

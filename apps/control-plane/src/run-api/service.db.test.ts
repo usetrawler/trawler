@@ -8,7 +8,7 @@ import { Keyring } from "../lib/secrets.ts";
 import { createProject } from "../projects/projects.ts";
 import { cancelLiveRuns, runSummary, startRun } from "../runs/runs.ts";
 import { runView } from "../runs/report.ts";
-import { workspaceRuns } from "../projects/overview.ts";
+import { runCounts, workspaceRuns } from "../projects/overview.ts";
 import { createApiToken } from "../api-tokens/tokens.ts";
 import { handleStartRun } from "./handlers.ts";
 import { readRunFor, startRunFor, stopRunFor, type RunApiDeps, type RunPrincipal } from "./service.ts";
@@ -105,18 +105,21 @@ test("a run started and stopped over MCP records the client and the person, show
   const id = started.value.id;
   const row = async () => asSystem(t.db, (tx) => tx.selectFrom("runs").select(["started_via", "stopped_via", "cancel_reason", "created_by"]).where("id", "=", id).executeTakeFirstOrThrow());
   expect(await row()).toMatchObject({ started_via: via, stopped_via: null, cancel_reason: null });
+  const { grant: _grant, ...shown } = via;
   const byOrigin = (origin: "app" | "api" | "mcp") => withOrg(t.db, "org-ent", async (tx) => (await workspaceRuns(tx, "org-ent", { origin })).runs.map((r) => r.id));
-  expect(await byOrigin("mcp")).toEqual([id]);
+  expect(await byOrigin("mcp")).toContain(id);
   expect(await byOrigin("app")).not.toContain(id);
   expect(await byOrigin("api")).not.toContain(id);
   const line = await withOrg(t.db, "org-ent", async (tx) => (await workspaceRuns(tx, "org-ent")).runs.find((r) => r.id === id));
-  expect(line).toMatchObject({ origin: "mcp", startedVia: via });
+  expect(line).toMatchObject({ origin: "mcp", startedVia: shown });
 
   const stopper = { ...via, person: "Lee Park" };
   expect((await stopRunFor(principal("org-ent", { via: stopper }), id, deps)).ok).toBe(true);
   expect(await row()).toMatchObject({ stopped_via: stopper, cancel_reason: "stopped_over_mcp", started_via: via });
   const summary = (await withOrg(t.db, "org-ent", (tx) => runSummary(tx, "org-ent", id)))!;
-  expect(summary).toMatchObject({ startedVia: via, stoppedVia: stopper });
+  const { grant: _g2, ...shownStopper } = stopper;
+  expect(summary).toMatchObject({ startedVia: shown, stoppedVia: shownStopper });
+  expect(JSON.stringify(summary)).not.toContain(via.grant);
   expect(runView(summary).headline).toBe("Stopped by Claude Code for Lee Park over MCP.");
 });
 
@@ -128,4 +131,27 @@ test("a run stopped without MCP keeps no stopping client, and the database refus
   expect(await asSystem(t.db, (tx) => tx.selectFrom("runs").select(["started_via", "stopped_via", "cancel_reason"]).where("id", "=", started.value.id).executeTakeFirstOrThrow())).toEqual({ started_via: null, stopped_via: null, cancel_reason: "stopped_from_ci" });
   await expect(asSystem(t.db, (tx) => tx.updateTable("runs").set({ started_via: JSON.stringify({ kind: "ui" }) as never }).where("id", "=", started.value.id).execute())).rejects.toThrow(/runs_started_via_shape/);
   await expect(asSystem(t.db, (tx) => tx.updateTable("runs").set({ stopped_via: JSON.stringify({ kind: "mcp", client: 3 }) as never }).where("id", "=", started.value.id).execute())).rejects.toThrow(/runs_stopped_via_shape/);
+});
+
+test("the origin filter and the status counts agree for every way a run starts", async () => {
+  await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
+  const via = { kind: "mcp" as const, client: "Claude Code", clientHost: null, person: "Ana Lopez", grant: "grant-9" };
+  const opts = { budgetUsd: 2, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 30, replaySteps: 20 };
+  const mk = async (createdBy: string, startedVia?: typeof via) => {
+    const run = await withOrg(t.db, "org-ent", (tx) => startRun(tx, "org-ent", ids.ent!, keys, { ...opts, createdBy, ...(startedVia ? { startedVia } : {}) }));
+    await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
+    return run.id;
+  };
+  const app = await mk("user-1");
+  const api = await mk("api-token:t1");
+  const mcp = await mk("mcp:grant-9:user-1", via);
+  const untagged = await mk("mcp:grant-9:user-1");
+  const listed = (origin: "app" | "api" | "mcp") => withOrg(t.db, "org-ent", async (tx) => (await workspaceRuns(tx, "org-ent", { origin, projectId: ids.ent! })).runs.map((r) => r.id));
+  const counted = (origin: "app" | "api" | "mcp") => withOrg(t.db, "org-ent", async (tx) => (await runCounts(tx, "org-ent", ids.ent!, undefined, origin)).all);
+  expect(await listed("api")).toContain(api);
+  expect(await listed("api")).not.toEqual(expect.arrayContaining([app]));
+  expect(await listed("mcp")).toEqual(expect.arrayContaining([untagged, mcp]));
+  expect(await listed("app")).toContain(app);
+  expect(await listed("app")).not.toEqual(expect.arrayContaining([api, mcp, untagged]));
+  for (const origin of ["app", "api", "mcp"] as const) expect(await counted(origin)).toBe((await listed(origin)).length);
 });

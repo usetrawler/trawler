@@ -117,4 +117,10 @@ describe("RunsView, how a run started", () => {
     expect(filters(html("mcp")).map((f) => f.href)).toEqual(["/runs?via=mcp", "/runs?show=completed&amp;via=mcp", "/runs?show=attention&amp;via=mcp"]);
     expect(pages(html("mcp"))).toEqual([["Older runs", "/runs?via=mcp&amp;before=5"]]);
   });
+
+  it("says no run here was started this way, instead of that there are no runs, when a way of starting is chosen", () => {
+    const empty = (origin: "any" | "mcp") => renderToStaticMarkup(createElement(RunsView, { head: null, basePath: "/runs", show: "all", origin, counts: { all: 0, completed: 0, attention: 0 }, runs: [], olderThan: null, paged: false }));
+    expect(empty("any")).toContain("No runs yet.");
+    expect(empty("mcp")).toContain("No run here was started this way.");
+  });
 });

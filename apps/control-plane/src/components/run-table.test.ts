@@ -90,8 +90,8 @@ test("a run names its plan after the project, or after its date inside a project
 });
 
 test("a run started over MCP names the assistant and the person on its row, and any other run says nothing of it", () => {
-  const via = { kind: "mcp" as const, client: "Claude Code", clientHost: "claude.ai", person: "Ana Lopez", grant: "g1" };
+  const via = { kind: "mcp" as const, client: "Claude Code", clientHost: "claude.ai", person: "Ana Lopez" };
   const [over] = rows(render([line({ startedVia: via, origin: "mcp" })]));
-  expect(over).toContain("MCP · Claude Code · Ana Lopez</small>");
+  expect(over).toContain("MCP · Claude Code (claude.ai) · Ana Lopez</small>");
   expect(rows(render([line()])).join("")).not.toContain("MCP");
 });

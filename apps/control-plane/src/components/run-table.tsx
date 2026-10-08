@@ -31,7 +31,7 @@ export function RunTable({ runs, compact = false, project = true }: { runs: RunL
                     <small className={`mt-0.5 block text-[10px] md:hidden ${tone}`}>{narrowStatus}</small>
                   </>
                 )}
-                {r.startedVia && <small className="mt-0.5 block text-[10px] text-muted">{viaLabel(r.startedVia)}</small>}
+                {r.startedVia && <small className="mt-0.5 block text-[10px] break-words text-muted">{viaLabel(r.startedVia)}</small>}
                 <small className="mt-1 block text-[10px] text-muted wide:hidden">
                   {r.unchecked ? "not checked" : `${r.confirmed} confirmed`} · {r.goalsReached}/{r.goalsTotal} goals · {spent.value}{spent.label === "tokens" ? " tokens" : ""}
                 </small>

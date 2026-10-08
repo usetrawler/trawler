@@ -18,7 +18,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
   const member = await signedInMember(await headers());
   if (!member) redirect("/sign-in");
   const { orgId } = member;
-  const [history, counts] = await withOrg(getDb(), orgId, (tx) => Promise.all([workspaceRuns(tx, orgId, { show, before, ...(origin === "any" ? {} : { origin }) }), runCounts(tx, orgId)]));
+  const [history, counts] = await withOrg(getDb(), orgId, (tx) => Promise.all([workspaceRuns(tx, orgId, { show, before, ...(origin === "any" ? {} : { origin }) }), runCounts(tx, orgId, undefined, undefined, origin === "any" ? undefined : origin)]));
   const shell = await shellFor(member);
   const newest = shell.workspace.projects[0];
   return (

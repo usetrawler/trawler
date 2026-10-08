@@ -467,13 +467,13 @@ test("a pull request plan shows what the lead told the team", () => {
 });
 
 test("a run started over MCP says which assistant started it, for whom, and a run started any other way says nothing of it", () => {
-  const via = { kind: "mcp" as const, client: "Claude Code", clientHost: "claude.ai", person: "Ana Lopez", grant: "g1" };
-  expect(text(head(render(summary({ startedVia: via }))))).toContain("Started over MCP by Claude Code for Ana Lopez");
+  const via = { kind: "mcp" as const, client: "Claude Code", clientHost: "claude.ai", person: "Ana Lopez" };
+  expect(text(head(render(summary({ startedVia: via }))))).toContain("Started over MCP by Claude Code (claude.ai) for Ana Lopez");
   expect(text(head(render(finished)))).not.toContain("Started over MCP");
 });
 
 test("a run an assistant stopped says who stopped it", () => {
-  const via = { kind: "mcp" as const, client: "Claude Code", clientHost: null, person: "Lee Park", grant: "g2" };
+  const via = { kind: "mcp" as const, client: "Claude Code", clientHost: null, person: "Lee Park" };
   const stopped = summary({ status: "cancelled", cancelReason: "stopped_over_mcp", stoppedVia: via });
   expect(head(render(stopped))).toMatch(/<h1[^>]*>Stopped by Claude Code for Lee Park over MCP\.<\/h1>/);
 });
