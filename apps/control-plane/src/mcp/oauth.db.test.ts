@@ -1,4 +1,5 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { createHmac, randomBytes, randomUUID } from "node:crypto";
+import { ProjectConfigSchema } from "@usetrawler/protocol";
 import { afterAll, expect, test, vi } from "vitest";
 import { authPool, createAuth } from "../auth/auth.ts";
 import { onDatabase, testDb } from "../db/test-db.ts";
@@ -7,6 +8,10 @@ import { mcpAuthentication, pruneMcp } from "./http.ts";
 import { authenticateMcp, revokeGrant } from "./oauth.ts";
 import { tokenHash } from "./config.ts";
 import { withOrg } from "../db/tenancy.ts";
+import { Keyring } from "../lib/secrets.ts";
+import { createProject } from "../projects/projects.ts";
+import { canControlRuns } from "./access.ts";
+import { connectionsOf } from "./connections.ts";
 import { setMcpSettings, type McpSettings } from "./settings.ts";
 
 const t = await testDb();
@@ -467,4 +472,81 @@ test("a grant can only shrink: it cannot be un-revoked or gain a scope, whoever 
   await expect(run("UPDATE mcp_grants SET revoked_at = NULL WHERE user_id = $1")).rejects.toThrow(/stays revoked/);
   await expect(run("UPDATE mcp_grants SET project_id = NULL, resource = resource || 'x' WHERE user_id = $1")).rejects.toThrow(/keeps its person, client, workspace and project/);
   await expect(run("UPDATE mcp_grants SET org_id = 'elsewhere' WHERE user_id = $1")).rejects.toThrow();
+});
+
+const keyring = new Keyring(randomBytes(32));
+const projectIn = (orgId: string, name: string) => withOrg(t.db, orgId, (tx) => createProject(tx, orgId, ProjectConfigSchema.parse({
+  name, targetUrl: "https://app.acme.test/", personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "Get in." }],
+}), keyring, { demo: true }));
+
+test("a connection can be limited to one project of its own workspace, and nothing else", async () => {
+  const f = await fixture();
+  const org = f.session.activeOrganizationId;
+  const mine = await projectIn(org, "Checkout");
+  const other = await fixture();
+  const theirs = await projectIn(other.session.activeOrganizationId, "Theirs");
+  const limited = await f.issue({ project_id: mine });
+  const principal = await authenticateMcp(pool, limited.access_token, resource);
+  expect(principal!.projectId).toBe(mine);
+  const refreshed = await (await f.refresh(limited.refresh_token)).json() as { access_token: string };
+  expect((await authenticateMcp(pool, refreshed.access_token, resource))!.projectId).toBe(mine);
+  expect((await rejectedAtConsent(f, { project_id: theirs })).status).toBe(403);
+  expect((await rejectedAtConsent(f, { project_id: "not-a-uuid" })).status).toBe(400);
+  expect((await authenticateMcp(pool, (await f.issue()).access_token, resource))!.projectId).toBeNull();
+  expect((await connectionsOf(pool, f.user.id, org, "owner")).map((c) => c.projectId).sort()).toEqual([mine, null].sort());
+});
+
+test("a role that may not control runs cannot be granted run control, and loses it when demoted", async () => {
+  expect(["owner", "admin", "member", "member, admin"].map(canControlRuns)).toEqual([true, true, true, true]);
+  expect(["viewer", "", "guest"].map(canControlRuns)).toEqual([false, false, false]);
+  const f = await fixture("none", WRITE);
+  const org = f.session.activeOrganizationId;
+  await allow(org, { connectionsAllowed: true, runControlAllowed: true });
+  await pool.query(`UPDATE member SET role = 'viewer' WHERE "userId" = $1`, [f.user.id]);
+  expect((await rejectedAtConsent(f)).status).toBe(403);
+  await pool.query(`UPDATE member SET role = 'member' WHERE "userId" = $1`, [f.user.id]);
+  const tokens = await f.issue();
+  expect((await authenticateMcp(pool, tokens.access_token, resource))!.scopes).toContain("trawler:runs:write");
+  await pool.query(`UPDATE member SET role = 'viewer' WHERE "userId" = $1`, [f.user.id]);
+  const demoted = await authenticateMcp(pool, tokens.access_token, resource);
+  expect(demoted!.scopes).toContain("trawler:read");
+  expect(demoted!.scopes).not.toContain("trawler:runs:write");
+  expect((await connectionsOf(pool, f.user.id, org, "viewer"))[0]!.runControl).toBe(false);
+});
+
+test("a connection records when it was last used, at most once a minute", async () => {
+  const f = await fixture();
+  const tokens = await f.issue();
+  const org = f.session.activeOrganizationId;
+  expect((await connectionsOf(pool, f.user.id, org, "owner"))[0]!.lastUsedAt).toBeNull();
+  const call = () => mcpAuthentication(pool, origin, new Request(resource, { headers: { authorization: `Bearer ${tokens.access_token}` } }));
+  expect(await call()).not.toBeInstanceOf(Response);
+  const first = (await connectionsOf(pool, f.user.id, org, "owner"))[0]!.lastUsedAt;
+  expect(first).toBeInstanceOf(Date);
+  await call();
+  expect((await connectionsOf(pool, f.user.id, org, "owner"))[0]!.lastUsedAt).toEqual(first);
+  await pool.query("UPDATE mcp_grants SET last_used_at = now() - interval '2 minutes' WHERE user_id = $1", [f.user.id]);
+  await call();
+  expect((await connectionsOf(pool, f.user.id, org, "owner"))[0]!.lastUsedAt!.getTime()).toBeGreaterThan(first!.getTime());
+});
+
+test("you see only your own live connections, and disconnecting one ends its access and its refresh at once", async () => {
+  const f = await fixture();
+  const other = await fixture();
+  const org = f.session.activeOrganizationId;
+  const first = await f.issue();
+  const second = await f.issue();
+  const theirs = await other.issue();
+  const listed = await connectionsOf(pool, f.user.id, org, "owner");
+  expect(listed).toHaveLength(2);
+  expect(listed.every((c) => c.clientName === "Integration client" && c.clientHost === null && !c.runControl)).toBe(true);
+  const firstId = (await authenticateMcp(pool, first.access_token, resource))!.grantId;
+  expect(await revokeGrant(pool, firstId, other.user.id)).toBe(false);
+  expect(await authenticateMcp(pool, first.access_token, resource)).toBeTruthy();
+  expect(await revokeGrant(pool, firstId, f.user.id)).toBe(true);
+  expect(await authenticateMcp(pool, first.access_token, resource)).toBeNull();
+  expect((await f.refresh(first.refresh_token)).status).toBe(400);
+  expect(await authenticateMcp(pool, second.access_token, resource)).toBeTruthy();
+  expect(await authenticateMcp(pool, theirs.access_token, resource)).toBeTruthy();
+  expect(await connectionsOf(pool, f.user.id, org, "owner")).toHaveLength(1);
 });

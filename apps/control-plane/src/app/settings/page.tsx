@@ -13,10 +13,12 @@ import { canManageBilling, getAuth, signedInMember } from "../../server/auth.ts"
 import { getDb } from "../../server/db.ts";
 import { readEnv } from "../../server/env.ts";
 import { shellFor } from "../../server/shell.ts";
+import { connectionsOf } from "../../mcp/connections.ts";
 import { mcpSettings } from "../../mcp/settings.ts";
 import { ApiTokens } from "./api-tokens.tsx";
 import { Members } from "./members.tsx";
 import { McpAccess } from "./mcp-access.tsx";
+import { McpConnections } from "./mcp-connections.tsx";
 import { ModelKey } from "./model-key.tsx";
 import { MonthlyBudget } from "./monthly-budget.tsx";
 import { WorkspaceName } from "./workspace-name.tsx";
@@ -31,15 +33,17 @@ export default async function SettingsPage() {
   const { orgId } = member;
   const auth = getAuth();
   const canManage = canManageBilling(member);
+  const mcpPool = auth.mcp?.pool ?? null;
   const [{ details, budget, spent, plan, projects, today, tokens, projectList, mcp }, members, invitations] = await Promise.all([
     withOrg(getDb(), orgId, async (tx) => ({
       details: await modelKeyDetails(tx, orgId), budget: await monthlyBudget(tx, orgId), spent: await monthSpent(tx, orgId),
       mcp: await mcpSettings(tx, orgId), plan: await workspacePlan(tx, orgId), projects: await projectsCounted(tx, orgId), today: await runsToday(tx, orgId),
-      tokens: canManage ? await listApiTokens(tx, orgId) : [], projectList: canManage ? await listProjects(tx, orgId) : [],
+      tokens: canManage ? await listApiTokens(tx, orgId) : [], projectList: canManage || mcpPool ? await listProjects(tx, orgId) : [],
     })),
     auth.workspaceMembers(orgId),
     auth.pendingInvitations(orgId),
   ]);
+  const connections = mcpPool ? await connectionsOf(mcpPool, member.userId, orgId, member.role) : [];
   const addedBy = details?.addedBy ? await auth.memberEmail(orgId, details.addedBy) : null;
   return (
     <AppShell shell={await shellFor(member)} current="settings">
@@ -68,7 +72,15 @@ export default async function SettingsPage() {
           projects={projectList.map((p) => ({ id: p.id, name: p.name }))}
           canManage={canManage}
         />
-        <McpAccess orgId={orgId} connectionsAllowed={mcp.connectionsAllowed} runControlAllowed={mcp.runControlAllowed} canManage={canManage} />
+        {mcpPool && <McpAccess orgId={orgId} connectionsAllowed={mcp.connectionsAllowed} runControlAllowed={mcp.runControlAllowed} canManage={canManage} />}
+        {mcpPool && (
+          <McpConnections
+            connections={connections.map((c) => ({
+              id: c.id, clientName: c.clientName, clientHost: c.clientHost, runControl: c.runControl, createdAt: c.createdAt.toISOString(), lastUsedAt: c.lastUsedAt?.toISOString() ?? null,
+              projectName: c.projectId ? projectList.find((p) => p.id === c.projectId)?.name ?? "a project that no longer exists" : null,
+            }))}
+          />
+        )}
       </div>
     </AppShell>
   );
