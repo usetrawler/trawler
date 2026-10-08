@@ -6,6 +6,7 @@ import { createApiToken, revokeApiToken } from "../api-tokens/tokens.ts";
 import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
+import { setModelKey } from "../credentials/credentials.ts";
 import { createProject } from "../projects/projects.ts";
 import { cancelLiveRuns, startRun } from "../runs/runs.ts";
 import type { Database } from "../db/index.ts";
@@ -85,9 +86,21 @@ test("the same key with different parameters is a conflict and creates nothing",
   const different = await post(token, { project: projects["org-i1"]!, execution: "hosted", cap: 2 }, "reused");
   expect(different.status).toBe(409);
   expect((await different.json()).error).toContain("already used for a different request");
-  const otherProject = await post(token, { project: projects["org-i1-other"]!, execution: "hosted", cap: 1 }, "reused");
-  expect(otherProject.status).toBe(409);
   expect((await runsOf(projects["org-i1"]!)).length).toBe(before);
+});
+
+test("the same key in another project is a separate key, so one pipeline cannot lock out or probe another's", async () => {
+  const first = await mint("org-i1", projects["org-i1"]!);
+  const second = await mint("org-i1", projects["org-i1-other"]!);
+  await stop("org-i1");
+  const a = await post(first.token, { project: projects["org-i1"]!, execution: "hosted" }, "pr-12");
+  const b = await post(second.token, { project: projects["org-i1-other"]!, execution: "hosted" }, "pr-12");
+  expect([a.status, b.status]).toEqual([201, 201]);
+  expect(b.headers.get("idempotent-replayed")).toBeNull();
+  expect((await a.json()).id).not.toBe((await b.json()).id);
+  await stop("org-i1");
+  const again = await post(first.token, { project: projects["org-i1"]!, execution: "hosted" }, "pr-12");
+  expect(again.headers.get("idempotent-replayed")).toBe("true");
 });
 
 test("a key from another workspace never matches", async () => {
@@ -196,4 +209,23 @@ test("the service refuses a malformed key itself, so every caller gets the same 
   const request = { project: projects["org-i2"]!, execution: "hosted" as const };
   expect(await startRunFor(principal("org-i2"), request, deps(), { idempotencyKey: "" })).toMatchObject({ ok: false, status: 400 });
   expect(await startRunFor(principal("org-i2"), request, deps(), { idempotencyKey: "a b" })).toMatchObject({ ok: false, status: 400 });
+});
+
+test("a retry whose model check is refused after the first request committed still gets the first answer", async () => {
+  const org = "org-i3";
+  await sql`insert into organization (id, name, slug, "createdAt") values (${org}, ${org}, ${org}, now())`.execute(t.db);
+  await withOrg(t.db, org, (tx) => setModelKey(tx, org, { provider: "openrouter", key: "sk-or-test-key-0123456789abcdef", baseUrl: null }, "u1", keys));
+  const project = await withOrg(t.db, org, (tx) => createProject(tx, org, config, keys));
+  await withOrg(t.db, org, (tx) => startRun(tx, org, project, keys, options));
+  await stop(org);
+  const request = { project, execution: "hosted" as const, model: "m/agent" };
+  const accept = { modelCheck: async () => ({ ok: true as const }) };
+  let first: Awaited<ReturnType<typeof startRunFor>> | undefined;
+  const refusing = { modelCheck: async () => { first = await startRunFor(principal(org), request, deps(accept), { idempotencyKey: "check" }); return { ok: false as const, reason: "unavailable" as const, detail: "" }; } };
+  const second = await startRunFor(principal(org), request, deps(refusing), { idempotencyKey: "check" });
+  expect(first).toMatchObject({ ok: true, status: 201 });
+  expect(second).toMatchObject({ ok: true, status: 201, replayed: true, value: (first as { value: unknown }).value });
+  await stop(org);
+  const unkeyed = await startRunFor(principal(org), request, deps(refusing), { idempotencyKey: "never-used" });
+  expect(unkeyed).toMatchObject({ ok: false, status: 503 });
 });

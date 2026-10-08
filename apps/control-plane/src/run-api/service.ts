@@ -52,6 +52,9 @@ const succeed = <T>(value: T, status = 200): Outcome<T> => ({ ok: true, status, 
 const notAllowed = (principal: RunPrincipal) => `This ${principal.subject} is not allowed to do that.`;
 
 class KeyGone extends Error {}
+class ModelCheckRefused extends Error {
+  constructor(readonly outcome: Outcome<never>) { super("model check refused"); }
+}
 class Replayed extends Error {
   constructor(readonly stored: StoredStart) {
     super("replayed");
@@ -100,7 +103,7 @@ export async function startRunFor(principal: RunPrincipal, body: ParsedStartRun,
   const keyHash = options.idempotencyKey ? keyHashOf(options.idempotencyKey) : null;
   const requestHash = keyHash ? requestHashOf(StartRunRequestSchema.parse(body)) : null;
   if (keyHash && requestHash) {
-    const stored = await withOrg(deps.db, orgId, (tx) => storedStart(tx, orgId, keyHash));
+    const stored = await withOrg(deps.db, orgId, (tx) => storedStart(tx, orgId, body.project, keyHash));
     if (stored) return replayOf(stored, requestHash);
   }
   const priceOf = deps.priceOf ?? priceFor;
@@ -132,7 +135,7 @@ export async function startRunFor(principal: RunPrincipal, body: ParsedStartRun,
     });
     if (endpoint) {
       const checkRefusal = await modelCheckRefusal(endpoint, payer.model, deps.modelCheck);
-      if (checkRefusal) return refuse(CHECK_STATUS[checkRefusal.reason], checkRefusal.error, "model_key");
+      if (checkRefusal) throw new ModelCheckRefused(refuse(CHECK_STATUS[checkRefusal.reason], checkRefusal.error, "model_key"));
     }
     const run = await withOrg(deps.db, orgId, async (tx) => {
       if (keyHash && requestHash) {
@@ -148,17 +151,17 @@ export async function startRunFor(principal: RunPrincipal, body: ParsedStartRun,
       });
       await tx.updateTable("runs").set({ client_seen_at: sql<Date>`now()` }).where("id", "=", started.id).execute();
       const response: StartedRun = { id: started.id, number: started.number, reportUrl: `${deps.baseUrl.replace(/\/+$/, "")}${runPath(started.number)}`, people: started.people };
-      if (keyHash) await recordStart(tx, orgId, keyHash, started.id, response);
+      if (keyHash) await recordStart(tx, orgId, body.project, keyHash, started.id, response);
       return { started, response };
     });
     if (body.pullRequest) deps.afterStart?.();
     return succeed(run.response, 201);
   } catch (err) {
     if (err instanceof Replayed && requestHash) return replayOf(err.stored, requestHash);
-    const refusal = refusalOf(err, principal);
+    const refusal = err instanceof ModelCheckRefused ? err.outcome : refusalOf(err, principal);
     if (!refusal) throw err;
     if (keyHash && requestHash) {
-      const stored = await withOrg(deps.db, orgId, (tx) => storedStart(tx, orgId, keyHash));
+      const stored = await withOrg(deps.db, orgId, (tx) => storedStart(tx, orgId, body.project, keyHash));
       if (stored) return replayOf(stored, requestHash);
     }
     return refusal;
