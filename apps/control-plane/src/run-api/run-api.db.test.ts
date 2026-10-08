@@ -13,6 +13,7 @@ import { FIRST_RUN_ON_US } from "../runs/models.ts";
 import { claimJob, HOSTED_SCOPE } from "../runs/queue.ts";
 import { cancelLiveRuns, startRun } from "../runs/runs.ts";
 import { handleGetRun, handleStartRun, type RunApiDeps } from "./handlers.ts";
+import { confirmTesting } from "../projects/overview.ts";
 
 const t = await testDb();
 afterAll(() => t.drop());
@@ -154,6 +155,20 @@ describe("run api", () => {
     await hadARun("org-ent", fresh);
     expect((await post(token, { project: fresh, execution: "own" })).status).toBe(201);
     await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
+  });
+
+  test("a project confirmed in the app for runs from CI takes its first run from the API without a run from the app", async () => {
+    const { token } = await mint("org-ent");
+    const ciOnly = await withOrg(t.db, "org-ent", (tx) => createProject(tx, "org-ent", { ...config, name: "Only in CI", targetUrl: "http://localhost:8080/" }, keys));
+    expect((await post(token, { project: ciOnly, execution: "own" })).status).toBe(412);
+    expect(await withOrg(t.db, "org-ent", (tx) => confirmTesting(tx, "org-ent", ciOnly, "u1"))).toBe(true);
+    expect(await withOrg(t.db, "org-ent", (tx) => confirmTesting(tx, "org-ent", ciOnly, "u2"))).toBe(true);
+    const row = await asSystem(t.db, (tx) => tx.selectFrom("projects").select(["testing_confirmed_at", "testing_confirmed_by"]).where("id", "=", ciOnly).executeTakeFirstOrThrow());
+    expect(row.testing_confirmed_by).toBe("u1");
+    expect(row.testing_confirmed_at).not.toBeNull();
+    expect((await post(token, { project: ciOnly, execution: "own" })).status).toBe(201);
+    await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
+    expect(await withOrg(t.db, "org-other", (tx) => confirmTesting(tx, "org-other", ciOnly, "u3"))).toBe(false);
   });
 
   test("a workspace key is tried on the chosen model before the run is queued, and a refused key or unknown model is a clear refusal", async () => {

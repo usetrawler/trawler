@@ -13,7 +13,10 @@ vi.mock("../../../server/beta.ts", () => ({ betaRefusal: () => null }));
 vi.mock("../../../server/env.ts", () => ({ readEnv: () => ({ openRouterUrl: "https://openrouter.test/api/v1" }) }));
 vi.mock("../../../server/db.ts", () => ({ getDb: () => ({}), getKeyring: () => ({}) }));
 vi.mock("../../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, _orgId: string, work: (tx: unknown) => unknown) => work({}) }));
-vi.mock("../../../projects/overview.ts", () => ({ projectRunCount: async (_tx: unknown, orgId: string, projectId: string) => { state.counted.push([orgId, projectId]); return state.runs[projectId] ?? 0; } }));
+vi.mock("../../../projects/overview.ts", () => ({
+  projectAuthorised: async (_tx: unknown, orgId: string, projectId: string) => { state.counted.push([orgId, projectId]); return (state.runs[projectId] ?? 0) > 0; },
+  confirmTesting: async () => true,
+}));
 vi.mock("../../../credentials/credentials.ts", () => ({
   modelKey: async () => ({ provider: "openrouter", key: "sk-or-v1-" + "k".repeat(40), baseUrl: null }),
   modelKeyHint: async () => null,

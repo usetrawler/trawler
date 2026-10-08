@@ -5,6 +5,7 @@ import { MAX_GOALS_PER_PERSONA, MAX_PERSONAS, turnsOf, type Goal, type Persona }
 import type { KeyHint } from "../../../credentials/credentials.ts";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { addAccountAction, removeAccountAction, savePlanAction, type AccountView } from "./plan-actions.ts";
+import { CiOnlyPanel } from "./ci-only.tsx";
 import { StartRun, type StartRefusal } from "./start-run.tsx";
 import { peopleLimitMessage, type WorkspacePlan } from "../../../runs/plan-limits.ts";
 
@@ -175,8 +176,8 @@ function planProblem(personas: PlanPerson[], goals: Goal[]): string | null {
   return null;
 }
 
-export function PlanWorkspace({ projectId, planId, planLabel, projectName, initialPersonas, initialGoals, initialAccounts, keyHint, canManageKey, authorisedBefore, firstRunOnUs, startRefusal, closedBeta, workspacePlan }: {
-  projectId: string; planId: string; planLabel?: string; projectName: string; initialPersonas: PlanPerson[]; initialGoals: Goal[]; initialAccounts: AccountView[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; firstRunOnUs?: boolean; startRefusal?: StartRefusal; closedBeta?: string; workspacePlan?: WorkspacePlan;
+export function PlanWorkspace({ projectId, planId, planLabel, projectName, initialPersonas, initialGoals, initialAccounts, keyHint, canManageKey, authorisedBefore, firstRunOnUs, startRefusal, closedBeta, workspacePlan, ciOnly }: {
+  projectId: string; planId: string; planLabel?: string; projectName: string; initialPersonas: PlanPerson[]; initialGoals: Goal[]; initialAccounts: AccountView[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; firstRunOnUs?: boolean; startRefusal?: StartRefusal; closedBeta?: string; workspacePlan?: WorkspacePlan; ciOnly?: { host: string; confirmedAt: string | null };
 }) {
   const [saved, setSaved] = useState({ personas: initialPersonas, goals: initialGoals });
   const [personas, setPersonas] = useState(initialPersonas);
@@ -314,7 +315,7 @@ export function PlanWorkspace({ projectId, planId, planLabel, projectName, initi
 
       {personas.length > 1 && <OrderOfPlay personas={personas} goals={goals} onMove={moveGoal} />}
 
-      <StartRun projectId={projectId} planId={planId} projectName={projectName} planLabel={planLabel} personas={saved.personas.length} goalsPerTurn={turnsOf(saved).map((t) => t.goalIds.length)} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} firstRunOnUs={firstRunOnUs} refusal={startRefusal} closedBeta={closedBeta} onStarting={setStarting} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : overPlan)} />
+      {ciOnly ? <CiOnlyPanel projectId={projectId} projectName={projectName} host={ciOnly.host} confirmedAt={ciOnly.confirmedAt} /> : <StartRun projectId={projectId} planId={planId} projectName={projectName} planLabel={planLabel} personas={saved.personas.length} goalsPerTurn={turnsOf(saved).map((t) => t.goalIds.length)} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} firstRunOnUs={firstRunOnUs} refusal={startRefusal} closedBeta={closedBeta} onStarting={setStarting} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : overPlan)} />}
     </div>
   );
 }

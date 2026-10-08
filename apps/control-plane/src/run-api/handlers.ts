@@ -7,7 +7,7 @@ import type { Keyring } from "../lib/secrets.ts";
 import { modelCheckRefusal } from "../llm/model-check.ts";
 import { priceFor, type Price } from "../llm/prices.ts";
 import { checkModelCall, endpointFor, PREFERRED_MODELS, type Endpoint, type Provider } from "../llm/providers.ts";
-import { projectRunCount } from "../projects/overview.ts";
+import { projectAuthorised } from "../projects/overview.ts";
 import { planOf, PlanNotFound, projectExists, ProjectNotFound } from "../projects/projects.ts";
 import { runResultOf } from "../runs/comment.ts";
 import { DEFAULT_RUN, FIRST_RUN_ON_US } from "../runs/models.ts";
@@ -75,7 +75,7 @@ export async function handleStartRun(req: Request, deps: RunApiDeps): Promise<Re
   try {
     const { plan, payer, endpoint } = await withOrg(deps.db, orgId, async (tx) => {
       if (!(await projectExists(tx, orgId, body.project))) throw new ProjectNotFound();
-      if ((await projectRunCount(tx, orgId, body.project)) === 0) throw new FirstRunFromApp();
+      if (!(await projectAuthorised(tx, orgId, body.project))) throw new FirstRunFromApp();
       const plan = await planOf(tx, orgId, body.project, body.plan);
       const without = await personWithoutAccount(tx, plan.id, body.accounts);
       if (without) throw new NeedsAccount(without);

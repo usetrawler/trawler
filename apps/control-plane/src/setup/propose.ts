@@ -83,8 +83,9 @@ export interface DescribedByHand {
 export async function startDraft(deps: SetupDeps, input: { orgId: string; url?: string; projectId?: string; planId?: string; planName?: string; byHand?: DescribedByHand }): Promise<string> {
   let url = input.url ?? "";
   let docsUrl: string | undefined;
+  let known: { name: string; description: string; features: string[] } | undefined;
   if (input.projectId) {
-    const project = await withOrg(deps.db, input.orgId, (tx) => tx.selectFrom("projects").select(["target_url", "docs_url"]).where("id", "=", input.projectId!).where("org_id", "=", input.orgId).executeTakeFirst());
+    const project = await withOrg(deps.db, input.orgId, (tx) => tx.selectFrom("projects").select(["target_url", "docs_url", "name", "description", "features"]).where("id", "=", input.projectId!).where("org_id", "=", input.orgId).executeTakeFirst());
     if (!project) throw new ProjectNotFound();
     if (input.planName !== undefined) {
       await withOrg(deps.db, input.orgId, async (tx) => {
@@ -96,6 +97,9 @@ export async function startDraft(deps: SetupDeps, input: { orgId: string; url?: 
     else if (input.planId !== undefined) await withOrg(deps.db, input.orgId, (tx) => planOf(tx, input.orgId, input.projectId!, input.planId));
     url = project.target_url;
     docsUrl = project.docs_url ?? undefined;
+    const plans = await withOrg(deps.db, input.orgId, (tx) => tx.selectFrom("plans").select(["id", "features"]).where("project_id", "=", input.projectId!).where("kind", "=", "standard").orderBy("position").orderBy("created_at").execute());
+    const plan = plans.find((p) => p.id === input.planId) ?? plans[0];
+    known = { name: project.name, description: project.description, features: plan?.features ?? project.features };
   } else {
     await refuseAtProjectLimit(deps, input.orgId);
   }
@@ -121,12 +125,23 @@ export async function startDraft(deps: SetupDeps, input: { orgId: string; url?: 
       },
     });
   } catch (err) {
+    if (refusal?.reason === "private" && known && input.projectId) return draftFromProject(deps, input, productUrl, known);
     throw refusal ?? err;
   }
   await asSystem(deps.db, (tx) => tx.deleteFrom("setup_drafts").where("created_at", "<", sql<Date>`now() - make_interval(hours => ${DRAFT_HOURS})`).execute());
   return withOrg(deps.db, input.orgId, async (tx) => {
     const { id } = await tx.insertInto("setup_drafts").values({
       org_id: input.orgId, project_id: input.projectId ?? null, plan_id: input.planName === undefined ? input.planId ?? null : null, new_plan_name: input.planName?.trim() ?? null, url: product.url, docs_url: product.docsUrl ?? null, page: product.page, docs: product.docs ?? null, origins: [...origins],
+    }).returning("id").executeTakeFirstOrThrow();
+    return id;
+  });
+}
+
+async function draftFromProject(deps: SetupDeps, input: { orgId: string; projectId?: string; planId?: string; planName?: string }, url: string, known: { name: string; description: string; features: string[] }): Promise<string> {
+  return withOrg(deps.db, input.orgId, async (tx) => {
+    const { id } = await tx.insertInto("setup_drafts").values({
+      org_id: input.orgId, project_id: input.projectId ?? null, plan_id: input.planName === undefined ? input.planId ?? null : null, new_plan_name: input.planName?.trim() ?? null,
+      url, page: "", name: known.name, description: known.description, sign_up: "unclear", features: JSON.stringify(known.features.map((title) => ({ title, summary: "" }))), described_at: new Date(),
     }).returning("id").executeTakeFirstOrThrow();
     return id;
   });

@@ -9,7 +9,7 @@ import { planOf, PlanNotFound, projectExists, ProjectNotFound } from "../../../p
 import { modelCheckRefusal } from "../../../llm/model-check.ts";
 import { freshEndpoint, runCheckRefusal, withinListingLimit, type KeyInput } from "../../../llm/key-input.ts";
 import { endpointFor, listModels, PREFERRED_MODELS, PROVIDER_LABEL, priceKey, type Endpoint, type Provider } from "../../../llm/providers.ts";
-import { projectRunCount } from "../../../projects/overview.ts";
+import { confirmTesting, projectAuthorised } from "../../../projects/overview.ts";
 import { DEFAULT_RUN, FIRST_RUN_ON_US } from "../../../runs/models.ts";
 import { FirstRunOnUsUsed, firstRunOnUsLeft, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunRefused, startRun, type PaidBy } from "../../../runs/runs.ts";
 import { canManageBilling, signedInMember } from "../../../server/auth.ts";
@@ -96,7 +96,7 @@ export async function startRunAction(_previous: StartState, form: FormData): Pro
   const member = await signedInMember(await headers());
   if (!member) redirect("/sign-in");
   const { orgId } = member;
-  if (form.get("authorised") !== "on" && !(UUID.test(projectId) && (await withOrg(getDb(), orgId, (tx) => projectRunCount(tx, orgId, projectId))) > 0)) {
+  if (form.get("authorised") !== "on" && !(UUID.test(projectId) && (await withOrg(getDb(), orgId, (tx) => projectAuthorised(tx, orgId, projectId))))) {
     return { error: "Confirm that you may test this product." };
   }
   const refusal = betaRefusal(member.email);
@@ -167,4 +167,15 @@ async function startOnUs(orgId: string, projectId: string, planId: string, userI
     return { error: "The run could not start. Try again." };
   }
   redirect(runPath(runNumber));
+}
+
+export async function confirmTestingAction(projectId: string, _state: { error?: string; done?: boolean }, form: FormData): Promise<{ error?: string; done?: boolean }> {
+  const member = await signedInMember(await headers());
+  if (!member) redirect("/sign-in");
+  if (!UUID.test(projectId)) return { error: "This project is gone." };
+  if (form.get("authorised") !== "on") return { error: "Confirm that you may test this product." };
+  const confirmed = await withOrg(getDb(), member.orgId, (tx) => confirmTesting(tx, member.orgId, projectId, member.userId));
+  if (!confirmed) return { error: "This project is gone." };
+  revalidatePath(`/projects/${projectId}`);
+  return { done: true };
 }

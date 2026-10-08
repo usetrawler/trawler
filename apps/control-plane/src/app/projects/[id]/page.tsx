@@ -8,7 +8,8 @@ import { PlanWorkspace } from "./plan-workspace.tsx";
 import { PrPlanView } from "./pr-plan-view.tsx";
 import { modelKeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
-import { projectRunCount } from "../../../projects/overview.ts";
+import { projectRunCount, testingConfirmedAt } from "../../../projects/overview.ts";
+import { onPrivateNetwork } from "../../../projects/private-target.ts";
 import { FIRST_RUN_ON_US } from "../../../runs/models.ts";
 import { firstRunOnUsLeft, projectRunState, refusalToStart, RunInProgress, TooManyPeople } from "../../../runs/runs.ts";
 import { workspacePlan } from "../../../runs/plans.ts";
@@ -43,8 +44,8 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   const prPlan = prPlans.find((p) => p.id === requestedPlan);
   const planId = prPlan?.id ?? plans.find((p) => p.id === requestedPlan)?.id ?? plans[0]?.id;
   if (!planId) notFound();
-  const [project, keyHint, runs, runState, onUsLeft, plan] = await withOrg(getDb(), orgId, (tx) =>
-    Promise.all([projectForEditing(tx, orgId, id, planId), modelKeyHint(tx, orgId), projectRunCount(tx, orgId, id), projectRunState(tx, orgId, id), env.setup ? firstRunOnUsLeft(tx, orgId) : false, workspacePlan(tx, orgId)]),
+  const [project, keyHint, runs, runState, onUsLeft, plan, confirmedAt] = await withOrg(getDb(), orgId, (tx) =>
+    Promise.all([projectForEditing(tx, orgId, id, planId), modelKeyHint(tx, orgId), projectRunCount(tx, orgId, id), projectRunState(tx, orgId, id), env.setup ? firstRunOnUsLeft(tx, orgId) : false, workspacePlan(tx, orgId), testingConfirmedAt(tx, orgId, id)]),
   );
   if (!project || !runState) notFound();
   const pullRequests = prPlans.map((p) => ({ id: p.id, number: p.number, version: p.version, lastUsedAt: p.lastUsedAt }));
@@ -97,7 +98,8 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
           initialAccounts={project.accounts.map((a) => ({ ref: a.ref, username: a.username, hint: a.password_hint }))}
           keyHint={keyHint}
           canManageKey={canManageBilling(member)}
-          authorisedBefore={runs > 0}
+          authorisedBefore={runs > 0 || confirmedAt !== null}
+          ciOnly={onPrivateNetwork(project.target_url) ? { host: new URL(project.target_url).host, confirmedAt: confirmedAt?.toISOString() ?? null } : undefined}
           firstRunOnUs={onUsLeft}
           workspacePlan={plan}
           startRefusal={refusal ? { message: refusal.message, ...(refusal instanceof RunInProgress ? { activeRun: refusal.run } : {}) } : undefined}
