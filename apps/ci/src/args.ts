@@ -1,9 +1,9 @@
 import { parseArgs } from "node:util";
-import { EXECUTIONS, FAIL_ON, PLAN_MODES, type Execution, type FailOn, type PlanMode } from "@usetrawler/protocol";
+import { EXECUTIONS, FAIL_ON, MAX_EXTRA_ORIGINS, PLAN_MODES, type Execution, type FailOn, type PlanMode } from "@usetrawler/protocol";
 
 export const USAGE = `Usage:
   trawler-ci run --project <uuid> [--api <url>] [--plan <uuid>] [--url <address>] [--runner hosted|own]
-                 [--accounts <file>] [--environment <file>]
+                 [--accounts <file>] [--environment <file>] [--allow-origin <address> ...]
                  [--cap <usd>] [--model <id>] [--conversation] [--fail-on new-confirmed|any-confirmed|never]
                  [--plan-mode regression|change|both] [--replan] [--timeout-minutes <n>] [--no-comment]
 
@@ -31,6 +31,7 @@ export interface Options {
   comment: boolean;
   accounts?: string;
   environment?: string;
+  allowOrigins: string[];
 }
 
 export type Parsed = { help: true } | { help: false; options: Options };
@@ -68,7 +69,7 @@ export function parseCliArgs(argv: string[], env: Record<string, string | undefi
     options: {
       api: { type: "string" }, project: { type: "string" }, plan: { type: "string" }, url: { type: "string" }, runner: { type: "string" },
       cap: { type: "string" }, model: { type: "string" }, "fail-on": { type: "string" }, "plan-mode": { type: "string" }, "timeout-minutes": { type: "string" },
-      "no-comment": { type: "boolean" }, replan: { type: "boolean" }, accounts: { type: "string" }, environment: { type: "string" }, conversation: { type: "boolean" }, help: { type: "boolean", short: "h" },
+      "no-comment": { type: "boolean" }, replan: { type: "boolean" }, accounts: { type: "string" }, environment: { type: "string" }, "allow-origin": { type: "string", multiple: true }, conversation: { type: "boolean" }, help: { type: "boolean", short: "h" },
     },
   });
   if (values.help) return { help: true };
@@ -92,6 +93,9 @@ export function parseCliArgs(argv: string[], env: Record<string, string | undefi
   }
   const execution = oneOf("runner", values.runner, EXECUTIONS, "hosted");
   if (values.accounts !== undefined && execution !== "own") throw new UsageError("--accounts needs --runner own, because a hosted runner cannot read a file in this job");
+  const allowOrigins = (values["allow-origin"] ?? []).map((u) => httpUrl("allow-origin", u));
+  if (allowOrigins.length > 0 && (execution !== "own" || values.url === undefined)) throw new UsageError("--allow-origin needs --runner own and --url, because it allows an address next to the app in this job");
+  if (allowOrigins.length > MAX_EXTRA_ORIGINS) throw new UsageError(`--allow-origin can be given at most ${MAX_EXTRA_ORIGINS} times`);
   return {
     help: false,
     options: {
@@ -111,6 +115,7 @@ export function parseCliArgs(argv: string[], env: Record<string, string | undefi
       comment: !values["no-comment"],
       accounts: values.accounts,
       environment: values.environment,
+      allowOrigins,
     },
   };
 }

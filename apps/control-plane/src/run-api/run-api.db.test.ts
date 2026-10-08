@@ -171,6 +171,19 @@ describe("run api", () => {
     expect(await withOrg(t.db, "org-other", (tx) => confirmTesting(tx, "org-other", ciOnly, "u3"))).toBe(false);
   });
 
+  test("a run on your own runner may allow addresses next to the app, such as a mail inbox, and a hosted run may not", async () => {
+    const { token } = await mint("org-ent");
+    expect((await post(token, { project: projects.ent, allowedOrigins: ["http://localhost:8025"] })).status).toBe(400);
+    expect((await post(token, { project: projects.ent, execution: "own", allowedOrigins: ["http://localhost:8025"] })).status).toBe(400);
+    const started = await post(token, { project: projects.ent, execution: "own", url: "http://localhost:8080", allowedOrigins: ["http://localhost:8025/inbox"] });
+    expect(started.status).toBe(201);
+    const { id } = await started.json();
+    const snapshot = (await asSystem(t.db, (tx) => tx.selectFrom("runs").select("config_snapshot").where("id", "=", id).executeTakeFirstOrThrow())).config_snapshot as { targetUrl: string; allowedOrigins: string[] };
+    expect(snapshot.targetUrl).toBe("http://localhost:8080");
+    expect(snapshot.allowedOrigins.slice(0, 2)).toEqual(["http://localhost:8080", "http://localhost:8025"]);
+    await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
+  });
+
   test("a workspace key is tried on the chosen model before the run is queued, and a refused key or unknown model is a clear refusal", async () => {
     const { token } = await mint("org-key");
     const before = (await runsOf(projects.keyed!)).length;
