@@ -1126,3 +1126,12 @@ test("a person reads the team's description of the setup as limits not to report
   expect(prompt).toMatch(/give the goal failed and say which limit stopped you/);
   expect(rolePrompt(base)).not.toContain("<setup-");
 });
+
+test("a person without an account looks for mail where the setup says it can be read, and expects none without a setup", () => {
+  const base = { persona: { id: "devon", name: "Devon", brief: "You were invited." }, targetUrl: "https://recurro.test/", goals: [{ id: "join", instruction: "You joined the household." }], signUpEmail: "devon@example.com" };
+  const withSetup = rolePrompt({ ...base, setup: "Every mail the app sends can be read in the inbox at http://localhost:8025." });
+  expect(withSetup).toContain("mail sent to it arrives only where the setup described below says mail can be read, if it names such a place");
+  expect(withSetup).toContain("When it says where mail the product sends can be read, open that place whenever a goal needs a mail");
+  expect(withSetup).not.toContain("no mail sent to it arrives");
+  expect(rolePrompt(base)).toContain("no mail sent to it arrives");
+});
