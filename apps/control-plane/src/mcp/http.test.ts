@@ -16,3 +16,12 @@ test("both declared and streamed oversized bodies are stopped before parsing", a
   expect((streamed as Response).status).toBe(413);
   expect(await boundedBody(new Request("http://localhost", { method: "POST", body: "small" }))).toBe("small");
 });
+
+test("a client published at an HTTPS URL is shown with its host, any other client with none", async () => {
+  const { clientHostOf } = await import("./consent.ts");
+  expect(clientHostOf("https://claude.ai/oauth/claude-code-client-metadata")).toBe("claude.ai");
+  expect(clientHostOf("https://app.example.test:8443/client.json")).toBe("app.example.test:8443");
+  expect(clientHostOf("http://localhost/client.json")).toBeNull();
+  expect(clientHostOf("nnMeibKMlaEBeiLyTLtasgDsdwirexuD")).toBeNull();
+  expect(clientHostOf(null)).toBeNull();
+});

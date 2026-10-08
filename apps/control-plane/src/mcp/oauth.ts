@@ -2,12 +2,12 @@ import { mcp } from "@better-auth/mcp";
 import { cimd } from "@better-auth/cimd";
 import { fetchClientMetadataResource } from "@better-auth/cimd/node";
 import { APIError, createAuthMiddleware } from "better-auth/api";
-import { getOAuthProviderApi } from "@better-auth/oauth-provider";
+import { getOAuthProviderApi, type ClientMetadataResourceFetch } from "@better-auth/oauth-provider";
 import type pg from "pg";
 import { MCP_SCOPES, mcpResource, tokenHash } from "./config.ts";
 import { consentWorkspace } from "./consent.ts";
 
-export function oauthPlugins(pool: pg.Pool, origin: string, dcr: boolean) {
+export function oauthPlugins(pool: pg.Pool, origin: string, dcr: boolean, fetchMetadata: ClientMetadataResourceFetch = fetchClientMetadataResource) {
   const resource = mcpResource(origin);
   const provider = mcp({
       resource,
@@ -24,7 +24,6 @@ export function oauthPlugins(pool: pg.Pool, origin: string, dcr: boolean) {
       allowDynamicClientRegistration: dcr,
       allowUnauthenticatedClientRegistration: dcr,
       clientPrivileges: () => false,
-      validateRedirectUri: (uri, registered) => registered.includes(uri),
       postLogin: {
         page: "/welcome",
         shouldRedirect: ({ session }) => !session.activeOrganizationId,
@@ -82,7 +81,7 @@ export function oauthPlugins(pool: pg.Pool, origin: string, dcr: boolean) {
       }] },
     },
     cimd({
-      fetchClientMetadataResource,
+      fetchClientMetadataResource: fetchMetadata,
       metadataProfile: "mcp-2026-07-28",
       metadataFetchPolicy: { maximumConcurrentFetches: 8, maximumConcurrentFetchesPerOrigin: 2, maximumFetchesPerMinute: 60, maximumFetchesPerOriginPerMinute: 10 },
       maxCacheEntries: 500,

@@ -121,6 +121,24 @@ test("bad redirect, resource, PKCE, expiry, reused code and revoked grants are r
   expect((await f.refresh(tokens.refresh_token)).status).toBe(400);
 });
 
+test("a client registered with a portless loopback redirect may authorize on any port, and only there", async () => {
+  const f = await fixture();
+  const registered = await f.call("/api/auth/oauth2/register", {
+    client_name: "Loopback client", redirect_uris: ["http://localhost/callback"], token_endpoint_auth_method: "none",
+    application_type: "native", grant_types: ["authorization_code", "refresh_token"], response_types: ["code"],
+  }, false);
+  expect(registered.status, await registered.clone().text()).toBe(201);
+  const { client_id } = await registered.json() as { client_id: string };
+  const attempt = (redirect: string) => f.authorize(new URLSearchParams({ ...Object.fromEntries(f.query), client_id, redirect_uri: redirect }));
+  const allowed = await attempt("http://localhost:43188/callback");
+  expect(allowed.status, await allowed.clone().text()).toBe(302);
+  expect(new URL(allowed.headers.get("location")!, origin).pathname).toBe("/mcp/consent");
+  const otherPath = await attempt("http://localhost:43188/elsewhere");
+  expect(new URL(otherPath.headers.get("location") ?? "http://none.test", origin).pathname).not.toBe("/mcp/consent");
+  const otherHost = await attempt("http://127.0.0.1:43188/callback");
+  expect(new URL(otherHost.headers.get("location") ?? "http://none.test", origin).pathname).not.toBe("/mcp/consent");
+});
+
 test("provider failures yield 503 without logging request credentials", async () => {
   const f = await fixture();
   const tokens = await f.issue();
