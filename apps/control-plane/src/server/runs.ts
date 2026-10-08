@@ -16,11 +16,11 @@ export async function runIdFor(orgId: string, ref: string): Promise<string | nul
 }
 
 async function withDismissersNamed(orgId: string, run: RunSummary): Promise<RunSummary> {
+  if (!run.findings.some((f) => f.dismissal)) return run;
   const ids = [...new Set(run.findings.flatMap((f) => (f.dismissal && f.dismissal.userId !== TRAWLER ? [f.dismissal.userId] : [])))];
-  if (ids.length === 0) return run;
-  const auth = getAuth();
-  const email = new Map(await Promise.all(ids.map(async (id) => [id, await auth.memberEmail(orgId, id)] as const)));
-  return { ...run, findings: run.findings.map((f) => (f.dismissal ? { ...f, dismissal: { ...f.dismissal, by: email.get(f.dismissal.userId) ?? null } } : f)) };
+  const auth = ids.length > 0 ? getAuth() : null;
+  const email = new Map(auth ? await Promise.all(ids.map(async (id) => [id, await auth.memberEmail(orgId, id)] as const)) : []);
+  return { ...run, findings: run.findings.map((f) => (f.dismissal ? { ...f, dismissal: { ...f.dismissal, by: f.dismissal.userId === TRAWLER ? "Trawler" : email.get(f.dismissal.userId) ?? null } } : f)) };
 }
 
 export async function runFor(requestHeaders: Headers, ref: string): Promise<RunAccess> {
