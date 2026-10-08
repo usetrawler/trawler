@@ -1,7 +1,7 @@
 import type { RunResult } from "@usetrawler/protocol";
 import { runView } from "./report.ts";
 import type { RunSummary } from "./runs.ts";
-import { NOTHING_TO_TEST, runPath, thinCoverage } from "./status.ts";
+import { NOT_VISIBLE_HERE, NOTHING_TO_TEST, runPath, thinCoverage } from "./status.ts";
 
 export const COMMENT_MARKER = "<!-- trawler-ci -->";
 
@@ -50,7 +50,10 @@ function unreachedBlock(r: CommentInput): string {
 }
 
 export function renderComment(r: CommentInput): string {
-  if (r.skipped) return [COMMENT_MARKER, `### ${NOTHING_TO_TEST}`, `[Full report](${r.reportUrl})`].join("\n\n");
+  if (r.skipped) {
+    const hidden = r.skipNote?.startsWith(NOT_VISIBLE_HERE) ? r.skipNote.slice(NOT_VISIBLE_HERE.length).trim() : null;
+    return [COMMENT_MARKER, `### ${hidden === null ? NOTHING_TO_TEST : NOT_VISIBLE_HERE}`, ...(hidden ? [plain(hidden)] : []), `[Full report](${r.reportUrl})`].join("\n\n");
+  }
   const sections = [COMMENT_MARKER, `### ${headline(r)}`];
   if (r.finished && r.status === "stopped_budget") sections.push(budgetLine(r));
   if (r.finished && r.confirmed.length > 0) sections.push(r.confirmed.map(defectBlock).join("\n\n"));
@@ -92,6 +95,7 @@ export function runResultOf(s: RunSummary, baseUrl: string): RunResult {
     unverified: view.report.couldNotJudge.length + view.report.notJudged.length,
     ...(s.cancelReason ? { cancelReason: s.cancelReason } : {}),
     ...(skipped ? { skipped: true } : {}),
+    ...(skipped && s.prPlan?.note ? { skipNote: s.prPlan.note } : {}),
   };
   return { ...result, commentMarkdown: renderComment({ ...result, peopleFailed: view.personas.filter((p) => p.state === "failed").length }) };
 }

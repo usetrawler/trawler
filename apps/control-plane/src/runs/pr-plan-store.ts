@@ -33,7 +33,7 @@ const squash = (text: string | undefined) => (text ?? "").replace(/\s+/g, " ").t
 
 export const inputsHash = (pr: PullRequest) =>
   createHash("sha256")
-    .update(JSON.stringify([squash(pr.title), squash(pr.description), [...new Set((pr.changedFiles ?? []).map((f) => f.trim()))].sort()]))
+    .update(JSON.stringify([squash(pr.title), squash(pr.description), [...new Set((pr.changedFiles ?? []).map((f) => f.trim()))].sort(), squash(pr.environment)]))
     .digest("hex");
 
 export const prPlanName = (number: number) => `PR #${number}`;

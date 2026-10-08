@@ -4,6 +4,8 @@ const STATUS_TONE: Record<string, string> = { succeeded: "text-ok", stopped_budg
 
 export const NOTHING_TO_TEST = "Nothing in this change can be tested through the product's UI, so Trawler did not start a run.";
 
+export const NOT_VISIBLE_HERE = "This change cannot be seen in the app as CI runs it, so Trawler did not start a run.";
+
 export const thinCoverage = (reached: number, total: number) => total > 0 && reached * 2 < total;
 
 export const runStatusLabel = (status: string) => STATUS_LABEL[status] ?? status;

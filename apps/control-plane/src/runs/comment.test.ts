@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { COMMENT_MARKER, renderComment } from "./comment.ts";
+import { NOT_VISIBLE_HERE } from "./status.ts";
 
 const base = {
   id: "7b0b2f56-5d3e-4c5c-9f49-2b0a1d2e3f40", number: 12, status: "succeeded" as const, finished: true, reportUrl: "https://app.trawler.test/runs/0012",
@@ -24,6 +25,11 @@ describe("renderComment", () => {
     expect(md).toContain("#### Logo overlaps menu\n");
     expect(md).toContain("3 people used the product and reached 5 of 6 goals. Cost $0.42.");
     expect(md).toContain("[Full report](https://app.trawler.test/runs/0012)");
+  });
+
+  test("says why a skipped run could not see the change in this setup", () => {
+    const md = renderComment({ ...base, status: "cancelled", skipped: true, people: 0, goalsTotal: 0, goalsReached: 0, skipNote: `${NOT_VISIBLE_HERE} The member limit only exists on the hosted service.` });
+    expect(md).toBe(`${COMMENT_MARKER}\n\n### ${NOT_VISIBLE_HERE}\n\nThe member limit only exists on the hosted service.\n\n[Full report](https://app.trawler.test/runs/0012)`);
   });
 
   test("does not call a run clean when most goals were not reached", () => {

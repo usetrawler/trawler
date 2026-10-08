@@ -8,7 +8,7 @@ import { logError, writeLog } from "../server/log.ts";
 import { workspacePlan } from "./plans.ts";
 import { currentPrPlan, inputsHash, prKey, runPlanName, storePrPlan } from "./pr-plan-store.ts";
 import { endRun, type ConfigSnapshot } from "./runs.ts";
-import { NOTHING_TO_TEST } from "./status.ts";
+import { NOT_VISIBLE_HERE, NOTHING_TO_TEST } from "./status.ts";
 
 export const PR_PLAN_POSITION = -1000;
 export const DEFAULT_PLAN_MODE: PlanMode = "change";
@@ -120,7 +120,7 @@ async function claimPrPlan(db: Database) {
 }
 
 type Claimed = NonNullable<Awaited<ReturnType<typeof claimPrPlan>>>;
-type Outcome = { turns: LeadTurn[]; accountFlow: AccountFlow; accountReason?: string; usage: { model: string; inputTokens: number; outputTokens: number; costUsd: number; steps: number } } | { failure: unknown };
+type Outcome = { turns: LeadTurn[]; accountFlow: AccountFlow; accountReason?: string; notVisibleHere?: string; usage: { model: string; inputTokens: number; outputTokens: number; costUsd: number; steps: number } } | { failure: unknown };
 
 async function ask(deps: PrPlanDeps, job: Claimed): Promise<Outcome> {
   try {
@@ -134,7 +134,7 @@ async function ask(deps: PrPlanDeps, job: Claimed): Promise<Outcome> {
       features: job.features, people: snapshot.personas.map((p) => ({ id: p.id, name: p.name, brief: p.brief, account: p.accountRef ?? null })),
       goals: playedGoals(snapshot).map((g) => ({ person: name.get(g.personaId) ?? g.personaId, instruction: g.instruction })), takenGoalIds: snapshot.goals.map((g) => g.id), page,
     });
-    return { turns: planned.turns, accountFlow: planned.accountFlow, ...(planned.accountReason ? { accountReason: planned.accountReason } : {}), usage: planned.usage };
+    return { turns: planned.turns, accountFlow: planned.accountFlow, ...(planned.accountReason ? { accountReason: planned.accountReason } : {}), ...(planned.notVisibleHere ? { notVisibleHere: planned.notVisibleHere } : {}), usage: planned.usage };
   } catch (err) {
     return { failure: err };
   }
@@ -159,8 +159,9 @@ async function finish(db: Database, job: Claimed, outcome: Outcome): Promise<voi
       : null;
     const provided = "turns" in outcome ? await accountsFor(tx, job.plan_id, run.provided_accounts as string[], outcome.accountFlow) : null;
     const nothingToTest = mode === "change" && "turns" in outcome && !merged;
+    const notVisibleHere = "turns" in outcome ? outcome.notVisibleHere : undefined;
     const record: PrPlanRecord = {
-      mode, goalIds: merged?.added.map((g) => g.id) ?? [], ...("failure" in outcome ? { note: noteOf(outcome.failure) } : merged ? {} : { note: nothingToTest ? NOTHING_TO_TEST : NOTHING }), ...(stored ? { prPlanId: stored.id, version: stored.version } : {}),
+      mode, goalIds: merged?.added.map((g) => g.id) ?? [], ...("failure" in outcome ? { note: noteOf(outcome.failure) } : merged ? {} : { note: nothingToTest ? (notVisibleHere ? `${NOT_VISIBLE_HERE} ${notVisibleHere}` : NOTHING_TO_TEST) : NOTHING }), ...(stored ? { prPlanId: stored.id, version: stored.version } : {}),
       ...("turns" in outcome ? { accountFlow: outcome.accountFlow, ...(outcome.accountReason ? { accountReason: outcome.accountReason } : {}), signUps: provided!.signUps } : {}),
     };
     if (provided && provided.signUps.length > 0) await tx.updateTable("runs").set({ provided_accounts: JSON.stringify(provided.accounts) }).where("id", "=", job.run_id).execute();

@@ -488,6 +488,40 @@ describe("runCli", () => {
     });
   });
 
+  describe("--environment", () => {
+    const pullRequestEnv = () => {
+      const event = join(mkdtempSync(join(tmpdir(), "trawler-ci-")), "event.json");
+      writeFileSync(event, JSON.stringify({ number: 12, pull_request: { number: 12, title: "t", head: { ref: "h", sha: "abc" }, base: { ref: "main" } } }));
+      return { GITHUB_ACTIONS: "true", GITHUB_EVENT_PATH: event, GITHUB_REPOSITORY: "acme/shop", GITHUB_TOKEN: "ghs_x" };
+    };
+    const missing = () => Object.assign(new Error("no such file"), { code: "ENOENT" });
+    const sentEnvironment = (h: ReturnType<typeof harness>) => h.calls.find((c) => c.url.endsWith("/api/v1/runs"))?.body.pullRequest.environment;
+
+    it("sends the file's text with the pull request", async () => {
+      const file = join(mkdtempSync(join(tmpdir(), "trawler-ci-")), "environment.md");
+      writeFileSync(file, "\nSelf-hosted, no licence, no mail.\n");
+      const h = harness([result({})], pullRequestEnv());
+      expect(await runCli([...argv, "--environment", file, "--fail-on", "never"], h.deps)).toBe(0);
+      expect(sentEnvironment(h)).toBe("Self-hosted, no licence, no mail.");
+    });
+
+    it("reads .github/trawler/environment.md without a flag, and runs without it when it is absent", async () => {
+      const present = harness([result({})], pullRequestEnv());
+      await runCli([...argv, "--fail-on", "never"], { ...present.deps, readFile: (p) => (p === ".github/trawler/environment.md" ? "No domain." : (() => { throw missing(); })()) });
+      expect(sentEnvironment(present)).toBe("No domain.");
+      const absent = harness([result({})], pullRequestEnv());
+      expect(await runCli([...argv, "--fail-on", "never"], { ...absent.deps, readFile: () => { throw missing(); } })).toBe(0);
+      expect(sentEnvironment(absent)).toBeUndefined();
+    });
+
+    it("exits 2 when a file named by the flag is missing", async () => {
+      const h = harness([result({})], pullRequestEnv());
+      expect(await runCli([...argv, "--environment", "/nonexistent/environment.md"], h.deps)).toBe(2);
+      expect(h.calls.some((c) => c.url.endsWith("/api/v1/runs"))).toBe(false);
+      expect(h.err.join("\n")).toContain("--environment");
+    });
+  });
+
   it("fails with the runner's message when it dies early", async () => {
     const h = harness([result({ status: "running", finished: false })], {});
     const stopped: string[] = [];

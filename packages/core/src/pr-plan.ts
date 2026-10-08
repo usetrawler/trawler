@@ -13,6 +13,7 @@ export interface PullRequestText {
   title?: string;
   description?: string;
   changedFiles?: string[];
+  environment?: string;
 }
 
 export interface LeadPerson {
@@ -34,6 +35,7 @@ const Answer = z.object({
   turns: z.array(z.object({ person: z.string(), goals: z.array(z.object({ id: z.string(), instruction: z.string() })) })),
   accountFlow: z.string().optional().catch(undefined).describe('"provided" or "exercise"'),
   accountReason: z.string().optional().catch(undefined),
+  notVisibleHere: z.string().optional().catch(undefined),
 });
 
 const words = (text: string) => text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
@@ -118,6 +120,12 @@ export function settleAccountFlow(answer: { accountFlow?: unknown; accountReason
   return { accountFlow, ...(reason && !leaksPullRequest(reason, pr) ? { accountReason: reason } : {}) };
 }
 
+export function settleNotVisible(answer: { notVisibleHere?: unknown }, turns: LeadTurn[], pr: PullRequestText): string | undefined {
+  if (turns.length > 0 || !pr.environment || typeof answer.notVisibleHere !== "string") return undefined;
+  const reason = clip(answer.notVisibleHere, REASON_CHARS);
+  return reason && !leaksPullRequest(reason, pr) ? reason : undefined;
+}
+
 export async function planForPullRequest(opts: {
   model: LanguageModel;
   modelId: string;
@@ -129,7 +137,9 @@ export async function planForPullRequest(opts: {
   goals: Array<{ person: string; instruction: string }>;
   takenGoalIds?: string[];
   page?: string;
-}): Promise<{ turns: LeadTurn[]; dropped: number; usage: JobUsage; accountFlow: AccountFlow; accountReason?: string }> {
+}): Promise<{ turns: LeadTurn[]; dropped: number; usage: JobUsage; accountFlow: AccountFlow; accountReason?: string; notVisibleHere?: string }> {
   const { answer, usage } = await ask(opts, Answer, prPlanPrompt(opts), (a) => problemsOf(a, opts.people, opts.pullRequest));
-  return { ...settleTurns(answer, opts.people, opts.pullRequest, opts.takenGoalIds), ...settleAccountFlow(answer, opts.pullRequest), usage };
+  const settled = settleTurns(answer, opts.people, opts.pullRequest, opts.takenGoalIds);
+  const notVisibleHere = settleNotVisible(answer, settled.turns, opts.pullRequest);
+  return { ...settled, ...settleAccountFlow(answer, opts.pullRequest), ...(notVisibleHere ? { notVisibleHere } : {}), usage };
 }
