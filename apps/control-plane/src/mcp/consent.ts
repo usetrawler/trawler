@@ -3,6 +3,14 @@ import { verifyOAuthQueryParams } from "@better-auth/oauth-provider";
 import type pg from "pg";
 import { mcpResource, tokenHash } from "./config.ts";
 
+export function clientHostOf(clientId: string | null): string | null {
+  if (!clientId) return null;
+  try {
+    const url = new URL(clientId);
+    return url.protocol === "https:" ? url.host : null;
+  } catch { return null; }
+}
+
 export const consentWorkspace = new AsyncLocalStorage<{ userId: string; orgId: string }>();
 
 export async function prepareConsent(pool: pg.Pool, secret: string, origin: string, query: string, userId: string, orgId: string) {
@@ -25,5 +33,5 @@ export async function prepareConsent(pool: pg.Pool, secret: string, origin: stri
     WHERE f.flow_hash = $1 AND f.user_id = $2 AND f.expires_at > now() AND COALESCE(c.disabled, false) = false
   `, [tokenHash(query), userId, clientId]);
   const row = rows[0];
-  return row ? { ...row, scopes: (params.get("scope") ?? "").split(" "), clientId } : null;
+  return row ? { ...row, scopes: (params.get("scope") ?? "").split(" "), clientId, clientHost: clientHostOf(clientId) } : null;
 }

@@ -26,6 +26,7 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
     <p className="flex items-center gap-2 text-2xl font-bold"><BrandMark className="h-8 w-8" />trawler</p>
     {consent ? <section className="flex flex-col gap-5 border border-line bg-panel p-6">
       <h1 className="text-2xl font-bold">Connect {consent.client_name}</h1>
+      {consent.clientHost && <p className="text-sm text-muted">Client published by <strong>{consent.clientHost}</strong></p>}
       <p>This connection will access <strong>{consent.org_name}</strong> as <strong>{person!.user.name}</strong>.</p>
       <ul className="list-disc space-y-2 pl-5 text-sm">
         <li>Read projects, plans, runs and their findings.</li>

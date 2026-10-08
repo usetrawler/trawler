@@ -7,6 +7,7 @@ import { chooseWorkspace, onboard, type OnboardingStore, type WorkspaceChoice } 
 import { devSignIn, organizationPlugin } from "./plugins.ts";
 import { logError } from "../server/log.ts";
 import { canonicalOrigin } from "../mcp/config.ts";
+import type { ClientMetadataResourceFetch } from "@better-auth/oauth-provider";
 import { oauthPlugins } from "../mcp/oauth.ts";
 import { oauthBoundary } from "../mcp/http.ts";
 
@@ -17,7 +18,7 @@ export interface AuthOptions {
   github?: { clientId: string; clientSecret: string };
   google?: { clientId: string; clientSecret: string };
   devOidc?: { issuer: string; clientId: string; clientSecret: string };
-  mcp?: { dcr?: boolean };
+  mcp?: { dcr?: boolean; fetchClientMetadata?: ClientMetadataResourceFetch };
 }
 
 type AuthTables = {
@@ -231,7 +232,7 @@ export function createAuth(options: AuthOptions) {
       ...(options.github ? { github: { ...options.github, prompt: "select_account" as const } } : {}),
       ...(options.google ? { google: { ...options.google, prompt: "select_account" as const } } : {}),
     },
-    plugins: [organizationPlugin(async (email) => (await workspaceOfEmail(email)) !== null), ...devSignIn(options.devOidc), ...(options.mcp ? oauthPlugins(options.pool, options.baseURL, options.mcp.dcr ?? false) : []), nextCookies()],
+    plugins: [organizationPlugin(async (email) => (await workspaceOfEmail(email)) !== null), ...devSignIn(options.devOidc), ...(options.mcp ? oauthPlugins(options.pool, options.baseURL, options.mcp.dcr ?? false, options.mcp.fetchClientMetadata) : []), nextCookies()],
     disabledPaths: CLOSED_ORGANIZATION_PATHS.map((path) => `/organization/${path}`),
     databaseHooks: {
       session: {
