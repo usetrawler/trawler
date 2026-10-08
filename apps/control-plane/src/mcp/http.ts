@@ -52,7 +52,7 @@ export async function withinMcpRate(pool: pg.Pool, key: string, max: number): Pr
 
 let prunedMinute = -1;
 
-async function pruneMcp(pool: pg.Pool, minute: number): Promise<void> {
+export async function pruneMcp(pool: pg.Pool, minute: number): Promise<void> {
   await pool.query("DELETE FROM mcp_rate_limits WHERE minute < $1", [minute - 60]);
   await pool.query("DELETE FROM mcp_consent_contexts WHERE expires_at < now() - interval '1 hour'");
   await pool.query('DELETE FROM "oauthAccessToken" WHERE "expiresAt" < now() - interval \'1 day\'');
@@ -110,8 +110,9 @@ export function oauthBoundary(handler: (r: Request) => Promise<Response>, pool: 
         if (!(query.get("scope") ?? "").split(" ").includes("trawler:read")) return oauthError("invalid_scope");
         const prompts = (query.get("prompt") ?? "").split(" ").filter(Boolean);
         if (prompts.includes("none")) return oauthError("consent_required");
-        if (!prompts.includes("consent")) {
-          url.searchParams.set("prompt", [...prompts, "consent"].join(" "));
+        if (!prompts.includes("consent") || query.has("max_age")) {
+          url.searchParams.set("prompt", [...new Set([...prompts, "consent"])].join(" "));
+          url.searchParams.delete("max_age");
           request = new Request(url, { method: "GET", headers: request.headers });
         }
       }
@@ -161,7 +162,12 @@ export function oauthBoundary(handler: (r: Request) => Promise<Response>, pool: 
           WHERE flow_hash = $1 AND user_id = $2 AND expires_at > now()
         `, [flowKey(body.oauth_query), person.user.id]);
         if (!rows[0]) return oauthError("access_denied", 403);
-        return await consentWorkspace.run({ userId: person.user.id, orgId: rows[0].org_id }, invoke);
+        const decided = await consentWorkspace.run({ userId: person.user.id, orgId: rows[0].org_id }, invoke);
+        const clientId = new URLSearchParams(body.oauth_query).get("client_id");
+        if (decided.ok && clientId) {
+          await pool.query('DELETE FROM "oauthConsent" WHERE "clientId" = $1 AND "userId" = $2 AND "referenceId" = $3', [clientId, person.user.id, rows[0].org_id]).catch(() => {});
+        }
+        return decided;
       }
       return await invoke();
     } catch {

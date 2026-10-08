@@ -3,7 +3,7 @@ import { afterAll, expect, test, vi } from "vitest";
 import { authPool, createAuth } from "../auth/auth.ts";
 import { onDatabase, testDb } from "../db/test-db.ts";
 import { prepareConsent } from "./consent.ts";
-import { mcpAuthentication } from "./http.ts";
+import { mcpAuthentication, pruneMcp } from "./http.ts";
 import { authenticateMcp, revokeGrant } from "./oauth.ts";
 import { tokenHash } from "./config.ts";
 
@@ -232,12 +232,15 @@ test("every authorization shows the consent page, so a remembered consent never 
   expect((await f.authorize(silent)).status).toBe(400);
 });
 
-test("disconnecting a connection also forgets the consent behind it", async () => {
+test("disconnecting a connection also forgets any consent left behind it", async () => {
   const f = await fixture();
   const tokens = await f.issue();
+  const principal = await authenticateMcp(pool, tokens.access_token, resource);
+  await onDatabase(t.name, (c) => c.query(
+    'INSERT INTO "oauthConsent" (id, "clientId", "userId", "referenceId", scopes, "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, \'["trawler:read"]\', now(), now())',
+    [randomUUID(), f.client.client_id, f.user.id, principal!.orgId]));
   const consents = () => pool.query('SELECT 1 FROM "oauthConsent" WHERE "clientId" = $1', [f.client.client_id]).then((r) => r.rowCount);
   expect(await consents()).toBe(1);
-  const principal = await authenticateMcp(pool, tokens.access_token, resource);
   expect(await revokeGrant(pool, principal!.grantId, f.user.id)).toBe(true);
   expect(await consents()).toBe(0);
 });
@@ -261,7 +264,7 @@ test("a request body is read the way the provider reads it, and any other type i
   expect(asJson.status).toBe(403);
   expect(await asJson.json()).toEqual({ error: "access_denied" });
   expect((await send("text/plain", JSON.stringify({ accept: true, oauth_query: "x" }))).status).toBe(415);
-  expect([400, 415]).toContain((await send("application/x-www-form-urlencoded;application/json", JSON.stringify({ accept: true, oauth_query: "x" }))).status);
+  expect((await send("application/x-www-form-urlencoded;application/json", JSON.stringify({ accept: true, oauth_query: "x" }))).status).toBe(415);
 });
 
 test("a connection does not depend on the browser session that created it", async () => {
@@ -287,7 +290,60 @@ test("a refresh never creates a grant: when the grant is gone the token is refus
 
 test("expired consent contexts are cleared when a new consent is prepared", async () => {
   const f = await fixture();
+  const oauthQuery = new URL((await f.authorize()).headers.get("location")!, origin).searchParams.toString();
   await onDatabase(t.name, (c) => c.query("INSERT INTO mcp_consent_contexts (flow_hash, user_id, org_id, expires_at) VALUES ('stale-flow', $1, $2, now() - interval '2 hours')", [f.user.id, f.session.activeOrganizationId]));
-  await f.code();
+  await prepareConsent(pool, secret, origin, oauthQuery, f.user.id, f.session.activeOrganizationId);
   expect(await onDatabase(t.name, async (c) => (await c.query("SELECT 1 FROM mcp_consent_contexts WHERE flow_hash = 'stale-flow'")).rowCount)).toBe(0);
+});
+
+test("pruning removes tokens that expired more than a day ago and keeps newer ones", async () => {
+  const f = await fixture();
+  const keeper = await fixture();
+  await f.issue();
+  await keeper.issue();
+  const count = (table: string, clientId: string) => onDatabase(t.name, async (c) => (await c.query(`SELECT 1 FROM "${table}" WHERE "clientId" = $1`, [clientId])).rowCount);
+  await onDatabase(t.name, async (c) => {
+    await c.query('UPDATE "oauthAccessToken" SET "expiresAt" = now() - interval \'2 days\' WHERE "clientId" = $1', [f.client.client_id]);
+    await c.query('UPDATE "oauthRefreshToken" SET "expiresAt" = now() - interval \'2 days\' WHERE "clientId" = $1', [f.client.client_id]);
+  });
+  await pruneMcp(pool, Math.floor(Date.now() / 60_000));
+  expect([await count("oauthAccessToken", f.client.client_id), await count("oauthRefreshToken", f.client.client_id)]).toEqual([0, 0]);
+  expect(await count("oauthAccessToken", keeper.client.client_id)).toBeGreaterThan(0);
+  expect(await count("oauthRefreshToken", keeper.client.client_id)).toBeGreaterThan(0);
+});
+
+test("a refresh that narrows the scope below read still succeeds, and the grant stays alive", async () => {
+  const f = await fixture();
+  const tokens = await f.issue();
+  const narrowed = await f.refresh(tokens.refresh_token, { scope: "offline_access" });
+  expect(narrowed.status, await narrowed.clone().text()).toBe(200);
+  const next = await narrowed.json() as { access_token: string; refresh_token: string };
+  expect(await authenticateMcp(pool, next.access_token, resource)).toBeNull();
+  expect(await onDatabase(t.name, async (c) => (await c.query("SELECT 1 FROM mcp_grants WHERE user_id = $1 AND revoked_at IS NULL", [f.user.id])).rowCount)).toBe(1);
+  expect((await f.refresh(next.refresh_token)).status).toBe(200);
+});
+
+test("a refresh with a client_id that is not a string is refused as a bad request", async () => {
+  const f = await fixture();
+  const tokens = await f.issue();
+  const headers = new Headers(f.headers);
+  headers.delete("cookie");
+  const response = await auth.handler(new Request(`${origin}/api/auth/oauth2/token`, {
+    method: "POST", headers, body: JSON.stringify({ grant_type: "refresh_token", refresh_token: tokens.refresh_token, client_id: 5 }),
+  }));
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ error: "invalid_request" });
+});
+
+test("consent is not remembered after a code is issued, and an authorization cannot ask the provider to skip it with max_age", async () => {
+  const f = await fixture();
+  await f.issue();
+  expect(await pool.query('SELECT 1 FROM "oauthConsent" WHERE "clientId" = $1', [f.client.client_id]).then((r) => r.rowCount)).toBe(0);
+  const aged = new URLSearchParams(f.query);
+  aged.set("max_age", "1");
+  const response = await f.authorize(aged);
+  const location = new URL(response.headers.get("location")!, origin);
+  expect(location.pathname).toBe("/mcp/consent");
+  expect(location.searchParams.has("max_age")).toBe(false);
+  expect(location.searchParams.get("prompt")).toContain("consent");
 });
