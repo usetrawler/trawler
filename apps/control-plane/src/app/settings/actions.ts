@@ -9,6 +9,7 @@ import { modelKeyHint, removeModelKey, setModelKey } from "../../credentials/cre
 import { withOrg } from "../../db/tenancy.ts";
 import { freshEndpoint, withinListingLimit } from "../../llm/key-input.ts";
 import { checkKey, PROVIDER_LABEL } from "../../llm/providers.ts";
+import { revokeGrant } from "../../mcp/oauth.ts";
 import { setMcpSettings } from "../../mcp/settings.ts";
 import { MONTHLY_BUDGET_RANGE, removeMonthlyBudget, setMonthlyBudget } from "../../runs/limits.ts";
 import { cancelLiveRuns } from "../../runs/runs.ts";
@@ -133,6 +134,22 @@ export async function setMcpAccessAction(_previous: McpAccessState, form: FormDa
   const changed = await withOrg(getDb(), member.orgId, (tx) => setMcpSettings(tx, member.orgId, { connectionsAllowed, runControlAllowed }, member.userId));
   revalidatePath("/", "layout");
   return { saved: true, ...changed };
+}
+
+export interface McpConnectionState {
+  error?: string;
+  revoked?: boolean;
+}
+
+export async function revokeMcpConnectionAction(_previous: McpConnectionState, form: FormData): Promise<McpConnectionState> {
+  const member = await signedInMember(await headers());
+  if (!member) redirect("/sign-in");
+  const config = getAuth().mcp;
+  const id = String(form.get("id") ?? "");
+  if (!config || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return { error: "That connection is not there any more." };
+  const revoked = await revokeGrant(config.pool, id, member.userId);
+  revalidatePath("/settings");
+  return revoked ? { revoked: true } : { error: "That connection is not there any more." };
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

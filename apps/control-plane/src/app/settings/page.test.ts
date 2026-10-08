@@ -17,6 +17,9 @@ const state = vi.hoisted(() => ({
   projects: 1,
   today: 0,
   mcp: { connectionsAllowed: true, runControlAllowed: false },
+  mcpOn: true,
+  connectionCalls: [] as unknown[][],
+  connections: [] as Array<{ id: string; clientName: string; clientHost: string | null; projectId: string | null; runControl: boolean; createdAt: Date; lastUsedAt: Date | null }>,
 }));
 
 vi.mock("react", async (original) => ({
@@ -31,6 +34,7 @@ vi.mock("../../server/auth.ts", () => ({
   signedInMember: async () => state.member,
   canManageBilling: (member: { role: string }) => member.role === "owner" || member.role === "admin",
   getAuth: () => ({
+    mcp: state.mcpOn ? { pool: {} } : undefined,
     memberEmail: async (orgId: string, userId: string) => {
       state.lookedUp.push([orgId, userId]);
       return state.members[`${orgId}/${userId}`] ?? null;
@@ -47,12 +51,13 @@ vi.mock("../../server/env.ts", () => ({ readEnv: () => ({ baseURL: "https://app.
 vi.mock("../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));
 vi.mock("../../credentials/credentials.ts", () => ({ modelKeyDetails: async () => state.key }));
 vi.mock("../../runs/limits.ts", () => ({ monthlyBudget: async () => state.budget, monthSpent: async () => state.spent }));
+vi.mock("../../mcp/connections.ts", () => ({ connectionsOf: async (...args: unknown[]) => { state.connectionCalls.push(args); return state.connections; } }));
 vi.mock("../../mcp/settings.ts", () => ({ mcpSettings: async () => state.mcp }));
 vi.mock("../../runs/plans.ts", () => ({ workspacePlan: async () => state.plan, projectsCounted: async () => state.projects, runsToday: async () => state.today }));
 vi.mock("../../api-tokens/tokens.ts", () => ({ listApiTokens: async () => [] }));
-vi.mock("../../projects/projects.ts", () => ({ listProjects: async () => [] }));
+vi.mock("../../projects/projects.ts", () => ({ listProjects: async () => [{ id: "p-1", name: "Checkout" }] }));
 vi.mock("./actions.ts", () => ({
-  setMcpAccessAction: async () => ({}), setMonthlyBudgetAction: async () => ({}), removeMonthlyBudgetAction: async () => ({}),
+  setMcpAccessAction: async () => ({}), revokeMcpConnectionAction: async () => ({}), setMonthlyBudgetAction: async () => ({}), removeMonthlyBudgetAction: async () => ({}),
   renameWorkspaceAction: async () => ({}), replaceModelKeyAction: async () => ({}), removeModelKeyAction: async () => ({}),
   inviteMemberAction: async () => ({}), revokeInvitationAction: async () => ({}), removeMemberAction: async () => ({}), changeRoleAction: async () => ({}),
 }));
@@ -65,7 +70,7 @@ const addedAt = new Date("2026-09-25T18:50:00.000Z");
 beforeEach(() => {
   Object.assign(state, {
     member: owner, key: null, members: { "org-1/user-2": "lee@acme.test" }, lookedUp: [], tenants: [], listed: [], actionResult: null, budget: null, spent: 0,
-    plan: { plan: "free", limits: { projects: 1, runsPerDay: 3, people: 4 } }, projects: 1, today: 0,
+    plan: { plan: "free", limits: { projects: 1, runsPerDay: 3, people: 4 } }, projects: 1, today: 0, mcp: { connectionsAllowed: true, runControlAllowed: false }, mcpOn: true, connections: [], connectionCalls: [],
     people: [
       { id: "m-1", userId: "user-1", role: "owner", joinedAt: new Date("2026-09-20T10:00:00Z"), name: "Ana", email: "ana@acme.test" },
       { id: "m-2", userId: "user-2", role: "member", joinedAt: new Date("2026-09-21T10:00:00Z"), name: "Lee", email: "lee@acme.test" },
@@ -179,4 +184,40 @@ test("AI assistant access shows both choices to everyone, and only an owner or a
   expect(memberView).toContain("Connections: allowed · Run control: allowed");
   expect(memberView).toContain("Only an owner or admin of this workspace can change this.");
   expect(renderToStaticMarkup(await SettingsPage())).not.toContain('name="connections"');
+});
+
+test("your connections are listed with who published the client, what it reaches and when it was used, and each can be disconnected", async () => {
+  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("No assistant is connected.");
+  state.connections = [
+    { id: "g-1", clientName: "Claude Code", clientHost: "claude.ai", projectId: "p-1", runControl: false, createdAt: new Date("2026-10-08T10:00:00Z"), lastUsedAt: null },
+    { id: "g-2", clientName: "Cursor", clientHost: null, projectId: "p-gone", runControl: true, createdAt: new Date("2026-10-07T10:00:00Z"), lastUsedAt: new Date("2026-10-08T09:00:00Z") },
+    { id: "g-3", clientName: "Plain", clientHost: null, projectId: null, runControl: false, createdAt: new Date("2026-10-06T10:00:00Z"), lastUsedAt: null },
+  ];
+  const html = renderToStaticMarkup(await SettingsPage());
+  const view = text(html);
+  expect(view).toContain("Your AI assistant connections");
+  expect(view).toContain("Claude Code · claude.ai read only · only Checkout");
+  expect(view).toContain("Cursor read and run control · only a project that no longer exists");
+  expect(view).toContain("Plain read only · whole workspace");
+  expect(view).toContain("never used");
+  expect(view.match(/never used/g)).toHaveLength(2);
+  expect(view).toMatch(/Cursor read and run control · only a project that no longer exists · connected [^·]+ · last used/);
+  expect(view).toContain("They are separate from the API tokens above");
+  expect(html).toContain('aria-label="Disconnect Claude Code, only Checkout, connected 2026-10-08"');
+  expect(html).toContain('aria-label="Disconnect Cursor, only a project that no longer exists, connected 2026-10-07"');
+  expect(html).toContain('aria-label="Disconnect Plain, whole workspace, connected 2026-10-06"');
+});
+
+test("a member sees and disconnects their own connections too, since a connection acts as them", async () => {
+  state.member = { ...owner, role: "member" };
+  state.connections = [{ id: "g-1", clientName: "Claude Code", clientHost: null, projectId: "p-1", runControl: false, createdAt: new Date("2026-10-08T10:00:00Z"), lastUsedAt: null }];
+  expect(renderToStaticMarkup(await SettingsPage())).toContain('aria-label="Disconnect Claude Code, only Checkout, connected 2026-10-08"');
+  expect(state.connectionCalls.at(-1)?.slice(1)).toEqual(["user-1", "org-1", "member"]);
+});
+
+test("a deployment without MCP shows neither MCP section", async () => {
+  state.mcpOn = false;
+  const view = text(renderToStaticMarkup(await SettingsPage()));
+  expect(view).not.toContain("AI assistant access (MCP)");
+  expect(view).not.toContain("Your AI assistant connections");
 });
