@@ -24,6 +24,7 @@ export async function mcpSettingsOf(pool: pg.Pool, orgId: string): Promise<McpSe
 }
 
 export async function setMcpSettings(tx: Tx, orgId: string, next: McpSettings, by: string): Promise<{ revokedGrants: number; strippedGrants: number }> {
+  await sql`SELECT pg_advisory_xact_lock(hashtext(${`mcp-settings:${orgId}`}))`.execute(tx);
   await tx.insertInto("workspace_mcp_settings")
     .values({ org_id: orgId, connections_allowed: next.connectionsAllowed, run_control_allowed: next.runControlAllowed, updated_by: by })
     .onConflict((oc) => oc.column("org_id").doUpdateSet({ connections_allowed: next.connectionsAllowed, run_control_allowed: next.runControlAllowed, updated_by: by, updated_at: new Date() }))
