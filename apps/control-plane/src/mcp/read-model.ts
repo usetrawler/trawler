@@ -18,6 +18,7 @@ export const LIMITS = {
   projects: { default: 25, max: 100 },
   runs: { default: 20, max: 50 },
   findingsPerGroup: 25,
+  comparedPerList: 25,
   evidenceBytes: 1_000_000,
 };
 
@@ -44,7 +45,7 @@ export async function projectsOf(db: Database, reach: Reach, page: { limit: numb
   const visible = reach.projectId ? all.filter((p) => p.id === reach.projectId) : all;
   const shown = visible.slice(page.offset, page.offset + page.limit);
   return {
-    projects: shown.map((p) => ({ id: p.id, name: p.name, site: p.site, targetUrl: p.targetUrl, lastRun: p.lastRun ? lineOf(p.lastRun) : null })),
+    projects: shown.map((p) => ({ id: p.id, name: p.name, site: reach.projectId ? null : p.site, targetUrl: p.targetUrl, lastRun: p.lastRun ? lineOf(p.lastRun) : null })),
     nextCursor: page.offset + page.limit < visible.length ? String(page.offset + page.limit) : null,
   };
 }
@@ -80,14 +81,28 @@ export async function summaryOf(db: Database, reach: Reach, ref: RunRef): Promis
   });
 }
 
+const statusOf = (summary: RunSummary) => (summary.cancelReason === "nothing_to_test" ? "skipped" : summary.status);
+
+export type GoalText = string | Untrusted;
+
+const goalOf = (summary: RunSummary, text: string): GoalText => (summary.prPlan ? untrusted("goal written for a pull request", text) : text);
+const plainGoal = (goal: GoalText): string => (typeof goal === "string" ? goal : goal.text);
+
+const REFUSED = "The product refused a test account, so the run stopped. Check that account on the plan and run again.";
+
+function headlineOf(summary: RunSummary, headline: string) {
+  const refused = summary.status === "cancelled" && summary.cancelReason === "account_refused";
+  return { headline: refused ? REFUSED : headline, headlineDetail: refused ? untrusted("what the product said when it refused a test account", headline) : null };
+}
+
 const by = (summary: RunSummary, key: string) => summary.personas.find((p) => p.id === key)?.name ?? key;
 
 function findingItem(summary: RunSummary, group: FindingGroup, f: ReportFinding) {
   return {
-    key: f.key, group, kind: f.kind, severity: f.severity, verdict: f.verdict ?? null, person: f.personaName, goal: f.goalText,
+    key: f.key, group, kind: f.kind, severity: f.severity, verdict: f.verdict ?? null, person: f.personaName, goal: goalOf(summary, f.goalText),
     title: untrusted(`finding title, filed by ${f.personaName}`, f.title),
     evidence: [f.screenshots.reported, f.screenshots.replayed].filter(Boolean).length,
-    ...(group === "couldNotJudge" ? { reason: untrusted("why the finding could not be judged", (f as ReportFinding & { reason: string }).reason) } : {}),
+    ...("reason" in f ? { reason: untrusted("why the finding could not be judged", (f as ReportFinding & { reason: string }).reason) } : {}),
   };
 }
 
@@ -99,16 +114,16 @@ export function runReport(summary: RunSummary, origin: string) {
     return [group, { total: all.length, items, more: Math.max(0, all.length - items.length) }];
   })) as Record<FindingGroup, { total: number; items: ReturnType<typeof findingItem>[]; more: number }>;
   return {
-    id: summary.id, number: summary.number, url: `${origin}${runPath(summary.number)}`, status: summary.status, live: view.live, headline: view.headline,
+    id: summary.id, number: summary.number, url: `${origin}${runPath(summary.number)}`, status: statusOf(summary), live: view.live, ...headlineOf(summary, view.headline),
     project: { id: summary.projectId }, plan: summary.planName, target: summary.target, model: summary.agentModel,
     createdAt: iso(summary.createdAt), startedAt: iso(summary.startedAt), finishedAt: iso(summary.finishedAt),
     costUsd: summary.costUsd, budgetUsd: summary.budgetUsd,
     pullRequest: summary.pullRequest ? { number: summary.pullRequest.number, repository: summary.pullRequest.repository, url: summary.pullRequest.url, title: summary.pullRequest.title === null ? null : untrusted("pull request title", summary.pullRequest.title) } : null,
     botProtection: summary.botProtection ? { vendor: summary.botProtection.vendor } : null,
-    goals: { reached: view.goalsReached, total: view.goalsTotal, notReached: view.unreachedGoals },
+    goals: { reached: view.goalsReached, total: view.goalsTotal, notReached: view.unreachedGoals.map((g) => goalOf(summary, g)) },
     people: view.personas.map((p) => ({
       id: p.id, name: p.name, state: p.state, defects: p.defects, friction: p.friction,
-      goals: p.goals.map((g) => ({ id: g.id, goal: g.goal, status: g.status, note: g.note ? untrusted(`note by ${p.name} on a goal`, g.note) : null })),
+      goals: p.goals.map((g) => ({ id: g.id, goal: goalOf(summary, g.goal), status: g.status, note: g.note ? untrusted(`note by ${p.name} on a goal`, g.note) : null })),
     })),
     findings: groups,
   };
@@ -126,14 +141,15 @@ export function findingDetail(summary: RunSummary, key: string) {
       if (f.key !== key && !same) continue;
       const source = f.key === key ? f : { ...f, ...same! };
       const who = source.personaName;
+      const personaOfKey = summary.findings.find((x) => x.key === key)?.personaKey ?? f.personaKey;
       const replay = f.replay as { observed?: string; completed?: boolean } | null;
       const evidence: EvidenceRef[] = [
         ...(source.screenshots.reported ? [{ ref: `shot:${source.screenshots.reported}`, kind: "screenshot" as const, label: `the page when ${who} reported it` }] : []),
         ...(source.screenshots.replayed ? [{ ref: `shot:${source.screenshots.replayed}`, kind: "screenshot" as const, label: "where the replay ended" }] : []),
-        { ref: `trail:${f.personaKey}`, kind: "trail" as const, label: `what ${f.personaName} did, step by step` },
+        { ref: `trail:${personaOfKey}`, kind: "trail" as const, label: `what ${who} did, step by step` },
       ];
       return {
-        run: summary.number, key: source.key, group, kind: f.kind, severity: f.severity, verdict: f.verdict ?? null, person: who, goal: f.goalText,
+        run: summary.number, key: source.key, group, kind: f.kind, severity: f.severity, verdict: f.verdict ?? null, person: who, goal: goalOf(summary, f.goalText),
         groupedUnder: f.key === key ? null : f.key,
         title: untrusted(`finding title, filed by ${who}`, source.title),
         observed: untrusted(`what ${who} observed`, source.observed),
@@ -142,7 +158,7 @@ export function findingDetail(summary: RunSummary, key: string) {
         page: source.page ? untrusted("address of the page", source.page) : null,
         replay: replay ? { completed: replay.completed ?? null, observed: replay.observed ? untrusted("what the replaying agent saw", replay.observed) : null } : null,
         sameReports: f.sameReports.map((s) => ({ key: s.key, title: untrusted(`finding title, filed by ${s.personaName}`, s.title) })),
-        dismissal: "dismissal" in f && f.dismissal ? { reason: f.dismissal.reason, by: f.dismissal.userId === TRAWLER ? "Trawler" : "a member of the workspace", at: iso(f.dismissal.at) } : null,
+        dismissal: "dismissal" in f && f.dismissal ? { reason: untrusted("why this finding was marked not a bug", f.dismissal.reason), by: f.dismissal.userId === TRAWLER ? "Trawler" : "a member of the workspace", at: iso(f.dismissal.at) } : null,
         evidence,
       };
     }
@@ -191,20 +207,21 @@ export async function trailOf(db: Database, reach: Reach, summary: RunSummary, p
   };
 }
 
-type Verdict = "confirmed" | "inconclusive" | "refuted" | "could_not_judge" | "unchecked";
-const COMPARED: Array<[FindingGroup, Verdict]> = [["confirmed", "confirmed"], ["inconclusive", "inconclusive"], ["refuted", "refuted"], ["couldNotJudge", "could_not_judge"], ["notJudged", "unchecked"]];
+type Verdict = "confirmed" | "inconclusive" | "refuted" | "could_not_judge" | "unchecked" | "friction" | "dismissed";
+const COMPARED: Array<[FindingGroup, Verdict]> = [["confirmed", "confirmed"], ["inconclusive", "inconclusive"], ["refuted", "refuted"], ["couldNotJudge", "could_not_judge"], ["notJudged", "unchecked"], ["friction", "friction"], ["dismissed", "dismissed"]];
 const sameWords = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
 function reported(summary: RunSummary) {
   const view = runView(summary);
-  return COMPARED.flatMap(([group, verdict]) => (view.report[group] as ReportFinding[]).map((f) => ({ key: f.key, verdict, goal: f.goal, goalText: f.goalText, title: f.title, personaKey: f.personaKey, match: `${sameWords(f.title)}|${f.goal}` })));
+  return COMPARED.flatMap(([group, verdict]) => (view.report[group] as ReportFinding[]).flatMap((f) => [f, ...f.sameReports.map((s) => ({ ...f, key: s.key, title: s.title }))]
+    .map((x) => ({ key: x.key, verdict, goalText: f.goalText, personaKey: f.personaKey, title: x.title, match: `${sameWords(x.title)}|${sameWords(f.goalText)}` }))));
 }
 
 type GoalState = "reached" | "failed" | "not_attempted" | "not_tested";
 
-function goalStates(summary: RunSummary): Map<string, { person: string; goal: string; state: GoalState }> {
+function goalStates(summary: RunSummary): Map<string, { person: string; goal: GoalText; state: GoalState }> {
   const view = runView(summary);
-  return new Map(view.personas.flatMap((p) => p.goals.map((g) => [`${p.id}/${g.id}`, { person: p.name, goal: g.goal, state: (g.status ?? "not_tested") as GoalState }] as const)));
+  return new Map(view.personas.flatMap((p) => p.goals.map((g) => [`${p.id}/${sameWords(g.goal)}`, { person: p.name, goal: goalOf(summary, g.goal), state: (g.status ?? "not_tested") as GoalState }] as const)));
 }
 
 const checked = (state: GoalState | undefined) => state === "reached" || state === "failed";
@@ -217,7 +234,10 @@ function change(base: GoalState | undefined, head: GoalState | undefined): strin
   return head === "reached" ? "now_reached" : "regressed";
 }
 
-export function compareRuns(base: RunSummary, head: RunSummary) {
+const capped = <T>(items: T[]) => ({ items: items.slice(0, LIMITS.comparedPerList), total: items.length, more: Math.max(0, items.length - LIMITS.comparedPerList) });
+
+export function compareRuns(first: RunSummary, second: RunSummary) {
+  const [base, head] = first.number <= second.number ? [first, second] : [second, first];
   const before = goalStates(base);
   const after = goalStates(head);
   const goals = [...new Set([...before.keys(), ...after.keys()])].map((id) => {
@@ -232,23 +252,27 @@ export function compareRuns(base: RunSummary, head: RunSummary) {
     const h = inHead.find((x) => x.match === b.match && !matched.has(x.key));
     if (!h) return [];
     matched.add(h.key);
-    return [{ title: untrusted("finding title", b.title), goal: b.goalText, base: { key: b.key, verdict: b.verdict }, head: { key: h.key, verdict: h.verdict }, matchedBy: "same wording of the title and the same goal" }];
+    return [{ title: untrusted("finding title", b.title), goal: goalOf(base, b.goalText), base: { key: b.key, verdict: b.verdict }, head: { key: h.key, verdict: h.verdict }, matchedBy: "same wording of the title and the same goal text" }];
   });
   const paired = new Set(stillReported.map((s) => s.base.key));
-  const goalInHead = (personaKey: string, goal: string) => after.get(`${personaKey}/${goal}`)?.state ?? "not_in_plan";
+  const goalInHead = (personaKey: string, goalText: string) => after.get(`${personaKey}/${sameWords(goalText)}`)?.state ?? "not_in_plan";
+  const plansDiffer = base.planName !== head.planName;
   return {
-    base: { number: base.number, headline: runView(base).headline, status: base.status },
-    head: { number: head.number, headline: runView(head).headline, status: head.status },
+    swapped: base !== first,
+    base: { number: base.number, ...headlineOf(base, runView(base).headline), status: statusOf(base) },
+    head: { number: head.number, ...headlineOf(head, runView(head).headline), status: statusOf(head) },
     goals,
     findings: {
-      stillReported,
-      onlyInBase: inBase.filter((f) => !paired.has(f.key)).map((f) => ({ key: f.key, verdict: f.verdict, title: untrusted("finding title", f.title), goal: f.goalText, goalInHead: goalInHead(f.personaKey, f.goal) })),
-      onlyInHead: inHead.filter((f) => !matched.has(f.key)).map((f) => ({ key: f.key, verdict: f.verdict, title: untrusted("finding title", f.title), goal: f.goalText })),
+      stillReported: capped(stillReported),
+      onlyInBase: capped(inBase.filter((f) => !paired.has(f.key)).map((f) => ({ key: f.key, verdict: f.verdict, title: untrusted("finding title", f.title), goal: goalOf(base, f.goalText), goalInHead: goalInHead(f.personaKey, f.goalText) }))),
+      onlyInHead: capped(inHead.filter((f) => !matched.has(f.key)).map((f) => ({ key: f.key, verdict: f.verdict, title: untrusted("finding title", f.title), goal: goalOf(head, f.goalText) }))),
     },
     caveats: [
-      "Findings are matched by the wording of their title and their goal. Different wording of the same defect shows up as one finding only in the base run and one only in the head run.",
-      "A defect that is not reported in the head run is not proven fixed. It counts as checked only when its goal was reached or failed in the head run (goalInHead).",
-      "Goals with no outcome are not tested, which is different from failed.",
+      "Findings are matched by the wording of their title and the text of their goal, across confirmed, refuted, unchecked, friction and dismissed reports. Different wording of the same defect shows up as one finding only in the base run and one only in the head run.",
+      "A defect that is not reported in the head run is not proven fixed, even when its goal was reached there (goalInHead): reaching the goal says the check ran, not that the defect is gone.",
+      "Goals are matched by person and goal text. A goal with no outcome is not tested, which is different from failed.",
+      ...(plansDiffer ? ["These runs followed different plans, so goals and findings may not be comparable."] : []),
+      ...(base !== first ? ["The runs were given newest first; base is the older run."] : []),
     ],
   };
 }
