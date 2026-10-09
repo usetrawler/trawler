@@ -129,6 +129,7 @@ export function registerReadTools(server: McpServer, deps: ToolDeps): void {
   });
 
   tool("list_projects", {
+    _meta: RUN_REPORT_META,
     title: "List projects",
     description: `Lists the projects this connection can read, most recently active first, with each one's last run. Project ids are used by list_plans and list_runs. Pages of ${LIMITS.projects.default} (at most ${LIMITS.projects.max}).`,
     inputSchema: z.object({ limit: z.number().int().min(1).max(LIMITS.projects.max).optional(), cursor: z.string().regex(/^\d{1,6}$/).optional().describe("nextCursor from the previous page") }).strict(),
@@ -151,6 +152,7 @@ export function registerReadTools(server: McpServer, deps: ToolDeps): void {
   });
 
   tool("list_runs", {
+    _meta: RUN_REPORT_META,
     title: "List runs",
     description: `Lists runs newest first, with confirmed defects and goals reached as the dashboard shows them. Filter by project, plan or status. Pages of ${LIMITS.runs.default} (at most ${LIMITS.runs.max}); pass nextBefore as before for older runs.`,
     inputSchema: z.object({
@@ -231,6 +233,7 @@ export function registerReadTools(server: McpServer, deps: ToolDeps): void {
   });
 
   tool("get_finding", {
+    _meta: RUN_REPORT_META,
     title: "Read one finding",
     description: `Reads one finding in full: what was observed, the steps that reproduce it, the replay and the verdict, plus references for get_evidence. ${UNTRUSTED_NOTICE}`,
     inputSchema: z.object({ run: RunArg, finding: z.string().min(1).max(200).describe("A finding key from get_run.") }).strict(),
