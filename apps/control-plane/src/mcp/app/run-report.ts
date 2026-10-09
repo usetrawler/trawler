@@ -80,7 +80,10 @@ function notice(text: string | null, retry?: () => void) {
   parts.notice!.append(el("p", { class: "notice", role: retry ? "alert" : "status" }, text, retry && " ", retry && Object.assign(el("button", { type: "button" }, "Try again"), { onclick: retry })));
 }
 
-const linkNote = (url: string) => { put(parts.head!, el("p", { class: "muted", role: "status" }, `The host did not open the link. The run is at ${url}`)); };
+const linkNote = (url: string) => {
+  parts.head!.querySelector("[data-link-note]")?.remove();
+  put(parts.head!, el("p", { class: "muted", role: "status", "data-link-note": "" }, `The host did not open the link. The run is at ${url}`));
+};
 
 function openInTrawler(url: string): HTMLElement {
   const link = el("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, "Open in Trawler");
@@ -207,7 +210,12 @@ function renderDetail() {
   const titleHadFocus = active?.id === "detail-title";
   const focused = active?.dataset?.ref ? `[data-ref="${CSS.escape(active.dataset.ref)}"][data-role="${active.dataset.role ?? "show"}"]` : null;
   clear(parts.detail!);
-  if (state.detailError) { parts.detail!.append(el("p", { class: "notice", role: "alert" }, state.detailError)); return; }
+  if (state.detailError) {
+    const alert = el("p", { class: "notice", role: "alert", tabindex: titleHadFocus ? "-1" : undefined }, state.detailError);
+    parts.detail!.append(alert);
+    if (titleHadFocus) alert.focus();
+    return;
+  }
   const d = state.detail;
   if (!d) return;
   const section = el("section", { class: "detail", "aria-labelledby": "detail-title" }, el("h2", { id: "detail-title" }, d.title.text),
@@ -257,7 +265,7 @@ async function openFinding(key: string, moveFocus = true) {
 async function loadEvidence(ref: string, label: string, before?: string) {
   const r = state.report;
   const key = state.selected;
-  const flight = `${ref}|${before ?? ""}`;
+  const flight = `${r?.number}|${key}|${ref}|${before ?? ""}`;
   if (!r || !key || state.loading.has(flight)) return;
   state.loading.add(flight);
   const result = await call("get_evidence", { run: r.number, ref, ...(before ? { before } : {}) }).catch(() => null);
@@ -373,6 +381,7 @@ function resetFor(run: number | null): boolean {
   Object.assign(state, { peopleOpen: false, filterSignature: "", headSignature: "", selected: null, detail: null, detailError: null, baseline: "", compared: null, filter: "all", baselines: [], baselineError: null });
   state.evidence.clear();
   state.evidenceErrors.clear();
+  state.loading.clear();
   state.compareToken += 1;
   state.pollToken += 1;
   state.polling = false;
