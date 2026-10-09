@@ -36,6 +36,9 @@ const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: 
 const RunArg = z.union([z.number().int().min(1).max(2_147_483_647), z.string().min(1).max(36)]).describe("A run number such as 12, or a run id. Both come from list_runs.");
 const Id = z.string().uuid();
 const Status = z.enum(["all", "completed", "attention"]);
+const GoalSchema = z.union([z.string(), UntrustedSchema]);
+const listOf = <T extends z.ZodType>(item: T) => z.object({ items: z.array(item), total: z.number(), more: z.number() });
+const inline = (value: string | Untrusted, nonce: string): string => (typeof value === "string" ? value : quoted(value, nonce));
 
 const RunLineSchema = z.object({
   id: z.string(), number: z.number(), status: z.string(), createdAt: z.string().nullable(), project: z.object({ id: z.string(), name: z.string() }), plan: z.string().nullable(),
@@ -121,7 +124,7 @@ export function registerReadTools(server: McpServer, deps: ToolDeps): void {
       workspace: { id: caller.orgId, name: row.workspace }, person: { name: row.person }, role: caller.role, client: row.client?.trim() || caller.clientId,
       access: { scopes: caller.scopes, canReadRuns: true as const, canStartAndStopRuns: caller.scopes.includes("trawler:runs:write") && canControlRuns(caller.role), project: caller.projectId && row.project ? { id: caller.projectId, name: row.project } : null },
     };
-    return result(out, `Connected to the workspace "${out.workspace.name}" as ${out.person.name} (${out.role}) through ${out.client}.\n${out.access.project ? `Limited to the project "${out.access.project.name}" (${out.access.project.id}).` : "Can read every project in the workspace."}\n${out.access.canStartAndStopRuns ? "May start and stop runs." : "Read only: this connection cannot start or stop runs."}`);
+    return result(out, `Connected to the workspace "${out.workspace.name}" as ${out.person.name} (${out.role}) through ${out.client}.\n${caller.projectId ? `Limited to the project ${out.access.project ? `"${out.access.project.name}" ` : ""}(${caller.projectId}).` : "Can read every project in the workspace."}\n${out.access.canStartAndStopRuns ? "May start and stop runs." : "Read only: this connection cannot start or stop runs."}`);
   });
 
   tool("list_projects", {
@@ -152,7 +155,7 @@ export function registerReadTools(server: McpServer, deps: ToolDeps): void {
     inputSchema: z.object({
       project: Id.optional().describe("Project id from list_projects."), plan: Id.optional().describe("Plan id from list_plans."),
       status: Status.optional().describe("all (default), completed, or attention (stopped, failed or cancelled)."),
-      limit: z.number().int().min(1).max(LIMITS.runs.max).optional(), before: z.number().int().min(1).optional().describe("nextBefore from the previous page."),
+      limit: z.number().int().min(1).max(LIMITS.runs.max).optional(), before: z.number().int().min(1).max(2_147_483_647).optional().describe("nextBefore from the previous page."),
     }).strict(),
     outputSchema: z.object({ runs: z.array(RunLineSchema), nextBefore: z.number().nullable(), counts: z.object({ all: z.number(), completed: z.number(), attention: z.number() }) }),
   }, async (args: { project?: string; plan?: string; status?: "all" | "completed" | "attention"; limit?: number; before?: number }) => {
@@ -167,15 +170,15 @@ export function registerReadTools(server: McpServer, deps: ToolDeps): void {
     description: `Reads one run: the headline, goals per person, and the findings grouped as the dashboard groups them (confirmed by replay, inconclusive, refuted, could not be judged, not judged, friction, dismissed). Up to ${LIMITS.findingsPerGroup} findings per group; use get_finding for one finding in full. ${UNTRUSTED_NOTICE}`,
     inputSchema: z.object({ run: RunArg }).strict(),
     outputSchema: z.object({
-      id: z.string(), number: z.number(), url: z.string(), status: z.string(), live: z.boolean(), headline: z.string(), project: z.object({ id: z.string() }), plan: z.string().nullable(), target: z.string(), model: z.string(),
+      id: z.string(), number: z.number(), url: z.string(), status: z.string(), live: z.boolean(), headline: z.string(), headlineDetail: UntrustedSchema.nullable(), project: z.object({ id: z.string() }), plan: z.string().nullable(), target: z.string(), model: z.string(),
       createdAt: z.string().nullable(), startedAt: z.string().nullable(), finishedAt: z.string().nullable(), costUsd: z.number(), budgetUsd: z.number(),
       pullRequest: z.object({ number: z.number().nullable(), repository: z.string().nullable(), url: z.string().nullable(), title: UntrustedSchema.nullable() }).nullable(),
       botProtection: z.object({ vendor: z.string() }).nullable(),
-      goals: z.object({ reached: z.number(), total: z.number(), notReached: z.array(z.string()) }),
-      people: z.array(z.object({ id: z.string(), name: z.string(), state: z.string(), defects: z.number(), friction: z.number(), goals: z.array(z.object({ id: z.string(), goal: z.string(), status: z.string().nullable(), note: UntrustedSchema.nullable() })) })),
+      goals: z.object({ reached: z.number(), total: z.number(), notReached: z.array(GoalSchema) }),
+      people: z.array(z.object({ id: z.string(), name: z.string(), state: z.string(), defects: z.number(), friction: z.number(), goals: z.array(z.object({ id: z.string(), goal: GoalSchema, status: z.string().nullable(), note: UntrustedSchema.nullable() })) })),
       findings: z.object(Object.fromEntries(GROUPS.map((g) => [g, z.object({
         total: z.number(), more: z.number(),
-        items: z.array(z.object({ key: z.string(), group: z.string(), kind: z.string(), severity: z.string(), verdict: z.string().nullable(), person: z.string(), goal: z.string(), title: UntrustedSchema, evidence: z.number(), reason: UntrustedSchema.optional() })),
+        items: z.array(z.object({ key: z.string(), group: z.string(), kind: z.string(), severity: z.string(), verdict: z.string().nullable(), person: z.string(), goal: GoalSchema, title: UntrustedSchema, evidence: z.number(), reason: UntrustedSchema.optional() })),
       })]))),
     }),
   }, async (args: { run: RunRef }) => {
@@ -187,7 +190,7 @@ export function registerReadTools(server: McpServer, deps: ToolDeps): void {
       const { items, more, total } = report.findings[g];
       return `${g} (${total}):\n${block(nonce, { untrusted: true, from: `titles of the ${g} findings`, text: items.map((i) => `${i.key} [${i.severity}] ${i.title.text}`).join("\n") })}${more ? `\n…${more} more, not listed.` : ""}`;
     });
-    return result(report, `Run #${report.number} (${report.status}): ${report.headline}\n${report.url}\nGoals reached ${report.goals.reached}/${report.goals.total}. Cost $${report.costUsd.toFixed(2)} of $${report.budgetUsd.toFixed(2)}.\n${UNTRUSTED_NOTICE}\n${sections.join("\n") || "No findings."}`);
+    return result(report, `Run #${report.number} (${report.status}): ${report.headline}${report.headlineDetail ? `\n${block(nonce, report.headlineDetail)}` : ""}\n${report.url}\nGoals reached ${report.goals.reached}/${report.goals.total}. Cost $${report.costUsd.toFixed(2)} of $${report.budgetUsd.toFixed(2)}.\n${UNTRUSTED_NOTICE}\n${sections.join("\n") || "No findings."}`);
   });
 
   tool("compare_runs", {
@@ -195,12 +198,13 @@ export function registerReadTools(server: McpServer, deps: ToolDeps): void {
     description: "Compares two runs of the same project: goals reached, failed or not tested in each, and which findings both runs reported. Absence of a finding is not proof of a fix, and a goal without an outcome is not tested; the result says which. Takes the older run as base and the newer as head.",
     inputSchema: z.object({ base: RunArg, head: RunArg }).strict(),
     outputSchema: z.object({
-      base: z.object({ number: z.number(), headline: z.string(), status: z.string() }), head: z.object({ number: z.number(), headline: z.string(), status: z.string() }),
-      goals: z.array(z.object({ person: z.string(), goal: z.string(), base: z.string(), head: z.string(), change: z.string() })),
+      swapped: z.boolean(),
+      base: z.object({ number: z.number(), headline: z.string(), headlineDetail: UntrustedSchema.nullable(), status: z.string() }), head: z.object({ number: z.number(), headline: z.string(), headlineDetail: UntrustedSchema.nullable(), status: z.string() }),
+      goals: z.array(z.object({ person: z.string(), goal: GoalSchema, base: z.string(), head: z.string(), change: z.string() })),
       findings: z.object({
-        stillReported: z.array(z.object({ title: UntrustedSchema, goal: z.string(), base: z.object({ key: z.string(), verdict: z.string() }), head: z.object({ key: z.string(), verdict: z.string() }), matchedBy: z.string() })),
-        onlyInBase: z.array(z.object({ key: z.string(), verdict: z.string(), title: UntrustedSchema, goal: z.string(), goalInHead: z.string() })),
-        onlyInHead: z.array(z.object({ key: z.string(), verdict: z.string(), title: UntrustedSchema, goal: z.string() })),
+        stillReported: listOf(z.object({ title: UntrustedSchema, goal: GoalSchema, base: z.object({ key: z.string(), verdict: z.string() }), head: z.object({ key: z.string(), verdict: z.string() }), matchedBy: z.string() })),
+        onlyInBase: listOf(z.object({ key: z.string(), verdict: z.string(), title: UntrustedSchema, goal: GoalSchema, goalInHead: z.string() })),
+        onlyInHead: listOf(z.object({ key: z.string(), verdict: z.string(), title: UntrustedSchema, goal: GoalSchema })),
       }),
       caveats: z.array(z.string()),
     }),
@@ -211,9 +215,16 @@ export function registerReadTools(server: McpServer, deps: ToolDeps): void {
     if (base.projectId !== head.projectId) return failure("These runs belong to different projects, so they cannot be compared.");
     const out = compareRuns(base, head);
     const nonce = newNonce();
-    const titles = [...out.findings.stillReported.map((f) => `still reported (${f.base.verdict} → ${f.head.verdict}): ${f.title.text}`), ...out.findings.onlyInBase.map((f) => `only in #${base.number} (${f.verdict}, goal in #${head.number}: ${f.goalInHead}): ${f.title.text}`), ...out.findings.onlyInHead.map((f) => `only in #${head.number} (${f.verdict}): ${f.title.text}`)];
+    const { stillReported, onlyInBase, onlyInHead } = out.findings;
+    const lines = [
+      ...stillReported.items.map((f) => `still reported (${f.base.verdict} → ${f.head.verdict}): ${f.title.text}`),
+      ...onlyInBase.items.map((f) => `only in #${out.base.number} (${f.verdict}, goal in #${out.head.number}: ${f.goalInHead}): ${f.title.text}`),
+      ...onlyInHead.items.map((f) => `only in #${out.head.number} (${f.verdict}): ${f.title.text}`),
+    ];
+    const more = stillReported.more + onlyInBase.more + onlyInHead.more;
     const changed = out.goals.filter((g) => g.change !== "same");
-    return result(out, `#${base.number}: ${out.base.headline}\n#${head.number}: ${out.head.headline}\nGoals that changed: ${changed.length === 0 ? "none" : changed.map((g) => `${g.person} / ${g.goal}: ${g.base} → ${g.head} (${g.change})`).join("; ")}\n${UNTRUSTED_NOTICE}\n${titles.length ? block(nonce, { untrusted: true, from: "finding titles of both runs", text: titles.join("\n") }) : "No findings in either run."}\n${out.caveats.join("\n")}`);
+    const headlines = [out.base, out.head].map((r) => `#${r.number}: ${r.headline}${r.headlineDetail ? `\n${block(nonce, r.headlineDetail)}` : ""}`).join("\n");
+    return result(out, `${headlines}\nGoals that changed: ${changed.length === 0 ? "none" : changed.map((g) => `${g.person} / ${inline(g.goal, nonce)}: ${g.base} → ${g.head} (${g.change})`).join("; ")}\n${UNTRUSTED_NOTICE}\n${lines.length ? block(nonce, { untrusted: true, from: "finding titles of both runs", text: lines.join("\n") }) : "No findings in either run."}${more ? `\n…${more} more findings, not listed.` : ""}\n${out.caveats.join("\n")}`);
   });
 
   tool("get_finding", {
@@ -221,11 +232,11 @@ export function registerReadTools(server: McpServer, deps: ToolDeps): void {
     description: `Reads one finding in full: what was observed, the steps that reproduce it, the replay and the verdict, plus references for get_evidence. ${UNTRUSTED_NOTICE}`,
     inputSchema: z.object({ run: RunArg, finding: z.string().min(1).max(200).describe("A finding key from get_run.") }).strict(),
     outputSchema: z.object({
-      run: z.number(), key: z.string(), group: z.string(), kind: z.string(), severity: z.string(), verdict: z.string().nullable(), person: z.string(), goal: z.string(), groupedUnder: z.string().nullable(),
+      run: z.number(), key: z.string(), group: z.string(), kind: z.string(), severity: z.string(), verdict: z.string().nullable(), person: z.string(), goal: GoalSchema, groupedUnder: z.string().nullable(),
       title: UntrustedSchema, observed: UntrustedSchema, reproduction: UntrustedSchema, quote: UntrustedSchema.nullable(), page: UntrustedSchema.nullable(),
       replay: z.object({ completed: z.boolean().nullable(), observed: UntrustedSchema.nullable() }).nullable(),
       sameReports: z.array(z.object({ key: z.string(), title: UntrustedSchema })),
-      dismissal: z.object({ reason: z.string(), by: z.string(), at: z.string().nullable() }).nullable(),
+      dismissal: z.object({ reason: UntrustedSchema, by: z.string(), at: z.string().nullable() }).nullable(),
       evidence: z.array(z.object({ ref: z.string(), kind: z.enum(["screenshot", "trail"]), label: z.string() })),
     }),
   }, async (args: { run: RunRef; finding: string }) => {
@@ -234,7 +245,7 @@ export function registerReadTools(server: McpServer, deps: ToolDeps): void {
     const finding = findingDetail(summary, args.finding);
     if (!finding) return failure(NOT_FOUND.finding);
     const nonce = newNonce();
-    return result(finding, `Finding ${finding.key} in run #${finding.run}: ${finding.group}, ${finding.severity}${finding.verdict ? `, verdict ${finding.verdict}` : ""}. Filed by ${finding.person} on the goal "${finding.goal}".\n${UNTRUSTED_NOTICE}\n${block(nonce, finding.title, finding.observed, finding.reproduction, ...(finding.quote ? [finding.quote] : []), ...(finding.page ? [finding.page] : []), ...(finding.replay?.observed ? [finding.replay.observed] : []))}\nEvidence: ${finding.evidence.map((e) => `${e.ref} (${e.label})`).join("; ")}. Read it with get_evidence.`);
+    return result(finding, `Finding ${finding.key} in run #${finding.run}: ${finding.group}, ${finding.severity}${finding.verdict ? `, verdict ${finding.verdict}` : ""}. Filed by ${finding.person} on the goal ${inline(finding.goal, nonce)}.\n${UNTRUSTED_NOTICE}\n${block(nonce, finding.title, finding.observed, finding.reproduction, ...(finding.dismissal ? [finding.dismissal.reason] : []), ...(finding.quote ? [finding.quote] : []), ...(finding.page ? [finding.page] : []), ...(finding.replay?.observed ? [finding.replay.observed] : []))}\nEvidence: ${finding.evidence.map((e) => `${e.ref} (${e.label})`).join("; ")}. Read it with get_evidence.`);
   });
 
   tool("get_evidence", {
