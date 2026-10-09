@@ -20,7 +20,7 @@
     "esbuild": "0.28.2",
     "kysely-codegen": "^0.20.0",
     "oauth2-mock-server": "^9.2.0",
-    "playwright": "1.64.0-alpha-1789764292000"
+    "playwright": "1.64.0-alpha-1790635538000"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1141.0",
