@@ -461,3 +461,14 @@ test("goals a lead wrote for a pull request are untrusted even when the run does
   expect(at).toBeGreaterThan(-1);
   expect(finding.text.slice(0, at)).toMatch(/<<untrusted (?!ID)\w+ from="goal written for a pull request">>\n$/);
 });
+
+test("a report grouped under one filed on another goal still matches the same defect filed on its own goal later", async () => {
+  const base = await seedRun("org-a", ids.a2!, { findings: [
+    { key: "ana:f0", title: "Unrelated primary", verdict: "confirmed", goal: "sign-in" },
+    { key: "lee:f1", persona: "lee", title: "Invoice save errors", verdict: "confirmed", goal: "invoice-lee", sameAs: "ana:f0" },
+  ] });
+  const head = await seedRun("org-a", ids.a2!, { findings: [{ key: "lee:f9", persona: "lee", title: "Invoice save errors", verdict: "confirmed", goal: "invoice-lee" }] });
+  const out = (await call(A, "compare_runs", { base: base.number, head: head.number })).structured;
+  expect(out.findings.stillReported.items.map((f: { base: { key: string }; head: { key: string } }) => [f.base.key, f.head.key])).toEqual([["lee:f1", "lee:f9"]]);
+  expect(out.findings.onlyInBase.items.map((f: { key: string }) => f.key)).toEqual([]);
+});
