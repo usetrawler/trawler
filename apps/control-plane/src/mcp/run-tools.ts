@@ -4,6 +4,7 @@ import { IDEMPOTENCY_KEY, StartRunRequestSchema } from "@usetrawler/protocol";
 import { withOrg } from "../db/tenancy.ts";
 import { runIdByNumber } from "../runs/runs.ts";
 import { startRunFor, stopRunFor, type Outcome, type RunApiDeps, type RunPrincipal } from "../run-api/service.ts";
+import { RUN_REPORT_META } from "./app/resource.ts";
 import { canControlRuns, RUN_CONTROL_ROLE } from "./access.ts";
 import { identityOf } from "./identity.ts";
 import { connectionUsage, MCP_MAX_CAP_USD, WINDOW_HOURS } from "./limits.ts";
@@ -45,6 +46,7 @@ export function registerRunTools(server: McpServer, deps: RunToolDeps): void {
   };
 
   start("start_run", {
+    _meta: RUN_REPORT_META,
     title: "Start a run",
     description: `Starts a run of a saved plan on an existing project and returns at once with the run number and report link; read progress later with get_run. ${COST_NOTE} Pass an idempotencyKey so that retrying never starts a second run. The cap is in dollars (at most ${MCP_MAX_CAP_USD}). Runs go to a hosted runner; with execution "own" a runner in your own network must already be available, since this connection never starts a local process. Some refusals (the first run of a project, an expired model key) can only be cleared by a person in the dashboard, and the error says where.`,
     inputSchema: z.object({
@@ -69,6 +71,7 @@ export function registerRunTools(server: McpServer, deps: RunToolDeps): void {
   });
 
   stop("stop_run", {
+    _meta: RUN_REPORT_META,
     title: "Stop a run",
     description: "Stops a run that is queued or running, and only a run this connection can read. Asking again is safe: the answer says what state the run is actually in. The unused part of its cap goes back to this connection's spending limit.",
     inputSchema: z.object({ run: RunArg }).strict(),

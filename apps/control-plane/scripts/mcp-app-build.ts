@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { runReportHtml } from "../src/mcp/app/template.ts";
 
-const entry = fileURLToPath(new URL("../src/mcp/app/run-report.ts", import.meta.url));
+const entry = fileURLToPath(new URL("../src/mcp/app/main.ts", import.meta.url));
 
 export async function buildRunReportModule(): Promise<string> {
   const result = await build({ entryPoints: [entry], bundle: true, write: false, format: "esm", target: "es2022", minify: true, platform: "browser", legalComments: "none", logLevel: "silent" });

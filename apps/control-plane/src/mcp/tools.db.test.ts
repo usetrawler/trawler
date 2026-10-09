@@ -478,10 +478,10 @@ test("a report grouped under one filed on another goal still matches the same de
   expect(out.findings.onlyInBase.items.map((f: { key: string }) => f.key)).toEqual([]);
 });
 
-test("get_run and compare_runs point at the run report app, which is served as an MCP App with no network access, and other tools do not", async () => {
+test("the tools whose results the app shows point at it, and the app is served as an MCP App with no network access", async () => {
   const listed = (await rpc(A, "tools/list", {})).result!.tools as Array<{ name: string; _meta?: { ui?: { resourceUri?: string } } }>;
   const linked = listed.filter((x) => x._meta?.ui?.resourceUri).map((x) => x.name).sort();
-  expect(linked).toEqual(["compare_runs", "get_run"]);
+  expect(linked).toEqual(["compare_runs", "get_finding", "get_run", "list_projects", "list_runs", "start_run", "stop_run"]);
   for (const tool of listed.filter((x) => linked.includes(x.name))) expect(tool._meta!.ui!.resourceUri).toBe("ui://trawler/run-report");
   const resources = (await rpc(A, "resources/list", {})).result!.resources as Array<{ uri: string; mimeType?: string }>;
   expect(resources.map((r) => r.uri)).toEqual(["ui://trawler/run-report"]);
