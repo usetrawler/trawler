@@ -206,7 +206,7 @@ async function proxied(req: Request, deps: ProxyDeps, call: LlmCall): Promise<Re
     model: typeof parsed.model === "string" ? parsed.model : request.model,
     inputTokens,
     outputTokens,
-    costUsd: Math.max(openRouter ? count(usage.cost) : 0, priced(price, inputTokens, outputTokens)),
+    costUsd: openRouter && typeof usage.cost === "number" && Number.isFinite(usage.cost) && usage.cost >= 0 ? usage.cost : priced(price, inputTokens, outputTokens),
   });
   return new Response(text, { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 }

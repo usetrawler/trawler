@@ -279,6 +279,11 @@ test("the proxy bounds a call by what is left of the cap, prices calls OpenRoute
   const cost = async () => Number((await sql<{ cost_usd: string }>`select cost_usd from runs where id = ${run.id}`.execute(t.db)).rows[0]!.cost_usd);
   expect(await cost()).toBeCloseTo((10_000 * 0.3 + 100 * 1.2) / 1e6, 9);
 
+  const before = await cost();
+  replies = [{ ...textReply("ok"), usage: { prompt_tokens: 10_000, completion_tokens: 100, cost: 0.0004 } }];
+  expect((await call()).status).toBe(200);
+  expect(await cost()).toBeCloseTo(before + 0.0004, 9);
+
   replies = [{ error: { message: "provider exploded", code: 500 } }];
   const failed = await call();
   expect(failed.status).toBe(502);
