@@ -9,7 +9,7 @@ import { setModelKey } from "../credentials/credentials.ts";
 import { createProject } from "../projects/projects.ts";
 import { cancelLiveRuns, startRun } from "../runs/runs.ts";
 import { startRunFor, stopRunFor, type RunApiDeps, type RunPrincipal } from "../run-api/service.ts";
-import { connectionUsage } from "./limits.ts";
+import { connectionUsage, reserveSpend, SpendLimitReached } from "./limits.ts";
 
 const t = await testDb();
 afterAll(() => t.drop());
@@ -146,4 +146,28 @@ test("a grant never gains a higher limit, and only the grant's own row decides i
   await expect(t.db.updateTable("mcp_grants").set({ max_spend_usd_per_day: "11" }).where("id", "=", id).execute()).rejects.toThrow(/never gains a higher spend limit/);
   await t.db.updateTable("mcp_grants").set({ max_runs_per_day: 1 }).where("id", "=", id).execute();
   expect((await used(id))!.runsPerDay).toBe(1);
+});
+
+test("a second reservation waits for the first transaction to settle before it counts, so two cannot both fit", async () => {
+  const id = await grant({ runs: 10, spend: 3 });
+  const via = { kind: "mcp" as const, client: "Claude Code", clientHost: null, person: "Ana", grant: id };
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let firstReserved!: () => void;
+  const reserved = new Promise<void>((resolve) => { firstReserved = resolve; });
+  const first = withOrg(t.db, ORG, async (tx) => {
+    await reserveSpend(tx, ORG, id, 2);
+    await startRun(tx, ORG, projects[0]!, keys, { ...options, budgetUsd: 2, startedVia: via });
+    firstReserved();
+    await held;
+  });
+  await reserved;
+  let secondSettled = false;
+  const second = withOrg(t.db, ORG, (tx) => reserveSpend(tx, ORG, id, 2)).then(() => "reserved", (err: unknown) => (err instanceof SpendLimitReached ? "refused" : "failed")).finally(() => { secondSettled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(secondSettled).toBe(false);
+  release();
+  await first;
+  expect(await second).toBe("refused");
+  await quiet();
 });

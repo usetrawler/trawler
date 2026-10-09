@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { randomBytes } from "node:crypto";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { ProjectConfigSchema } from "@usetrawler/protocol";
@@ -134,7 +135,13 @@ describe("connecting an assistant, seeing it in Settings and disconnecting it", 
     expect(await control.isChecked()).toBe(false);
     await expect.poll(() => page.getByText("spends this workspace's budget").isVisible()).toBe(true);
     await page.getByRole("combobox").selectOption({ label: "Only Checkout" });
+    expect(await page.getByLabel("Runs per 24 hours").count()).toBe(0);
     await control.check();
+    await page.getByLabel("Runs per 24 hours").fill("0");
+    await page.getByRole("button", { name: "Allow with run control" }).click();
+    await expect.poll(() => page.getByText("between 1 and 50 whole runs").isVisible()).toBe(true);
+    await page.getByLabel("Runs per 24 hours").fill("3");
+    await page.getByLabel("Spend per 24 hours (USD)").fill("7.5");
     await page.getByRole("button", { name: "Allow with run control" }).click();
     await afterRedirect(page);
     const tokens = await redeem(clientId, verifier, await callback.next());
@@ -148,6 +155,7 @@ describe("connecting an assistant, seeing it in Settings and disconnecting it", 
     const section = connections(page);
     const row = section.getByRole("listitem").filter({ hasText: "E2E assistant" });
     await expect.poll(() => row.textContent()).toContain("read and run control · only Checkout");
+    expect(await row.textContent()).toContain("Last 24 hours: 0 of 3 runs, $0.00 of $7.50");
     expect(await row.textContent()).toContain("last used");
     expect(await section.textContent()).toContain("separate from the API tokens above");
     const disconnect = row.getByRole("button", { name: /^Disconnect E2E assistant/ });
@@ -269,7 +277,10 @@ describe("the consent page on a phone, with the keyboard, and when the wrong acc
       await mobile.keyboard.press("Enter");
       const tokens = await redeem(clientId, verifier, await callback.next());
       const client = await mcp(tokens.access_token!);
-      expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(["compare_runs", "get_evidence", "get_finding", "get_run", "list_plans", "list_projects", "list_runs", "whoami"]);
+      expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(["compare_runs", "get_evidence", "get_finding", "get_run", "list_plans", "list_projects", "list_runs", "start_run", "stop_run", "whoami"]);
+      const refused = await client.callTool({ name: "start_run", arguments: { project: randomUUID() } });
+      expect(refused.isError).toBe(true);
+      expect(JSON.stringify(refused.content)).toContain("Run control is switched off");
       expect((await client.callTool({ name: "list_projects", arguments: {} })).structuredContent).toMatchObject({ projects: expect.any(Array), nextCursor: null });
       await client.close();
     } finally {

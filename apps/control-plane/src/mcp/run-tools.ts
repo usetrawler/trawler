@@ -3,7 +3,7 @@ import { z } from "zod";
 import { IDEMPOTENCY_KEY, StartRunRequestSchema } from "@usetrawler/protocol";
 import { withOrg } from "../db/tenancy.ts";
 import { runIdByNumber } from "../runs/runs.ts";
-import { readRunStartedBy, startRunFor, stopRunFor, type Outcome, type RunApiDeps, type RunPrincipal } from "../run-api/service.ts";
+import { startRunFor, stopRunFor, type Outcome, type RunApiDeps, type RunPrincipal } from "../run-api/service.ts";
 import { canControlRuns, RUN_CONTROL_ROLE } from "./access.ts";
 import { identityOf } from "./identity.ts";
 import { connectionUsage, MCP_MAX_CAP_USD, WINDOW_HOURS } from "./limits.ts";
@@ -11,7 +11,7 @@ import { mcpSettingsOf, RUN_CONTROL_OFF } from "./settings.ts";
 import { failure, makeTool, result, type ToolDeps } from "./tools.ts";
 
 export interface RunToolDeps extends ToolDeps {
-  runApi: RunApiDeps;
+  runApi: () => RunApiDeps;
 }
 
 const NOT_GRANTED = "This connection was not granted run control. Disconnect it under Settings, Your AI assistant connections, and connect again with \"Read access and run control\".";
@@ -61,7 +61,7 @@ export function registerRunTools(server: McpServer, deps: RunToolDeps): void {
     const principal = await principalOf();
     if (typeof principal === "string") return failure(principal);
     const { idempotencyKey, ...rest } = args;
-    const outcome = await startRunFor(principal, StartRunRequestSchema.parse(rest), deps.runApi, idempotencyKey === undefined ? {} : { idempotencyKey });
+    const outcome = await startRunFor(principal, StartRunRequestSchema.parse(rest), deps.runApi(), idempotencyKey === undefined ? {} : { idempotencyKey });
     if (!outcome.ok) return failure(refusalText(outcome, origin, args.project));
     const usage = await withOrg(db, caller.orgId, (tx) => connectionUsage(tx, caller.orgId, caller.grantId));
     const out = { id: outcome.value.id, number: outcome.value.number, url: outcome.value.reportUrl, replayed: outcome.replayed === true, people: Number(outcome.value.people), limit: usage ? { ...usage, nextFreeAt: usage.nextFreeAt?.toISOString() ?? null } : null };
@@ -79,7 +79,7 @@ export function registerRunTools(server: McpServer, deps: RunToolDeps): void {
     const text = String(args.run);
     const id = /^\d{1,9}$/.test(text) ? await withOrg(db, caller.orgId, (tx) => runIdByNumber(tx, caller.orgId, Number(text))) : text;
     if (!id) return failure("That run does not exist in this connection's reach. Call list_runs to see the runs you can read.");
-    const outcome = await stopRunFor(principal, id, deps.runApi);
+    const outcome = await stopRunFor(principal, id, deps.runApi());
     if (!outcome.ok) return failure(outcome.status === 404 ? "That run does not exist in this connection's reach. Call list_runs to see the runs you can read." : refusalText(outcome, origin));
     const { value } = outcome;
     return result(value, value.stopped ? `Stopped the run. Its status is now ${value.status}.` : `Nothing to stop: the run is already ${value.status}.`);

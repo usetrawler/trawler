@@ -37,9 +37,10 @@ const store: ArtifactStore = {
   put: async () => {}, remove: async () => {},
   read: async (key) => (key.includes("/runs/") ? new ReadableStream({ start(c) { c.enqueue(png); c.close(); } }) : null),
 };
+const runApi = { db: t.db, keys, baseUrl: "https://app.trawler.test", openRouterUrl: "http://unused.test", trawlerPays: false };
 const identity = { rows: [{ workspace: "Acme Inc", person: "Ana", client: "Claude Code", project: null }] };
 const fakePool = { query: async () => identity } as unknown as pg.Pool;
-const endpoint = createMcpEndpoint({ db: t.db, pool: fakePool, store, origin: "https://app.trawler.test" });
+const endpoint = createMcpEndpoint({ db: t.db, pool: fakePool, store, origin: "https://app.trawler.test", runApi: () => runApi });
 
 const callerFor = (orgId: string, over: Partial<Caller> = {}): Caller => ({ grantId: "g1", userId: "u1", clientId: "c1", role: "owner", scopes: ["trawler:read"], orgId, projectId: null, ...over });
 
@@ -122,11 +123,15 @@ const A = callerFor("org-a");
 const everything: string[] = [];
 const record = (...texts: Array<string | undefined>) => { everything.push(...texts.filter((x): x is string => !!x)); };
 
-test("the endpoint offers eight read-only tools, and nothing from a tested product reaches a tool description", async () => {
+test("the endpoint offers eight read-only tools and two run-control tools marked as such, and nothing from a tested product reaches a tool description", async () => {
   const reply = await rpc(A, "tools/list", {});
   const tools = reply.result!.tools as Array<{ name: string; description: string; annotations: Record<string, unknown>; outputSchema: unknown }>;
-  expect(tools.map((x) => x.name).sort()).toEqual(["compare_runs", "get_evidence", "get_finding", "get_run", "list_plans", "list_projects", "list_runs", "whoami"]);
-  for (const tool of tools) {
+  expect(tools.map((x) => x.name).sort()).toEqual(["compare_runs", "get_evidence", "get_finding", "get_run", "list_plans", "list_projects", "list_runs", "start_run", "stop_run", "whoami"]);
+  const controls = ["start_run", "stop_run"];
+  expect(tools.find((x) => x.name === "start_run")!.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false, openWorldHint: true });
+  expect(tools.find((x) => x.name === "stop_run")!.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true, idempotentHint: true });
+  expect(tools.find((x) => x.name === "start_run")!.description).toContain("spends money");
+  for (const tool of tools.filter((x) => !controls.includes(x.name))) {
     expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
     expect(tool.outputSchema).toBeTruthy();
     expect(tool.description).not.toContain("Ignore previous");
@@ -256,7 +261,7 @@ test("evidence images come back as images up to the byte limit, and a larger one
   expect(refused.isError).toBe(true);
   expect(refused.content.some((c) => c.type === "image")).toBe(false);
   expect(refused.text).toContain("1000000");
-  const noStore = createMcpEndpoint({ db: t.db, pool: fakePool, store: undefined, origin: "https://app.trawler.test" });
+  const noStore = createMcpEndpoint({ db: t.db, pool: fakePool, store: undefined, origin: "https://app.trawler.test", runApi: () => runApi });
   const response = await noStore.fetch(new Request("https://app.trawler.test/api/mcp", { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "get_evidence", arguments: { run: runs.a1!.number, ref: `shot:${small}` } } }) }), { authInfo: { token: "", clientId: "c1", scopes: ["trawler:read"], extra: { grantId: "g", workspaceId: "org-a", userId: "u1", role: "owner", projectId: null } } });
   expect(await response.text()).toContain("not available");
 });
@@ -325,7 +330,7 @@ test("an image that turns out larger than the limit while it is read is refused 
   const id = await seedScreenshot("org-a", runs.a1!.id, "ana:f1");
   const big = new Uint8Array(1_100_000);
   const lying: ArtifactStore = { ...store, read: async () => new ReadableStream({ start(c) { c.enqueue(big); c.close(); } }) };
-  const reading = createMcpEndpoint({ db: t.db, pool: fakePool, store: lying, origin: "https://app.trawler.test" });
+  const reading = createMcpEndpoint({ db: t.db, pool: fakePool, store: lying, origin: "https://app.trawler.test", runApi: () => runApi });
   const response = await reading.fetch(new Request("https://app.trawler.test/api/mcp", { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "get_evidence", arguments: { run: runs.a1!.number, ref: `shot:${id}` } } }) }), { authInfo: { token: "", clientId: "c1", scopes: ["trawler:read"], extra: { grantId: "g", workspaceId: "org-a", userId: "u1", role: "owner", projectId: null } } });
   const body = await response.text();
   expect(body).toContain("could not be read");
@@ -335,7 +340,7 @@ test("an image that turns out larger than the limit while it is read is refused 
 test("whoami names the project a connection is limited to, and an unexpected failure is reported without its details", async () => {
   const limited = await call(callerFor("org-a", { projectId: ids.a1! }), "whoami");
   expect(limited.structured.access.project).toEqual({ id: ids.a1, name: "Alpha" });
-  const failing = createMcpEndpoint({ db: t.db, pool: { query: async () => { throw new Error("permission denied for table secrets"); } } as unknown as pg.Pool, store, origin: "https://app.trawler.test" });
+  const failing = createMcpEndpoint({ db: t.db, pool: { query: async () => { throw new Error("permission denied for table secrets"); } } as unknown as pg.Pool, store, origin: "https://app.trawler.test", runApi: () => runApi });
   const response = await failing.fetch(new Request("https://app.trawler.test/api/mcp", { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "whoami", arguments: {} } }) }), { authInfo: { token: "", clientId: "c1", scopes: ["trawler:read"], extra: { grantId: "g", workspaceId: "org-a", userId: "u1", role: "owner", projectId: null } } });
   const body = await response.text();
   expect(body).toContain("could not answer this request");

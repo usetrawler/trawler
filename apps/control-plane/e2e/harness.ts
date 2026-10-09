@@ -56,6 +56,7 @@ export async function startStack(databaseUrl: string): Promise<Stack> {
   });
   server.stdout?.on("data", (chunk: Buffer) => output.push(String(chunk)));
   server.stderr?.on("data", (chunk: Buffer) => output.push(String(chunk)));
+  if (process.env.TRAWLER_E2E_LOG) server.stdout?.pipe(process.stdout), server.stderr?.pipe(process.stderr);
   const killGroup = (signal: NodeJS.Signals) => {
     if (server.pid) try { process.kill(-server.pid, signal); } catch { /* already gone */ }
   };

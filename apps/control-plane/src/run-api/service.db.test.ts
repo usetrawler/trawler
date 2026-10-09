@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { ProjectConfigSchema } from "@usetrawler/protocol";
@@ -99,7 +99,11 @@ test("through REST a token's runs are recorded as started by that token, and a t
 
 test("a run started and stopped over MCP records the client and the person, shows them in history and the report, and the filter finds it", async () => {
   await withOrg(t.db, "org-ent", (tx) => cancelLiveRuns(tx, "org-ent", "stopped"));
-  const via = { kind: "mcp" as const, client: "Claude Code", clientHost: "claude.ai", person: "Ana Lopez", grant: "grant-1" };
+  const grantId = randomUUID();
+  await sql`insert into "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") values ('user-svc', 'Ana', 'ana@svc.test', true, now(), now()) on conflict do nothing`.execute(t.db);
+  await sql`insert into "oauthClient" ("id", "clientId", "redirectUris") values (${grantId}, ${grantId}, '[]'::jsonb)`.execute(t.db);
+  await sql`insert into mcp_grants (id, code_hash, user_id, org_id, client_id, resource, scopes) values (${grantId}, ${grantId}, 'user-svc', 'org-ent', ${grantId}, 'http://localhost/api/mcp', ARRAY['trawler:read','trawler:runs:write'])`.execute(t.db);
+  const via = { kind: "mcp" as const, client: "Claude Code", clientHost: "claude.ai", person: "Ana Lopez", grant: grantId };
   const started = await startRunFor(principal("org-ent", { projectId: ids.ent!, actor: "mcp:grant-1:user-1", via }), { project: ids.ent!, execution: "hosted" }, deps);
   if (!started.ok) throw new Error(started.error);
   const id = started.value.id;
