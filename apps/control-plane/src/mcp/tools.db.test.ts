@@ -301,9 +301,10 @@ test("pages are bounded: runs and projects stop at their maximum, and a finding 
 
 test("two runs are compared by goal and by finding, keeping apart what failed, what was not tested and what was merely not reported", async () => {
   const out = (await call(A, "compare_runs", { base: runs.a1!.number, head: runs.a1b!.number })).structured;
-  const goal = (person: string, text: string) => out.goals.find((g: { person: string; goal: string }) => g.person === person && g.goal === text);
+  const goal = (person: string, text: string) => out.goals.items.find((g: { person: string; goal: string }) => g.person === person && g.goal === text);
   expect(goal("Ana", "Send an invoice.")).toMatchObject({ base: "failed", head: "reached", change: "now_reached" });
-  expect(goal("Ana", "Get in.")).toMatchObject({ base: "reached", head: "reached", change: "same" });
+  expect(goal("Ana", "Get in.")).toBeUndefined();
+  expect(out.goals.unchanged).toBe(2);
   expect(goal("Lee", "Get in.")).toMatchObject({ base: "reached", head: "not_attempted", change: "not_checked_in_head" });
   expect(out.findings.stillReported.items.map((f: { base: { verdict: string }; head: { verdict: string } }) => [f.base.verdict, f.head.verdict])).toEqual([["refuted", "confirmed"]]);
   expect(out.findings.onlyInHead.items.map((f: { title: { text: string } }) => f.title.text)).toEqual(["Brand new defect"]);
@@ -391,16 +392,16 @@ test("goals are matched by person and wording, so two plans that reuse an id are
   const other = await seedRun("org-a", ids.a1!, { goals: [["ana", "sign-in", "reached"], ["ana", "invoice", "failed"]] });
   await asSystem(t.db, (tx) => tx.updateTable("runs").set({ config_snapshot: sql`jsonb_set(config_snapshot, '{goals}', (select jsonb_agg(case when g ->> 'id' = 'invoice' then jsonb_set(g, '{instruction}', '"Cancel a booking."') else g end) from jsonb_array_elements(config_snapshot -> 'goals') g))` }).where("id", "=", other.id).execute());
   const out = (await call(A, "compare_runs", { base: runs.a1!.number, head: other.number })).structured;
-  const row = (text: string) => out.goals.find((g: { person: string; goal: string }) => g.person === "Ana" && g.goal === text);
+  const row = (text: string) => out.goals.items.find((g: { person: string; goal: string }) => g.person === "Ana" && g.goal === text);
   expect(row("Send an invoice.")).toMatchObject({ base: "failed", head: "not_in_plan" });
   expect(row("Cancel a booking.")).toMatchObject({ base: "not_in_plan", head: "failed" });
-  expect(out.goals.some((g: { change: string; goal: string }) => g.change === "regressed" && g.goal === "Cancel a booking.")).toBe(false);
+  expect(out.goals.items.some((g: { change: string; goal: string }) => g.change === "regressed" && g.goal === "Cancel a booking.")).toBe(false);
 });
 
 test("the older run is the base whatever order the runs are named in, and long finding lists are cut with a count", async () => {
   const swapped = (await call(A, "compare_runs", { base: runs.a1b!.number, head: runs.a1!.number })).structured;
   expect(swapped).toMatchObject({ swapped: true, base: { number: runs.a1!.number }, head: { number: runs.a1b!.number } });
-  expect(swapped.goals.find((g: { goal: string; person: string }) => g.person === "Ana" && g.goal === "Send an invoice.")).toMatchObject({ change: "now_reached" });
+  expect(swapped.goals.items.find((g: { goal: string; person: string }) => g.person === "Ana" && g.goal === "Send an invoice.")).toMatchObject({ change: "now_reached" });
   const many = (title: (i: number) => string) => Array.from({ length: 30 }, (_, i) => ({ key: `ana:m${i}`, title: title(i), verdict: "confirmed" as const }));
   const a = await seedRun("org-a", ids.a2!, { findings: many((i) => `Old defect ${i}`) });
   const b = await seedRun("org-a", ids.a2!, { findings: many((i) => `New defect ${i}`) });
@@ -424,4 +425,55 @@ test("a page cursor beyond what the database stores is refused at the door, and 
   const me = await call(callerFor("org-c", { projectId: randomUUID() }), "whoami");
   expect(me.text).toContain("Limited to the project");
   expect(me.text).not.toContain("Can read every project");
+});
+
+test("a grouped report is compared by its own person and goal, and a group counts as reported when any member is", async () => {
+  const base = await seedRun("org-a", ids.a2!, {
+    findings: [
+      { key: "ana:f0", title: "Saving fails", verdict: "confirmed", goal: "sign-in" },
+      { key: "lee:f1", persona: "lee", title: "Save button errors", verdict: "confirmed", goal: "invoice-lee", sameAs: "ana:f0" },
+      { key: "lee:f2", persona: "lee", title: "Invoice save errors", verdict: "confirmed", goal: "invoice-lee" },
+    ],
+    goals: [["ana", "sign-in", "reached"], ["lee", "invoice-lee", "reached"]],
+  });
+  const head = await seedRun("org-a", ids.a2!, {
+    findings: [
+      { key: "ana:f0", title: "saving FAILS!", verdict: "confirmed", goal: "sign-in" },
+      { key: "lee:f1", persona: "lee", title: "Invoice save errors", verdict: "confirmed", goal: "invoice-lee", sameAs: "ana:f0" },
+      { key: "ana:f2", title: "Dismissed defect", verdict: null },
+    ],
+    goals: [["ana", "sign-in", "reached"], ["lee", "invoice-lee", "failed"]],
+  });
+  await asSystem(t.db, (tx) => tx.insertInto("finding_dismissals").values({ org_id: "org-a", run_id: head.id, finding_key: "ana:f2", reason: "not a bug", dismissed_by: "u1" }).execute());
+  const out = (await call(A, "compare_runs", { base: base.number, head: head.number })).structured;
+  expect(out.findings.stillReported.items.map((f: { base: { key: string }; head: { key: string } }) => [f.base.key, f.head.key])).toEqual([["ana:f0", "ana:f0"], ["lee:f2", "lee:f1"]]);
+  expect(out.findings.onlyInBase.items.map((f: { key: string }) => f.key)).toEqual([]);
+  expect(out.findings.onlyInHead.items.map((f: { key: string; verdict: string }) => [f.key, f.verdict])).toEqual([["ana:f2", "dismissed"]]);
+  const grouped = (await call(A, "get_finding", { run: base.number, finding: "lee:f1" })).structured;
+  expect(grouped).toMatchObject({ person: "Lee", goal: "Send an invoice.", groupedUnder: "ana:f0" });
+  expect(grouped.evidence.at(-1)).toMatchObject({ ref: "trail:lee" });
+});
+
+test("goals a lead wrote for a pull request are untrusted even when the run does not carry the pull request plan record", async () => {
+  const run = await seedRun("org-a", ids.a2!, { findings: [{ title: "Anything", verdict: "confirmed", goal: "pr-goal-1" }], goals: [["ana", "pr-goal-1", "failed"]] });
+  await asSystem(t.db, (tx) => tx.updateTable("runs").set({ config_snapshot: sql`jsonb_set(config_snapshot, '{goals}', jsonb_build_array(jsonb_build_object('id', 'pr-goal-1', 'instruction', ${INJECTION}::text, 'personaId', 'ana')))` }).where("id", "=", run.id).execute());
+  const report = await call(A, "get_run", { run: run.number });
+  expect(report.structured.people[0].goals[0].goal).toMatchObject({ untrusted: true, from: expect.stringContaining("goal written for a pull request"), text: INJECTION });
+  expect(report.structured.findings.confirmed.items[0].goal).toMatchObject({ untrusted: true, text: INJECTION });
+  expect(report.structured.goals.notReached[0]).toMatchObject({ untrusted: true });
+  const finding = await call(A, "get_finding", { run: run.number, finding: "ana:f0" });
+  const at = finding.text.indexOf(INJECTION);
+  expect(at).toBeGreaterThan(-1);
+  expect(finding.text.slice(0, at)).toMatch(/<<untrusted (?!ID)\w+ from="goal written for a pull request">>\n$/);
+});
+
+test("a report grouped under one filed on another goal still matches the same defect filed on its own goal later", async () => {
+  const base = await seedRun("org-a", ids.a2!, { findings: [
+    { key: "ana:f0", title: "Unrelated primary", verdict: "confirmed", goal: "sign-in" },
+    { key: "lee:f1", persona: "lee", title: "Invoice save errors", verdict: "confirmed", goal: "invoice-lee", sameAs: "ana:f0" },
+  ] });
+  const head = await seedRun("org-a", ids.a2!, { findings: [{ key: "lee:f9", persona: "lee", title: "Invoice save errors", verdict: "confirmed", goal: "invoice-lee" }] });
+  const out = (await call(A, "compare_runs", { base: base.number, head: head.number })).structured;
+  expect(out.findings.stillReported.items.map((f: { base: { key: string }; head: { key: string } }) => [f.base.key, f.head.key])).toEqual([["lee:f1", "lee:f9"]]);
+  expect(out.findings.onlyInBase.items.map((f: { key: string }) => f.key)).toEqual([]);
 });

@@ -85,7 +85,9 @@ const statusOf = (summary: RunSummary) => (summary.cancelReason === "nothing_to_
 
 export type GoalText = string | Untrusted;
 
-const goalOf = (summary: RunSummary, text: string): GoalText => (summary.prPlan ? untrusted("goal written for a pull request", text) : text);
+const GENERATED_GOAL = /^pr-goal-\d+$/;
+const goalOf = (summary: RunSummary, text: string): GoalText =>
+  summary.prPlan || summary.goalTexts.some((g) => g.instruction === text && GENERATED_GOAL.test(g.id)) ? untrusted("goal written for a pull request", text) : text;
 const plainGoal = (goal: GoalText): string => (typeof goal === "string" ? goal : goal.text);
 
 const REFUSED = "The product refused a test account, so the run stopped. Check that account on the plan and run again.";
@@ -149,7 +151,7 @@ export function findingDetail(summary: RunSummary, key: string) {
         { ref: `trail:${personaOfKey}`, kind: "trail" as const, label: `what ${who} did, step by step` },
       ];
       return {
-        run: summary.number, key: source.key, group, kind: f.kind, severity: f.severity, verdict: f.verdict ?? null, person: who, goal: goalOf(summary, f.goalText),
+        run: summary.number, key: source.key, group, kind: f.kind, severity: f.severity, verdict: f.verdict ?? null, person: who, goal: goalOf(summary, source.goalText),
         groupedUnder: f.key === key ? null : f.key,
         title: untrusted(`finding title, filed by ${who}`, source.title),
         observed: untrusted(`what ${who} observed`, source.observed),
@@ -213,8 +215,11 @@ const sameWords = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/g
 
 function reported(summary: RunSummary) {
   const view = runView(summary);
-  return COMPARED.flatMap(([group, verdict]) => (view.report[group] as ReportFinding[]).flatMap((f) => [f, ...f.sameReports.map((s) => ({ ...f, key: s.key, title: s.title }))]
-    .map((x) => ({ key: x.key, verdict, goalText: f.goalText, personaKey: f.personaKey, title: x.title, match: `${sameWords(x.title)}|${sameWords(f.goalText)}` }))));
+  const personaOf = new Map(summary.findings.map((f) => [f.key, f.personaKey]));
+  return COMPARED.flatMap(([group, verdict]) => (view.report[group] as ReportFinding[]).flatMap((f) => [
+    { key: f.key, title: f.title, goalText: f.goalText },
+    ...f.sameReports.map((s) => ({ key: s.key, title: s.title, goalText: s.goalText })),
+  ].map((x) => ({ key: x.key, groupKey: f.key, verdict, goalText: x.goalText, personaKey: personaOf.get(x.key) ?? f.personaKey, title: x.title, match: `${sameWords(x.title)}|${sameWords(x.goalText)}` }))));
 }
 
 type GoalState = "reached" | "failed" | "not_attempted" | "not_tested";
@@ -255,17 +260,22 @@ export function compareRuns(first: RunSummary, second: RunSummary) {
     return [{ title: untrusted("finding title", b.title), goal: goalOf(base, b.goalText), base: { key: b.key, verdict: b.verdict }, head: { key: h.key, verdict: h.verdict }, matchedBy: "same wording of the title and the same goal text" }];
   });
   const paired = new Set(stillReported.map((s) => s.base.key));
+  const groupOf = (items: typeof inBase) => new Map(items.map((f) => [f.key, f.groupKey]));
+  const baseGroups = groupOf(inBase);
+  const headGroups = groupOf(inHead);
+  const reportedBaseGroups = new Set([...paired].map((k) => baseGroups.get(k)));
+  const reportedHeadGroups = new Set([...matched].map((k) => headGroups.get(k)));
   const goalInHead = (personaKey: string, goalText: string) => after.get(`${personaKey}/${sameWords(goalText)}`)?.state ?? "not_in_plan";
   const plansDiffer = base.planName !== head.planName;
   return {
     swapped: base !== first,
     base: { number: base.number, ...headlineOf(base, runView(base).headline), status: statusOf(base) },
     head: { number: head.number, ...headlineOf(head, runView(head).headline), status: statusOf(head) },
-    goals,
+    goals: { ...capped(goals.filter((g) => g.change !== "same")), unchanged: goals.filter((g) => g.change === "same").length },
     findings: {
       stillReported: capped(stillReported),
-      onlyInBase: capped(inBase.filter((f) => !paired.has(f.key)).map((f) => ({ key: f.key, verdict: f.verdict, title: untrusted("finding title", f.title), goal: goalOf(base, f.goalText), goalInHead: goalInHead(f.personaKey, f.goalText) }))),
-      onlyInHead: capped(inHead.filter((f) => !matched.has(f.key)).map((f) => ({ key: f.key, verdict: f.verdict, title: untrusted("finding title", f.title), goal: goalOf(head, f.goalText) }))),
+      onlyInBase: capped(inBase.filter((f) => !paired.has(f.key) && !reportedBaseGroups.has(f.groupKey)).map((f) => ({ key: f.key, verdict: f.verdict, title: untrusted("finding title", f.title), goal: goalOf(base, f.goalText), goalInHead: goalInHead(f.personaKey, f.goalText) }))),
+      onlyInHead: capped(inHead.filter((f) => !matched.has(f.key) && !reportedHeadGroups.has(f.groupKey)).map((f) => ({ key: f.key, verdict: f.verdict, title: untrusted("finding title", f.title), goal: goalOf(head, f.goalText) }))),
     },
     caveats: [
       "Findings are matched by the wording of their title and the text of their goal, across confirmed, refuted, unchecked, friction and dismissed reports. Different wording of the same defect shows up as one finding only in the base run and one only in the head run.",
