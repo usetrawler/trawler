@@ -15,6 +15,7 @@ import { peopleLimitMessage, runsPerDayMessage, type WorkspacePlan } from "./pla
 import { runsToday, workspacePlan } from "./plans.ts";
 import { gaveNoVerdict } from "./report.ts";
 import { runTitle } from "./status.ts";
+import { viaOf, type RunVia } from "./via.ts";
 
 export interface StartRunOptions {
   budgetUsd: number;
@@ -33,6 +34,7 @@ export interface StartRunOptions {
   targetUrl?: string;
   extraOrigins?: string[];
   pullRequest?: PullRequest;
+  startedVia?: RunVia;
   planMode?: PlanMode;
   replan?: boolean;
   conversation?: boolean;
@@ -283,7 +285,7 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
       max_steps: options.maxSteps, replay_steps: options.replaySteps, created_by: options.createdBy,
       provider: options.provider ?? "openrouter", provider_base_url: options.providerBaseUrl ?? null, token_cap: options.tokenCap ? String(options.tokenCap) : null,
       prompt_usd_per_mtok: options.price ? options.price.promptUsdPerMtok.toFixed(6) : null, completion_usd_per_mtok: options.price ? options.price.completionUsdPerMtok.toFixed(6) : null,
-      paid_by: paidBy, execution, target_override: options.targetUrl !== undefined, conversation, provided_accounts: JSON.stringify(providedAccounts), pull_request: options.pullRequest ? JSON.stringify(options.pullRequest) : null, pr_plan: prPlan ? JSON.stringify(prPlan) : null,
+      paid_by: paidBy, execution, target_override: options.targetUrl !== undefined, conversation, provided_accounts: JSON.stringify(providedAccounts), pull_request: options.pullRequest ? JSON.stringify(options.pullRequest) : null, started_via: options.startedVia ? JSON.stringify(options.startedVia) : null, pr_plan: prPlan ? JSON.stringify(prPlan) : null,
     })
     .returning(["id", "number"])
     .executeTakeFirstOrThrow();
@@ -307,21 +309,21 @@ export class RunNotFound extends Error {
   }
 }
 
-export type CancelReason = "stopped" | "key_removed" | "account_refused" | "time_limit" | "workspace_budget" | "paused" | "halted" | "stopped_from_ci" | "unclaimed" | "ci_gone" | "superseded" | "nothing_to_test";
+export type CancelReason = "stopped_over_mcp" | "stopped" | "key_removed" | "account_refused" | "time_limit" | "workspace_budget" | "paused" | "halted" | "stopped_from_ci" | "unclaimed" | "ci_gone" | "superseded" | "nothing_to_test";
 
 export const ACCOUNT_REFUSED = "The product refused the username and password of";
 
-export async function endRun(tx: Tx, runId: string, end: { status: "stopped_budget" } | { status: "cancelled"; reason: CancelReason }): Promise<void> {
-  await tx.updateTable("runs").set({ status: end.status, cancel_reason: end.status === "cancelled" ? end.reason : null, finished_at: new Date(), sign_up_seed: null }).where("id", "=", runId).execute();
+export async function endRun(tx: Tx, runId: string, end: { status: "stopped_budget" } | { status: "cancelled"; reason: CancelReason; via?: RunVia }): Promise<void> {
+  await tx.updateTable("runs").set({ status: end.status, cancel_reason: end.status === "cancelled" ? end.reason : null, finished_at: new Date(), sign_up_seed: null, ...(end.status === "cancelled" && end.via ? { stopped_via: JSON.stringify(end.via) } : {}) }).where("id", "=", runId).execute();
   await tx.updateTable("jobs").set({ status: "cancelled", finished_at: new Date() }).where("run_id", "=", runId).where("status", "=", "queued").execute();
   await giveBackUnusedFirstRun(tx, runId);
 }
 
-export async function cancelRun(tx: Tx, orgId: string, runId: string, reason: CancelReason): Promise<boolean> {
+export async function cancelRun(tx: Tx, orgId: string, runId: string, reason: CancelReason, via?: RunVia): Promise<boolean> {
   const run = await tx.selectFrom("runs").select("status").where("id", "=", runId).where("org_id", "=", orgId).forUpdate().executeTakeFirst();
   if (!run) throw new RunNotFound();
   if (run.status !== "queued" && run.status !== "running") return false;
-  await endRun(tx, runId, { status: "cancelled", reason });
+  await endRun(tx, runId, { status: "cancelled", reason, ...(via ? { via } : {}) });
   return true;
 }
 
@@ -421,7 +423,7 @@ export async function runIdByNumber(tx: Tx, orgId: string, number: number): Prom
 export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const run = await tx
     .selectFrom("runs")
-    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason", "paid_by", "conversation", "provided_accounts", "plan_id", "plan_name", "pull_request", "pr_plan", "execution", sql<string>`(select count(*) from plans p where p.project_id = runs.project_id and p.org_id = runs.org_id and p.kind = 'standard')`.as("plan_count"), sql<boolean>`exists (select 1 from plans p where p.id = runs.plan_id and p.kind = 'pull_request')`.as("on_pull_request_plan")])
+    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason", "paid_by", "conversation", "provided_accounts", "plan_id", "plan_name", "pull_request", "pr_plan", "execution", "started_via", "stopped_via", sql<string>`(select count(*) from plans p where p.project_id = runs.project_id and p.org_id = runs.org_id and p.kind = 'standard')`.as("plan_count"), sql<boolean>`exists (select 1 from plans p where p.id = runs.plan_id and p.kind = 'pull_request')`.as("on_pull_request_plan")])
     .where("id", "=", runId)
     .where("org_id", "=", orgId)
     .executeTakeFirst();
@@ -494,6 +496,8 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
     execution: run.execution as Execution,
     providedAccounts: run.provided_accounts as string[],
     pullRequest: pullRequestOf(run.pull_request as unknown as PullRequest | null),
+    startedVia: viaOf(run.started_via),
+    stoppedVia: viaOf(run.stopped_via),
     prPlan: run.pr_plan ? plannedFor(record!, (run.pull_request as unknown as PullRequest | null)?.number ?? null, snapshot, record?.createdByRun ?? origin?.number ?? null) : null,
     createdAt: run.created_at, startedAt: run.started_at, finishedAt: run.finished_at,
     jobs,

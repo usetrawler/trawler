@@ -5,6 +5,7 @@ import type { RunFilter, RunLine } from "../../projects/overview.ts";
 import { parsePlanQuery, parseRunsQuery, RunsView } from "./runs-view.tsx";
 
 const run: RunLine = {
+  startedVia: null, origin: "app",
   id: "r1", number: 12, status: "failed", createdAt: new Date("2026-09-25T12:32:00Z"), costUsd: 0.2, tokenCap: null, tokensUsed: 0,
   confirmed: 0, unchecked: false, goalsReached: 0, goalsTotal: 3, projectId: "p1", projectName: "Acme", projectSite: null, planName: null,
 };
@@ -63,13 +64,16 @@ describe("RunsView", () => {
 
 describe("parseRunsQuery", () => {
   it("reads the filter and the page from the address", () => {
-    expect(parseRunsQuery({ show: "completed", before: "40" })).toEqual({ show: "completed", before: 40 });
-    expect(parseRunsQuery({ show: "attention" })).toEqual({ show: "attention", before: undefined });
+    expect(parseRunsQuery({ show: "completed", before: "40" })).toEqual({ show: "completed", origin: "any", before: 40 });
+    expect(parseRunsQuery({ show: "attention" })).toEqual({ show: "attention", origin: "any", before: undefined });
+    expect(parseRunsQuery({ via: "mcp" }).origin).toBe("mcp");
+    expect(parseRunsQuery({ via: "api" }).origin).toBe("api");
   });
 
   it("falls back to all runs from the newest for anything else", () => {
     for (const show of [undefined, "all", "running", "", ["completed", "attention"]]) expect(parseRunsQuery({ show }).show).toBe("all");
     for (const before of [undefined, "0", "-3", "4.5", "abc", "2147483648", "01", ["3", "4"]]) expect(parseRunsQuery({ before }).before).toBeUndefined();
+    for (const via of [undefined, "", "other", ["mcp", "app"]]) expect(parseRunsQuery({ via }).origin).toBe("any");
     expect(parseRunsQuery({ before: "2147483647" }).before).toBe(2_147_483_647);
   });
 });
@@ -94,5 +98,29 @@ describe("RunsView, a project with several plans", () => {
     expect(parsePlanQuery({ plan: "other" }, plans)).toBeUndefined();
     expect(parsePlanQuery({ plan: ["pl-2"] }, plans)).toBeUndefined();
     expect(parsePlanQuery({}, plans)).toBeUndefined();
+  });
+});
+
+describe("RunsView, how a run started", () => {
+  const html = (origin: "any" | "app" | "api" | "mcp", show: RunFilter = "all") => renderToStaticMarkup(createElement(RunsView, {
+    head: null, basePath: "/runs", show, origin, counts: { all: 3, completed: 2, attention: 1 }, runs: [run], olderThan: 5, paged: false,
+  }));
+  const origins = (markup: string) => [...(markup.match(/<nav aria-label="Filter runs by how they started".*?<\/nav>/)?.[0] ?? "").matchAll(/<a href="([^"]*)"( aria-current="page")?[^>]*>([^<]*)<\/a>/g)].map((m) => [m[3], m[1], Boolean(m[2])]);
+
+  it("offers every way a run starts, marks the open one, and keeps the status filter", () => {
+    expect(origins(html("any"))).toEqual([["Any", "/runs", true], ["In the app", "/runs?via=app", false], ["API token", "/runs?via=api", false], ["Assistant", "/runs?via=mcp", false]]);
+    expect(origins(html("mcp", "attention")).map((o) => o[1])).toEqual(["/runs?show=attention", "/runs?show=attention&amp;via=app", "/runs?show=attention&amp;via=api", "/runs?show=attention&amp;via=mcp"]);
+    expect(origins(html("mcp")).filter((o) => o[2]).map((o) => o[0])).toEqual(["Assistant"]);
+  });
+
+  it("keeps the way a run started in the status filters and the paging", () => {
+    expect(filters(html("mcp")).map((f) => f.href)).toEqual(["/runs?via=mcp", "/runs?show=completed&amp;via=mcp", "/runs?show=attention&amp;via=mcp"]);
+    expect(pages(html("mcp"))).toEqual([["Older runs", "/runs?via=mcp&amp;before=5"]]);
+  });
+
+  it("says no run here was started this way, instead of that there are no runs, when a way of starting is chosen", () => {
+    const empty = (origin: "any" | "mcp") => renderToStaticMarkup(createElement(RunsView, { head: null, basePath: "/runs", show: "all", origin, counts: { all: 0, completed: 0, attention: 0 }, runs: [], olderThan: null, paged: false }));
+    expect(empty("any")).toContain("No runs yet.");
+    expect(empty("mcp")).toContain("No run here was started this way.");
   });
 });

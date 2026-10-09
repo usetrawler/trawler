@@ -95,7 +95,7 @@ test("the home page lists every project of the workspace, the most recently acti
   expect(projects[2]).toMatchObject({ id: acme, targetUrl: "https://app.acme.test/" });
   expect(projects[2]!.lastRun).toEqual({
     id: live.id, number: live.number, status: "running", createdAt: expect.any(Date),
-    costUsd: 0.02, tokenCap: null, tokensUsed: 0, confirmed: 0, unchecked: false, goalsReached: 0, goalsTotal: 6, projectId: acme, projectName: "Acme", projectSite: null, planName: null,
+    costUsd: 0.02, tokenCap: null, tokensUsed: 0, confirmed: 0, unchecked: false, goalsReached: 0, goalsTotal: 6, projectId: acme, projectName: "Acme", projectSite: null, planName: null, startedVia: null, origin: "app",
   });
   expect(projects[1]!.lastRun).toMatchObject({ id: waiting.id, status: "queued", projectName: "Beta" });
 });
@@ -105,7 +105,7 @@ test("the workspace's runs are newest first across its projects, each with its p
   expect(history.runs.map((r) => r.id)).toEqual([waiting.id, live.id, latest.id, cancelled.id, capped.id, failed.id]);
   expect(history.runs[4]).toEqual({
     id: capped.id, number: capped.number, status: "stopped_budget", createdAt: expect.any(Date),
-    costUsd: 2, tokenCap: 100_000, tokensUsed: 120_000, confirmed: 1, unchecked: false, goalsReached: 2, goalsTotal: 6, projectId: acme, projectName: "Acme", projectSite: null, planName: null,
+    costUsd: 2, tokenCap: 100_000, tokensUsed: 120_000, confirmed: 1, unchecked: false, goalsReached: 2, goalsTotal: 6, projectId: acme, projectName: "Acme", projectSite: null, planName: null, startedVia: null, origin: "app",
   });
   expect(history.runs[3]).toMatchObject({ status: "cancelled", projectId: beta, projectName: "Beta" });
   expect(history.runs[5]).toMatchObject({ status: "failed", confirmed: 0, unchecked: false, goalsReached: 0, goalsTotal: 6, costUsd: 0.1 });

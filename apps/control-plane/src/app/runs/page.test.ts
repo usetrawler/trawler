@@ -36,6 +36,7 @@ vi.mock("../../projects/overview.ts", () => ({
 const { default: RunsPage } = await import("./page.tsx");
 const open = (search: { show?: string | string[]; before?: string | string[] } = {}) => RunsPage({ searchParams: Promise.resolve(search) });
 const run: RunLine = {
+  startedVia: null, origin: "app",
   id: "r12", number: 12, status: "failed", createdAt: new Date("2026-09-25T12:32:00Z"), costUsd: 0.2, tokenCap: null, tokensUsed: 0,
   confirmed: 0, unchecked: false, goalsReached: 0, goalsTotal: 3, projectId: "p1", projectName: "Acme", projectSite: null, planName: null,
 };

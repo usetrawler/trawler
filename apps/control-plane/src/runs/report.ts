@@ -158,6 +158,7 @@ const STOPPED_BECAUSE: Record<CancelReason, string> = {
   workspace_budget: "Stopped when the workspace reached its monthly budget.",
   paused: "Stopped when runs on this project were paused.",
   halted: "Stopped because Trawler paused hosted runs.",
+  stopped_over_mcp: "Stopped by an assistant over MCP.",
   stopped_from_ci: "Stopped from CI: the job timed out, was cancelled or was interrupted before the run finished.",
   unclaimed: `No runner picked this run up within ${UNCLAIMED_RUN_MINUTES} minutes, so it was stopped.`,
   ci_gone: "The CI job that started this run stopped asking about it, so the run was stopped.",
@@ -174,6 +175,7 @@ function headline(s: RunSummary, confirmed: number, defects: number, replaysAllF
     const refused = checks.findLast((j) => j.status === "failed" && j.error?.startsWith(ACCOUNT_REFUSED))?.error?.trim() ?? "The product refused a test account";
     return `${/[.!?]$/.test(refused) ? refused : `${refused}.`} Check that account on the plan and run again.`;
   }
+  if (status === "cancelled" && cancelReason === "stopped_over_mcp" && s.stoppedVia) return `Stopped by ${s.stoppedVia.client} for ${s.stoppedVia.person} over MCP.`;
   if (status === "cancelled") return STOPPED_BECAUSE[cancelReason ?? "stopped"];
   if (status === "failed") return "This run could not finish.";
   const prefix = status === "stopped_budget" ? "Stopped at the cap. " : "";

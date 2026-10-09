@@ -5,6 +5,7 @@ import type { ProjectLine, RunLine } from "../projects/overview.ts";
 import { firstName, Overview, overviewSubtitle } from "./overview.tsx";
 
 const run = (over: Partial<RunLine> = {}): RunLine => ({
+  startedVia: null, origin: "app",
   id: "r9", number: 9, status: "succeeded", createdAt: new Date("2026-09-25T12:32:00Z"), costUsd: 0.4, tokenCap: null, tokensUsed: 0,
   confirmed: 2, unchecked: false, goalsReached: 4, goalsTotal: 6, projectId: "p1", projectName: "Acme", projectSite: null, planName: null, ...over,
 });

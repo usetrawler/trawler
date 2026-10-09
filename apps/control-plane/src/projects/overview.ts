@@ -1,5 +1,6 @@
 import { sql } from "kysely";
 import type { Tx } from "../db/tenancy.ts";
+import { originOf, viaOf, type RunOrigin, type ShownVia } from "../runs/via.ts";
 
 export const RUNS_PER_PAGE = 50;
 
@@ -19,6 +20,8 @@ export interface RunLine {
   projectName: string;
   projectSite: string | null;
   planName: string | null;
+  startedVia: ShownVia | null;
+  origin: RunOrigin;
 }
 
 export type RunFilter = "all" | "completed" | "attention";
@@ -49,13 +52,19 @@ function namesUsed(projects: Array<{ name: string }>): Map<string, number> {
 
 const siteOf = (url: string) => (URL.canParse(url) ? `${new URL(url).host}${new URL(url).pathname.replace(/\/+$/, "")}` : url);
 
+const startedBy = (origin: RunOrigin) => ({
+  mcp: sql<boolean>`(r.started_via IS NOT NULL OR r.created_by LIKE 'mcp:%')`,
+  api: sql<boolean>`(r.started_via IS NULL AND r.created_by LIKE 'api-token:%')`,
+  app: sql<boolean>`(r.started_via IS NULL AND r.created_by NOT LIKE 'api-token:%' AND r.created_by NOT LIKE 'mcp:%')`,
+})[origin];
+
 function runLines(tx: Tx, orgId: string) {
   return tx
     .selectFrom("runs as r")
     .innerJoin("projects as p", "p.id", "r.project_id")
     .where("r.org_id", "=", orgId)
     .select((eb) => [
-      "r.id", "r.number", "r.status", "r.cancel_reason", "r.created_at", "r.cost_usd", "r.token_cap", "r.tokens_used", "r.project_id", "r.plan_name", "p.name as project_name", "p.target_url as project_url",
+      "r.id", "r.number", "r.status", "r.cancel_reason", "r.created_at", "r.cost_usd", "r.token_cap", "r.tokens_used", "r.project_id", "r.plan_name", "r.created_by", "r.started_via", "p.name as project_name", "p.target_url as project_url",
       sql<boolean>`r.plan_id IS NULL OR (SELECT count(*) FROM plans pl WHERE pl.project_id = r.project_id AND pl.kind = 'standard') > 1 OR EXISTS (SELECT 1 FROM plans pl WHERE pl.id = r.plan_id AND pl.kind = 'pull_request')`.as("plan_shown"),
       eb.exists(eb.selectFrom("projects as twin").select("twin.id").whereRef("twin.org_id", "=", "p.org_id").whereRef("twin.name", "=", "p.name").whereRef("twin.id", "<>", "p.id")).as("name_shared"),
       eb.selectFrom("findings as f").select((f) => f.fn.countAll<string>().as("n")).whereRef("f.run_id", "=", "r.id").where("f.kind", "=", "defect").where("f.verdict", "=", "confirmed")
@@ -76,6 +85,7 @@ function toLine(r: RunRow): RunLine {
     costUsd: Number(r.cost_usd), tokenCap: r.token_cap === null ? null : Number(r.token_cap), tokensUsed: Number(r.tokens_used),
     confirmed: Number(r.confirmed ?? 0), unchecked: !!r.unchecked, goalsReached: Number(r.goals_reached ?? 0), goalsTotal: Number(r.goals_total ?? 0),
     projectId: r.project_id, projectName: r.project_name, projectSite: r.name_shared ? siteOf(r.project_url) : null, planName: r.plan_shown ? r.plan_name : null,
+    startedVia: viaOf(r.started_via), origin: originOf(r.created_by, r.started_via),
   };
 }
 
@@ -108,12 +118,13 @@ export async function runHead(tx: Tx, orgId: string, runId: string) {
   return run ? { number: run.number, projectName: run.name } : null;
 }
 
-export async function workspaceRuns(tx: Tx, orgId: string, options: { projectId?: string; planId?: string; show?: RunFilter; before?: number; size?: number } = {}) {
+export async function workspaceRuns(tx: Tx, orgId: string, options: { projectId?: string; planId?: string; show?: RunFilter; origin?: RunOrigin; before?: number; size?: number } = {}) {
   const size = options.size ?? RUNS_PER_PAGE;
   const show = options.show ?? "all";
   let query = runLines(tx, orgId).orderBy("r.number", "desc").limit(size + 1);
   if (options.projectId !== undefined) query = query.where("r.project_id", "=", options.projectId);
   if (options.planId !== undefined) query = query.where("r.plan_id", "=", options.planId);
+  if (options.origin) query = query.where(startedBy(options.origin));
   if (show !== "all") query = query.where("r.status", "in", FILTER_STATUSES[show]);
   if (show === "attention") query = query.where(sql<boolean>`r.cancel_reason IS DISTINCT FROM 'nothing_to_test'`);
   if (options.before !== undefined) query = query.where("r.number", "<", options.before);
@@ -122,17 +133,18 @@ export async function workspaceRuns(tx: Tx, orgId: string, options: { projectId?
   return { runs, olderThan: rows.length > size ? runs.at(-1)!.number : null };
 }
 
-export async function runCounts(tx: Tx, orgId: string, projectId?: string, planId?: string): Promise<Record<RunFilter, number>> {
+export async function runCounts(tx: Tx, orgId: string, projectId?: string, planId?: string, origin?: RunOrigin): Promise<Record<RunFilter, number>> {
   let query = tx
-    .selectFrom("runs")
-    .where("org_id", "=", orgId)
+    .selectFrom("runs as r")
+    .where("r.org_id", "=", orgId)
     .select([
       sql<string>`count(*)`.as("all"),
-      sql<string>`count(*) filter (where status in (${sql.join(FILTER_STATUSES.completed)}))`.as("completed"),
-      sql<string>`count(*) filter (where status in (${sql.join(FILTER_STATUSES.attention)}) and cancel_reason is distinct from 'nothing_to_test')`.as("attention"),
+      sql<string>`count(*) filter (where r.status in (${sql.join(FILTER_STATUSES.completed)}))`.as("completed"),
+      sql<string>`count(*) filter (where r.status in (${sql.join(FILTER_STATUSES.attention)}) and r.cancel_reason is distinct from 'nothing_to_test')`.as("attention"),
     ]);
-  if (projectId !== undefined) query = query.where("project_id", "=", projectId);
-  if (planId !== undefined) query = query.where("plan_id", "=", planId);
+  if (projectId !== undefined) query = query.where("r.project_id", "=", projectId);
+  if (planId !== undefined) query = query.where("r.plan_id", "=", planId);
+  if (origin) query = query.where(startedBy(origin));
   const counts = await query.executeTakeFirstOrThrow();
   return { all: Number(counts.all), completed: Number(counts.completed), attention: Number(counts.attention) };
 }
