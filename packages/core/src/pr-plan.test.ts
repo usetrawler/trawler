@@ -34,6 +34,14 @@ describe("leaksPullRequest", () => {
     expect(leaksPullRequest(instruction, pr)).toBe(why);
   });
 
+  test("a two-word file name is a component only when the goal writes it as the code does", () => {
+    const rename = { title: "feat: the owner renames the household", changedFiles: ["api/src/main/java/com/recurro/household/HouseholdName.java", "web/src/views/MembersView.vue"] };
+    expect(leaksPullRequest("Change the household name and see it at the top", rename)).toBeNull();
+    expect(leaksPullRequest("The members view shows who is in the household", rename)).toBeNull();
+    expect(leaksPullRequest("The HouseholdName check refuses a blank name", rename)).toBe("names a component");
+    expect(leaksPullRequest("Open the MembersView", rename)).toBe("names a component");
+  });
+
   test("lets a goal phrased as what a user wants through", () => {
     expect(leaksPullRequest("Last month's invoices are downloaded as one spreadsheet", pr)).toBeNull();
     expect(leaksPullRequest("Tom opens the invoice Ana sent and sees its total", pr)).toBeNull();

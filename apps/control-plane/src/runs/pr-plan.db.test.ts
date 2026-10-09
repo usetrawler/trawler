@@ -177,7 +177,7 @@ test("both: a lead whose goals all name code or addresses leaves the stored plan
   const leaky = answer([{ person: "ana", goals: [{ id: "a", instruction: "Click the InvoiceExportButton" }, { id: "b", instruction: "Open https://app.acme.test/export" }] }]);
   const { run } = await start("leaky", { planMode: "both" });
   await planDueRuns(lead(scriptedModel([leaky, leaky])));
-  expect((await summary(run.id))!.prPlan).toMatchObject({ goals: [], note: expect.stringContaining("every one of the 2 goals the lead wrote named code, a file or an address") });
+  expect((await summary(run.id))!.prPlan).toMatchObject({ goals: [], note: expect.stringContaining("every one of the 2 goals the lead wrote was dropped; the first: \"Click the InvoiceExportButton\" uses a name from the code") });
   expect((await kinds(run.id)).filter((j) => j.kind === "role_session")).toHaveLength(2);
   await finish(run.id);
   const { run: bare } = await start("no-model");
