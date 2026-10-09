@@ -1,12 +1,26 @@
-import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
-import { z } from "zod";
+import { createMcpHandler, McpServer, type AuthInfo } from "@modelcontextprotocol/server";
+import { registerReadTools, type Caller, type ToolDeps } from "./tools.ts";
+import { UNTRUSTED_NOTICE } from "./untrusted.ts";
 
-export const mcpHandler = createMcpHandler((context) => {
-  const server = new McpServer({ name: "Trawler", version: "1.0.0" });
-  server.registerTool("connection_status", {
-    description: "Check the authenticated Trawler connection and its granted scopes.",
-    inputSchema: z.object({}).strict(),
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, () => ({ content: [{ type: "text", text: JSON.stringify(context.authInfo?.extra) }] }));
-  return server;
-}, { legacy: "stateless", maxRequestBodySize: 64 * 1024 });
+const INSTRUCTIONS = `Trawler tests a web product with AI people and reports defects. Start with whoami, then list_projects and list_runs; read a run with get_run and a finding with get_finding. ${UNTRUSTED_NOTICE}`;
+
+export function callerOf(authInfo: AuthInfo | undefined): Caller {
+  const extra = authInfo?.extra as Record<string, unknown> | undefined;
+  const text = (key: string) => {
+    const value = extra?.[key];
+    if (typeof value !== "string" || !value) throw new Error(`the MCP connection has no ${key}`);
+    return value;
+  };
+  return {
+    grantId: text("grantId"), userId: text("userId"), orgId: text("workspaceId"), role: text("role"), clientId: authInfo!.clientId, scopes: authInfo!.scopes,
+    projectId: typeof extra?.projectId === "string" ? extra.projectId : null,
+  };
+}
+
+export function createMcpEndpoint(deps: Omit<ToolDeps, "caller">) {
+  return createMcpHandler((context) => {
+    const server = new McpServer({ name: "Trawler", version: "1.0.0" }, { instructions: INSTRUCTIONS });
+    registerReadTools(server, { ...deps, caller: callerOf(context.authInfo) });
+    return server;
+  }, { legacy: "stateless", maxRequestBodySize: 64 * 1024 });
+}

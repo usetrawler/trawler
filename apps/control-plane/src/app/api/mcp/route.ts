@@ -1,17 +1,23 @@
 import { getAuth } from "../../../server/auth.ts";
+import { artifactStore } from "../../../server/artifacts.ts";
+import { getDb } from "../../../server/db.ts";
 import { mcpAuthentication } from "../../../mcp/http.ts";
-import { mcpHandler } from "../../../mcp/server.ts";
+import { createMcpEndpoint } from "../../../mcp/server.ts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+let endpoint: ReturnType<typeof createMcpEndpoint> | undefined;
+
 export async function POST(request: Request): Promise<Response> {
   const config = getAuth().mcp;
   if (!config) return new Response(null, { status: 404 });
   const principal = await mcpAuthentication(config.pool, config.origin, request);
   if (principal instanceof Response) return principal;
-  return mcpHandler.fetch(request, { authInfo: {
+  endpoint ??= createMcpEndpoint({ db: getDb(), pool: config.pool, store: artifactStore(), origin: config.origin });
+  return endpoint.fetch(request, { authInfo: {
     token: "", clientId: principal.clientId, scopes: principal.scopes, expiresAt: principal.expiresAt,
-    extra: { grantId: principal.grantId, workspaceId: principal.orgId, projectId: principal.projectId, userId: principal.userId },
+    extra: { grantId: principal.grantId, workspaceId: principal.orgId, projectId: principal.projectId, userId: principal.userId, role: principal.role },
   } });
 }
 export const GET = POST;
