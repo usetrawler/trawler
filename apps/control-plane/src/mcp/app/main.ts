@@ -16,8 +16,9 @@ const note = el("div", { "data-part": "note" });
 const stage = el("div", { class: "stage" });
 put(root, status, note, stage);
 
-const stack: View[] = [];
+const stack: Array<View & { opener?: Element | null }> = [];
 let building = false;
+let input: Record<string, unknown> = {};
 
 function build(payload: Payload): View {
   switch (payload.view) {
@@ -42,13 +43,28 @@ function show(payload: Payload, push = true) {
     if (top && payload.view === "report" && top.update && top.key === `run:${payload.data.number}` && stack.length === 1) { top.update(payload); return; }
     replaceAll();
   } else top?.setActive?.(false);
+  const opener = document.activeElement;
   building = push && !!top;
-  const view = build(payload);
-  building = false;
+  let view: View;
+  try {
+    view = build(payload);
+  } catch {
+    building = false;
+    top?.setActive?.(true);
+    clear(note);
+    put(note, el("p", { class: "notice", role: "alert" }, "Trawler could not display this result."));
+    return;
+  } finally {
+    building = false;
+  }
   if (push && top) top.el.hidden = true;
-  stack.push(view);
+  stack.push(Object.assign(view, { opener }));
   stage.append(view.el);
-  if (push) window.scrollTo(0, 0);
+  if (push) {
+    window.scrollTo(0, 0);
+    const heading = view.el.querySelector("h1") as HTMLElement | null;
+    if (heading) { heading.tabIndex = -1; heading.focus(); host.announce(heading.textContent ?? ""); }
+  }
 }
 
 function back() {
@@ -60,6 +76,9 @@ function back() {
   previous.el.hidden = false;
   previous.setActive?.(true);
   window.scrollTo(0, 0);
+  const opener = closed.opener as HTMLElement | null | undefined;
+  if (opener && opener.isConnected) opener.focus();
+  else (previous.el.querySelector("h1") as HTMLElement | null)?.focus();
 }
 
 const linkNote = (url: string) => {
@@ -90,8 +109,10 @@ app.ontoolresult = (result) => {
   clear(note);
   if (result.isError) { put(note, el("p", { class: "notice", role: "alert" }, failureText(result as Result))); return; }
   const payload = payloadOf(result.structuredContent);
+  if (payload?.view === "runs") payload.args = { ...input };
   if (payload) show(payload, false);
 };
+app.ontoolinput = (params) => { input = { ...(params.arguments ?? {}) }; delete input.limit; delete input.before; };
 app.onhostcontextchanged = () => theme();
 app.onteardown = async () => { replaceAll(); return {}; };
 

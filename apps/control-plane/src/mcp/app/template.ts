@@ -1,7 +1,7 @@
 const STYLE = `
-:root { color-scheme: light dark; --bg: var(--color-background-primary, #faf8f4); --fg: var(--color-text-primary, #17191c); --muted: var(--color-text-secondary, color-mix(in srgb, var(--fg) 62%, var(--bg)));
+:root { color-scheme: light dark; --bg: var(--color-background-primary, Canvas); --fg: var(--color-text-primary, CanvasText); --muted: var(--color-text-secondary, color-mix(in srgb, var(--fg) 72%, var(--bg)));
   --card: color-mix(in srgb, var(--fg) 4%, var(--bg)); --line: color-mix(in srgb, var(--fg) 14%, transparent); --soft: color-mix(in srgb, var(--fg) 9%, transparent);
-  --ok: #2e7d4f; --bad: #c0392b; --warn: #a86a00; --info: #2563c9; --neutral: var(--muted); --action: #ff6b3d; --font: var(--font-sans, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif); }
+  --ok: #1f6b3f; --bad: #b3261e; --warn: #86500a; --info: #1d4fb3; --neutral: var(--muted); --action: #ff6b3d; --font: var(--font-sans, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ok: #6fcf97; --bad: #ff8a78; --warn: #f2c14e; --info: #8ab4f8; --action: #ff7045; } }
 :root[data-theme="dark"] { --ok: #6fcf97; --bad: #ff8a78; --warn: #f2c14e; --info: #8ab4f8; --action: #ff7045; }
 * { box-sizing: border-box; }
@@ -17,7 +17,7 @@ p { margin: 4px 0; overflow-wrap: anywhere; }
 ul { margin: 0; padding: 0; list-style: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .muted { color: var(--muted); } .small { font-size: 12px; } .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }
-:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; border-radius: 6px; }
+:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; border-radius: 6px; box-shadow: 0 0 0 5px color-mix(in srgb, var(--action) 60%, transparent); }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; box-shadow: 0 1px 0 color-mix(in srgb, var(--fg) 4%, transparent); }
 .hero { padding: 20px 22px; position: relative; overflow: hidden; }
 .hero::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: linear-gradient(90deg, var(--action), transparent 70%); opacity: 0.9; }
@@ -26,7 +26,7 @@ ul { margin: 0; padding: 0; list-style: none; }
 .eyebrow .mono { color: var(--fg); letter-spacing: 0.04em; }
 .meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 0; align-items: center; }
 .toolbar { display: flex; }
-.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--t, var(--neutral)); background: color-mix(in srgb, var(--t, var(--neutral)) 14%, transparent); border: 1px solid color-mix(in srgb, var(--t, var(--neutral)) 32%, transparent); }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--t, var(--neutral)); background: color-mix(in srgb, var(--t, var(--neutral)) 9%, transparent); border: 1px solid color-mix(in srgb, var(--t, var(--neutral)) 34%, transparent); }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: inline-block; }
 .dot.live { animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); } 50% { box-shadow: 0 0 0 5px transparent; } }
@@ -90,7 +90,7 @@ select { font: inherit; color: var(--fg); background: var(--card); border: 1px s
 .panel { padding: 0 18px 18px; }
 .panel section + section { margin-top: 2px; }
 .untrusted { margin: 6px 0; padding: 10px 12px; border-left: 3px solid color-mix(in srgb, var(--warn) 60%, transparent); background: var(--soft); border-radius: 0 8px 8px 0; }
-.untrusted figcaption { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+.untrusted figcaption { font-size: 11.5px; color: var(--fg); opacity: 0.8; margin-bottom: 4px; }
 .untrusted pre, .untrusted p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .from-product { font-style: italic; overflow-wrap: anywhere; }
 .evidence { display: flex; flex-direction: column; gap: 10px; }

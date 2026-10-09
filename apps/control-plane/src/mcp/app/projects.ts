@@ -1,6 +1,6 @@
 import { el, icon, put } from "./dom.ts";
 import type { Host, View } from "./host.ts";
-import { failureText, type ProjectList, type RunList } from "./types.ts";
+import { failureText, payloadOf, type ProjectList } from "./types.ts";
 import { button, chip, empty, hostOf, statusPill } from "./ui.ts";
 
 export function projectsView(list: ProjectList, host: Host): View {
@@ -8,11 +8,17 @@ export function projectsView(list: ProjectList, host: Host): View {
   const error = el("div", {});
   if (host.canGoBack()) put(root, el("div", { class: "toolbar" }, button("Back", { icon: "back", onclick: () => host.back() })));
   put(root, el("h1", { class: "title" }, "Projects"), error);
+  const state = { opening: false, disposed: false };
   async function open(id: string) {
+    if (state.opening) return;
+    state.opening = true;
     error.replaceChildren();
     const result = await host.call("list_runs", { project: id, limit: 20 }).catch(() => null);
-    if (!result || result.isError) { put(error, el("p", { class: "notice", role: "alert" }, icon("alert", 16), el("span", {}, result ? failureText(result) : "Could not load the runs of this project."))); return; }
-    host.show({ view: "runs", data: result.structuredContent as RunList, args: { project: id } });
+    state.opening = false;
+    if (state.disposed) return;
+    const payload = result && !result.isError ? payloadOf(result.structuredContent) : null;
+    if (!payload || payload.view !== "runs") { put(error, el("p", { class: "notice", role: "alert" }, icon("alert", 16), el("span", {}, result && result.isError ? failureText(result) : "Could not load the runs of this project."))); return; }
+    host.show({ ...payload, args: { project: id } });
   }
   if (list.projects.length === 0) put(root, empty("No projects."));
   else put(root, el("ul", { class: "cards" }, ...list.projects.map((p) => {
@@ -27,5 +33,5 @@ export function projectsView(list: ProjectList, host: Host): View {
     return el("li", {}, card);
   })));
   if (list.nextCursor) put(root, el("p", { class: "muted small" }, "More projects exist. Ask the assistant for the next page."));
-  return { el: root, dispose() {} };
+  return { el: root, dispose() { state.disposed = true; } };
 }

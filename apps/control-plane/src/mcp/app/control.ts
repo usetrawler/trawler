@@ -9,7 +9,7 @@ export function startedView(s: Started, host: Host): View {
   const root = el("div", { class: "view control" });
   const limit = s.limit;
   put(root, el("section", { class: "card hero ok-hero" },
-    el("p", { class: "eyebrow" }, el("span", { class: "mono" }, `Run #${s.number}`), statusPill("queued")),
+    el("p", { class: "eyebrow" }, el("span", { class: "mono" }, `Run #${s.number}`), !s.replayed && statusPill("queued")),
     el("h1", {}, s.replayed ? "This run was already started" : "Run started"),
     el("p", { class: "muted" }, "It runs in the background. Ask for the run again to see its report."),
     el("p", { class: "meta" }, chip(`${s.people} ${s.people === 1 ? "person" : "people"}`, "neutral"), s.replayed && chip("same idempotency key", "info")),
@@ -19,7 +19,7 @@ export function startedView(s: Started, host: Host): View {
     put(root, el("section", { class: "card block" }, el("h2", {}, icon("coins", 17), "This connection's limit, last 24 hours"),
       el("div", { class: "tiles" },
         tile("Runs", `${limit.runs}/${limit.runsPerDay}`, tone(limit.runs, limit.runsPerDay), meter(limit.runs, limit.runsPerDay, tone(limit.runs, limit.runsPerDay), "Runs used")),
-        tile("Spent or set aside", money(limit.spentUsd), tone(limit.spentUsd, limit.spendUsdPerDay), meter(limit.spentUsd, limit.spendUsdPerDay, tone(limit.spentUsd, limit.spendUsdPerDay), "Spend used"), el("p", { class: "tile-sub" }, `of ${money(limit.spendUsdPerDay)}`))),
+        tile("Spent or set aside", money(limit.spentUsd), tone(limit.spentUsd, limit.spendUsdPerDay), meter(limit.spentUsd, limit.spendUsdPerDay, tone(limit.spentUsd, limit.spendUsdPerDay), "Spend used", money), el("p", { class: "tile-sub" }, `of ${money(limit.spendUsdPerDay)}`))),
       limit.nextFreeAt && el("p", { class: "muted small" }, `The oldest start leaves the window at ${when(limit.nextFreeAt)}.`)));
   }
   return { el: root, dispose() {} };

@@ -25,16 +25,14 @@ export function compareView(c: Compared, host: Host): View {
   const comparable = c.goals.items.filter((g) => g.base !== "not_in_plan" && g.head !== "not_in_plan");
   const onlyOne = c.goals.items.filter((g) => g.base === "not_in_plan" || g.head === "not_in_plan");
   if (onlyOne.length > 0) {
-    const inBase = onlyOne.filter((g) => g.head === "not_in_plan").length;
-    const inHead = onlyOne.length - inBase;
     put(root, el("div", { class: "callout tone-info" }, icon("layers", 18), el("div", {},
       el("strong", {}, "These runs followed different plans."),
-      el("p", {}, `${inBase} goal${inBase === 1 ? " is" : "s are"} only in run #${c.base.number} and ${inHead} only in run #${c.head.number}, so there is nothing to compare for them.${comparable.length === 0 ? " No goal is in both runs." : ""}`),
+      el("p", {}, `${onlyOne.length}${c.goals.more > 0 ? "+" : ""} ${onlyOne.length === 1 ? "goal exists" : "goals exist"} in only one of the runs, so there is nothing to compare for ${onlyOne.length === 1 ? "it" : "them"}.`),
       el("details", {}, el("summary", {}, "Show those goals"), el("ul", { class: "plain" }, ...onlyOne.map((g) => el("li", {}, el("span", { class: "muted" }, `${g.person} · `), inlineText(g.goal), ` (only in run #${g.head === "not_in_plan" ? c.base.number : c.head.number})`)))))));
   }
 
-  const goalsSection = el("section", { class: "card block" }, el("h2", {}, "Goals", el("span", { class: "muted" }, ` ${comparable.length} in both runs · ${c.goals.unchanged} unchanged`)));
-  if (comparable.length === 0) goalsSection.append(el("p", { class: "muted" }, onlyOne.length ? "No goal appears in both runs." : "No goal changed."));
+  const goalsSection = el("section", { class: "card block" }, el("h2", {}, "Goals", el("span", { class: "muted" }, ` ${c.goals.unchanged} unchanged`)));
+  if (comparable.length === 0) goalsSection.append(el("p", { class: "muted" }, "No goal changed between the runs."));
   else goalsSection.append(el("ul", { class: "diff" }, ...comparable.map((g) => {
     const change = CHANGE[g.change] ?? { text: label(g.change), tone: "neutral" as Tone };
     return el("li", {}, el("div", { class: "diff-main" }, el("span", { class: "muted small" }, g.person), el("span", {}, inlineText(g.goal))),

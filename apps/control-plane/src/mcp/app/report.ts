@@ -1,7 +1,7 @@
 import { clear, el, icon, inlineText, put, textOf, untrustedBlock } from "./dom.ts";
 import { EvidenceStore, findingPanel } from "./evidence.ts";
 import type { Host, View } from "./host.ts";
-import { failureText, GROUP_LABEL, GROUPS, type Detail, type Group, type Item, type Payload, type Report } from "./types.ts";
+import { failureText, GROUP_LABEL, GROUPS, payloadOf, type Detail, type Group, type Item, type Payload, type Report } from "./types.ts";
 import { avatar, button, chip, goalMark, GROUP_VERDICT, VERDICT_TONE, hostOf, meter, money, person, segmented, severityChip, stack, statusPill, tile, verdictChip, label as pretty } from "./ui.ts";
 
 const POLL_MS = 5000;
@@ -32,7 +32,7 @@ export function reportView(initial: Report, host: Host): View {
     polling: false,
     pollToken: 0,
     timer: 0,
-    lastGood: null as Date | null,
+    lastGood: new Date() as Date | null,
     stopped: null as string | null,
     active: true,
     disposed: false,
@@ -79,7 +79,7 @@ export function reportView(initial: Report, host: Host): View {
     put(parts.tiles!, el("div", { class: "tiles" },
       tile("Confirmed defects", String(confirmed), confirmed > 0 ? "bad" : "ok", el("p", { class: "tile-sub" }, confirmed === 1 ? "confirmed by a blind replay" : "confirmed by blind replays")),
       tile("Goals reached", `${r.goals.reached}/${r.goals.total}`, goalTone(r.goals.reached, r.goals.total), meter(r.goals.reached, r.goals.total, goalTone(r.goals.reached, r.goals.total), "Goals reached")),
-      tile("Cost", money(r.costUsd), "neutral", meter(r.costUsd, r.budgetUsd, r.costUsd >= r.budgetUsd ? "warn" : "info", "Cost against cap"), el("p", { class: "tile-sub" }, `of a ${money(r.budgetUsd)} cap`)),
+      tile("Cost", money(r.costUsd), "neutral", meter(r.costUsd, r.budgetUsd, r.costUsd >= r.budgetUsd ? "warn" : "info", "Cost against cap", money), el("p", { class: "tile-sub" }, `of a ${money(r.budgetUsd)} cap`)),
       tile("Findings", String(confirmed + others + f.friction.total), "neutral",
         stack([{ value: confirmed, tone: "bad", label: "confirmed" }, { value: f.inconclusive.total, tone: "warn", label: "inconclusive" }, { value: f.refuted.total, tone: "ok", label: "refuted" }, { value: f.couldNotJudge.total + f.notJudged.total, tone: "neutral", label: "not judged" }, { value: f.friction.total, tone: "info", label: "friction" }]),
         el("p", { class: "tile-sub" }, `${f.refuted.total} refuted · ${f.inconclusive.total} inconclusive`))));
@@ -160,7 +160,7 @@ export function reportView(initial: Report, host: Host): View {
 
   async function openFinding(key: string, moveFocus = true) {
     const r = state.report;
-    if (state.selected === key && moveFocus && state.detail) { state.selected = null; state.detail = null; store.reset(); renderList(); return; }
+    if (state.selected === key && moveFocus && (state.detail || state.detailError)) { state.selected = null; state.detail = null; state.detailError = null; store.reset(); renderList(); return; }
     state.selected = key;
     if (moveFocus) { state.detail = null; store.reset(); }
     state.detailError = null;
@@ -180,11 +180,13 @@ export function reportView(initial: Report, host: Host): View {
     const result = await host.call("compare_runs", { base: Number(state.baseline), head: r.number }).catch(() => null);
     if (state.disposed || token !== state.compareToken) return;
     if (!result || result.isError) { notice(result ? failureText(result) : "Could not compare these runs. Try again."); return; }
+    const payload = payloadOf(result.structuredContent);
+    if (!payload || payload.view !== "compare") { notice("Could not compare these runs. Try again."); return; }
     notice(null);
     const select = parts.baseline!.querySelector("select") as HTMLSelectElement | null;
     if (select) select.value = "";
     state.baseline = "";
-    host.show({ view: "compare", data: result.structuredContent } as Payload);
+    host.show(payload);
   }
 
   async function loadBaselines() {
@@ -273,7 +275,7 @@ export function reportView(initial: Report, host: Host): View {
     key: `run:${initial.number}`,
     dispose() { state.disposed = true; stopPolling("closed"); document.removeEventListener("visibilitychange", onVisibility); },
     setActive(active) { state.active = active; if (active) { renderToolbar(); if (!state.stopped) schedulePolling(); } else { window.clearTimeout(state.timer); state.timer = 0; } },
-    update(payload) { if (payload.view === "report" && payload.data.number === state.report.number) apply(payload.data); },
+    update(payload) { if (payload.view === "report" && payload.data.number === state.report.number) { state.polls = 0; state.failures = 0; state.stopped = null; state.lastGood = new Date(); notice(null); apply(payload.data); } },
   };
 }
 

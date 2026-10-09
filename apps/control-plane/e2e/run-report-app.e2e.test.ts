@@ -302,4 +302,31 @@ describe("the Trawler app in a real MCP Apps host", () => {
     await expect.poll(() => frame.getByRole("list", { name: "Findings" }).getByRole("button").count()).toBe(2);
     expect(await frame.locator('[data-part="filters"] [aria-pressed="true"]').textContent()).toContain("All");
   });
+
+  test("a list opened with a filter keeps it, and keyboard focus follows every move between views", async () => {
+    await mount("runs", { project: projectId, status: "completed", limit: 20 }, "list_runs");
+    await expect.poll(() => frame.getByRole("button", { name: /^Completed \d+$/ }).getAttribute("aria-pressed")).toBe("true");
+    const row = frame.locator(`[data-run="${runs.report!.number}"]`);
+    await row.focus();
+    await host.keyboard.press("Enter");
+    await expect.poll(() => frame.locator(".report h1").count()).toBe(1);
+    expect(await frame.locator(":focus").evaluate((node) => node.tagName)).toBe("H1");
+    await frame.getByRole("button", { name: "Back" }).focus();
+    await host.keyboard.press("Enter");
+    await expect.poll(() => frame.locator(".view.runs").count()).toBe(1);
+    expect(await frame.locator(":focus").getAttribute("data-run")).toBe(String(runs.report!.number));
+    await frame.locator(`[data-run="${runs.report!.number}"]`).dblclick();
+    await expect.poll(() => frame.locator(".report h1").count()).toBeGreaterThan(0);
+    await host.waitForTimeout(500);
+    expect(await frame.locator(".view.report").count()).toBe(1);
+  });
+
+  test("a host that sends only a dark theme gets a dark page, and a replayed start does not claim to be queued", async () => {
+    await mount("report", { run: runs.report!.number });
+    await host.evaluate(() => window.changeContext({ theme: "dark" }));
+    await expect.poll(() => frame.locator("body").evaluate((node) => getComputedStyle(node).backgroundColor.match(/\d+/g)!.slice(0, 3).map(Number).reduce((a, b) => a + b, 0))).toBeLessThan(200);
+    await host.evaluate((result) => window.sendResult(result), { content: [{ type: "text", text: "ok" }], structuredContent: { id: "r1", number: 42, url: "https://app.trawler.test/runs/0042", replayed: true, people: 2, limit: null } });
+    await expect.poll(() => frame.locator(".control h1").textContent()).toContain("already started");
+    expect(await frame.locator(".control .pill").count()).toBe(0);
+  });
 });

@@ -40,9 +40,9 @@ export function person(name: string, size = 24): HTMLElement {
   return el("span", { class: "person" }, avatar(name, size), el("span", {}, name));
 }
 
-export function meter(value: number, max: number, tone: Tone, name: string): HTMLElement {
+export function meter(value: number, max: number, tone: Tone, name: string, format: (n: number) => string = String): HTMLElement {
   const percent = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
-  return el("span", { class: `meter tone-${tone}`, role: "img", "aria-label": `${name}: ${value} of ${max}` }, el("i", { style: `width:${percent}%` }));
+  return el("span", { class: `meter tone-${tone}`, role: "img", "aria-label": `${name}: ${format(value)} of ${format(max)}` }, el("i", { style: `width:${percent}%` }));
 }
 
 export function stack(parts: Array<{ value: number; tone: Tone; label: string }>): HTMLElement {
