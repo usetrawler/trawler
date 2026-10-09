@@ -123,6 +123,9 @@ describe("the Trawler app in a real MCP Apps host", () => {
     await mount("report", { run: runs.report!.number });
     await expect.poll(() => frame.locator("h1").textContent()).toContain("defect confirmed by replay");
     await expect.poll(() => frame.locator(".tiles").textContent()).toContain("Confirmed defects");
+    await frame.locator(".fold summary").click();
+    await shot("people");
+    await frame.locator(".fold summary").click();
     expect(await frame.locator(".tiles").textContent()).toContain("1/");
     const list = frame.getByRole("list", { name: "Findings" });
     await expect.poll(() => list.getByRole("button").count()).toBe(3);
@@ -153,6 +156,7 @@ describe("the Trawler app in a real MCP Apps host", () => {
     await frame.getByRole("button", { name: /^Show: what Ana did, step by step$/ }).click();
     await expect.poll(() => frame.locator(".panel").textContent()).toContain("Tried the form <b>twice</b>");
     expect(await frame.locator(".panel b").count()).toBe(0);
+    await shot("trail");
   });
 
   test("an earlier run is chosen as the baseline and opens the comparison, with a way back", async () => {
