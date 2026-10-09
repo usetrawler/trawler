@@ -199,11 +199,17 @@ test("a stopped run keeps holding its cap while a job of it is still working, an
   expect((await used(id))!.spentUsd).toBe(6.5);
 });
 
-test("a run on a model without a known price counts its whole cap even when it has finished", async () => {
+test("an assistant cannot start a run on a model without a known price, and a run that somehow has only a token cap counts its whole cap", async () => {
   const id = await grant({ runs: 10, spend: 20 });
-  const unpriced = { ...deps, priceOf: async () => null };
-  const first = await startRunFor(principal(id), request(projects[0]!, 4), unpriced);
+  const refused = await startRunFor(principal(id), request(projects[0]!, 4), { ...deps, priceOf: async () => null });
+  expect(refused).toMatchObject({ ok: false });
+  expect((refused as { error: string }).error).toContain("no known price");
+  expect((await used(id))!.runs).toBe(0);
+  const first = await startRunFor(principal(id), request(projects[0]!, 4), deps);
   if (!first.ok) throw new Error(first.error);
-  await settle(first.value.id, "succeeded", 0);
+  await settle(first.value.id, "succeeded", 5);
+  await asSystem(t.db, (tx) => tx.updateTable("runs").set({ token_cap: 3_000_000 }).where("id", "=", first.value.id).execute());
+  expect((await used(id))!.spentUsd).toBe(5);
+  await asSystem(t.db, (tx) => tx.updateTable("runs").set({ cost_usd: 1 }).where("id", "=", first.value.id).execute());
   expect((await used(id))!.spentUsd).toBe(4);
 });

@@ -31,7 +31,7 @@ export interface WindowRun {
   costUsd: number;
 }
 
-const held = (run: WindowRun) => (run.live ? Math.max(run.budgetUsd, run.costUsd) : run.unpriced ? run.budgetUsd : run.costUsd);
+const held = (run: WindowRun) => (run.live ? Math.max(run.budgetUsd, run.costUsd) : run.unpriced ? Math.max(run.budgetUsd, run.costUsd) : run.costUsd);
 const leavesAt = (run: WindowRun) => new Date(run.startedAt.getTime() + WINDOW_MS);
 const usd = (amount: number) => `$${amount.toFixed(2)}`;
 

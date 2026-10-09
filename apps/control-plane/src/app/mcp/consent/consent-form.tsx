@@ -93,7 +93,7 @@ export function ConsentForm({ query, requestedScopes, account, workspace, contro
     {access === "control" && (
       <fieldset className="flex flex-col gap-3">
         <legend className="mb-1 font-mono text-xs tracking-[0.2em] text-muted uppercase">Spending limit</legend>
-        <p className="text-sm text-muted">In any 24 hours this connection can start at most this many runs, and its runs can spend about this much: each run counts its whole cap until it has finished, then what it actually cost (a model without a known price always counts its whole cap). This is on top of this workspace&apos;s own limits. Choose it now; a higher limit needs a new connection.</p>
+        <p className="text-sm text-muted">In any 24 hours this connection can start at most this many runs, and its runs can spend about this much: each run counts its whole cap until it has finished, then what it actually cost. This is on top of this workspace&apos;s own limits. Choose it now; a higher limit needs a new connection.</p>
         <div className="flex flex-wrap gap-4">
           <label className="flex flex-col gap-1 text-sm">
             <span>Runs per 24 hours</span>

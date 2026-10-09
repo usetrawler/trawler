@@ -148,6 +148,7 @@ export async function startRunFor(principal: RunPrincipal, body: ParsedStartRun,
       if (payer.paidBy === "workspace" && !(await keyStillStored(tx, orgId, payer.provider, payer.providerBaseUrl))) throw new KeyGone();
       if (principal.via) await reserveSpend(tx, orgId, principal.via.grant, payer.budgetUsd);
       const price = await priceOf(payer.provider, payer.model, deps.openRouterUrl);
+      if (principal.via && !price) throw new RunRefused("This model has no known price, so what a run costs cannot be limited in dollars. Pick a model with a known price, or start this run in Trawler.");
       const started = await startRun(tx, orgId, body.project, deps.keys, {
         budgetUsd: payer.budgetUsd, agentModel: payer.model, judgeModel: payer.model, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: principal.actor, ...(principal.via ? { startedVia: principal.via } : {}),
         provider: payer.provider, providerBaseUrl: payer.providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap, paidBy: payer.paidBy,

@@ -55,7 +55,7 @@ export function McpConnections({ connections }: { connections: ConnectionView[] 
               </div>
               {c.limit && (
                 <p className="basis-full text-xs text-muted">
-                  Last 24 hours: <strong className="font-semibold text-ink">{c.limit.runs} of {c.limit.runsPerDay}</strong> runs, <strong className="font-semibold text-ink">${c.limit.spentUsd.toFixed(2)} of ${c.limit.spendUsdPerDay.toFixed(2)}</strong> spent or held by running runs.
+                  Last 24 hours: <strong className="font-semibold text-ink">{c.limit.runs} of {c.limit.runsPerDay}</strong> runs, <strong className="font-semibold text-ink">${c.limit.spentUsd.toFixed(2)} of ${c.limit.spendUsdPerDay.toFixed(2)}</strong> spent, counting the whole cap of runs that have not finished.
                   {c.limit.nextFreeAt && <> The oldest start leaves the window at <LocalTime iso={c.limit.nextFreeAt} />.</>}
                 </p>
               )}

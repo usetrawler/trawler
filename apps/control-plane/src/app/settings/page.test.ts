@@ -199,7 +199,7 @@ test("your connections are listed with who published the client, what it reaches
   const html = renderToStaticMarkup(await SettingsPage());
   const view = text(html);
   expect(view).toContain("Your AI assistant connections");
-  expect(view).toContain("Last 24 hours: 2 of 5 runs, $3.50 of $20.00 spent or held by running runs.");
+  expect(view).toContain("Last 24 hours: 2 of 5 runs, $3.50 of $20.00 spent, counting the whole cap of runs that have not finished.");
   expect(view.match(/Last 24 hours/g)).toHaveLength(1);
   expect(view).toContain("Claude Code · claude.ai read only · only Checkout");
   expect(view).toContain("Cursor read and run control · only a project that no longer exists");
