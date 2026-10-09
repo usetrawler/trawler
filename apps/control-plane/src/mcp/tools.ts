@@ -197,7 +197,7 @@ export function registerReadTools(server: McpServer, deps: ToolDeps): void {
     outputSchema: z.object({
       swapped: z.boolean(),
       base: z.object({ number: z.number(), headline: z.string(), headlineDetail: UntrustedSchema.nullable(), status: z.string() }), head: z.object({ number: z.number(), headline: z.string(), headlineDetail: UntrustedSchema.nullable(), status: z.string() }),
-      goals: z.array(z.object({ person: z.string(), goal: GoalSchema, base: z.string(), head: z.string(), change: z.string() })),
+      goals: listOf(z.object({ person: z.string(), goal: GoalSchema, base: z.string(), head: z.string(), change: z.string() })).extend({ unchanged: z.number() }),
       findings: z.object({
         stillReported: listOf(z.object({ title: UntrustedSchema, goal: GoalSchema, base: z.object({ key: z.string(), verdict: z.string() }), head: z.object({ key: z.string(), verdict: z.string() }), matchedBy: z.string() })),
         onlyInBase: listOf(z.object({ key: z.string(), verdict: z.string(), title: UntrustedSchema, goal: GoalSchema, goalInHead: z.string() })),
@@ -219,9 +219,9 @@ export function registerReadTools(server: McpServer, deps: ToolDeps): void {
       ...onlyInHead.items.map((f) => `only in #${out.head.number} (${f.verdict}): ${f.title.text}`),
     ];
     const more = stillReported.more + onlyInBase.more + onlyInHead.more;
-    const changed = out.goals.filter((g) => g.change !== "same");
+    const changed = out.goals.items;
     const headlines = [out.base, out.head].map((r) => `#${r.number}: ${r.headline}${r.headlineDetail ? `\n${block(nonce, r.headlineDetail)}` : ""}`).join("\n");
-    return result(out, `${headlines}\nGoals that changed: ${changed.length === 0 ? "none" : changed.map((g) => `${g.person} / ${inline(g.goal, nonce)}: ${g.base} → ${g.head} (${g.change})`).join("; ")}\n${UNTRUSTED_NOTICE}\n${lines.length ? block(nonce, { untrusted: true, from: "finding titles of both runs", text: lines.join("\n") }) : "No findings in either run."}${more ? `\n…${more} more findings, not listed.` : ""}\n${out.caveats.join("\n")}`);
+    return result(out, `${headlines}\nGoals that changed (${out.goals.total}, ${out.goals.unchanged} unchanged${out.goals.more ? `, ${out.goals.more} not listed` : ""}): ${changed.length === 0 ? "none" : changed.map((g) => `${g.person} / ${inline(g.goal, nonce)}: ${g.base} → ${g.head} (${g.change})`).join("; ")}\n${UNTRUSTED_NOTICE}\n${lines.length ? block(nonce, { untrusted: true, from: "finding titles of both runs", text: lines.join("\n") }) : "No findings in either run."}${more ? `\n…${more} more findings, not listed.` : ""}\n${out.caveats.join("\n")}`);
   });
 
   tool("get_finding", {
@@ -242,7 +242,7 @@ export function registerReadTools(server: McpServer, deps: ToolDeps): void {
     const finding = findingDetail(summary, args.finding);
     if (!finding) return failure(NOT_FOUND.finding);
     const nonce = newNonce();
-    return result(finding, `Finding ${finding.key} in run #${finding.run}: ${finding.group}, ${finding.severity}${finding.verdict ? `, verdict ${finding.verdict}` : ""}. Filed by ${finding.person} on the goal ${inline(finding.goal, nonce)}.\n${UNTRUSTED_NOTICE}\n${block(nonce, finding.title, finding.observed, finding.reproduction, ...(finding.dismissal ? [finding.dismissal.reason] : []), ...(finding.quote ? [finding.quote] : []), ...(finding.page ? [finding.page] : []), ...(finding.replay?.observed ? [finding.replay.observed] : []))}\nEvidence: ${finding.evidence.map((e) => `${e.ref} (${e.label})`).join("; ")}. Read it with get_evidence.`);
+    return result(finding, `Finding ${JSON.stringify(finding.key.slice(0, 100))} in run #${finding.run}: ${finding.group}, ${finding.severity}${finding.verdict ? `, verdict ${finding.verdict}` : ""}. Filed by ${finding.person} on the goal ${inline(finding.goal, nonce)}.\n${UNTRUSTED_NOTICE}\n${block(nonce, finding.title, finding.observed, finding.reproduction, ...(finding.dismissal ? [finding.dismissal.reason] : []), ...(finding.quote ? [finding.quote] : []), ...(finding.page ? [finding.page] : []), ...(finding.replay?.observed ? [finding.replay.observed] : []))}\nEvidence: ${finding.evidence.map((e) => `${e.ref} (${e.label})`).join("; ")}. Read it with get_evidence.`);
   });
 
   tool("get_evidence", {
