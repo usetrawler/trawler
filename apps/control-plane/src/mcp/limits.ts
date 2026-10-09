@@ -26,11 +26,12 @@ export function spendLimitFrom(body: Record<string, unknown>): SpendLimit | "inv
 export interface WindowRun {
   startedAt: Date;
   live: boolean;
+  unpriced?: boolean;
   budgetUsd: number;
   costUsd: number;
 }
 
-const held = (run: WindowRun) => (run.live ? run.budgetUsd : run.costUsd);
+const held = (run: WindowRun) => (run.live ? Math.max(run.budgetUsd, run.costUsd) : run.unpriced ? run.budgetUsd : run.costUsd);
 const leavesAt = (run: WindowRun) => new Date(run.startedAt.getTime() + WINDOW_MS);
 const usd = (amount: number) => `$${amount.toFixed(2)}`;
 
@@ -81,12 +82,12 @@ export function refusalFor(runs: WindowRun[], limit: SpendLimit, capUsd: number)
 }
 
 async function windowRuns(tx: Tx, orgId: string, grantId: string): Promise<WindowRun[]> {
-  const rows = await tx.selectFrom("runs").select(["created_at", "status", "budget_usd", "cost_usd"])
+  const rows = await tx.selectFrom("runs").select(["created_at", "status", "budget_usd", "cost_usd", "token_cap", sql<boolean>`EXISTS (SELECT 1 FROM jobs j WHERE j.run_id = runs.id AND (j.status = 'leased' OR (j.status = 'queued' AND j.requested_by IS NOT NULL)))`.as("working")])
     .where("org_id", "=", orgId)
     .where(sql<boolean>`started_via ->> 'grant' = ${grantId}`)
     .where("created_at", ">", sql<Date>`now() - ${sql.lit(`${WINDOW_HOURS} hours`)}::interval`)
     .orderBy("created_at").orderBy("id").execute();
-  return rows.map((r) => ({ startedAt: r.created_at, live: r.status === "queued" || r.status === "running", budgetUsd: Number(r.budget_usd), costUsd: Number(r.cost_usd) }));
+  return rows.map((r) => ({ startedAt: r.created_at, live: r.status === "queued" || r.status === "running" || r.working, unpriced: r.token_cap !== null, budgetUsd: Number(r.budget_usd), costUsd: Number(r.cost_usd) }));
 }
 
 async function limitOf(tx: Tx, orgId: string, grantId: string): Promise<(SpendLimit & { revoked: boolean }) | null> {

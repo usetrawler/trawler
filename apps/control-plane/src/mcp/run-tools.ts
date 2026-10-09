@@ -61,9 +61,9 @@ export function registerRunTools(server: McpServer, deps: RunToolDeps): void {
     const principal = await principalOf();
     if (typeof principal === "string") return failure(principal);
     const { idempotencyKey, ...rest } = args;
-    const outcome = await startRunFor(principal, StartRunRequestSchema.parse(rest), deps.runApi(), idempotencyKey === undefined ? {} : { idempotencyKey });
+    const outcome = await startRunFor(principal, StartRunRequestSchema.parse({ ...rest, project: rest.project.toLowerCase(), ...(rest.plan ? { plan: rest.plan.toLowerCase() } : {}) }), deps.runApi(), idempotencyKey === undefined ? {} : { idempotencyKey });
     if (!outcome.ok) return failure(refusalText(outcome, origin, args.project));
-    const usage = await withOrg(db, caller.orgId, (tx) => connectionUsage(tx, caller.orgId, caller.grantId));
+    const usage = await withOrg(db, caller.orgId, (tx) => connectionUsage(tx, caller.orgId, caller.grantId)).catch(() => null);
     const out = { id: outcome.value.id, number: outcome.value.number, url: outcome.value.reportUrl, replayed: outcome.replayed === true, people: Number(outcome.value.people), limit: usage ? { ...usage, nextFreeAt: usage.nextFreeAt?.toISOString() ?? null } : null };
     return result(out, `${out.replayed ? "This run was already started with that key" : "Started"} run #${out.number}: ${out.url}\nIt runs in the background; read it with get_run when it has finished.${out.limit ? `\nThis connection has used ${out.limit.runs} of ${out.limit.runsPerDay} runs and $${out.limit.spentUsd.toFixed(2)} of $${out.limit.spendUsdPerDay.toFixed(2)} in the last ${WINDOW_HOURS} hours.` : ""}`);
   });
@@ -77,7 +77,7 @@ export function registerRunTools(server: McpServer, deps: RunToolDeps): void {
     const principal = await principalOf();
     if (typeof principal === "string") return failure(principal);
     const text = String(args.run);
-    const id = /^\d{1,9}$/.test(text) ? await withOrg(db, caller.orgId, (tx) => runIdByNumber(tx, caller.orgId, Number(text))) : text;
+    const id = /^\d{1,9}$/.test(text) ? await withOrg(db, caller.orgId, (tx) => runIdByNumber(tx, caller.orgId, Number(text))) : text.toLowerCase();
     if (!id) return failure("That run does not exist in this connection's reach. Call list_runs to see the runs you can read.");
     const outcome = await stopRunFor(principal, id, deps.runApi());
     if (!outcome.ok) return failure(outcome.status === 404 ? "That run does not exist in this connection's reach. Call list_runs to see the runs you can read." : refusalText(outcome, origin));

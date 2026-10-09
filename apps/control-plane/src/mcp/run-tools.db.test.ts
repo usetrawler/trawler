@@ -21,7 +21,7 @@ const keys = new Keyring(randomBytes(32));
 const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "Do it.", personaId: "ana" }] });
 const options = { budgetUsd: 2, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 30, replaySteps: 20, createdBy: "u1" };
 const ORIGIN = "https://app.trawler.test";
-const runApi: RunApiDeps = { db: t.db, keys, baseUrl: ORIGIN, openRouterUrl: "http://unused.test", trawlerPays: false, priceOf: async () => null, modelCheck: async () => ({ ok: true }) };
+const runApi: RunApiDeps = { db: t.db, keys, baseUrl: ORIGIN, openRouterUrl: "http://unused.test", trawlerPays: false, priceOf: async () => ({ promptUsdPerMtok: 1, completionUsdPerMtok: 2 }), modelCheck: async () => ({ ok: true }) };
 const endpoint = createMcpEndpoint({ db: t.db, pool, store: undefined, origin: ORIGIN, runApi: () => runApi });
 const projects: Record<string, string> = {};
 
@@ -76,7 +76,7 @@ test("a read-only grant can neither start nor stop, and says why", async () => {
   expect(await asSystem(t.db, (tx) => tx.selectFrom("runs").select("id").where("project_id", "=", projects.r1!).execute())).toHaveLength(1);
 });
 
-test("with run control switched off for the workspace, a grant that still carries the scope in hand starts nothing", async () => {
+test("a connection whose workspace switched run control off is told so by both tools", async () => {
   const id = await grantFor("org-s", ["trawler:read", "trawler:runs:write"]);
   await withOrg(t.db, "org-s", (tx) => setMcpSettings(tx, "org-s", { connectionsAllowed: true, runControlAllowed: false }, "owner"));
   const off = caller("org-s", id, { scopes: ["trawler:read"] });
@@ -171,6 +171,8 @@ test("stopping names the run by number or id, is safe to repeat, and reaches not
   const repeat = await call(who, "stop_run", { run: started.structured.id });
   expect(repeat.structured).toEqual({ id: started.structured.id, status: "cancelled", stopped: false });
   expect(repeat.text).toContain("already cancelled");
+  const upper = await call(who, "stop_run", { run: started.structured.id.toUpperCase() });
+  expect(upper.structured).toMatchObject({ id: started.structured.id, stopped: false });
   const other = await call(caller("org-s", await grantFor("org-s", ["trawler:read", "trawler:runs:write"])), "stop_run", { run: started.structured.id });
   expect(other.isError).toBe(true);
   expect(other.text).toContain("does not exist in this connection's reach");
@@ -178,5 +180,12 @@ test("stopping names the run by number or id, is safe to repeat, and reaches not
   const limited = await call(caller("org-r", id, { projectId: projects.r2! }), "stop_run", { run: second.structured.id });
   expect(limited.isError).toBe(true);
   expect((await runRow(second.structured.id)).status).toBe("queued");
+  await quiet("org-r");
+});
+
+test("a project given in capitals is the same project, for a limited connection too", async () => {
+  const id = await grantFor("org-r", ["trawler:read", "trawler:runs:write"]);
+  const started = await call(caller("org-r", id, { projectId: projects.r1! }), "start_run", { project: projects.r1!.toUpperCase(), cap: 1 });
+  expect(started.isError).toBe(false);
   await quiet("org-r");
 });

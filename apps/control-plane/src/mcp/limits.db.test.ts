@@ -16,7 +16,7 @@ afterAll(() => t.drop());
 const keys = new Keyring(randomBytes(32));
 const config = ProjectConfigSchema.parse({ name: "Acme", targetUrl: "https://app.acme.test/", personas: [{ id: "ana", name: "Ana", brief: "b" }], goals: [{ id: "g", instruction: "Do it.", personaId: "ana" }] });
 const options = { budgetUsd: 2, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 30, replaySteps: 20, createdBy: "u1" };
-const deps: RunApiDeps = { db: t.db, keys, baseUrl: "https://app.trawler.test", openRouterUrl: "http://unused.test", trawlerPays: false, priceOf: async () => null, modelCheck: async () => ({ ok: true }) };
+const deps: RunApiDeps = { db: t.db, keys, baseUrl: "https://app.trawler.test", openRouterUrl: "http://unused.test", trawlerPays: false, priceOf: async () => ({ promptUsdPerMtok: 1, completionUsdPerMtok: 2 }), modelCheck: async () => ({ ok: true }) };
 const ORG = "org-l";
 const projects: string[] = [];
 
@@ -83,7 +83,7 @@ test("two starts that together exceed the limit cannot both reserve", async () =
   await quiet();
 });
 
-test("a retry under the same idempotency key returns the first run and reserves nothing a second time", async () => {
+test("a retry under the same idempotency key returns the first run even when the limit is already used, and reserves nothing a second time", async () => {
   const id = await grant({ runs: 1, spend: 3 });
   const first = await startRunFor(principal(id), request(projects[0]!, 2), deps, { idempotencyKey: "mcp-retry" });
   const retry = await startRunFor(principal(id), request(projects[0]!, 2), deps, { idempotencyKey: "mcp-retry" });
@@ -170,4 +170,40 @@ test("a second reservation waits for the first transaction to settle before it c
   await first;
   expect(await second).toBe("refused");
   await quiet();
+});
+
+test("a finished run that a person asked to judge again holds its whole cap while the judge works, so that money cannot be handed out twice", async () => {
+  const id = await grant({ runs: 10, spend: 20 });
+  const first = await startRunFor(principal(id), request(projects[0]!, 20), deps);
+  if (!first.ok) throw new Error(first.error);
+  await settle(first.value.id, "succeeded", 2);
+  expect((await used(id))!.spentUsd).toBe(2);
+  await asSystem(t.db, (tx) => tx.insertInto("jobs").values({ org_id: ORG, run_id: first.value.id, kind: "judge", position: 99, finding_key: "ana:f0", requested_by: "u1", status: "queued" }).execute());
+  expect((await used(id))!.spentUsd).toBe(20);
+  expect(await startRunFor(principal(id), request(projects[1]!, 2), deps)).toMatchObject({ ok: false, status: 429 });
+  await asSystem(t.db, (tx) => tx.updateTable("jobs").set({ status: "succeeded" }).where("run_id", "=", first.value.id).where("kind", "=", "judge").execute());
+  expect((await used(id))!.spentUsd).toBe(2);
+});
+
+test("a stopped run keeps holding its cap while a job of it is still working, and a run over its cap holds what it cost", async () => {
+  const id = await grant({ runs: 10, spend: 20 });
+  const first = await startRunFor(principal(id), request(projects[0]!, 5), deps);
+  if (!first.ok) throw new Error(first.error);
+  expect((await stopRunFor(principal(id), first.value.id, deps)).ok).toBe(true);
+  expect((await used(id))!.spentUsd).toBe(0);
+  await asSystem(t.db, (tx) => tx.insertInto("jobs").values({ org_id: ORG, run_id: first.value.id, kind: "role_session", persona_key: "ana", position: 98, status: "leased" }).execute());
+  expect((await used(id))!.spentUsd).toBe(5);
+  await asSystem(t.db, (tx) => tx.updateTable("runs").set({ cost_usd: 6.5 }).where("id", "=", first.value.id).execute());
+  expect((await used(id))!.spentUsd).toBe(6.5);
+  await asSystem(t.db, (tx) => tx.updateTable("jobs").set({ status: "cancelled" }).where("run_id", "=", first.value.id).execute());
+  expect((await used(id))!.spentUsd).toBe(6.5);
+});
+
+test("a run on a model without a known price counts its whole cap even when it has finished", async () => {
+  const id = await grant({ runs: 10, spend: 20 });
+  const unpriced = { ...deps, priceOf: async () => null };
+  const first = await startRunFor(principal(id), request(projects[0]!, 4), unpriced);
+  if (!first.ok) throw new Error(first.error);
+  await settle(first.value.id, "succeeded", 0);
+  expect((await used(id))!.spentUsd).toBe(4);
 });
