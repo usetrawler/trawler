@@ -58,7 +58,7 @@ async function mcp(token: string) {
 const connectionStatus = async (token: string) => {
   const client = await mcp(token);
   try {
-    return JSON.parse(((await client.callTool({ name: "connection_status", arguments: {} })).content as Array<{ text: string }>)[0]!.text) as { userId: string; projectId: string | null };
+    return (await client.callTool({ name: "whoami", arguments: {} })).structuredContent as { person: { name: string }; access: { project: { id: string } | null } };
   } finally {
     await client.close();
   }
@@ -86,7 +86,6 @@ async function openSettings(on: Page) {
   await expect.poll(() => access(on).isVisible()).toBe(true);
 }
 
-const userIdOf = (email: string) => onDatabase(db.name, async (c) => (await c.query<{ id: string }>('SELECT id FROM "user" WHERE email = $1', [email])).rows[0]!.id);
 
 beforeAll(async () => {
   stack = await startStack(db.url);
@@ -141,7 +140,7 @@ describe("connecting an assistant, seeing it in Settings and disconnecting it", 
     const tokens = await redeem(clientId, verifier, await callback.next());
     accessToken = tokens.access_token!;
     refreshToken = tokens.refresh_token!;
-    expect((await connectionStatus(accessToken)).projectId).toBe(checkoutId);
+    expect((await connectionStatus(accessToken)).access.project?.id).toBe(checkoutId);
   });
 
   test("Settings lists the connection with what it reaches, and disconnecting it asks first", async () => {
@@ -182,7 +181,7 @@ describe("what the consent page offers and what a decision does", () => {
     await page.getByRole("button", { name: "Allow read access" }).click();
     await afterRedirect(page);
     const tokens = await redeem(clientId, verifier, await callback.next());
-    expect((await connectionStatus(tokens.access_token!)).projectId).toBeNull();
+    expect((await connectionStatus(tokens.access_token!)).access.project).toBeNull();
     await page.goto(`${stack.origin}/settings`);
     await expect.poll(() => connections(page).getByRole("listitem").filter({ hasText: "Careful assistant" }).textContent()).toContain("read only");
   });
@@ -270,7 +269,8 @@ describe("the consent page on a phone, with the keyboard, and when the wrong acc
       await mobile.keyboard.press("Enter");
       const tokens = await redeem(clientId, verifier, await callback.next());
       const client = await mcp(tokens.access_token!);
-      expect((await client.listTools()).tools.map((t) => t.name)).toContain("connection_status");
+      expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(["compare_runs", "get_evidence", "get_finding", "get_run", "list_plans", "list_projects", "list_runs", "whoami"]);
+      expect((await client.callTool({ name: "list_projects", arguments: {} })).structuredContent).toMatchObject({ projects: expect.any(Array), nextCursor: null });
       await client.close();
     } finally {
       await phone.close();
@@ -293,6 +293,6 @@ describe("the consent page on a phone, with the keyboard, and when the wrong acc
     await page.getByRole("button", { name: "Allow read access" }).click();
     await afterRedirect(page);
     const tokens = await redeem(clientId, verifier, await callback.next());
-    expect((await connectionStatus(tokens.access_token!)).userId).toBe(await userIdOf(SECOND));
+    expect((await connectionStatus(tokens.access_token!)).person.name).toBe("second");
   });
 });
