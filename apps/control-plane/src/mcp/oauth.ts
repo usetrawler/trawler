@@ -5,6 +5,7 @@ import { APIError, createAuthMiddleware } from "better-auth/api";
 import { getOAuthProviderApi, type ClientMetadataResourceFetch } from "@better-auth/oauth-provider";
 import type pg from "pg";
 import { MCP_SCOPES, mcpResource, tokenHash } from "./config.ts";
+import { DEFAULT_SPEND_LIMIT } from "./limits.ts";
 import { canControlRuns } from "./access.ts";
 import { consentWorkspace } from "./consent.ts";
 
@@ -142,16 +143,18 @@ export async function persistGrant(pool: pg.Pool, accessToken: string, resource:
     if (!(settings.rows[0]?.connections_allowed ?? true)) throw new GrantRefused();
     const runControlAllowed = settings.rows[0]?.run_control_allowed ?? false;
     const result = await client.query(`
-      INSERT INTO mcp_grants (id, code_hash, user_id, org_id, project_id, client_id, resource, scopes)
+      INSERT INTO mcp_grants (id, code_hash, user_id, org_id, project_id, client_id, resource, scopes, max_runs_per_day, max_spend_usd_per_day)
       SELECT $1, a."authorizationCodeId", a."userId", a."referenceId",
              (SELECT p.project_id FROM mcp_code_projects p WHERE p.code_hash = a."authorizationCodeId" AND p.org_id = a."referenceId"),
              a."clientId", $2,
-             ARRAY(SELECT scope FROM jsonb_array_elements_text(a.scopes) AS scope WHERE scope <> 'trawler:runs:write' OR $4::boolean)
+             ARRAY(SELECT scope FROM jsonb_array_elements_text(a.scopes) AS scope WHERE scope <> 'trawler:runs:write' OR $4::boolean),
+             COALESCE((SELECT p.max_runs_per_day FROM mcp_code_projects p WHERE p.code_hash = a."authorizationCodeId" AND p.org_id = a."referenceId"), $5::integer),
+             COALESCE((SELECT p.max_spend_usd_per_day FROM mcp_code_projects p WHERE p.code_hash = a."authorizationCodeId" AND p.org_id = a."referenceId"), $6::numeric)
       FROM "oauthAccessToken" a
       JOIN member m ON m."userId" = a."userId" AND m."organizationId" = a."referenceId"
       WHERE a.token = $3 AND a.resources = jsonb_build_array($2::text)
       ON CONFLICT (code_hash) DO NOTHING
-    `, [crypto.randomUUID(), resource, tokenHash(accessToken), runControlAllowed]);
+    `, [crypto.randomUUID(), resource, tokenHash(accessToken), runControlAllowed, DEFAULT_SPEND_LIMIT.runsPerDay, DEFAULT_SPEND_LIMIT.spendUsdPerDay]);
     if (!result.rowCount) {
       const existing = await client.query("SELECT 1 FROM mcp_grants g JOIN \"oauthAccessToken\" a ON a.\"authorizationCodeId\" = g.code_hash WHERE a.token = $1", [tokenHash(accessToken)]);
       if (!existing.rowCount) throw new Error("grant persistence failed");

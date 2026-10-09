@@ -14,6 +14,7 @@ import { getDb } from "../../server/db.ts";
 import { readEnv } from "../../server/env.ts";
 import { shellFor } from "../../server/shell.ts";
 import { connectionsOf } from "../../mcp/connections.ts";
+import { connectionUsage } from "../../mcp/limits.ts";
 import { mcpSettings } from "../../mcp/settings.ts";
 import { ApiTokens } from "./api-tokens.tsx";
 import { Members } from "./members.tsx";
@@ -44,6 +45,8 @@ export default async function SettingsPage() {
     auth.pendingInvitations(orgId),
   ]);
   const connections = mcpPool ? await connectionsOf(mcpPool, member.userId, orgId, member.role) : [];
+  const controlling = connections.filter((c) => c.runControl);
+  const usage = controlling.length === 0 ? new Map() : await withOrg(getDb(), orgId, async (tx) => new Map(await Promise.all(controlling.map(async (c) => [c.id, await connectionUsage(tx, orgId, c.id)] as const))));
   const addedBy = details?.addedBy ? await auth.memberEmail(orgId, details.addedBy) : null;
   return (
     <AppShell shell={await shellFor(member)} current="settings">
@@ -77,6 +80,7 @@ export default async function SettingsPage() {
           <McpConnections
             connections={connections.map((c) => ({
               id: c.id, clientName: c.clientName, clientHost: c.clientHost, runControl: c.runControl, createdAt: c.createdAt.toISOString(), lastUsedAt: c.lastUsedAt?.toISOString() ?? null,
+              limit: usage.get(c.id) ? { ...usage.get(c.id)!, nextFreeAt: usage.get(c.id)!.nextFreeAt?.toISOString() ?? null } : null,
               projectName: c.projectId ? projectList.find((p) => p.id === c.projectId)?.name ?? "a project that no longer exists" : null,
             }))}
           />

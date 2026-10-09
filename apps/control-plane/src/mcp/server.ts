@@ -1,4 +1,6 @@
 import { createMcpHandler, McpServer, type AuthInfo } from "@modelcontextprotocol/server";
+import type { RunApiDeps } from "../run-api/service.ts";
+import { registerRunTools } from "./run-tools.ts";
 import { registerReadTools, type Caller, type ToolDeps } from "./tools.ts";
 import { UNTRUSTED_NOTICE } from "./untrusted.ts";
 
@@ -17,10 +19,12 @@ export function callerOf(authInfo: AuthInfo | undefined): Caller {
   };
 }
 
-export function createMcpEndpoint(deps: Omit<ToolDeps, "caller">) {
+export function createMcpEndpoint(deps: Omit<ToolDeps, "caller"> & { runApi: () => RunApiDeps }) {
   return createMcpHandler((context) => {
     const server = new McpServer({ name: "Trawler", version: "1.0.0" }, { instructions: INSTRUCTIONS });
-    registerReadTools(server, { ...deps, caller: callerOf(context.authInfo) });
+    const tools = { ...deps, caller: callerOf(context.authInfo) };
+    registerReadTools(server, tools);
+    registerRunTools(server, tools);
     return server;
   }, { legacy: "stateless", maxRequestBodySize: 64 * 1024 });
 }
