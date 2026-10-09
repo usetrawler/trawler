@@ -1135,3 +1135,8 @@ test("a person without an account looks for mail where the setup says it can be 
   expect(withSetup).not.toContain("no mail sent to it arrives");
   expect(rolePrompt(base)).toContain("no mail sent to it arrives");
 });
+
+test("a defect seen on the page ends its steps with what to look at and compare, never with what was expected", () => {
+  const prompt = rolePrompt({ persona: { id: "owen", name: "Owen", brief: "You move money." }, targetUrl: "https://bank.test/", goals: [{ id: "move", instruction: "Money is in savings." }], signUpEmail: "owen@example.com" });
+  expect(prompt).toContain("the last step names what to look at and what to compare it with, never what you expected");
+});

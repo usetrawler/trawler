@@ -117,7 +117,7 @@ describe("planForPullRequest", () => {
     const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
     expect(prompt).toContain("promise a message only when the pull request says the screen shows one");
     expect(prompt).toContain("never that a longer entry leaves the old value in place");
-    expect(prompt).toContain("add a goal that does it again after the first time's outcome");
+    expect(prompt).toContain("add a goal that does it again after something changed since the first time");
     expect(prompt).toContain("add a goal with a value the pull request does not list");
   });
 
