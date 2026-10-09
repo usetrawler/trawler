@@ -79,18 +79,21 @@ function problemsOf(answer: z.infer<typeof Answer>, people: LeadPerson[], pr: Pu
   ]);
 }
 
-export function settleTurns(answer: z.infer<typeof Answer>, people: LeadPerson[], pr: PullRequestText, taken: Iterable<string> = []): { turns: LeadTurn[]; dropped: number } {
+export function settleTurns(answer: z.infer<typeof Answer>, people: LeadPerson[], pr: PullRequestText, taken: Iterable<string> = []): { turns: LeadTurn[]; dropped: number; firstDrop?: string } {
   const known = new Set(people.map((p) => p.id));
   const used = new Set(taken);
   const turns: LeadTurn[] = [];
   let kept = 0;
   let dropped = 0;
+  let firstDrop: string | undefined;
   for (const turn of answer.turns) {
     const goals: LeadTurn["goals"] = [];
     for (const g of turn.goals) {
       const instruction = clip(g.instruction, GOAL_CHARS);
-      if (!known.has(turn.person) || !instruction || leaksPullRequest(instruction, pr) || kept >= MAX_LEAD_GOALS) {
+      const why = !known.has(turn.person) ? `is for ${JSON.stringify(turn.person)}, who is not one of the people` : !instruction ? "is empty" : leaksPullRequest(instruction, pr) ?? (kept >= MAX_LEAD_GOALS ? "is over the limit of goals" : null);
+      if (why) {
         dropped++;
+        firstDrop ??= `${JSON.stringify(instruction.slice(0, 160))} ${why}`;
         continue;
       }
       let id = `pr-goal-${kept + 1}`;
@@ -104,7 +107,7 @@ export function settleTurns(answer: z.infer<typeof Answer>, people: LeadPerson[]
     if (last?.person === turn.person) last.goals.push(...goals);
     else turns.push({ person: turn.person, goals });
   }
-  return { turns, dropped };
+  return { turns, dropped, ...(firstDrop ? { firstDrop } : {}) };
 }
 
 export function settleAccountFlow(answer: { accountFlow?: unknown; accountReason?: unknown }, pr: PullRequestText): { accountFlow: AccountFlow; accountReason?: string } {
@@ -136,7 +139,7 @@ export async function planForPullRequest(opts: {
   goals: Array<{ person: string; instruction: string }>;
   takenGoalIds?: string[];
   page?: string;
-}): Promise<{ turns: LeadTurn[]; dropped: number; usage: JobUsage; accountFlow: AccountFlow; accountReason?: string; notVisibleHere?: string; brief?: string }> {
+}): Promise<{ turns: LeadTurn[]; dropped: number; firstDrop?: string; usage: JobUsage; accountFlow: AccountFlow; accountReason?: string; notVisibleHere?: string; brief?: string }> {
   const { answer, usage } = await ask(opts, Answer, prPlanPrompt(opts), (a) => problemsOf(a, opts.people, opts.pullRequest));
   const settled = settleTurns(answer, opts.people, opts.pullRequest, opts.takenGoalIds);
   const notVisibleHere = settleNotVisible(answer, settled.turns, opts.pullRequest);
