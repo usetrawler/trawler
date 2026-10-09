@@ -4,7 +4,7 @@ import { RUN_REPORT_HTML } from "./run-report.generated.ts";
 
 export const RUN_REPORT_URI = "ui://trawler/run-report";
 
-export const RUN_REPORT_META = { ui: { resourceUri: RUN_REPORT_URI } };
+export const RUN_REPORT_META = { ui: { resourceUri: RUN_REPORT_URI }, "ui/resourceUri": RUN_REPORT_URI };
 
 const UI = { csp: { connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [] }, prefersBorder: true };
 

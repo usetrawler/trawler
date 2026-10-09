@@ -18,6 +18,7 @@ ul { margin: 4px 0; padding-left: 20px; }
 .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin: 0; }
 .summary dt { color: var(--muted); font-size: 12px; } .summary dd { margin: 0 0 6px; font-size: 16px; font-weight: 600; }
 .summary > * { min-width: 0; }
+select { max-width: 100%; }
 button, select { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 8px 12px; min-height: 44px; cursor: pointer; text-align: left; }
 button[aria-pressed="true"], button[aria-expanded="true"] { border-color: var(--fg); font-weight: 600; }
 button:focus-visible, select:focus-visible, summary:focus-visible, a:focus-visible, h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -27,7 +28,8 @@ button:focus-visible, select:focus-visible, summary:focus-visible, a:focus-visib
 .sev { text-transform: uppercase; font-size: 11px; letter-spacing: 0.06em; border: 1px solid var(--line); padding: 0 4px; }
 .sev-high, .sev-critical { border-color: #c62828; }
 .title { font-weight: 600; }
-.field { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.field { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
+.field select { flex: 1 1 200px; min-width: 0; }
 .untrusted { margin: 6px 0; padding: 8px 10px; border-left: 3px solid var(--line); background: var(--panel); }
 .untrusted figcaption { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .untrusted pre, .untrusted p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }

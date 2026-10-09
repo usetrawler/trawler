@@ -27,6 +27,7 @@ let projectId = "";
 let orgId = "";
 const runs: Record<string, { id: string; number: number }> = {};
 let failGetRun = false;
+let failEvidence = false;
 const getRunCalls: number[] = [];
 const keys = new Keyring(randomBytes(32));
 
@@ -96,6 +97,7 @@ beforeAll(async () => {
   await client.connect(transport);
   host = await context.newPage();
   await host.exposeFunction("hostCall", async (params: { name: string; arguments?: Record<string, unknown> }) => {
+    if (params.name === "get_evidence" && failEvidence) return { isError: true, content: [{ type: "text", text: "This screen capture is 2000000 bytes, over the 1000000 byte limit." }] };
     if (params.name === "get_run") {
       getRunCalls.push(Date.now());
       if (failGetRun) throw new Error("the host lost its connection");
@@ -140,6 +142,7 @@ describe("the run report app in a real MCP Apps host", () => {
     await refuted.focus();
     await host.keyboard.press("Enter");
     await expect.poll(() => refuted.getAttribute("aria-pressed")).toBe("true");
+    expect(await frame.locator(":focus").textContent()).toContain("Refuted");
     const list = frame.getByRole("list", { name: "Findings" });
     await expect.poll(() => list.getByRole("button").count()).toBe(1);
     expect(await list.textContent()).toContain("A typo on the button");
@@ -165,6 +168,7 @@ describe("the run report app in a real MCP Apps host", () => {
     await host.evaluate(() => window.changeContext({ theme: "dark", styles: { variables: { "--color-background-primary": "#101010", "--color-text-primary": "#f0f0f0" } } }));
     await expect.poll(() => frame.locator("body").evaluate((node) => getComputedStyle(node).backgroundColor)).toBe("rgb(16, 16, 16)");
     await shot("report-dark");
+    await expect.poll(() => frame.locator("#baseline-select").count()).toBe(1);
     await host.evaluate(() => { document.querySelector("iframe")!.style.width = "340px"; });
     await expect.poll(() => frame.locator("html").evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
     await shot("report-narrow-dark");
@@ -191,5 +195,32 @@ describe("the run report app in a real MCP Apps host", () => {
     expect(await frame.locator("h1").textContent()).toBe(heading);
     failGetRun = false;
     await expect.poll(() => frame.locator("#notice").textContent(), { timeout: 30_000 }).toBe("");
+  });
+
+  test("a failed evidence load says so beside the button and leaves the finding open, and focus stays on the button", async () => {
+    await mount("report", { run: runs.report!.number });
+    const list = frame.getByRole("list", { name: "Findings" });
+    await list.getByRole("button").first().click();
+    const show = frame.getByRole("button", { name: /^Show: what Ana did, step by step$/ });
+    failEvidence = true;
+    await show.click();
+    await expect.poll(() => frame.locator("#detail .evidence").textContent()).toContain("over the 1000000 byte limit");
+    expect(await frame.locator("#detail h2").count()).toBe(1);
+    failEvidence = false;
+    await frame.getByRole("button", { name: /^Show: what Ana did, step by step$/ }).focus();
+    await host.keyboard.press("Enter");
+    await expect.poll(() => frame.locator("#detail").textContent()).toContain("Tried the form");
+    expect(await frame.locator(":focus").getAttribute("data-ref")).toBe("trail:ana");
+  });
+
+  test("a live report keeps its open sections and its focus while it refreshes", async () => {
+    await asSystem(db.db, (tx) => tx.updateTable("runs").set({ status: "running", finished_at: null }).where("id", "=", runs.live!.id).execute());
+    await mount("live", { run: runs.live!.number });
+    await frame.locator("#people summary").click();
+    expect(await frame.locator("#people details").getAttribute("open")).not.toBeNull();
+    const before = getRunCalls.length;
+    await expect.poll(() => getRunCalls.length, { timeout: 20_000 }).toBeGreaterThan(before);
+    await host.waitForTimeout(500);
+    expect(await frame.locator("#people details").getAttribute("open")).not.toBeNull();
   });
 });

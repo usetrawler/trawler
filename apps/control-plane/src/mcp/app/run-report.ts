@@ -49,6 +49,12 @@ const state = {
   selected: null as string | null,
   detail: null as Detail | null,
   detailError: null as string | null,
+  evidenceErrors: new Map<string, string>(),
+  peopleOpen: false,
+  filterSignature: "",
+  compareToken: 0,
+  polling: false,
+  pollToken: 0,
   evidence: new Map<string, { kind: "screenshot"; src: string; note: string } | { kind: "trail"; blocks: Untrusted[]; next: string | null }>(),
   polls: 0,
   failures: 0,
@@ -69,7 +75,17 @@ const failureText = (result: Result) => result.content?.find((c) => c.type === "
 function notice(text: string | null, retry?: () => void) {
   clear(parts.notice!);
   if (!text) return;
-  parts.notice!.append(el("p", { class: "notice", role: "alert" }, text, retry && " ", retry && Object.assign(el("button", { type: "button" }, "Try again"), { onclick: retry })));
+  parts.notice!.append(el("p", { class: "notice", role: retry ? "alert" : "status" }, text, retry && " ", retry && Object.assign(el("button", { type: "button" }, "Try again"), { onclick: retry })));
+}
+
+function openInTrawler(url: string): HTMLElement {
+  const link = el("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, "Open in Trawler");
+  link.onclick = (event) => {
+    if (!app.getHostCapabilities()?.openLinks) return;
+    event.preventDefault();
+    void app.openLink({ url }).catch(() => undefined);
+  };
+  return link;
 }
 
 function renderHead() {
@@ -80,7 +96,7 @@ function renderHead() {
     el("p", { class: "eyebrow" }, `Run #${r.number} · `, el("span", { class: `badge status-${r.status}` }, r.status.replaceAll("_", " ")), r.live && " · live"),
     el("h1", {}, r.headline),
     r.headlineDetail && untrustedBlock(r.headlineDetail),
-    el("p", { class: "muted" }, `${new URL(r.target).host} · ${r.model}${r.plan ? ` · ${r.plan}` : ""} · `, el("a", { href: r.url, target: "_blank", rel: "noopener noreferrer" }, "Open in Trawler")),
+    el("p", { class: "muted" }, `${new URL(r.target).host} · ${r.model}${r.plan ? ` · ${r.plan}` : ""} · `, openInTrawler(r.url)),
   );
 }
 
@@ -100,7 +116,9 @@ function renderPeople() {
   if (!r || r.people.length === 0) return;
   const goalLine = (g: Report["people"][number]["goals"][number]) => el("li", {}, g.status ?? "not tested", ": ", inlineText(g.goal), g.note && untrustedBlock(g.note, "p"));
   const person = (p: Report["people"][number]) => el("li", {}, el("strong", {}, p.name), ` · ${p.state}`, el("ul", {}, ...p.goals.map(goalLine)));
-  parts.people!.append(el("details", {}, el("summary", {}, `People and goals (${r.people.length})`), el("ul", { class: "people" }, ...r.people.map(person))));
+  const details = el("details", state.peopleOpen ? { open: true } : {}, el("summary", {}, `People and goals (${r.people.length})`), el("ul", { class: "people" }, ...r.people.map(person)));
+  details.ontoggle = () => { state.peopleOpen = details.open; };
+  parts.people!.append(details);
 }
 
 function renderBaseline() {
@@ -140,14 +158,17 @@ function shownItems(): Item[] {
   return GROUPS.filter((g) => state.filter === "all" || state.filter === g).flatMap((g) => r.findings[g].items);
 }
 
+const filterSignature = (r: Report) => GROUPS.map((g) => r.findings[g].total).join(",");
+
 function renderFilters() {
   const r = state.report;
   clear(parts.filters!);
   if (!r) return;
+  state.filterSignature = filterSignature(r);
   const options: Array<["all" | Group, string, number]> = [["all", "All", GROUPS.reduce((n, g) => n + r.findings[g].total, 0)], ...GROUPS.filter((g) => r.findings[g].total > 0).map((g) => [g, GROUP_LABEL[g], r.findings[g].total] as ["all" | Group, string, number])];
   parts.filters!.append(el("div", { class: "filters", role: "group", "aria-label": "Filter findings" }, ...options.map(([value, label, n]) => {
     const button = el("button", { type: "button", "aria-pressed": state.filter === value }, `${label} ${n}`);
-    button.onclick = () => { state.filter = value; renderFilters(); renderList(); button.focus(); };
+    button.onclick = () => { state.filter = value; renderFilters(); renderList(); (parts.filters!.querySelector('[aria-pressed="true"]') as HTMLElement | null)?.focus(); };
     return button;
   })));
 }
@@ -168,6 +189,7 @@ function renderList() {
 }
 
 function renderDetail() {
+  const focusedRef = (document.activeElement as HTMLElement | null)?.dataset?.ref;
   clear(parts.detail!);
   if (state.detailError) { parts.detail!.append(el("p", { class: "notice", role: "alert" }, state.detailError)); return; }
   const d = state.detail;
@@ -183,18 +205,19 @@ function renderDetail() {
   const list = el("ul", { class: "evidence" });
   for (const e of d.evidence) {
     const loaded = state.evidence.get(e.ref);
-    const button = el("button", { type: "button" }, `${loaded ? "Reload" : "Show"}: ${e.label}`);
+    const button = el("button", { type: "button", "data-ref": e.ref }, `${loaded ? "Reload" : "Show"}: ${e.label}`);
     button.onclick = () => void loadEvidence(e.ref, e.label);
-    const item = el("li", {}, button);
+    const item = el("li", {}, button, state.evidenceErrors.has(e.ref) && el("p", { class: "muted", role: "status" }, state.evidenceErrors.get(e.ref)));
     if (loaded?.kind === "screenshot") item.append(el("figure", { class: "capture" }, el("img", { src: loaded.src, alt: `Screen capture: ${e.label}` }), el("figcaption", {}, loaded.note)));
     if (loaded?.kind === "trail") {
       item.append(...loaded.blocks.map((b) => untrustedBlock(b)));
-      if (loaded.next) { const older = el("button", { type: "button" }, "Older steps"); older.onclick = () => void loadEvidence(e.ref, e.label, loaded.next!); item.append(older); }
+      if (loaded.next) { const older = el("button", { type: "button", "data-ref": e.ref }, "Older steps"); older.onclick = () => void loadEvidence(e.ref, e.label, loaded.next!); item.append(older); }
     }
     list.append(item);
   }
   section.append(list);
   parts.detail!.append(section);
+  if (focusedRef) (parts.detail!.querySelector(`[data-ref="${CSS.escape(focusedRef)}"]`) as HTMLElement | null)?.focus();
 }
 
 async function openFinding(key: string) {
@@ -203,9 +226,10 @@ async function openFinding(key: string) {
   state.selected = key;
   state.detail = null;
   state.detailError = null;
+  state.evidenceErrors.clear();
   renderList();
   const result = await call("get_finding", { run: r.number, finding: key }).catch(() => null);
-  if (state.selected !== key) return;
+  if (state.selected !== key || state.report?.number !== r.number) return;
   if (!result || result.isError) state.detailError = result ? failureText(result) : "Could not load this finding. Try again.";
   else state.detail = result.structuredContent as Detail;
   renderDetail();
@@ -215,9 +239,15 @@ async function openFinding(key: string) {
 
 async function loadEvidence(ref: string, label: string, before?: string) {
   const r = state.report;
-  if (!r) return;
+  const key = state.selected;
+  if (!r || !key) return;
   const result = await call("get_evidence", { run: r.number, ref, ...(before ? { before } : {}) }).catch(() => null);
-  if (!result || result.isError) { state.detailError = result ? failureText(result) : "Could not load this evidence. Try again."; renderDetail(); return; }
+  if (state.selected !== key || state.report?.number !== r.number) return;
+  if (!result || result.isError) {
+    state.evidenceErrors.set(ref, result ? failureText(result) : "Could not load this evidence. Try again.");
+    renderDetail();
+    return;
+  }
   const structured = result.structuredContent as { kind: "screenshot" | "trail"; trail?: Untrusted; nextBefore?: string | null };
   const image = result.content?.find((c) => c.type === "image");
   if (structured.kind === "screenshot" && image?.data && /^image\/(png|jpeg|webp)$/.test(image.mimeType ?? "")) state.evidence.set(ref, { kind: "screenshot", src: `data:${image.mimeType};base64,${image.data}`, note: `${label}. Passwords and other secrets are blacked out.` });
@@ -225,16 +255,20 @@ async function loadEvidence(ref: string, label: string, before?: string) {
     const previous = before ? state.evidence.get(ref) : undefined;
     state.evidence.set(ref, { kind: "trail", blocks: [...(previous?.kind === "trail" ? previous.blocks : []), structured.trail], next: structured.nextBefore ?? null });
   }
-  state.detailError = null;
+  state.evidenceErrors.delete(ref);
   renderDetail();
+  announce(`Loaded: ${label}.`);
 }
 
 async function compareWithBaseline() {
   const r = state.report;
+  const token = ++state.compareToken;
   state.compared = null;
   renderCompare();
+  notice(null);
   if (!r || !state.baseline) return;
   const result = await call("compare_runs", { base: Number(state.baseline), head: r.number }).catch(() => null);
+  if (token !== state.compareToken || state.report?.number !== r.number) return;
   if (!result || result.isError) { notice(result ? failureText(result) : "Could not compare these runs. Try again."); return; }
   notice(null);
   state.compared = result.structuredContent as Compared;
@@ -260,26 +294,33 @@ function stopPolling(reason: string | null) {
   window.clearTimeout(state.timer);
   state.timer = 0;
   state.stopped = reason;
+  state.pollToken += 1;
 }
+
+const resume = () => { state.stopped = null; state.polls = 0; state.failures = 0; notice(null); schedulePolling(); };
 
 function schedulePolling() {
   window.clearTimeout(state.timer);
   state.timer = 0;
   const r = state.report;
-  if (!r || !r.live || document.hidden) return;
-  if (state.polls >= MAX_POLLS) { stopPolling("Live updates stopped after ten minutes."); notice("Live updates stopped after ten minutes. Use Try again to keep watching.", () => { state.polls = 0; state.failures = 0; notice(null); schedulePolling(); }); return; }
+  if (!r || !r.live || document.hidden || state.stopped === "closed" || state.polling) return;
+  if (state.polls >= MAX_POLLS) { stopPolling("limit"); notice("Live updates stopped after ten minutes. Use Try again to keep watching.", resume); return; }
   state.timer = window.setTimeout(() => void poll(), POLL_MS);
 }
 
 async function poll() {
   const r = state.report;
-  if (!r) return;
+  if (!r || state.polling) return;
+  state.polling = true;
   state.polls += 1;
+  const token = state.pollToken;
   const result = await call("get_run", { run: r.number }).catch(() => null);
+  state.polling = false;
+  if (token !== state.pollToken || state.stopped === "closed" || state.report?.number !== r.number) return;
   if (!result || result.isError) {
     state.failures += 1;
     const when = state.lastGood ? ` Showing the last result from ${time(state.lastGood)}.` : "";
-    if (state.failures >= MAX_FAILURES) { stopPolling("connection"); notice(`Could not refresh this run.${when}`, () => { state.failures = 0; notice(null); schedulePolling(); }); return; }
+    if (state.failures >= MAX_FAILURES) { stopPolling("connection"); notice(`Could not refresh this run.${when}`, resume); return; }
     notice(`Could not refresh this run, trying again.${when}`);
     schedulePolling();
     return;
@@ -291,14 +332,31 @@ async function poll() {
 }
 
 function show(report: Report) {
-  const was = state.report?.status;
+  const was = state.report;
   state.report = report;
-  renderHead(); renderSummary(); renderPeople(); renderFilters(); renderList();
-  if (was && was !== report.status) announce(`Run ${report.number} is now ${report.status.replaceAll("_", " ")}.`);
+  renderHead(); renderSummary(); renderList();
+  if (!was || filterSignature(report) !== state.filterSignature) renderFilters();
+  if (!was || JSON.stringify(was.people) !== JSON.stringify(report.people)) renderPeople();
+  if (was && was.status !== report.status) {
+    announce(`Run ${report.number} is now ${report.status.replaceAll("_", " ")}.`);
+    if (state.selected && !report.live) void openFinding(state.selected);
+  }
   if (report.live) schedulePolling(); else stopPolling(null);
 }
 
+function resetFor(run: number | null) {
+  if (state.report?.number === run) return;
+  Object.assign(state, { selected: null, detail: null, detailError: null, baseline: "", compared: null, filter: "all", baselines: [], baselineError: null });
+  state.evidence.clear();
+  state.evidenceErrors.clear();
+  state.compareToken += 1;
+  state.pollToken += 1;
+  state.polling = false;
+}
+
 function showCompared(compared: Compared) {
+  stopPolling(null);
+  resetFor(null);
   state.report = null;
   state.compared = compared;
   clear(parts.head!); clear(parts.summary!); clear(parts.people!); clear(parts.baseline!); clear(parts.filters!); clear(parts.list!); clear(parts.detail!);
@@ -323,7 +381,7 @@ app.ontoolresult = (result) => {
   const value = result.structuredContent;
   if (result.isError) { notice(failureText(result as Result)); return; }
   notice(null);
-  if (isReport(value)) { state.polls = 0; state.failures = 0; state.lastGood = new Date(); show(value); void loadBaselines(); }
+  if (isReport(value)) { resetFor(value.number); state.polls = 0; state.failures = 0; state.stopped = null; state.lastGood = new Date(); show(value); void loadBaselines(); }
   else if (isCompared(value)) showCompared(value);
 };
 app.onhostcontextchanged = () => theme();

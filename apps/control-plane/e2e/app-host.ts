@@ -15,7 +15,7 @@ const CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-i
 window.sizes = [];
 window.mountApp = async (html, input, result) => {
   const iframe = document.createElement("iframe");
-  iframe.setAttribute("sandbox", "allow-scripts");
+  iframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
   iframe.style.cssText = "width:100%;height:900px;border:1px solid #888";
   iframe.srcdoc = html.replace("<head>", `<head><meta http-equiv="Content-Security-Policy" content="${CSP}">`);
   document.body.append(iframe);

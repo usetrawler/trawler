@@ -8,7 +8,7 @@ test("the committed run report page is what its source builds to", async () => {
   expect(read("./run-report.generated.ts")).toBe(await buildRunReportModule());
 });
 
-test("the page writes the text of a finding only as text, never as markup, and loads nothing from outside", () => {
+test("the page source writes the text of a finding only as text, never as markup, and reaches for nothing from outside", () => {
   for (const name of ["./run-report.ts", "./dom.ts"]) {
     const source = read(name);
     for (const forbidden of ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "srcdoc", "javascript:", "fetch(", "XMLHttpRequest", "WebSocket", "localStorage", "document.cookie"]) expect(source, `${name} uses ${forbidden}`).not.toContain(forbidden);
