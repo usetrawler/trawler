@@ -12,8 +12,9 @@ type Kid = Node | string | null | false | undefined;
 export function el<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Attrs = {}, ...kids: Kid[]): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   for (const [name, value] of Object.entries(attrs)) {
-    if (value === undefined || value === null || value === false) continue;
-    node.setAttribute(name, value === true ? "" : String(value));
+    if (value === undefined || value === null) continue;
+    if (value === false && !name.startsWith("aria-")) continue;
+    node.setAttribute(name, value === true && !name.startsWith("aria-") ? "" : String(value));
   }
   for (const kid of kids) if (kid) node.append(kid);
   return node;

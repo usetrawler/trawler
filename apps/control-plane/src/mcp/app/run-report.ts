@@ -43,6 +43,7 @@ const state = {
   report: null as Report | null,
   compared: null as Compared | null,
   baselines: [] as Array<{ number: number; label: string }>,
+  baselineError: null as string | null,
   baseline: "",
   filter: "all" as "all" | Group,
   selected: null as string | null,
@@ -105,10 +106,11 @@ function renderPeople() {
 function renderBaseline() {
   const r = state.report;
   clear(parts.baseline!);
+  if (state.baselineError) { parts.baseline!.append(el("p", { class: "muted" }, state.baselineError)); return; }
   if (!r || state.baselines.length === 0) return;
-  const select = el("select", { id: "baseline" }, el("option", { value: "" }, "No baseline"), ...state.baselines.map((b) => el("option", { value: String(b.number), selected: String(b.number) === state.baseline }, b.label)));
+  const select = el("select", { id: "baseline-select" }, el("option", { value: "" }, "No baseline"), ...state.baselines.map((b) => el("option", { value: String(b.number), selected: String(b.number) === state.baseline }, b.label)));
   select.onchange = () => { state.baseline = select.value; void compareWithBaseline(); };
-  parts.baseline!.append(el("label", { class: "field", for: "baseline" }, "Compare with an earlier run ", select));
+  parts.baseline!.append(el("label", { class: "field", for: "baseline-select" }, "Compare with an earlier run ", select));
 }
 
 function renderCompare() {
@@ -243,7 +245,8 @@ async function loadBaselines() {
   const r = state.report;
   if (!r) return;
   const result = await call("list_runs", { project: r.project.id, limit: 50, before: r.number }).catch(() => null);
-  if (!result || result.isError) return;
+  if (!result || result.isError) { state.baselineError = `Could not load earlier runs to compare with. ${result ? failureText(result) : ""}`.trim(); renderBaseline(); return; }
+  state.baselineError = null;
   const runs = (result.structuredContent as { runs: Array<{ number: number; status: string; confirmedDefects: number; createdAt: string | null }> }).runs;
   state.baselines = runs.map((x) => ({ number: x.number, label: `#${x.number} · ${x.status.replaceAll("_", " ")} · ${x.confirmedDefects} confirmed${x.createdAt ? ` · ${x.createdAt.slice(0, 10)}` : ""}` }));
   renderBaseline();
