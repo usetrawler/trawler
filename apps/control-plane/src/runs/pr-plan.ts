@@ -136,6 +136,7 @@ async function ask(deps: PrPlanDeps, job: Claimed): Promise<Outcome> {
       features: job.features, people: snapshot.personas.map((p) => ({ id: p.id, name: p.name, brief: p.brief, account: p.accountRef ?? null })),
       goals: playedGoals(snapshot).map((g) => ({ person: name.get(g.personaId) ?? g.personaId, instruction: g.instruction })), takenGoalIds: snapshot.goals.map((g) => g.id), page,
     });
+    if (planned.turns.length === 0 && planned.dropped > 0) throw new Error(`every one of the ${planned.dropped} goals the lead wrote named code, a file or an address`);
     return { turns: planned.turns, accountFlow: planned.accountFlow, ...(planned.accountReason ? { accountReason: planned.accountReason } : {}), ...(planned.notVisibleHere ? { notVisibleHere: planned.notVisibleHere } : {}), ...(planned.brief ? { brief: planned.brief } : {}), usage: planned.usage };
   } catch (err) {
     return { failure: err };
