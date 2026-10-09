@@ -253,4 +253,23 @@ describe("the run report app in a real MCP Apps host", () => {
     await host.waitForTimeout(500);
     expect(await frame.locator(":focus").textContent()).toContain("Open in Trawler");
   });
+
+  test("when a run ends, focus stays on the link, and a filter on a group that disappeared falls back to all", async () => {
+    await asSystem(db.db, (tx) => tx.updateTable("runs").set({ status: "succeeded", finished_at: new Date() }).where("id", "=", runs.live!.id).execute());
+    const run = await seedRun("running", [{ key: "ana:f0", title: "Flaky save", verdict: "inconclusive" }, { key: "ana:f1", title: "Solid defect", verdict: "confirmed" }]);
+    await mount("ending", { run: run.number });
+    const inconclusive = frame.getByRole("button", { name: /^Inconclusive 1$/ });
+    await expect.poll(() => inconclusive.count()).toBe(1);
+    await inconclusive.click();
+    await expect.poll(() => frame.getByRole("list", { name: "Findings" }).getByRole("button").count()).toBe(1);
+    await frame.locator("#head a").focus();
+    await asSystem(db.db, async (tx) => {
+      await tx.updateTable("findings").set({ verdict: "confirmed" }).where("run_id", "=", run.id).where("key", "=", "ana:f0").execute();
+      await tx.updateTable("runs").set({ status: "succeeded", finished_at: new Date() }).where("id", "=", run.id).execute();
+    });
+    await expect.poll(() => frame.locator(".eyebrow").textContent(), { timeout: 30_000 }).toContain("succeeded");
+    expect(await frame.locator(":focus").textContent()).toContain("Open in Trawler");
+    await expect.poll(() => frame.getByRole("list", { name: "Findings" }).getByRole("button").count()).toBe(2);
+    expect(await frame.locator('#filters [aria-pressed="true"]').textContent()).toContain("All");
+  });
 });

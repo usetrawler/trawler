@@ -54,6 +54,7 @@ const state = {
   filterSignature: "",
   headSignature: "",
   compareToken: 0,
+  loading: new Set<string>(),
   polling: false,
   pollToken: 0,
   evidence: new Map<string, { kind: "screenshot"; src: string; note: string } | { kind: "trail"; blocks: Untrusted[]; next: string | null }>(),
@@ -79,12 +80,14 @@ function notice(text: string | null, retry?: () => void) {
   parts.notice!.append(el("p", { class: "notice", role: retry ? "alert" : "status" }, text, retry && " ", retry && Object.assign(el("button", { type: "button" }, "Try again"), { onclick: retry })));
 }
 
+const linkNote = (url: string) => { put(parts.head!, el("p", { class: "muted", role: "status" }, `The host did not open the link. The run is at ${url}`)); };
+
 function openInTrawler(url: string): HTMLElement {
   const link = el("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, "Open in Trawler");
   link.onclick = (event) => {
     if (!app.getHostCapabilities()?.openLinks) return;
     event.preventDefault();
-    void app.openLink({ url }).then((outcome) => { if ((outcome as { isError?: boolean }).isError) notice(`The host did not open the link. The run is at ${url}`); }).catch(() => notice(`The host did not open the link. The run is at ${url}`));
+    void app.openLink({ url }).then((outcome) => { if ((outcome as { isError?: boolean }).isError) linkNote(url); }).catch(() => linkNote(url));
   };
   return link;
 }
@@ -93,6 +96,7 @@ const headSignature = (r: Report) => JSON.stringify([r.number, r.status, r.live,
 
 function renderHead() {
   const r = state.report;
+  const linkHadFocus = !!document.activeElement && document.activeElement.tagName === "A" && parts.head!.contains(document.activeElement);
   clear(parts.head!);
   state.headSignature = r ? headSignature(r) : "";
   if (!r) return;
@@ -102,6 +106,7 @@ function renderHead() {
     r.headlineDetail && untrustedBlock(r.headlineDetail),
     el("p", { class: "muted" }, `${new URL(r.target).host} · ${r.model}${r.plan ? ` · ${r.plan}` : ""} · `, openInTrawler(r.url)),
   );
+  if (linkHadFocus) parts.head!.querySelector("a")?.focus();
 }
 
 function renderSummary() {
@@ -168,18 +173,18 @@ const filterSignature = (r: Report) => GROUPS.map((g) => r.findings[g].total).jo
 
 function renderFilters() {
   const r = state.report;
-  const focusedAt = [...parts.filters!.querySelectorAll("button")].indexOf(document.activeElement as HTMLButtonElement);
+  const focusedValue = (document.activeElement as HTMLElement | null)?.dataset?.filter;
   clear(parts.filters!);
   if (!r) return;
   state.filterSignature = filterSignature(r);
   if (state.filter !== "all" && r.findings[state.filter].total === 0) state.filter = "all";
   const options: Array<["all" | Group, string, number]> = [["all", "All", GROUPS.reduce((n, g) => n + r.findings[g].total, 0)], ...GROUPS.filter((g) => r.findings[g].total > 0).map((g) => [g, GROUP_LABEL[g], r.findings[g].total] as ["all" | Group, string, number])];
   parts.filters!.append(el("div", { class: "filters", role: "group", "aria-label": "Filter findings" }, ...options.map(([value, label, n]) => {
-    const button = el("button", { type: "button", "aria-pressed": state.filter === value }, `${label} ${n}`);
+    const button = el("button", { type: "button", "data-filter": value, "aria-pressed": state.filter === value }, `${label} ${n}`);
     button.onclick = () => { state.filter = value; renderFilters(); renderList(); (parts.filters!.querySelector('[aria-pressed="true"]') as HTMLElement | null)?.focus(); };
     return button;
   })));
-  if (focusedAt >= 0) (parts.filters!.querySelectorAll("button")[focusedAt] as HTMLElement | undefined)?.focus();
+  if (focusedValue) ((parts.filters!.querySelector(`[data-filter="${CSS.escape(focusedValue)}"]`) ?? parts.filters!.querySelector('[aria-pressed="true"]')) as HTMLElement | null)?.focus();
 }
 
 function renderList() {
@@ -199,6 +204,7 @@ function renderList() {
 
 function renderDetail() {
   const active = document.activeElement as HTMLElement | null;
+  const titleHadFocus = active?.id === "detail-title";
   const focused = active?.dataset?.ref ? `[data-ref="${CSS.escape(active.dataset.ref)}"][data-role="${active.dataset.role ?? "show"}"]` : null;
   clear(parts.detail!);
   if (state.detailError) { parts.detail!.append(el("p", { class: "notice", role: "alert" }, state.detailError)); return; }
@@ -227,6 +233,7 @@ function renderDetail() {
   }
   section.append(list);
   parts.detail!.append(section);
+  if (titleHadFocus) { const heading = parts.detail!.querySelector("h2") as HTMLElement | null; heading?.setAttribute("tabindex", "-1"); heading?.focus(); }
   if (focused) ((parts.detail!.querySelector(focused) ?? parts.detail!.querySelector(focused.replace(/\[data-role="[^"]*"\]/, '[data-role="show"]'))) as HTMLElement | null)?.focus();
 }
 
@@ -250,8 +257,11 @@ async function openFinding(key: string, moveFocus = true) {
 async function loadEvidence(ref: string, label: string, before?: string) {
   const r = state.report;
   const key = state.selected;
-  if (!r || !key) return;
+  const flight = `${ref}|${before ?? ""}`;
+  if (!r || !key || state.loading.has(flight)) return;
+  state.loading.add(flight);
   const result = await call("get_evidence", { run: r.number, ref, ...(before ? { before } : {}) }).catch(() => null);
+  state.loading.delete(flight);
   if (state.selected !== key || state.report?.number !== r.number) return;
   if (!result || result.isError) {
     state.evidenceErrors.set(ref, result ? failureText(result) : "Could not load this evidence. Try again.");
@@ -343,11 +353,13 @@ async function poll() {
 }
 
 function show(report: Report) {
-  const was = state.report;
+  const was = state.report?.number === report.number ? state.report : null;
   state.report = report;
+  const staleFilter = state.filter !== "all" && report.findings[state.filter].total === 0;
+  if (staleFilter) state.filter = "all";
   if (!was || headSignature(report) !== state.headSignature) renderHead();
   renderSummary(); renderList();
-  if (!was || filterSignature(report) !== state.filterSignature) renderFilters();
+  if (!was || staleFilter || filterSignature(report) !== state.filterSignature) renderFilters();
   if (!was || JSON.stringify(was.people) !== JSON.stringify(report.people)) renderPeople();
   if (was && was.status !== report.status) {
     announce(`Run ${report.number} is now ${report.status.replaceAll("_", " ")}.`);
@@ -358,7 +370,7 @@ function show(report: Report) {
 
 function resetFor(run: number | null): boolean {
   if (state.report?.number === run) return false;
-  Object.assign(state, { filterSignature: "", headSignature: "", selected: null, detail: null, detailError: null, baseline: "", compared: null, filter: "all", baselines: [], baselineError: null });
+  Object.assign(state, { peopleOpen: false, filterSignature: "", headSignature: "", selected: null, detail: null, detailError: null, baseline: "", compared: null, filter: "all", baselines: [], baselineError: null });
   state.evidence.clear();
   state.evidenceErrors.clear();
   state.compareToken += 1;
