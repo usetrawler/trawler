@@ -1,10 +1,18 @@
 import { expect, test } from "vitest";
-import { estimateUsd, turnSteps } from "./models.ts";
+import { estimateUsd, replaySteps, turnSteps } from "./models.ts";
 
 test("a turn gets steps for each of its goals, up to the run's ceiling", () => {
   expect([1, 2, 4, 6].map((goals) => turnSteps(goals))).toEqual([30, 50, 90, 120]);
   expect(turnSteps(0)).toBe(30);
   expect(turnSteps(4, 60)).toBe(60);
+});
+
+test("a replay gets its steps again for each person in the reproduction and for each four of its steps", () => {
+  expect(replaySteps(30, 3, 1)).toBe(30);
+  expect(replaySteps(30, 6, 1)).toBe(60);
+  expect(replaySteps(30, 6, 3)).toBe(90);
+  expect(replaySteps(30, 13, 2)).toBe(120);
+  expect(replaySteps(30, 0, 0)).toBe(30);
 });
 
 test("a person with six goals has room for the 67 to 94 steps such a plan took on OrangeHRM", () => {

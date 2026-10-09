@@ -11,7 +11,7 @@ import type { Price } from "../llm/prices.ts";
 import type { Provider } from "../llm/providers.ts";
 import { KNOWN_LIMIT, markKnownNotBugs, notBugsOf, TRAWLER } from "./dismissals.ts";
 import { budgetLeft, CLIENT_GONE_MINUTES, monthlyBudget, RUN_TIME_LIMIT_HOURS, runsHalted, UNCLAIMED_RUN_MINUTES } from "./limits.ts";
-import { turnSteps } from "./models.ts";
+import { replaySteps, turnSteps } from "./models.ts";
 import { ACCOUNT_REFUSED, affordableOutputTokens, cancelRun, capSpent, endRun, giveBackUnusedFirstRun, signUpSeedContext, type CancelReason, type ConfigSnapshot, type PaidBy } from "./runs.ts";
 
 const LEASE_MINUTES = 10;
@@ -226,7 +226,7 @@ async function claimOnce(db: Database, keys: Keyring, scope: ClaimScope): Promis
           observation: finding?.replay,
           ...(defects ? { defects } : {}),
           ...(notBugs.length > 0 ? { notBugs } : {}),
-          maxSteps: picked.kind === "role_session" ? (turn ? turnSteps(turn.goalIds.length, picked.max_steps) : picked.max_steps) : picked.kind === "account_check" ? Math.min(ACCOUNT_CHECK_STEPS, picked.replay_steps) : picked.replay_steps * Math.max(1, new Set(finding?.finding.by ?? []).size),
+          maxSteps: picked.kind === "role_session" ? (turn ? turnSteps(turn.goalIds.length, picked.max_steps) : picked.max_steps) : picked.kind === "account_check" ? Math.min(ACCOUNT_CHECK_STEPS, picked.replay_steps) : replaySteps(picked.replay_steps, finding?.finding.reproduction.length ?? 0, new Set(finding?.finding.by ?? []).size),
           budgetUsd: Math.max(0, Number(picked.budget_usd) - Number(picked.cost_usd)),
           agentModel: picked.agent_model,
           judgeModel: picked.judge_model,
