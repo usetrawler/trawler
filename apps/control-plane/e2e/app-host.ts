@@ -5,6 +5,7 @@ declare global {
     hostCall(params: unknown): Promise<unknown>;
     mountApp(html: string, input: unknown, result: unknown): Promise<void>;
     changeContext(context: unknown): Promise<void>;
+    sendResult(result: unknown): Promise<void>;
     bridge?: AppBridge;
     sizes: Array<{ width?: number; height?: number }>;
   }
@@ -29,4 +30,5 @@ window.mountApp = async (html, input, result) => {
   await bridge.sendToolResult(result as never);
   window.bridge = bridge;
 };
+window.sendResult = async (result) => { await window.bridge!.sendToolResult(result as never); };
 window.changeContext = async (context) => { await window.bridge!.sendHostContextChange(context as never); };

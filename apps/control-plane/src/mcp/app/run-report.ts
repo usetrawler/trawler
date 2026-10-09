@@ -52,6 +52,7 @@ const state = {
   evidenceErrors: new Map<string, string>(),
   peopleOpen: false,
   filterSignature: "",
+  headSignature: "",
   compareToken: 0,
   polling: false,
   pollToken: 0,
@@ -83,14 +84,17 @@ function openInTrawler(url: string): HTMLElement {
   link.onclick = (event) => {
     if (!app.getHostCapabilities()?.openLinks) return;
     event.preventDefault();
-    void app.openLink({ url }).catch(() => undefined);
+    void app.openLink({ url }).then((outcome) => { if ((outcome as { isError?: boolean }).isError) notice(`The host did not open the link. The run is at ${url}`); }).catch(() => notice(`The host did not open the link. The run is at ${url}`));
   };
   return link;
 }
 
+const headSignature = (r: Report) => JSON.stringify([r.number, r.status, r.live, r.headline, r.headlineDetail, r.target, r.model, r.plan, r.url]);
+
 function renderHead() {
   const r = state.report;
   clear(parts.head!);
+  state.headSignature = r ? headSignature(r) : "";
   if (!r) return;
   put(parts.head!,
     el("p", { class: "eyebrow" }, `Run #${r.number} · `, el("span", { class: `badge status-${r.status}` }, r.status.replaceAll("_", " ")), r.live && " · live"),
@@ -112,6 +116,7 @@ function renderSummary() {
 
 function renderPeople() {
   const r = state.report;
+  const summaryHadFocus = document.activeElement?.tagName === "SUMMARY" && parts.people!.contains(document.activeElement);
   clear(parts.people!);
   if (!r || r.people.length === 0) return;
   const goalLine = (g: Report["people"][number]["goals"][number]) => el("li", {}, g.status ?? "not tested", ": ", inlineText(g.goal), g.note && untrustedBlock(g.note, "p"));
@@ -119,6 +124,7 @@ function renderPeople() {
   const details = el("details", state.peopleOpen ? { open: true } : {}, el("summary", {}, `People and goals (${r.people.length})`), el("ul", { class: "people" }, ...r.people.map(person)));
   details.ontoggle = () => { state.peopleOpen = details.open; };
   parts.people!.append(details);
+  if (summaryHadFocus) details.querySelector("summary")?.focus();
 }
 
 function renderBaseline() {
@@ -162,15 +168,18 @@ const filterSignature = (r: Report) => GROUPS.map((g) => r.findings[g].total).jo
 
 function renderFilters() {
   const r = state.report;
+  const focusedAt = [...parts.filters!.querySelectorAll("button")].indexOf(document.activeElement as HTMLButtonElement);
   clear(parts.filters!);
   if (!r) return;
   state.filterSignature = filterSignature(r);
+  if (state.filter !== "all" && r.findings[state.filter].total === 0) state.filter = "all";
   const options: Array<["all" | Group, string, number]> = [["all", "All", GROUPS.reduce((n, g) => n + r.findings[g].total, 0)], ...GROUPS.filter((g) => r.findings[g].total > 0).map((g) => [g, GROUP_LABEL[g], r.findings[g].total] as ["all" | Group, string, number])];
   parts.filters!.append(el("div", { class: "filters", role: "group", "aria-label": "Filter findings" }, ...options.map(([value, label, n]) => {
     const button = el("button", { type: "button", "aria-pressed": state.filter === value }, `${label} ${n}`);
     button.onclick = () => { state.filter = value; renderFilters(); renderList(); (parts.filters!.querySelector('[aria-pressed="true"]') as HTMLElement | null)?.focus(); };
     return button;
   })));
+  if (focusedAt >= 0) (parts.filters!.querySelectorAll("button")[focusedAt] as HTMLElement | undefined)?.focus();
 }
 
 function renderList() {
@@ -189,7 +198,8 @@ function renderList() {
 }
 
 function renderDetail() {
-  const focusedRef = (document.activeElement as HTMLElement | null)?.dataset?.ref;
+  const active = document.activeElement as HTMLElement | null;
+  const focused = active?.dataset?.ref ? `[data-ref="${CSS.escape(active.dataset.ref)}"][data-role="${active.dataset.role ?? "show"}"]` : null;
   clear(parts.detail!);
   if (state.detailError) { parts.detail!.append(el("p", { class: "notice", role: "alert" }, state.detailError)); return; }
   const d = state.detail;
@@ -205,22 +215,22 @@ function renderDetail() {
   const list = el("ul", { class: "evidence" });
   for (const e of d.evidence) {
     const loaded = state.evidence.get(e.ref);
-    const button = el("button", { type: "button", "data-ref": e.ref }, `${loaded ? "Reload" : "Show"}: ${e.label}`);
+    const button = el("button", { type: "button", "data-ref": e.ref, "data-role": "show" }, `${loaded ? "Reload" : "Show"}: ${e.label}`);
     button.onclick = () => void loadEvidence(e.ref, e.label);
     const item = el("li", {}, button, state.evidenceErrors.has(e.ref) && el("p", { class: "muted", role: "status" }, state.evidenceErrors.get(e.ref)));
     if (loaded?.kind === "screenshot") item.append(el("figure", { class: "capture" }, el("img", { src: loaded.src, alt: `Screen capture: ${e.label}` }), el("figcaption", {}, loaded.note)));
     if (loaded?.kind === "trail") {
       item.append(...loaded.blocks.map((b) => untrustedBlock(b)));
-      if (loaded.next) { const older = el("button", { type: "button", "data-ref": e.ref }, "Older steps"); older.onclick = () => void loadEvidence(e.ref, e.label, loaded.next!); item.append(older); }
+      if (loaded.next) { const older = el("button", { type: "button", "data-ref": e.ref, "data-role": "older" }, "Older steps"); older.onclick = () => void loadEvidence(e.ref, e.label, loaded.next!); item.append(older); }
     }
     list.append(item);
   }
   section.append(list);
   parts.detail!.append(section);
-  if (focusedRef) (parts.detail!.querySelector(`[data-ref="${CSS.escape(focusedRef)}"]`) as HTMLElement | null)?.focus();
+  if (focused) ((parts.detail!.querySelector(focused) ?? parts.detail!.querySelector(focused.replace(/\[data-role="[^"]*"\]/, '[data-role="show"]'))) as HTMLElement | null)?.focus();
 }
 
-async function openFinding(key: string) {
+async function openFinding(key: string, moveFocus = true) {
   const r = state.report;
   if (!r) return;
   state.selected = key;
@@ -234,7 +244,7 @@ async function openFinding(key: string) {
   else state.detail = result.structuredContent as Detail;
   renderDetail();
   parts.detail!.querySelector("h2")?.setAttribute("tabindex", "-1");
-  (parts.detail!.querySelector("h2") as HTMLElement | null)?.focus();
+  if (moveFocus) (parts.detail!.querySelector("h2") as HTMLElement | null)?.focus();
 }
 
 async function loadEvidence(ref: string, label: string, before?: string) {
@@ -246,6 +256,7 @@ async function loadEvidence(ref: string, label: string, before?: string) {
   if (!result || result.isError) {
     state.evidenceErrors.set(ref, result ? failureText(result) : "Could not load this evidence. Try again.");
     renderDetail();
+    announce(`Could not load: ${label}.`);
     return;
   }
   const structured = result.structuredContent as { kind: "screenshot" | "trail"; trail?: Untrusted; nextBefore?: string | null };
@@ -265,12 +276,10 @@ async function compareWithBaseline() {
   const token = ++state.compareToken;
   state.compared = null;
   renderCompare();
-  notice(null);
   if (!r || !state.baseline) return;
   const result = await call("compare_runs", { base: Number(state.baseline), head: r.number }).catch(() => null);
   if (token !== state.compareToken || state.report?.number !== r.number) return;
-  if (!result || result.isError) { notice(result ? failureText(result) : "Could not compare these runs. Try again."); return; }
-  notice(null);
+  if (!result || result.isError) { parts.compare!.append(el("p", { class: "notice", role: "alert" }, result ? failureText(result) : "Could not compare these runs. Try again.")); return; }
   state.compared = result.structuredContent as Compared;
   renderCompare();
 }
@@ -279,6 +288,7 @@ async function loadBaselines() {
   const r = state.report;
   if (!r) return;
   const result = await call("list_runs", { project: r.project.id, limit: 50, before: r.number }).catch(() => null);
+  if (state.report?.number !== r.number) return;
   if (!result || result.isError) { state.baselineError = `Could not load earlier runs to compare with. ${result ? failureText(result) : ""}`.trim(); renderBaseline(); return; }
   state.baselineError = null;
   const runs = (result.structuredContent as { runs: Array<{ number: number; status: string; confirmedDefects: number; createdAt: string | null }> }).runs;
@@ -295,6 +305,7 @@ function stopPolling(reason: string | null) {
   state.timer = 0;
   state.stopped = reason;
   state.pollToken += 1;
+  state.polling = false;
 }
 
 const resume = () => { state.stopped = null; state.polls = 0; state.failures = 0; notice(null); schedulePolling(); };
@@ -315,9 +326,9 @@ async function poll() {
   state.polls += 1;
   const token = state.pollToken;
   const result = await call("get_run", { run: r.number }).catch(() => null);
-  state.polling = false;
+  if (token === state.pollToken) state.polling = false;
   if (token !== state.pollToken || state.stopped === "closed" || state.report?.number !== r.number) return;
-  if (!result || result.isError) {
+  if (!result || result.isError || !isReport(result.structuredContent)) {
     state.failures += 1;
     const when = state.lastGood ? ` Showing the last result from ${time(state.lastGood)}.` : "";
     if (state.failures >= MAX_FAILURES) { stopPolling("connection"); notice(`Could not refresh this run.${when}`, resume); return; }
@@ -334,24 +345,26 @@ async function poll() {
 function show(report: Report) {
   const was = state.report;
   state.report = report;
-  renderHead(); renderSummary(); renderList();
+  if (!was || headSignature(report) !== state.headSignature) renderHead();
+  renderSummary(); renderList();
   if (!was || filterSignature(report) !== state.filterSignature) renderFilters();
   if (!was || JSON.stringify(was.people) !== JSON.stringify(report.people)) renderPeople();
   if (was && was.status !== report.status) {
     announce(`Run ${report.number} is now ${report.status.replaceAll("_", " ")}.`);
-    if (state.selected && !report.live) void openFinding(state.selected);
+    if (state.selected && !report.live) void openFinding(state.selected, false);
   }
   if (report.live) schedulePolling(); else stopPolling(null);
 }
 
-function resetFor(run: number | null) {
-  if (state.report?.number === run) return;
-  Object.assign(state, { selected: null, detail: null, detailError: null, baseline: "", compared: null, filter: "all", baselines: [], baselineError: null });
+function resetFor(run: number | null): boolean {
+  if (state.report?.number === run) return false;
+  Object.assign(state, { filterSignature: "", headSignature: "", selected: null, detail: null, detailError: null, baseline: "", compared: null, filter: "all", baselines: [], baselineError: null });
   state.evidence.clear();
   state.evidenceErrors.clear();
   state.compareToken += 1;
   state.pollToken += 1;
   state.polling = false;
+  return true;
 }
 
 function showCompared(compared: Compared) {
@@ -381,7 +394,7 @@ app.ontoolresult = (result) => {
   const value = result.structuredContent;
   if (result.isError) { notice(failureText(result as Result)); return; }
   notice(null);
-  if (isReport(value)) { resetFor(value.number); state.polls = 0; state.failures = 0; state.stopped = null; state.lastGood = new Date(); show(value); void loadBaselines(); }
+  if (isReport(value)) { const changed = resetFor(value.number); state.polls = 0; state.failures = 0; state.stopped = null; state.lastGood = new Date(); show(value); if (changed) renderAll(); void loadBaselines(); }
   else if (isCompared(value)) showCompared(value);
 };
 app.onhostcontextchanged = () => theme();

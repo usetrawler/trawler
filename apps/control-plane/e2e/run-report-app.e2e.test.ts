@@ -223,4 +223,34 @@ describe("the run report app in a real MCP Apps host", () => {
     await host.waitForTimeout(500);
     expect(await frame.locator("#people details").getAttribute("open")).not.toBeNull();
   });
+
+  test("a result for another run replaces everything of the first: the open finding, the comparison and the filter", async () => {
+    await mount("report", { run: runs.report!.number });
+    const list = frame.getByRole("list", { name: "Findings" });
+    await frame.getByRole("button", { name: /^Refuted 1$/ }).click();
+    await frame.getByRole("button", { name: /^All 3$/ }).click();
+    await list.getByRole("button").first().click();
+    await expect.poll(() => frame.locator("#detail h2").count()).toBe(1);
+    const select = frame.getByLabel("Compare with an earlier run");
+    await expect.poll(() => select.locator("option").count()).toBeGreaterThan(1);
+    await select.selectOption({ index: 1 });
+    await expect.poll(() => frame.locator("#compare section").count()).toBe(1);
+    const other = await client.callTool({ name: "get_run", arguments: { run: runs.base!.number } });
+    await host.evaluate((result) => window.sendResult(result), other);
+    await expect.poll(() => frame.locator("h1").textContent()).toContain("defect confirmed by replay");
+    await expect.poll(() => frame.locator(".eyebrow").textContent()).toContain(`Run #${runs.base!.number}`);
+    expect(await frame.locator("#detail").textContent()).toBe("");
+    expect(await frame.locator("#compare").textContent()).toBe("");
+    expect(await frame.locator('#filters [aria-pressed="true"]').textContent()).toContain("All");
+  });
+
+  test("keyboard focus on a link or filter survives a refresh of a live run", async () => {
+    await asSystem(db.db, (tx) => tx.updateTable("runs").set({ status: "running", finished_at: null }).where("id", "=", runs.live!.id).execute());
+    await mount("live", { run: runs.live!.number });
+    await frame.locator("#head a").focus();
+    const before = getRunCalls.length;
+    await expect.poll(() => getRunCalls.length, { timeout: 20_000 }).toBeGreaterThan(before);
+    await host.waitForTimeout(500);
+    expect(await frame.locator(":focus").textContent()).toContain("Open in Trawler");
+  });
 });
