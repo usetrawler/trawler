@@ -12,6 +12,7 @@ export interface ConnectionView {
   clientHost: string | null;
   projectName: string | null;
   runControl: boolean;
+  limit: { runsPerDay: number; spendUsdPerDay: number; runs: number; spentUsd: number; nextFreeAt: string | null } | null;
   createdAt: string;
   lastUsedAt: string | null;
 }
@@ -52,6 +53,12 @@ export function McpConnections({ connections }: { connections: ConnectionView[] 
                   {c.runControl ? <strong className="font-semibold text-ink">read and run control</strong> : "read only"} · {c.projectName ? `only ${c.projectName}` : "whole workspace"} · connected <LocalTime iso={c.createdAt} /> · {c.lastUsedAt ? <>last used <LocalTime iso={c.lastUsedAt} /></> : "never used"}
                 </p>
               </div>
+              {c.limit && (
+                <p className="basis-full text-xs text-muted">
+                  Last 24 hours: <strong className="font-semibold text-ink">{c.limit.runs} of {c.limit.runsPerDay}</strong> runs, <strong className="font-semibold text-ink">${c.limit.spentUsd.toFixed(2)} of ${c.limit.spendUsdPerDay.toFixed(2)}</strong> spent or held by running runs.
+                  {c.limit.nextFreeAt && <> The oldest start leaves the window at <LocalTime iso={c.limit.nextFreeAt} />.</>}
+                </p>
+              )}
               {asking === c.id ? (
                 <form action={revoke} className="flex flex-wrap items-center gap-3 text-sm">
                   <input type="hidden" name="id" value={c.id} />

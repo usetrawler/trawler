@@ -16,6 +16,7 @@ import { workspacePlan } from "../runs/plans.ts";
 import { cancelRun, FirstRunOnUsUsed, firstRunOnUsLeft, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunRefused, runSummary, startRun, TooManyOwnRuns, type PaidBy } from "../runs/runs.ts";
 import { runPath } from "../runs/status.ts";
 import type { RunVia } from "../runs/via.ts";
+import { reserveSpend, SpendLimitReached } from "../mcp/limits.ts";
 import { claimStart, keyHashOf, recordStart, requestHashOf, storedStart, type StoredStart } from "./idempotency.ts";
 
 export interface RunApiDeps {
@@ -145,6 +146,7 @@ export async function startRunFor(principal: RunPrincipal, body: ParsedStartRun,
         if (taken) throw new Replayed(taken);
       }
       if (payer.paidBy === "workspace" && !(await keyStillStored(tx, orgId, payer.provider, payer.providerBaseUrl))) throw new KeyGone();
+      if (principal.via) await reserveSpend(tx, orgId, principal.via.grant, payer.budgetUsd);
       const price = await priceOf(payer.provider, payer.model, deps.openRouterUrl);
       const started = await startRun(tx, orgId, body.project, deps.keys, {
         budgetUsd: payer.budgetUsd, agentModel: payer.model, judgeModel: payer.model, maxSteps: DEFAULT_RUN.maxSteps, replaySteps: DEFAULT_RUN.replaySteps, createdBy: principal.actor, ...(principal.via ? { startedVia: principal.via } : {}),
@@ -176,6 +178,7 @@ function refusalOf(err: unknown, principal: RunPrincipal): Outcome<never> | null
   if (err instanceof PlanNotFound) return refuse(404, "That plan is not on this project.");
   if (err instanceof NeedsAccount) return refuse(422, err.message);
   if (err instanceof RunInProgress) return refuse(409, err.message);
+  if (err instanceof SpendLimitReached) return refuse(429, err.message);
   if (err instanceof TooManyOwnRuns) return refuse(429, err.message);
   if (err instanceof NoModelKey || err instanceof FirstRunOnUsUsed) return refuse(422, err.message, "model_key");
   if (err instanceof RunRefused) return refuse(422, err.message);
