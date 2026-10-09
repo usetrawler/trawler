@@ -306,6 +306,11 @@ describe("judge", () => {
     expect(missing).toMatch(/An action that does nothing or gives no response, a record or change that does not appear where the product shows such things, a value that contradicts what the product said or what was entered, empty results, and input refused without saying why are behaviour/);
   });
 
+  test("the judge treats a field that takes no more than its limit as keeping the limit", () => {
+    const prompt = judgePrompt({ ...finding, title: "An 81-character name is cut to 80 and saved" }, { completed: true, observed: "The field kept 80 characters and the name was saved.", blockedAt: null });
+    expect(prompt).toContain("A field that takes no more characters than a limit keeps that limit: saving the shortened text it shows is not a defect");
+  });
+
   test("answers through report_verdict and records the verdict", async () => {
     const model = scriptedModel([verdictCall("confirmed")]);
     const { promise, events } = judgeWith(model);

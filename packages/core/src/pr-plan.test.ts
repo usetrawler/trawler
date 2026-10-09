@@ -106,7 +106,10 @@ describe("planForPullRequest", () => {
   test("the lead is told not to promise a message for a limit unless the pull request says the screen shows one", async () => {
     const model = scriptedModel([answer([])]);
     await plan(model, { pullRequest: { title: "feat: rename the household", description: "The name is up to 80 characters, with field errors from the API.", changedFiles: ["web/src/Members.vue"] } });
-    expect(JSON.stringify(model.doGenerateCalls[0]!.prompt)).toContain("promise a message only when the pull request says the screen shows one");
+    const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
+    expect(prompt).toContain("promise a message only when the pull request says the screen shows one");
+    expect(prompt).toContain("never that a longer entry leaves the old value in place");
+    expect(prompt).toContain("add a goal that does it again after the first time's outcome");
   });
 
   test("an injected description can neither pick unknown people nor carry addresses into goals", async () => {
