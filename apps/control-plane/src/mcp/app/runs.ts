@@ -18,7 +18,7 @@ export function runsView(initial: RunList, host: Host, args: Record<string, unkn
     host.show({ view: "report", data: result.structuredContent } as never);
   }
 
-  async function refetch(extra: Record<string, unknown>) {
+  async function reload(extra: Record<string, unknown>) {
     if (state.loading) return;
     state.loading = true;
     state.error = null;
@@ -40,7 +40,7 @@ export function runsView(initial: RunList, host: Host, args: Record<string, unkn
     const l = state.list;
     slot.replaceChildren();
     put(slot,
-      segmented([{ value: "all", label: "All", count: l.counts.all }, { value: "completed", label: "Completed", count: l.counts.completed }, { value: "attention", label: "Needs attention", count: l.counts.attention }], state.status, (value) => void refetch({ status: value, before: undefined }), "Filter runs"),
+      segmented([{ value: "all", label: "All", count: l.counts.all }, { value: "completed", label: "Completed", count: l.counts.completed }, { value: "attention", label: "Needs attention", count: l.counts.attention }], state.status, (value) => void reload({ status: value, before: undefined }), "Filter runs"),
       state.error && el("p", { class: "notice", role: "alert" }, icon("alert", 16), el("span", {}, state.error)),
       l.runs.length === 0 ? empty("No runs here.", "Start one from the app or ask the assistant to start it.") : el("ul", { class: "run-rows", "aria-label": "Runs", ...(state.loading ? { "aria-busy": "true" } : {}) }, ...l.runs.map((r) => {
         const row = el("button", { type: "button", class: "run-row card", "data-run": r.number },
@@ -52,7 +52,7 @@ export function runsView(initial: RunList, host: Host, args: Record<string, unkn
         row.onclick = () => void open(r.number);
         return el("li", {}, row);
       })),
-      l.nextBefore !== null && button(state.loading ? "Loading…" : "Older runs", { attrs: { "data-role": "older-runs" }, onclick: () => void refetch({ before: l.nextBefore }) }));
+      l.nextBefore !== null && button(state.loading ? "Loading…" : "Older runs", { attrs: { "data-role": "older-runs" }, onclick: () => void reload({ before: l.nextBefore }) }));
     if (focused) (slot.querySelector(`[data-filter="${CSS.escape(focused)}"]`) as HTMLElement | null)?.focus();
   }
   render();
