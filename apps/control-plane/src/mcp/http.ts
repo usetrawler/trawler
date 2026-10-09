@@ -3,6 +3,7 @@ import { consentWorkspace, flowKey } from "./consent.ts";
 import { mcpResource, tokenHash } from "./config.ts";
 import { authenticateMcp, GrantRefused, persistGrant } from "./oauth.ts";
 import { canControlRuns } from "./access.ts";
+import { spendLimitFrom } from "./limits.ts";
 import { mcpSettingsOf } from "./settings.ts";
 
 const MAX_BODY = 64 * 1024;
@@ -180,6 +181,8 @@ export function oauthBoundary(handler: (r: Request) => Promise<Response>, pool: 
         }
         const projectId = typeof body.project_id === "string" && body.project_id ? body.project_id : null;
         if (projectId !== null && !UUID.test(projectId)) return oauthError("invalid_request");
+        const limit = granted.includes("trawler:runs:write") ? spendLimitFrom(body) : null;
+        if (limit === "invalid") return oauthError("invalid_request");
         try {
           const chosen = await pool.query("UPDATE mcp_consent_contexts SET project_id = $2 WHERE flow_hash = $1", [flowKey(body.oauth_query), projectId]);
           if (chosen.rowCount !== 1) return oauthError("access_denied", 403);
@@ -188,11 +191,11 @@ export function oauthBoundary(handler: (r: Request) => Promise<Response>, pool: 
           throw error;
         }
         const response = await consentWorkspace.run({ userId: person.user.id, orgId }, invoke);
-        if (projectId && response.ok) {
+        if ((projectId || limit) && response.ok) {
           const issued = await response.clone().json() as { url?: string; redirect_uri?: string };
           const code = new URL(issued.url ?? issued.redirect_uri ?? "http://invalid.test").searchParams.get("code");
           if (!code) return oauthError("temporarily_unavailable", 503);
-          await pool.query("INSERT INTO mcp_code_projects (code_hash, project_id, org_id, expires_at) VALUES ($1, $2, $3, now() + interval '10 minutes') ON CONFLICT (code_hash) DO NOTHING", [tokenHash(code), projectId, orgId]);
+          await pool.query("INSERT INTO mcp_code_projects (code_hash, project_id, org_id, max_runs_per_day, max_spend_usd_per_day, expires_at) VALUES ($1, $2, $3, $4, $5, now() + interval '10 minutes') ON CONFLICT (code_hash) DO NOTHING", [tokenHash(code), projectId, orgId, limit?.runsPerDay ?? null, limit?.spendUsdPerDay ?? null]);
           await pool.query("DELETE FROM mcp_code_projects WHERE expires_at < now() - interval '1 hour'");
         }
         const clientId = new URLSearchParams(body.oauth_query).get("client_id");

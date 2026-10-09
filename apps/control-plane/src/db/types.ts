@@ -206,8 +206,10 @@ export interface McpCodeClaims {
 export interface McpCodeProjects {
   code_hash: string;
   expires_at: Timestamp;
+  max_runs_per_day: number | null;
+  max_spend_usd_per_day: Numeric | null;
   org_id: string;
-  project_id: string;
+  project_id: string | null;
 }
 
 export interface McpConsentContexts {
@@ -224,6 +226,8 @@ export interface McpGrants {
   created_at: Generated<Timestamp>;
   id: string;
   last_used_at: Timestamp | null;
+  max_runs_per_day: Generated<number>;
+  max_spend_usd_per_day: Generated<Numeric>;
   org_id: string;
   project_id: string | null;
   resource: string;

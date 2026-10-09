@@ -19,6 +19,7 @@ const state = vi.hoisted(() => ({
   mcp: { connectionsAllowed: true, runControlAllowed: false },
   mcpOn: true,
   connectionCalls: [] as unknown[][],
+  usage: {} as Record<string, unknown>,
   connections: [] as Array<{ id: string; clientName: string; clientHost: string | null; projectId: string | null; runControl: boolean; createdAt: Date; lastUsedAt: Date | null }>,
 }));
 
@@ -52,6 +53,7 @@ vi.mock("../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: str
 vi.mock("../../credentials/credentials.ts", () => ({ modelKeyDetails: async () => state.key }));
 vi.mock("../../runs/limits.ts", () => ({ monthlyBudget: async () => state.budget, monthSpent: async () => state.spent }));
 vi.mock("../../mcp/connections.ts", () => ({ connectionsOf: async (...args: unknown[]) => { state.connectionCalls.push(args); return state.connections; } }));
+vi.mock("../../mcp/limits.ts", () => ({ connectionUsage: async (_tx: unknown, _org: string, id: string) => state.usage[id] ?? null }));
 vi.mock("../../mcp/settings.ts", () => ({ mcpSettings: async () => state.mcp }));
 vi.mock("../../runs/plans.ts", () => ({ workspacePlan: async () => state.plan, projectsCounted: async () => state.projects, runsToday: async () => state.today }));
 vi.mock("../../api-tokens/tokens.ts", () => ({ listApiTokens: async () => [] }));
@@ -70,7 +72,7 @@ const addedAt = new Date("2026-09-25T18:50:00.000Z");
 beforeEach(() => {
   Object.assign(state, {
     member: owner, key: null, members: { "org-1/user-2": "lee@acme.test" }, lookedUp: [], tenants: [], listed: [], actionResult: null, budget: null, spent: 0,
-    plan: { plan: "free", limits: { projects: 1, runsPerDay: 3, people: 4 } }, projects: 1, today: 0, mcp: { connectionsAllowed: true, runControlAllowed: false }, mcpOn: true, connections: [], connectionCalls: [],
+    plan: { plan: "free", limits: { projects: 1, runsPerDay: 3, people: 4 } }, projects: 1, today: 0, mcp: { connectionsAllowed: true, runControlAllowed: false }, mcpOn: true, usage: {}, connections: [], connectionCalls: [],
     people: [
       { id: "m-1", userId: "user-1", role: "owner", joinedAt: new Date("2026-09-20T10:00:00Z"), name: "Ana", email: "ana@acme.test" },
       { id: "m-2", userId: "user-2", role: "member", joinedAt: new Date("2026-09-21T10:00:00Z"), name: "Lee", email: "lee@acme.test" },
@@ -193,9 +195,12 @@ test("your connections are listed with who published the client, what it reaches
     { id: "g-2", clientName: "Cursor", clientHost: null, projectId: "p-gone", runControl: true, createdAt: new Date("2026-10-07T10:00:00Z"), lastUsedAt: new Date("2026-10-08T09:00:00Z") },
     { id: "g-3", clientName: "Plain", clientHost: null, projectId: null, runControl: false, createdAt: new Date("2026-10-06T10:00:00Z"), lastUsedAt: null },
   ];
+  state.usage = { "g-2": { runsPerDay: 5, spendUsdPerDay: 20, runs: 2, spentUsd: 3.5, nextFreeAt: new Date("2026-10-09T08:00:00Z") } };
   const html = renderToStaticMarkup(await SettingsPage());
   const view = text(html);
   expect(view).toContain("Your AI assistant connections");
+  expect(view).toContain("Last 24 hours: 2 of 5 runs, $3.50 of $20.00 spent, counting the whole cap of runs that have not finished.");
+  expect(view.match(/Last 24 hours/g)).toHaveLength(1);
   expect(view).toContain("Claude Code · claude.ai read only · only Checkout");
   expect(view).toContain("Cursor read and run control · only a project that no longer exists");
   expect(view).toContain("Plain read only · whole workspace");

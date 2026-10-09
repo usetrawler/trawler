@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { authClient } from "../../auth-client.ts";
 import { field } from "../../../components/key-fields.tsx";
+import { DEFAULT_SPEND_LIMIT, SPEND_LIMIT_BOUNDS, spendLimitFrom } from "../../../mcp/limits.ts";
 
 export interface ConsentFormProps {
   query: string;
@@ -20,18 +21,25 @@ const link = "inline-block py-2 underline underline-offset-4 hover:text-ink";
 export function ConsentForm({ query, requestedScopes, account, workspace, controlOffered, controlNote, projects }: ConsentFormProps) {
   const [access, setAccess] = useState<"read" | "control">("read");
   const [projectId, setProjectId] = useState("");
+  const [runs, setRuns] = useState(String(DEFAULT_SPEND_LIMIT.runsPerDay));
+  const [spend, setSpend] = useState(String(DEFAULT_SPEND_LIMIT.spendUsdPerDay));
   const [state, setState] = useState<"idle" | "working" | "done">("idle");
   const [error, setError] = useState<string | null>(null);
   const scope = requestedScopes.filter((s) => s !== RUN_CONTROL || access === "control").join(" ");
   const busy = state !== "idle";
   const decide = async (accept: boolean) => {
     if (busy) return;
+    const limit = accept && access === "control" ? spendLimitFrom({ max_runs: runs.trim() === "" ? NaN : Number(runs), max_spend_usd: spend.trim() === "" ? NaN : Number(spend) }) : null;
+    if (limit === "invalid") {
+      setError(`Choose between ${SPEND_LIMIT_BOUNDS.runsPerDay.min} and ${SPEND_LIMIT_BOUNDS.runsPerDay.max} whole runs, and between $${SPEND_LIMIT_BOUNDS.spendUsdPerDay.min} and $${SPEND_LIMIT_BOUNDS.spendUsdPerDay.max}, for every 24 hours.`);
+      return;
+    }
     setState("working");
     setError(null);
     try {
       const response = await fetch("/api/auth/oauth2/consent", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accept, oauth_query: query, ...(accept ? { scope, ...(projectId ? { project_id: projectId } : {}) } : {}) }),
+        body: JSON.stringify({ accept, oauth_query: query, ...(accept ? { scope, ...(projectId ? { project_id: projectId } : {}), ...(limit ? { max_runs: limit.runsPerDay, max_spend_usd: limit.spendUsdPerDay } : {}) } : {}) }),
       });
       const result = await response.json() as { url?: string; redirect_uri?: string };
       const url = result.url ?? result.redirect_uri;
@@ -82,6 +90,22 @@ export function ConsentForm({ query, requestedScopes, account, workspace, contro
       )}
       {controlNote && <p className="border-l-2 border-line pl-3 text-sm text-muted">{controlNote}</p>}
     </fieldset>
+    {access === "control" && (
+      <fieldset className="flex flex-col gap-3">
+        <legend className="mb-1 font-mono text-xs tracking-[0.2em] text-muted uppercase">Spending limit</legend>
+        <p className="text-sm text-muted">In any 24 hours this connection can start at most this many runs, and its runs can spend about this much: each run counts its whole cap until it has finished, then what it actually cost. This is on top of this workspace&apos;s own limits. Choose it now; a higher limit needs a new connection.</p>
+        <div className="flex flex-wrap gap-4">
+          <label className="flex flex-col gap-1 text-sm">
+            <span>Runs per 24 hours</span>
+            <input type="number" inputMode="numeric" min={SPEND_LIMIT_BOUNDS.runsPerDay.min} max={SPEND_LIMIT_BOUNDS.runsPerDay.max} step={1} value={runs} onChange={(e) => !busy && setRuns(e.target.value)} className={`${field} w-32`} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span>Spend per 24 hours (USD)</span>
+            <input type="number" inputMode="decimal" min={SPEND_LIMIT_BOUNDS.spendUsdPerDay.min} max={SPEND_LIMIT_BOUNDS.spendUsdPerDay.max} step="0.01" value={spend} onChange={(e) => !busy && setSpend(e.target.value)} className={`${field} w-32`} />
+          </label>
+        </div>
+      </fieldset>
+    )}
     {projects.length > 0 && (
       <label className="flex flex-col gap-2 text-sm">
         <span className="text-muted">Which projects it can reach. This limits reading and run control alike.</span>

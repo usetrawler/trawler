@@ -8,6 +8,7 @@ import { withOrg } from "../db/tenancy.ts";
 import { projectHead } from "../projects/overview.ts";
 import { logError } from "../server/log.ts";
 import { canControlRuns } from "./access.ts";
+import { identityOf } from "./identity.ts";
 import {
   compareRuns, findingDetail, LIMITS, plansOf, projectsOf, runReport, runsOf, screenshotOf, summaryOf, trailOf, GROUPS,
   type Reach, type RunRef,
@@ -44,7 +45,7 @@ const RunLineSchema = z.object({
   confirmedDefects: z.number(), hasUncheckedDefects: z.boolean(), goalsReached: z.number(), goalsTotal: z.number(), costUsd: z.number(),
 });
 
-const failure = (text: string): CallToolResult => ({ isError: true, content: [{ type: "text", text }] });
+export const failure = (text: string): CallToolResult => ({ isError: true, content: [{ type: "text", text }] });
 const NOT_FOUND = {
   project: "That project does not exist in this connection's reach. Call list_projects to see the projects you can read.",
   run: "That run does not exist in this connection's reach. Call list_runs to see the runs you can read.",
@@ -52,7 +53,7 @@ const NOT_FOUND = {
   evidence: "That evidence reference is not in this run. Call get_finding to see the evidence references it offers.",
 };
 
-function result(structuredContent: object, text: string, extra: CallToolResult["content"] = []): CallToolResult {
+export function result(structuredContent: object, text: string, extra: CallToolResult["content"] = []): CallToolResult {
   return { content: [{ type: "text", text }, ...extra], structuredContent: structuredContent as Record<string, unknown> };
 }
 
@@ -84,20 +85,27 @@ async function readBounded(stream: ReadableStream<Uint8Array>, limit: number): P
   return bytes;
 }
 
-export function registerReadTools(server: McpServer, deps: ToolDeps): void {
-  const { db, caller } = deps;
-  const reach: Reach = { orgId: caller.orgId, projectId: caller.projectId };
-  const tool = (name: string, config: { title: string; description: string; inputSchema: z.ZodObject; outputSchema: z.ZodObject }, run: (args: never) => Promise<CallToolResult>) => {
-    server.registerTool(name, { ...config, annotations: { title: config.title, ...READ_ONLY } }, (async (args: never) => {
+export type ToolConfig = { title: string; description: string; inputSchema: z.ZodObject; outputSchema: z.ZodObject };
+
+export function makeTool(server: McpServer, deps: ToolDeps, annotations: Record<string, boolean> = READ_ONLY) {
+  const { caller } = deps;
+  return (name: string, config: ToolConfig, run: (args: never) => Promise<CallToolResult>) => {
+    server.registerTool(name, { ...config, annotations: { title: config.title, ...annotations } }, (async (args: never) => {
       if (!caller.scopes.includes("trawler:read")) return failure("This connection was not granted read access. Reconnect and allow reading.");
       try {
         return await run(args);
       } catch (err) {
-        await logError("an MCP read tool failed", { tool: name, orgId: caller.orgId, grantId: caller.grantId, err });
+        await logError("an MCP tool failed", { tool: name, orgId: caller.orgId, grantId: caller.grantId, err });
         return failure("Trawler could not answer this request. Try again in a moment.");
       }
     }) as never);
   };
+}
+
+export function registerReadTools(server: McpServer, deps: ToolDeps): void {
+  const { db, caller } = deps;
+  const reach: Reach = { orgId: caller.orgId, projectId: caller.projectId };
+  const tool = makeTool(server, deps);
 
   tool("whoami", {
     title: "Who is connected",
@@ -108,12 +116,7 @@ export function registerReadTools(server: McpServer, deps: ToolDeps): void {
       access: z.object({ scopes: z.array(z.string()), canReadRuns: z.literal(true), canStartAndStopRuns: z.boolean(), project: z.object({ id: z.string(), name: z.string() }).nullable() }),
     }),
   }, async () => {
-    const { rows } = await deps.pool.query<{ workspace: string; person: string; client: string | null }>(`
-      SELECT o.name AS workspace, u.name AS person, c.name AS client
-      FROM organization o JOIN "user" u ON u.id = $2 LEFT JOIN "oauthClient" c ON c."clientId" = $3
-      WHERE o.id = $1
-    `, [caller.orgId, caller.userId, caller.clientId]);
-    const found = rows[0];
+    const found = await identityOf(deps.pool, caller);
     if (!found) return failure("This connection's workspace could not be found. Reconnect to Trawler.");
     const project = caller.projectId ? await withOrg(db, caller.orgId, (tx) => projectHead(tx, caller.orgId, caller.projectId!)) : null;
     const row = { ...found, project: project?.name ?? null };
