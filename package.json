@@ -20,7 +20,8 @@
     "db:down": "docker compose down",
     "db:migrate": "docker compose run --rm flyway migrate",
     "db:validate": "docker compose run --rm flyway validate",
-    "db:codegen": "tsx apps/control-plane/scripts/codegen.ts"
+    "db:codegen": "tsx apps/control-plane/scripts/codegen.ts",
+    "build:mcp-app": "npm run build:mcp-app -w @usetrawler/control-plane"
   },
   "devDependencies": {
     "@types/node": "^24.13.6",

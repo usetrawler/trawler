@@ -1,5 +1,6 @@
 import { createMcpHandler, McpServer, type AuthInfo } from "@modelcontextprotocol/server";
 import type { RunApiDeps } from "../run-api/service.ts";
+import { registerRunReportResource } from "./app/resource.ts";
 import { registerRunTools } from "./run-tools.ts";
 import { registerReadTools, type Caller, type ToolDeps } from "./tools.ts";
 import { UNTRUSTED_NOTICE } from "./untrusted.ts";
@@ -25,6 +26,7 @@ export function createMcpEndpoint(deps: Omit<ToolDeps, "caller"> & { runApi: () 
     const tools = { ...deps, caller: callerOf(context.authInfo) };
     registerReadTools(server, tools);
     registerRunTools(server, tools);
+    registerRunReportResource(server);
     return server;
   }, { legacy: "stateless", maxRequestBodySize: 64 * 1024 });
 }

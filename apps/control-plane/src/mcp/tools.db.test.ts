@@ -477,3 +477,17 @@ test("a report grouped under one filed on another goal still matches the same de
   expect(out.findings.stillReported.items.map((f: { base: { key: string }; head: { key: string } }) => [f.base.key, f.head.key])).toEqual([["lee:f1", "lee:f9"]]);
   expect(out.findings.onlyInBase.items.map((f: { key: string }) => f.key)).toEqual([]);
 });
+
+test("get_run and compare_runs point at the run report app, which is served as an MCP App with no network access, and other tools do not", async () => {
+  const listed = (await rpc(A, "tools/list", {})).result!.tools as Array<{ name: string; _meta?: { ui?: { resourceUri?: string } } }>;
+  const linked = listed.filter((x) => x._meta?.ui?.resourceUri).map((x) => x.name).sort();
+  expect(linked).toEqual(["compare_runs", "get_run"]);
+  for (const tool of listed.filter((x) => linked.includes(x.name))) expect(tool._meta!.ui!.resourceUri).toBe("ui://trawler/run-report");
+  const resources = (await rpc(A, "resources/list", {})).result!.resources as Array<{ uri: string; mimeType?: string }>;
+  expect(resources.map((r) => r.uri)).toEqual(["ui://trawler/run-report"]);
+  const read = (await rpc(A, "resources/read", { uri: "ui://trawler/run-report" })).result!.contents as Array<{ uri: string; mimeType: string; text: string; _meta?: { ui?: { csp?: Record<string, string[]> } } }>;
+  expect(read).toHaveLength(1);
+  expect(read[0]).toMatchObject({ uri: "ui://trawler/run-report", mimeType: "text/html;profile=mcp-app" });
+  expect(read[0]!.text).toMatch(/^<!doctype html>/);
+  expect(read[0]!._meta!.ui!.csp).toEqual({ connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [] });
+});

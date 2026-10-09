@@ -13,6 +13,7 @@ import {
   compareRuns, findingDetail, LIMITS, plansOf, projectsOf, runReport, runsOf, screenshotOf, summaryOf, trailOf, GROUPS,
   type Reach, type RunRef,
 } from "./read-model.ts";
+import { RUN_REPORT_META } from "./app/resource.ts";
 import { newNonce, quoted, UNTRUSTED_NOTICE, UntrustedSchema, type Untrusted } from "./untrusted.ts";
 
 export interface Caller extends Reach {
@@ -85,7 +86,7 @@ async function readBounded(stream: ReadableStream<Uint8Array>, limit: number): P
   return bytes;
 }
 
-export type ToolConfig = { title: string; description: string; inputSchema: z.ZodObject; outputSchema: z.ZodObject };
+export type ToolConfig = { title: string; description: string; inputSchema: z.ZodObject; outputSchema: z.ZodObject; _meta?: Record<string, unknown> };
 
 export function makeTool(server: McpServer, deps: ToolDeps, annotations: Record<string, boolean> = READ_ONLY) {
   const { caller } = deps;
@@ -166,6 +167,7 @@ export function registerReadTools(server: McpServer, deps: ToolDeps): void {
   });
 
   tool("get_run", {
+    _meta: RUN_REPORT_META,
     title: "Read a run's report",
     description: `Reads one run: the headline, goals per person, and the findings grouped as the dashboard groups them (confirmed by replay, inconclusive, refuted, could not be judged, not judged, friction, dismissed). Up to ${LIMITS.findingsPerGroup} findings per group; use get_finding for one finding in full. ${UNTRUSTED_NOTICE}`,
     inputSchema: z.object({ run: RunArg }).strict(),
@@ -194,6 +196,7 @@ export function registerReadTools(server: McpServer, deps: ToolDeps): void {
   });
 
   tool("compare_runs", {
+    _meta: RUN_REPORT_META,
     title: "Compare two runs",
     description: "Compares two runs of the same project: goals reached, failed or not tested in each, and which findings both runs reported. Absence of a finding is not proof of a fix, and a goal without an outcome is not tested; the result says which. Takes the older run as base and the newer as head.",
     inputSchema: z.object({ base: RunArg, head: RunArg }).strict(),
