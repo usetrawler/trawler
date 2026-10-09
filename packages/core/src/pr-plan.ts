@@ -53,9 +53,8 @@ export function leaksPullRequest(instruction: string, pr: PullRequestText): stri
     const stem = file.split("/").at(-1)!.replace(/\.[^.]*$/, "");
     const stemWords = identifierWords(stem);
     if ((path.length >= 4 && lower.includes(path)) || (base.length >= 4 && lower.includes(base))) return "names a file";
-    if (stemWords.length >= 3 || (stemWords.length === 2 && /[a-z\d][A-Z]|_/.test(stem))) {
-      if (contains(goalWords, stemWords)) return "names a component";
-    }
+    if (stemWords.length >= 3 && contains(goalWords, stemWords)) return "names a component";
+    if (stemWords.length === 2 && /[a-z\d][A-Z]|_/.test(stem) && lower.includes(stem.toLowerCase())) return "names a component";
   }
   const source = `${pr.title ?? ""}\n${pr.description ?? ""}`;
   for (const token of source.match(/[^\s`"'()<>,;]{4,}/g) ?? []) {
