@@ -149,6 +149,18 @@ test("change: nothing the people can try means no run is spent: the run ends as 
   await finish(next.id);
 });
 
+test("change: a lead whose goals were all dropped is not taken for a change with nothing to test", async () => {
+  const leaky = answer([{ person: "ana", goals: [{ id: "a", instruction: "Read the reminder in the inbox at http://localhost:8025" }] }]);
+  const { run } = await start("all-dropped");
+  await planDueRuns(lead(scriptedModel([leaky, leaky])));
+  const planned = (await summary(run.id))!;
+  expect(planned.cancelReason).not.toBe("nothing_to_test");
+  expect(planned.status).toBe("queued");
+  expect(planned.prPlan).toMatchObject({ goals: [], note: expect.stringContaining("the project's plan ran as it is") });
+  expect((await kinds(run.id)).filter((j) => j.kind === "role_session").map((j) => j.persona_key)).toEqual(["ana", "lee"]);
+  await finish(run.id);
+});
+
 test("a failing lead never fails the run: the stored plan runs and the run says why", async () => {
   const { run } = await start("broken");
   await planDueRuns(lead(scriptedModel([new Error("provider is down"), new Error("provider is down")])));
@@ -165,7 +177,7 @@ test("both: a lead whose goals all name code or addresses leaves the stored plan
   const leaky = answer([{ person: "ana", goals: [{ id: "a", instruction: "Click the InvoiceExportButton" }, { id: "b", instruction: "Open https://app.acme.test/export" }] }]);
   const { run } = await start("leaky", { planMode: "both" });
   await planDueRuns(lead(scriptedModel([leaky, leaky])));
-  expect((await summary(run.id))!.prPlan).toMatchObject({ goals: [], note: expect.stringContaining("Nothing in this pull request points at a feature") });
+  expect((await summary(run.id))!.prPlan).toMatchObject({ goals: [], note: expect.stringContaining("every one of the 2 goals the lead wrote named code, a file or an address") });
   expect((await kinds(run.id)).filter((j) => j.kind === "role_session")).toHaveLength(2);
   await finish(run.id);
   const { run: bare } = await start("no-model");
