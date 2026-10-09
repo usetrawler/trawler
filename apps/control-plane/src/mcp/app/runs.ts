@@ -21,11 +21,12 @@ export function runsView(initial: RunList, host: Host, args: Record<string, unkn
     const payload = result && !result.isError ? payloadOf(result.structuredContent) : null;
     if (!payload || payload.view !== "report") { state.error = result && result.isError ? failureText(result) : "Could not open this run."; render(); return; }
     state.error = null;
+    render();
     host.show(payload);
   }
 
   async function reload(extra: Record<string, unknown>) {
-    if (state.loading) { state.pending = extra; return; }
+    if (state.loading) { if (!("before" in extra) || extra.before === undefined) state.pending = extra; return; }
     state.loading = true;
     state.error = null;
     render();
@@ -33,7 +34,14 @@ export function runsView(initial: RunList, host: Host, args: Record<string, unkn
     const result = await host.call("list_runs", { ...next, limit: 20 }).catch(() => null);
     state.loading = false;
     if (state.disposed) return;
-    if (!result || result.isError) { state.error = result ? failureText(result) : "Could not load runs."; render(); return; }
+    if (!result || result.isError) {
+      state.error = result ? failureText(result) : "Could not load runs.";
+      render();
+      const queued = state.pending;
+      state.pending = null;
+      if (queued) void reload(queued);
+      return;
+    }
     state.filterKept = next;
     state.status = (next.status as string | undefined) ?? "all";
     state.list = extra.before ? { ...(result.structuredContent as RunList), runs: [...state.list.runs, ...(result.structuredContent as RunList).runs] } : (result.structuredContent as RunList);

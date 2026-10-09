@@ -61,6 +61,7 @@ export function reportView(initial: Report, host: Host): View {
   function renderHead() {
     const r = state.report;
     const had = document.activeElement?.getAttribute("data-role") === "open-link" && parts.head!.contains(document.activeElement);
+    const headingHadFocus = !!document.activeElement && document.activeElement.tagName === "H1" && parts.head!.contains(document.activeElement);
     clear(parts.head!);
     state.headSignature = headSignature(r);
     const meta = el("p", { class: "meta" }, chip(hostOf(r.target), "neutral", icon("globe", 13)), chip(r.model, "neutral", icon("cpu", 13)), r.plan && chip(r.plan, "neutral", icon("layers", 13)));
@@ -68,6 +69,7 @@ export function reportView(initial: Report, host: Host): View {
       el("div", { class: "hero-top" }, el("p", { class: "eyebrow" }, el("span", { class: "mono" }, `Run #${r.number}`), statusPill(r.status, r.live)), openLink()),
       el("h1", {}, r.headline), r.headlineDetail && untrustedBlock(r.headlineDetail), meta));
     if (had) (parts.head!.querySelector('[data-role="open-link"]') as HTMLElement | null)?.focus();
+    if (headingHadFocus) { const heading = parts.head!.querySelector("h1") as HTMLElement | null; if (heading) { heading.tabIndex = -1; heading.focus(); } }
   }
 
   function renderTiles() {

@@ -60,10 +60,11 @@ function show(payload: Payload, push = true) {
   if (push && top) top.el.hidden = true;
   stack.push(Object.assign(view, { opener }));
   stage.append(view.el);
+  const heading = view.el.querySelector("h1") as HTMLElement | null;
+  if (heading) heading.tabIndex = -1;
   if (push) {
     window.scrollTo(0, 0);
-    const heading = view.el.querySelector("h1") as HTMLElement | null;
-    if (heading) { heading.tabIndex = -1; heading.focus(); host.announce(heading.textContent ?? ""); }
+    if (heading) { heading.focus(); host.announce(heading.textContent ?? ""); }
   }
 }
 
@@ -78,7 +79,7 @@ function back() {
   window.scrollTo(0, 0);
   const opener = closed.opener as HTMLElement | null | undefined;
   if (opener && opener.isConnected) opener.focus();
-  else (previous.el.querySelector("h1") as HTMLElement | null)?.focus();
+  else { const heading = previous.el.querySelector("h1") as HTMLElement | null; if (heading) { heading.tabIndex = -1; heading.focus(); } }
 }
 
 const linkNote = (url: string) => {

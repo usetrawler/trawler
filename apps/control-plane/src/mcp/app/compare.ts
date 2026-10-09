@@ -27,12 +27,12 @@ export function compareView(c: Compared, host: Host): View {
   if (onlyOne.length > 0) {
     put(root, el("div", { class: "callout tone-info" }, icon("layers", 18), el("div", {},
       el("strong", {}, "These runs followed different plans."),
-      el("p", {}, `${onlyOne.length}${c.goals.more > 0 ? "+" : ""} ${onlyOne.length === 1 ? "goal exists" : "goals exist"} in only one of the runs, so there is nothing to compare for ${onlyOne.length === 1 ? "it" : "them"}.`),
+      el("p", {}, c.goals.more > 0 ? `At least ${onlyOne.length} goals exist in only one of the runs, so there is nothing to compare for them.` : `${onlyOne.length} ${onlyOne.length === 1 ? "goal exists" : "goals exist"} in only one of the runs, so there is nothing to compare for ${onlyOne.length === 1 ? "it" : "them"}.`),
       el("details", {}, el("summary", {}, "Show those goals"), el("ul", { class: "plain" }, ...onlyOne.map((g) => el("li", {}, el("span", { class: "muted" }, `${g.person} · `), inlineText(g.goal), ` (only in run #${g.head === "not_in_plan" ? c.base.number : c.head.number})`)))))));
   }
 
   const goalsSection = el("section", { class: "card block" }, el("h2", {}, "Goals", el("span", { class: "muted" }, ` ${c.goals.unchanged} unchanged`)));
-  if (comparable.length === 0) goalsSection.append(el("p", { class: "muted" }, "No goal changed between the runs."));
+  if (comparable.length === 0) { if (c.goals.more === 0) goalsSection.append(el("p", { class: "muted" }, "No goal changed between the runs.")); }
   else goalsSection.append(el("ul", { class: "diff" }, ...comparable.map((g) => {
     const change = CHANGE[g.change] ?? { text: label(g.change), tone: "neutral" as Tone };
     return el("li", {}, el("div", { class: "diff-main" }, el("span", { class: "muted small" }, g.person), el("span", {}, inlineText(g.goal))),
