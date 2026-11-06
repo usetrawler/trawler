@@ -70,6 +70,7 @@ export async function replaceModelKeyAction(_previous: SettingsState, form: Form
   if (!check.ok) {
     const provider = endpoint.provider === "custom" ? "The OpenAI-compatible service" : PROVIDER_LABEL[endpoint.provider];
     if (check.reason === "key") return { error: `${provider} refused this key. Copy it again from your provider, and check the provider picked below it.`, field: "key" };
+    if (check.reason === "workspace") return { error: "This Anthropic key belongs to no workspace. In Claude Console, create a key inside a workspace, such as Default, and paste that one.", field: "key" };
     if (check.reason === "private") return { error: "That base URL is on a private network. Trawler calls models only at public addresses.", field: "baseUrl" };
     return { error: `${provider} could not be reached to check the key. Try again in a minute.` };
   }
