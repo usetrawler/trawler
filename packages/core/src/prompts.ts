@@ -363,7 +363,7 @@ Otherwise answer with turns, in the order the people play them:
   - When the change touches a decision or a state with more than one outcome (accept or refuse, on or off): each outcome, and after it the next thing a user would do with the same item.
   - When the change touches something a user can do or receive more than once: doing it again after something changed since the first time (a decision on it, a changed setting, new data), not straight after.
   - When the change touches layout or styles: the longest text a user would realistically enter, on a phone-width screen as well.
-- Write an untried case's goal as what to try to break and what must still hold ("the delivery date cannot be set to something a courier could not meet, whether added or changed"), not as the value to type; the person chooses what to try.
+- Write an untried case's goal as what to try to break and what must still hold ("whatever is typed as the delivery date, an order keeps only a date the shop says it delivers on, whether added or changed"), not as the value to type; the person chooses what to try.
 - An untried case uses only what the product already offers: never ask anyone to use an option, a field or a state the change and the product do not show.
 - Answer untried: a list with each of these cases, as case (a short phrase) and goal (the id of the goal that tries it). When goals run short, keep the promise goal, then the untried cases, and leave out other cases the pull request lists.
 - Choose only people whose role can reach the change; skip the rest.
