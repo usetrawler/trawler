@@ -114,6 +114,14 @@ test("a key to save is checked where a wrong one is refused: OpenRouter's key en
   expect(await checkKey(anthropic, answer(503))).toEqual({ ok: false, reason: "unavailable" });
 });
 
+test("an Anthropic key outside any workspace is told apart from an unreachable Anthropic", async () => {
+  const anthropic = endpointFor("anthropic", "sk-ant-x", { openRouterUrl: "" });
+  const outsideWorkspace: typeof fetch = async () => new Response(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header with the ID of the workspace to use." } }), { status: 400 });
+  expect(await checkKey(anthropic, outsideWorkspace)).toEqual({ ok: false, reason: "workspace" });
+  const otherBadRequest: typeof fetch = async () => new Response(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "something else" } }), { status: 400 });
+  expect(await checkKey(anthropic, otherBadRequest)).toEqual({ ok: false, reason: "unavailable" });
+});
+
 test("an OpenAI-compatible service that lists no models is saved unchecked, and a private one is named as such", async () => {
   const custom = endpointFor("custom", "key-x", { openRouterUrl: "", customUrl: "https://llm.example.com/v1" });
   const answer = (status: number): typeof fetch => async () => new Response("{}", { status });

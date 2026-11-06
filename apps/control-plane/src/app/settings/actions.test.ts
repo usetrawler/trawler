@@ -1,7 +1,8 @@
 import { APIError } from "better-auth/api";
 import { beforeEach, expect, test, vi } from "vitest";
 
-type Check = { ok: true; checked: boolean } | { ok: false; reason: "key" | "private" | "unavailable" };
+import type { SavedKeyCheck as Check } from "../../llm/providers.ts";
+
 const state = vi.hoisted(() => ({
   member: null as null | { userId: string; name: string; email: string; orgId: string; orgName: string; role: string },
   renamed: [] as unknown[],
@@ -69,6 +70,7 @@ const ADDED_AT = "2026-09-26T10:21:33.123Z";
 const EVERY_PAGE = [["/", "layout"]];
 const OPENROUTER = "sk-or-v1-" + "a".repeat(40);
 const CUSTOM = "k-" + "b".repeat(40);
+const ANTHROPIC = "sk-ant-api03-" + "c".repeat(40);
 const owner = { userId: "user-1", name: "Ana", email: "ana@acme.test", orgId: "org-1", orgName: "Acme", role: "owner" };
 const form = (fields: Record<string, string>) => {
   const data = new FormData();
@@ -191,6 +193,12 @@ test("a key the provider refuses, one on a private network, or one that cannot b
   state.check = { ok: false, reason: "unavailable" };
   expect(await replaceModelKeyAction({}, form({ apiKey: OPENROUTER }))).toEqual({ error: "OpenRouter could not be reached to check the key. Try again in a minute." });
   expect([state.saved, state.revalidated]).toEqual([[], []]);
+});
+
+test("an Anthropic key outside any workspace is not saved, and the message says which key to make instead", async () => {
+  state.check = { ok: false, reason: "workspace" };
+  expect(await replaceModelKeyAction({}, form({ apiKey: ANTHROPIC }))).toEqual({ error: "This Anthropic key belongs to no workspace. In Claude Console, create a key inside a workspace, such as Default, and paste that one.", field: "key" });
+  expect(state.saved).toEqual([]);
 });
 
 test("a malformed key or an http base URL is refused before the provider is asked", async () => {

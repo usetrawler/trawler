@@ -73,17 +73,30 @@ export function chatHeaders(endpoint: Endpoint): Record<string, string> {
 
 export async function listModels(endpoint: Endpoint, fetchImpl: typeof fetch = fetchFor(endpoint)): Promise<string[]> {
   const res = await fetchImpl(`${endpoint.baseUrl}/models`, { headers: listingHeaders(endpoint), redirect: "error", signal: AbortSignal.timeout(10_000) });
-  if (!res.ok) throw new ProviderRefused(res.status);
+  if (!res.ok) throw new ProviderRefused(res.status, await refusalMessage(res));
   const body = (await res.json()) as { data?: Array<{ id?: unknown }> };
   const ids = (body.data ?? []).map((m) => (typeof m.id === "string" ? m.id.replace(/^models\//, "") : "")).filter((id) => id && id.length <= 200);
   return [...new Set(ids)].sort();
 }
 
 export class ProviderRefused extends Error {
-  constructor(readonly status: number) {
+  constructor(readonly status: number, readonly providerMessage = "") {
     super(`the provider answered ${status}`);
   }
 }
+
+async function refusalMessage(res: Response): Promise<string> {
+  const text = await res.text().catch(() => "");
+  if (text.length > LONGEST_EXPLANATION_READ) return "";
+  try {
+    const message = providerError(JSON.parse(text))?.message;
+    return typeof message === "string" ? message : "";
+  } catch {
+    return "";
+  }
+}
+
+const anthropicKeyOutsideWorkspace = (err: ProviderRefused) => err.status === 400 && /not scoped to a workspace/i.test(err.providerMessage);
 
 export type KeyCheck = { ok: true } | { ok: false; reason: "key" | "model" | "unavailable"; detail?: string };
 
@@ -122,7 +135,7 @@ export async function checkModelCall(endpoint: Endpoint, model: string, fetchImp
   }
 }
 
-export type SavedKeyCheck = { ok: true; checked: boolean } | { ok: false; reason: "key" | "private" | "unavailable" };
+export type SavedKeyCheck = { ok: true; checked: boolean } | { ok: false; reason: "key" | "workspace" | "private" | "unavailable" };
 
 export async function checkKey(endpoint: Endpoint, fetchImpl: typeof fetch = fetchFor(endpoint)): Promise<SavedKeyCheck> {
   try {
@@ -136,6 +149,7 @@ export async function checkKey(endpoint: Endpoint, fetchImpl: typeof fetch = fet
     return { ok: true, checked: true };
   } catch (err) {
     if (err instanceof ProviderRefused && (err.status === 401 || err.status === 403 || (endpoint.provider === "google" && err.status === 400))) return { ok: false, reason: "key" };
+    if (err instanceof ProviderRefused && endpoint.provider === "anthropic" && anthropicKeyOutsideWorkspace(err)) return { ok: false, reason: "workspace" };
     if (err instanceof ProviderRefused && endpoint.provider === "custom" && (err.status === 404 || err.status === 405)) return { ok: true, checked: false };
     if (err instanceof FetchRefused && err.reason === "private") return { ok: false, reason: "private" };
     return { ok: false, reason: "unavailable" };
