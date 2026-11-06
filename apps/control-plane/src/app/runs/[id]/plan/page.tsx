@@ -1,3 +1,4 @@
+import { goalsFor } from "@usetrawler/protocol";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound, permanentRedirect, redirect } from "next/navigation";
@@ -37,7 +38,7 @@ export default async function RunPlanPage({ params, searchParams }: { params: Pr
   const planName = run.savedPlan?.name ?? "Plan used in this run";
   const pendingPlan = run.prPlan?.mode === "change" && run.prPlan.goals.length === 0;
   const goals = pendingPlan ? [] : run.goalTexts;
-  const people = run.personas.map((person) => ({ ...person, goals: goals.filter((goal) => !goal.personaId || goal.personaId === person.id) })).filter((person) => person.goals.length);
+  const people = run.personas.map((person) => ({ ...person, goals: goalsFor(goals, person.id) })).filter((person) => person.goals.length);
   const goalCount = people.reduce((total, person) => total + person.goals.length, 0);
   const runs = run.savedPlan?.id ? history.runs : history.runs.filter((r) => r.number === run.number);
   return (
