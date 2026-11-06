@@ -18,7 +18,9 @@ const untriedFor = (turns: unknown) => {
   const first = (turns as Array<{ goals: Array<{ id: string }> }>)[0]?.goals[0];
   return first ? [{ case: "the side the description does not name", goal: first.id }] : [];
 };
-const answer = (turns: unknown) => text(JSON.stringify({ turns, untried: untriedFor(turns) }));
+const promised = (turns: unknown) =>
+  (turns as Array<{ goals: Array<Record<string, unknown>> }>).map((t, i) => ({ ...t, goals: t.goals.map((g, j) => (i === 0 && j === 0 ? { ...g, promise: true } : g)) }));
+const answer = (turns: unknown) => text(JSON.stringify({ turns: promised(turns), untried: untriedFor(turns) }));
 
 function plan(model: ReturnType<typeof scriptedModel>, over: Partial<Parameters<typeof planForPullRequest>[0]> = {}) {
   return planForPullRequest({ model, modelId: "mock", budget: new Budget(1), url: "https://app.acme.test/", pullRequest: pr, features: ["Send an invoice"], people, goals: [{ person: "Ana", instruction: "Send a first invoice." }], ...over });
@@ -122,7 +124,7 @@ describe("planForPullRequest", () => {
     expect(prompt).toContain("promise a message only when the pull request says the screen shows one");
     expect(prompt).toContain("never that a longer entry leaves the old value in place");
     expect(prompt).toContain("doing it again after something changed since the first time");
-    expect(prompt).toContain("A pull request that names an upper limit has not tried below zero");
+    expect(prompt).toContain("When the change checks what a user enters: the kinds of value the description does not name");
   });
 
   test("an injected description can neither pick unknown people nor carry addresses into goals", async () => {
@@ -144,7 +146,7 @@ describe("planForPullRequest", () => {
   });
 
   describe("the untried cases", () => {
-    const turns = [{ person: "ana", goals: [{ id: "export", instruction: "Last month's invoices come out as one spreadsheet" }, { id: "empty-month", instruction: "A month with no invoices gives a file with no rows" }] }];
+    const turns = [{ person: "ana", goals: [{ id: "export", instruction: "Last month's invoices come out as one spreadsheet", promise: true }, { id: "empty-month", instruction: "A month with no invoices gives a file with no rows" }] }];
     const reply = (untried: unknown) => text(JSON.stringify({ turns, untried }));
 
     test("a plan with goals and no untried case is asked again for one", async () => {
@@ -165,7 +167,7 @@ describe("planForPullRequest", () => {
     });
 
     test("an untried case whose goal falls past the limit is asked again, and the listed cases give way", async () => {
-      const long = [{ person: "ana", goals: Array.from({ length: 9 }, (_, i) => ({ id: `g${i}`, instruction: `Listed outcome number ${i} is visible` })) }];
+      const long = [{ person: "ana", goals: Array.from({ length: 9 }, (_, i) => ({ id: `g${i}`, instruction: `Listed outcome number ${i} is visible`, promise: i === 0 })) }];
       const model = scriptedModel([text(JSON.stringify({ turns: long, untried: [{ case: "below zero", goal: "g8" }] })), reply([{ case: "a month with no invoices", goal: "empty-month" }])]);
       await plan(model);
       expect(model.doGenerateCalls).toHaveLength(2);
@@ -178,13 +180,56 @@ describe("planForPullRequest", () => {
       expect(model.doGenerateCalls).toHaveLength(1);
     });
 
-    test("the lead is told the author already tried what the description lists, and to give way to the untried cases", async () => {
+    test("the lead keeps the promise first, writes untried cases as what to try to break, and invents nothing the product lacks", async () => {
       const model = scriptedModel([text(JSON.stringify({ turns: [] }))]);
       await plan(model);
       const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
-      expect(prompt).toContain("Whoever wrote the change has already tried what its title and description list");
-      expect(prompt).toContain("asking again after a refusal");
-      expect(prompt).toContain("when goals run short, leave out listed cases, never untried ones");
+      expect(prompt).toContain("Mark one goal promise: true");
+      expect(prompt).toContain("not as the value to type; the person chooses what to try");
+      expect(prompt).toContain("never ask anyone to use an option, a field or a state the change and the product do not show");
+      expect(prompt).toContain("keep the promise goal, then the untried cases, and leave out other cases the pull request lists");
+    });
+
+    test("the brief is asked for in three parts, without values to type or what the author tried", async () => {
+      const model = scriptedModel([text(JSON.stringify({ turns: [] }))]);
+      await plan(model);
+      const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
+      expect(prompt).toContain("in three short parts: what changed");
+      expect(prompt).toContain("where to look for trouble, in one or two hints drawn from the untried cases, without the values to type");
+      expect(prompt).toContain("never how it was built or what its author already tried");
+    });
+  });
+
+  describe("the promise goal", () => {
+    const goals = (promise: boolean | undefined) => [{ person: "ana", goals: [{ id: "export", instruction: "Last month's invoices come out as one spreadsheet", ...(promise === undefined ? {} : { promise }) }] }];
+    const reply = (promise: boolean | undefined) => text(JSON.stringify({ turns: goals(promise), untried: [{ case: "a month with no invoices", goal: "export" }] }));
+
+    test("a plan with no goal marked as the promise is asked again", async () => {
+      const model = scriptedModel([reply(undefined), reply(true)]);
+      await plan(model);
+      expect(model.doGenerateCalls).toHaveLength(2);
+      expect(JSON.stringify(model.doGenerateCalls[1]!.prompt)).toContain("no goal is marked promise: true");
+    });
+
+    test("a promise of false is no promise", async () => {
+      const model = scriptedModel([reply(false), reply(true)]);
+      await plan(model);
+      expect(model.doGenerateCalls).toHaveLength(2);
+    });
+
+    test("a promise goal past the limit is asked again", async () => {
+      const late = [{ person: "ana", goals: Array.from({ length: 9 }, (_, i) => ({ id: `g${i}`, instruction: `Listed outcome number ${i} is visible`, promise: i === 8 })) }];
+      const model = scriptedModel([text(JSON.stringify({ turns: late, untried: [{ case: "below the limit", goal: "g0" }] })), reply(true)]);
+      await plan(model);
+      expect(model.doGenerateCalls).toHaveLength(2);
+      expect(JSON.stringify(model.doGenerateCalls[1]!.prompt)).toContain("is past the limit of 8 goals; play it earlier");
+    });
+
+    test("a plan with a promise goal and an untried case is taken at once", async () => {
+      const model = scriptedModel([reply(true)]);
+      const { turns } = await plan(model);
+      expect(model.doGenerateCalls).toHaveLength(1);
+      expect(turns[0]!.goals).toEqual([{ id: "pr-goal-1", instruction: "Last month's invoices come out as one spreadsheet" }]);
     });
   });
 
@@ -216,7 +261,7 @@ describe("planForPullRequest", () => {
 
   describe("the lead's brief", () => {
     const goal = [{ person: "ana", goals: [{ id: "export", instruction: "Last month's invoices come out as one spreadsheet" }] }];
-    const withBrief = (turns: unknown, brief: unknown) => text(JSON.stringify({ turns, brief, untried: untriedFor(turns) }));
+    const withBrief = (turns: unknown, brief: unknown) => text(JSON.stringify({ turns: promised(turns), brief, untried: untriedFor(turns) }));
 
     test("the prompt asks for a preparation goal when the change needs something that may not exist yet", async () => {
       const model = scriptedModel([withBrief(goal, "Exports now work.")]);
@@ -271,7 +316,7 @@ describe("planForPullRequest", () => {
     });
 
     test("ignores a reason next to goals and one that repeats the pull request", async () => {
-      const withGoals = await plan(scriptedModel([text(JSON.stringify({ turns: goal, untried: untriedFor(goal), notVisibleHere: "Needs a licence." }))]), { pullRequest: withSetup });
+      const withGoals = await plan(scriptedModel([text(JSON.stringify({ turns: promised(goal), untried: untriedFor(goal), notVisibleHere: "Needs a licence." }))]), { pullRequest: withSetup });
       expect(withGoals.turns).toHaveLength(1);
       expect(withGoals.notVisibleHere).toBeUndefined();
       const leaking = await plan(scriptedModel([hidden("InvoiceExportButton needs a licence."), hidden("InvoiceExportButton needs a licence.")]), { pullRequest: withSetup }).catch(() => null);
@@ -281,7 +326,7 @@ describe("planForPullRequest", () => {
 
   describe("how the people get their accounts", () => {
     const invite: PullRequestText = { title: "Let admins invite colleagues by email", description: "Admins can send an invitation link that expires after a week.", changedFiles: ["src/server/invitations.ts", "src/app/team/invite/page.tsx"] };
-    const withFlow = (turns: unknown, flow: Record<string, unknown>) => text(JSON.stringify({ turns, untried: untriedFor(turns), ...flow }));
+    const withFlow = (turns: unknown, flow: Record<string, unknown>) => text(JSON.stringify({ turns: promised(turns), untried: untriedFor(turns), ...flow }));
     const goal = [{ person: "tom", goals: [{ id: "joins", instruction: "A new colleague joins the team and sees its workspace" }] }];
 
     test("a pull request about invitations yields exercise, with the reason for the owner", async () => {
