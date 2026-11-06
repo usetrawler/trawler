@@ -206,6 +206,23 @@ describe("runCli", () => {
     expect(stops(h)).toHaveLength(0);
   });
 
+  it("says the change was not tested when the lead could not plan for it, without a clean pass", async () => {
+    const leadFallback = "The lead could not plan for this pull request (the model provider refused Trawler's key; Trawler has been told), so the project's plan ran as it is.";
+    const clean = { defects: { confirmed: 0, refuted: 0, inconclusive: 0 }, goalsReached: 4 };
+    const h = harness([result({ ...clean, status: "running", finished: false, leadFallback }), result({ ...clean, leadFallback })], {});
+    expect(await runCli(argv, h.deps)).toBe(0);
+    const log = h.err.join("\n");
+    expect(h.err.filter((l) => l === `warning: ${leadFallback}`)).toHaveLength(1);
+    expect(log).toContain(`Run #7 is not a clean result for this change, so it does not pass or fail the job. ${leadFallback} Report: https://app.example/runs/7`);
+    expect(log).not.toContain("finished with no confirmed defects");
+    const found = harness([result({ leadFallback })], {});
+    expect(await runCli(argv, found.deps)).toBe(1);
+    expect(found.err.join("\n")).toContain(`Run #7 confirmed 1 defect(s) (--fail-on new-confirmed). ${leadFallback} Report:`);
+    const planned = harness([result(clean)], {});
+    expect(await runCli(argv, planned.deps)).toBe(0);
+    expect(planned.err.join("\n")).toContain("Run #7 finished with no confirmed defects.");
+  });
+
   it("is neutral when the run was stopped by its cap", async () => {
     const h = harness([result({ status: "stopped_budget" })], {});
     expect(await runCli(argv, h.deps)).toBe(0);

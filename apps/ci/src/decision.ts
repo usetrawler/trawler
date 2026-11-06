@@ -16,7 +16,9 @@ export function decide(result: RunResult, failOn: FailOn): Decision {
   if (result.status !== "succeeded") {
     return { exitCode: 0, message: `Run #${result.number} ended as ${result.status.replace("_", " ")} before it could finish, so it does not pass or fail the job (${confirmed} confirmed so far). Report: ${result.reportUrl}` };
   }
-  if (failOn === "never") return { exitCode: 0, message: `Run #${result.number} finished with ${confirmed} confirmed defect(s); --fail-on never, so the job passes.` };
-  if (confirmed > 0) return { exitCode: 1, message: `Run #${result.number} confirmed ${confirmed} defect(s) (--fail-on ${failOn}). Report: ${result.reportUrl}` };
+  const fallback = result.leadFallback ? ` ${result.leadFallback}` : "";
+  if (failOn === "never") return { exitCode: 0, message: `Run #${result.number} finished with ${confirmed} confirmed defect(s); --fail-on never, so the job passes.${fallback}` };
+  if (confirmed > 0) return { exitCode: 1, message: `Run #${result.number} confirmed ${confirmed} defect(s) (--fail-on ${failOn}).${fallback} Report: ${result.reportUrl}` };
+  if (result.leadFallback) return { exitCode: 0, message: `Run #${result.number} is not a clean result for this change, so it does not pass or fail the job.${fallback} Report: ${result.reportUrl}` };
   return { exitCode: 0, message: `Run #${result.number} finished with no confirmed defects.` };
 }
