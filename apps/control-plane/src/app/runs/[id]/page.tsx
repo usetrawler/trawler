@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { AppShell } from "../../../components/app-shell.tsx";
 import { runView } from "../../../runs/report.ts";
-import { runPath, runTitle } from "../../../runs/status.ts";
+import { runPath } from "../../../runs/status.ts";
 import { betaRefusal } from "../../../server/beta.ts";
 import { runFor } from "../../../server/runs.ts";
 import { shellFor } from "../../../server/shell.ts";
@@ -27,15 +27,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   const project = shell.workspace.projects.find((p) => p.id === access.run!.projectId);
   return (
     <AppShell shell={shell} current={{ project: access.run.projectId }} parent wide>
-      <nav aria-label="Breadcrumb" className="mb-[34px]">
-        <ol className="flex flex-wrap items-center gap-x-2 gap-y-4 font-mono text-[10px] text-muted">
-          {project && <><li><a href={`/projects/${project.id}`} className="-my-2 inline-block py-2 hover:text-ink">{project.name}</a></li><li aria-hidden>/</li></>}
-          <li><a href={project ? `/projects/${project.id}/runs` : "/runs"} className="-my-2 inline-block py-2 hover:text-ink">Runs</a></li>
-          <li aria-hidden>/</li>
-          <li aria-current="page" className="font-bold text-ink">{runTitle(access.run.number)}</li>
-        </ol>
-      </nav>
-      <RunLive initial={JSON.parse(JSON.stringify({ run: access.run, view: runView(access.run) }))} closedBeta={betaRefusal(access.member.email) ?? undefined} />
+      <RunLive project={project} initial={JSON.parse(JSON.stringify({ run: access.run, view: runView(access.run) }))} closedBeta={betaRefusal(access.member.email) ?? undefined} />
     </AppShell>
   );
 }

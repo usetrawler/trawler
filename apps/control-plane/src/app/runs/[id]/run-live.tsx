@@ -4,7 +4,8 @@ import { useCallback, useEffect, useId, useRef, useState, useTransition } from "
 import type { runView, StageState, PersonaState } from "../../../runs/report.ts";
 import type { RunSummary } from "../../../runs/runs.ts";
 import { findingAnchor } from "../../../runs/finding-anchor.ts";
-import { runPath, runStatusLabel, runTitle } from "../../../runs/status.ts";
+import { runPath, runStatusLabel, runStatusTone, runTitle } from "../../../runs/status.ts";
+import { RunBreadcrumb } from "../../../components/run-breadcrumb.tsx";
 import { initials } from "../../../components/initials.ts";
 import { DocsLink } from "../../../components/docs-link.tsx";
 import { LocalTime } from "../../../components/local-time.tsx";
@@ -402,54 +403,43 @@ function BotProtectionNotice({ met }: { met: NonNullable<RunSummary["botProtecti
   );
 }
 
-function Outcome({ run, view }: { run: RunSummary; view: View }) {
-  const { people, goals } = outcome(view);
-  const { report } = view;
-  const reported = view.reported;
-  const spent = spentOf(run, false);
-  const cell = "p-5 border-line";
-  const id = useId();
+function RunOverview({ run, view }: { run: RunSummary; view: View }) {
+  const status = run.cancelReason === "nothing_to_test" ? "skipped" : run.status;
+  const hasGoals = view.goalsTotal > 0 && (view.live || status === "succeeded" || run.goals.length > 0);
+  const confirmed = view.report.confirmed.length;
+  const checked = view.live || status === "succeeded" || confirmed > 0;
   return (
-    <section aria-labelledby={id} className="mt-[35px] grid grid-cols-2 border border-line bg-panel wide:grid-cols-[minmax(300px,1.5fr)_repeat(3,minmax(120px,0.5fr))]">
-      <div className={`${cell} border-r border-b wide:border-b-0`}>
-        <h2 id={id} className={`${label} text-muted`}>Outcome</h2>
-        <p className="my-3 text-[25px] leading-[1.05] font-bold">{people}</p>
-        <p className="text-[11px] text-muted">{goals}</p>
+    <dl className="mt-5 grid grid-cols-3 divide-x divide-line rounded-lg border border-line bg-paper">
+      <div className="min-w-0 p-2.5 sm:p-3.5">
+        <dt className="text-xs text-muted">Run state</dt>
+        <dd className={`mt-1 wrap-anywhere font-semibold ${status === "succeeded" ? "" : runStatusTone(status)}`}>{runStatusLabel(status)}</dd>
       </div>
-      <div className={`${cell} border-b wide:border-r wide:border-b-0`}>
-        <p className={`${label} text-muted`}>Verified</p>
-        <p className="mt-3.5 mb-1 text-[34px] font-bold">{report.confirmed.length}</p>
-        <p className="text-[10px] text-muted">of {reported} reported</p>
+      <div className="min-w-0 p-2.5 sm:p-3.5">
+        <dt className="text-xs text-muted">Goals reached</dt>
+        <dd className="mt-1 font-semibold tabular-nums">{hasGoals ? `${view.goalsReached} / ${view.goalsTotal}` : "—"}</dd>
       </div>
-      <div className={`${cell} border-r`}>
-        <p className={`${label} text-muted`}>Dismissed by replay</p>
-        <p className="mt-3.5 mb-1 text-[34px] font-bold">{report.refuted.length}</p>
-        <p className="text-[10px] text-muted">the replay did not bear them out</p>
+      <div className="min-w-0 p-2.5 sm:p-3.5">
+        <dt className="text-xs text-muted">{view.live ? "Confirmed so far" : "Confirmed findings"}</dt>
+        <dd className={`mt-1 font-semibold tabular-nums ${confirmed ? "text-action-ink" : ""}`}>{checked ? confirmed : "—"}</dd>
+        {view.reported > 0 && <dd className="text-xs text-muted">of {view.reported} reported</dd>}
       </div>
-      <div className={cell}>
-        <p className={`${label} text-muted`}>{spent.title}</p>
-        <p className="mt-3.5 mb-1 text-[34px] font-bold">{spent.value}</p>
-        <p className="text-[10px] text-muted">{spent.of}</p>
-      </div>
-    </section>
+    </dl>
   );
 }
 
-function LiveCost({ run }: { run: RunSummary }) {
-  const spent = spentOf(run, true);
+function RunCost({ run, live }: { run: RunSummary; live: boolean }) {
+  const spent = spentOf(run, live);
   return (
-    <div className="w-full shrink-0 border border-line p-[17px] md:w-[220px]">
-      <p className={`${label} text-muted`}>{spent.title}</p>
-      <p className="my-[7px] text-[32px] font-bold">{spent.value}</p>
-      <p className="font-mono text-[10px] text-muted">{spent.of}</p>
-      <div className="mt-[15px] h-[3px] bg-line"><div className="h-full bg-action" style={{ width: `${spent.share}%` }} /></div>
+    <div className="w-fit text-xs text-muted">
+      <strong className="font-semibold text-ink">{spent.title} {spent.value}</strong> <span>{spent.of}</span>
+      {live && <div className="mt-1 h-0.5 bg-line" aria-hidden><div className="h-full bg-action" style={{ width: `${spent.share}%` }} /></div>}
     </div>
   );
 }
 
 function Stages({ stages }: { stages: View["stages"] }) {
   return (
-    <ol aria-label="Stages" className="mt-[55px] mb-4 grid grid-cols-4 border border-line max-md:grid-cols-2">
+    <ol aria-label="Stages" className="mb-4 grid grid-cols-4 border border-line max-md:grid-cols-2">
       {stages.map((s, i) => (
         <li key={s.label} className={`grid grid-cols-[auto_1fr] gap-x-2.5 gap-y-[3px] border-line p-[15px] not-last:border-r max-md:nth-2:border-r-0 max-md:nth-[-n+2]:border-b ${s.state === "done" ? "text-ok" : s.state === "active" ? "bg-[color-mix(in_srgb,var(--action)_9%,transparent)] text-ink shadow-[inset_0_-3px_var(--action)]" : "text-muted"}`}>
           <span className="row-span-2 font-mono text-[10px]">{String(i + 1).padStart(2, "0")}</span>
@@ -530,7 +520,16 @@ function PeopleOutcomes({ view }: { view: View }) {
   );
 }
 
-export function RunLive({ initial, closedBeta }: { initial: Data; closedBeta?: string }) {
+const PANELS = [["findings", "Findings"], ["goals", "Goals"], ["activity", "Activity"]] as const;
+type Panel = (typeof PANELS)[number][0];
+
+function panelForHash(hash: string): Panel {
+  if (hash === "#goals" || hash === "#pr-plan") return "goals";
+  if (hash === "#activity" || hash === "#conversation" || hash.startsWith("#trail-")) return "activity";
+  return "findings";
+}
+
+export function RunLive({ initial, closedBeta, project }: { initial: Data; closedBeta?: string; project?: { id: string; name: string } }) {
   const [data, setData] = useState(initial);
   const [stale, setStale] = useState(false);
   const [gone, setGone] = useState(false);
@@ -573,6 +572,7 @@ export function RunLive({ initial, closedBeta }: { initial: Data; closedBeta?: s
   const [announcement, setAnnouncement] = useState({ text: "", n: 0 });
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const [reveal, setReveal] = useState(false);
+  const [panel, setPanel] = useState<Panel>("findings");
   const focused = useCallback(() => setFocusKey(null), []);
   const again = useRunAgain();
   const moved = useCallback<Moved>(async (key, text) => {
@@ -592,83 +592,76 @@ export function RunLive({ initial, closedBeta }: { initial: Data; closedBeta?: s
     setFocusKey(finished[0]!);
   }, [view.report]);
   useEffect(() => {
-    const showAddressedFinding = () => {
-      const finding = document.getElementById(window.location.hash.slice(1));
-      if (!finding) return;
-      const { top, bottom } = finding.getBoundingClientRect();
-      if (top > 0 || bottom <= 0) finding.scrollIntoView();
+    const syncPanel = () => {
+      const hash = window.location.hash;
+      const next = panelForHash(hash);
+      if (next !== panel) return setPanel(next);
+      if (!/^#(?:finding-|trail-|pr-plan$|conversation$)/.test(hash)) return;
+      const addressed = document.getElementById(hash.slice(1));
+      if (!addressed) return;
+      const { top, bottom } = addressed.getBoundingClientRect();
+      if (top > 0 || bottom <= 0) addressed.scrollIntoView();
     };
-    showAddressedFinding();
-    window.addEventListener("hashchange", showAddressedFinding);
-    return () => window.removeEventListener("hashchange", showAddressedFinding);
-  }, []);
+    syncPanel();
+    window.addEventListener("hashchange", syncPanel);
+    window.addEventListener("popstate", syncPanel);
+    return () => {
+      window.removeEventListener("hashchange", syncPanel);
+      window.removeEventListener("popstate", syncPanel);
+    };
+  }, [panel]);
+  const openPanel = (next: Panel) => {
+    if (next === panel) return;
+    window.history.pushState(window.history.state, "", `#${next}`);
+    setPanel(next);
+  };
 
   const host = URL.canParse(run.target) ? new URL(run.target).host : run.target;
   const { report } = view;
   const dismiss = view.live ? undefined : (f: ReportFinding) => <NotABugButton runId={run.id} findingKey={f.key} title={f.title} working={view.refreshes} onDone={moved} onRefused={refresh} />;
   const when = view.live ? run.createdAt : run.finishedAt ?? run.createdAt;
+  const subject = run.pullRequest?.title?.trim();
+  const totalFindings = report.confirmed.length + report.couldNotJudge.length + report.inconclusive.length + report.notJudged.length + report.refuted.length + report.friction.length + report.dismissed.length;
   return (
     <div className="flex flex-col">
-      <div className={`flex flex-col items-start gap-6 ${view.live ? "md:flex-row md:flex-wrap md:items-end md:justify-between md:gap-x-[60px]" : "wide:flex-row wide:items-end wide:justify-between"}`}>
-        <div className={`flex min-w-0 flex-col ${view.live ? "md:min-w-80 md:flex-1" : "wide:flex-1"}`}>
-          <p className="font-mono text-base tracking-[0.1em] text-muted uppercase">{runStatusLabel(run.status)} · <LocalTime iso={new Date(when).toISOString()} /></p>
-          {run.pullRequest && <PullRequestSubject pr={run.pullRequest} />}
-          {run.startedVia && <p className="mt-2.5 text-sm break-words text-muted">Started over MCP by <strong className="font-semibold text-ink">{viaClient(run.startedVia)}</strong> for <strong className="font-semibold text-ink">{run.startedVia.person}</strong>.</p>}
-          <h1 className={`my-2.5 font-bold wrap-anywhere ${view.live ? "text-[48px] leading-[0.94] tracking-[-0.06em] md:text-[clamp(48px,6vw,88px)]" : "text-[44px] leading-[0.96] tracking-[-0.055em] md:text-[clamp(44px,5vw,72px)]"}`}>{view.headline}</h1>
-          <p className="text-base break-words text-muted">{host} · {run.planName && <>{run.prPlan ? "Plan: " : ""}{run.planName} · </>}{run.agentModel}</p>
-          {run.providedAccounts.length > 0 && <p className="text-sm break-words text-muted">{run.providedAccounts.join(", ")} {run.providedAccounts.length === 1 ? "signs" : "sign"} in with {run.providedAccounts.length === 1 ? "an account" : "accounts"} provided by the CI job.</p>}
-          {(run.prPlan?.signUps?.length ?? 0) > 0 && <p title={run.prPlan!.accountReason} className="text-sm break-words text-muted">This pull request touches how people get accounts, so {run.prPlan!.signUps!.join(", ")} {run.prPlan!.signUps!.length === 1 ? "goes" : "go"} through the real sign-up instead of using the CI account.</p>}
-          {view.live && <p className="mt-2 max-w-[700px] text-lg text-muted">Defects count only after a fresh agent reproduces them.</p>}
+      <RunBreadcrumb project={project} number={run.number} plan={run.savedPlan?.name ?? run.planName} />
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-3xl leading-tight font-bold tracking-tight wrap-anywhere md:text-4xl">{subject || view.headline}</h1>
+          <p className="mt-1 text-sm break-words text-muted">{host} · <LocalTime iso={new Date(when).toISOString()} /></p>
+          {subject && <p className="mt-1 text-sm text-muted">{view.headline}</p>}
           <p role="status" aria-live="polite" className="text-sm text-warn">
             {(gone || stale) && <span className="mt-2 block">{gone ? "This run is no longer available." : "Lost contact with Trawler. Retrying…"}</span>}
             <span className="sr-only">{runStatusLabel(run.status)}. {view.headline} <span key={announcement.n}>{announcement.text}</span></span>
           </p>
         </div>
-        {view.live ? (
-          <LiveCost run={run} />
-        ) : (
-          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
-            <a href={`/projects/${run.projectId}#start`} className={`${secondary} w-full md:w-auto`}>Start another run</a>
+        {!view.live && (
+          <div className="flex flex-wrap gap-2">
+            <a href={`/projects/${run.projectId}#start`} className={secondary}>Start another run</a>
             {!closedBeta && run.execution !== "own" && <RunAgainButton runId={run.id} again={again} />}
           </div>
         )}
-      </div>
+      </header>
       {!view.live && again.error && <div className="mt-3 flex wide:justify-end"><RunAgainError again={again} /></div>}
-      {!view.live && run.execution === "own" && <p className="mt-3 max-w-md self-end text-sm text-muted max-wide:self-start">This run came from CI. Start it again from there.</p>}
       {!view.live && closedBeta && run.execution !== "own" && <p className="mt-3 max-w-md self-end border-l-2 border-warn pl-3 text-sm max-wide:self-start">{closedBeta}</p>}
-      {run.botProtection && <BotProtectionNotice met={run.botProtection} />}
-      <PullRequestPlan run={run} />
-
-      {view.live ? (
-        <>
-          <Stages stages={view.stages} />
-          <LivePeople view={view} />
-          {run.activity.length > 0 && (
-            <section className="mt-6 flex flex-col gap-2">
-              <h2 className={`${label} text-muted`}>Latest</h2>
-              <ul className="flex flex-col gap-1 text-sm">
-                {run.activity.map((a) => (
-                  <li key={a.id} className="truncate"><span className="text-muted">{run.personas.find((p) => p.id === a.personaKey)?.name ?? (a.kind === "judge" ? "Judge" : "Replay")}: </span>{a.text}</li>
-                ))}
-              </ul>
-            </section>
-          )}
-          <div className="mt-[30px] flex items-center justify-between gap-4 max-md:flex-col max-md:items-start">
-            <p className="flex items-center gap-2.5 text-xs text-muted">
-              <span aria-hidden className="size-[9px] shrink-0 animate-[halo_1.5s_infinite] rounded-full bg-action [box-shadow:0_0_0_6px_color-mix(in_srgb,var(--action)_15%,transparent)] motion-reduce:animate-none" />
-              <span><strong className="text-ink">Safe to leave.</strong> The run keeps going; come back to this page for the report.</span>
-            </p>
-            <CancelButton runId={run.id} onDone={refresh} />
-          </div>
-        </>
-      ) : (
-        <Outcome run={run} view={view} />
+      <RunOverview run={run} view={view} />
+      {view.live && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <RunCost run={run} live />
+          <CancelButton runId={run.id} onDone={refresh} />
+        </div>
       )}
-
-      <Conversation run={run} />
-
-      <div className={`mt-[34px] grid gap-5 ${view.live ? "" : "wide:grid-cols-[minmax(0,1fr)_290px]"}`}>
-        <div className="flex min-w-0 flex-col gap-8">
+      {run.botProtection && <BotProtectionNotice met={run.botProtection} />}
+      <nav aria-label="Run report" className="mt-5 flex flex-wrap gap-x-5 border-b border-line">
+        {PANELS.map(([key, name]) => (
+          <button key={key} type="button" aria-pressed={panel === key} aria-controls={`run-${key}`} onClick={() => openPanel(key)}
+            className={`-mb-px flex min-h-10 items-center gap-1.5 border-b-2 text-sm ${panel === key ? "border-action font-semibold text-ink" : "border-transparent text-muted hover:text-ink"}`}>
+            {name}{key === "findings" && totalFindings > 0 && <span className="rounded bg-soft px-1.5 text-xs">{totalFindings}</span>}
+          </button>
+        ))}
+      </nav>
+      <div id="run-findings" hidden={panel !== "findings"} className="pt-5">
+        <div className="flex min-w-0 flex-col gap-6">
           <Section title="Confirmed" hint="A fresh agent reproduced it and the judge agreed" items={report.confirmed} mark="✓ Replayed" empty={view.live ? "Nothing confirmed yet." : "No defect was confirmed."} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} />
           <Section<UnjudgedFinding> title="Could not be judged" hint="The judge gave no verdict; the replay is kept" items={report.couldNotJudge} note detail={(f) => (f.action === "judging" ? undefined : f.reason)} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} action={(f) =>
             f.action === "judge_again" && closedBeta ? <p className="text-sm text-muted">{closedBeta}</p>
@@ -681,9 +674,41 @@ export function RunLive({ initial, closedBeta }: { initial: Data; closedBeta?: s
           <Section title="Friction" hint="Not broken, but slowed someone down" items={report.friction} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} />
           <Section<DismissedFinding> title="Not a bug" hint="Marked not a bug by your team, or by Trawler for a repeat of one; the people in later runs of this project are told, with the reason" items={report.dismissed} action={(f) => <UndoNotABug runId={run.id} f={f} onDone={moved} onRefused={refresh} />} focusKey={focusKey} reveal={reveal} onFocused={focused} />
         </div>
-        {!view.live && <aside><PeopleOutcomes view={view} /></aside>}
       </div>
-      <div className="mt-8"><Trails runId={run.id} people={run.personas} live={view.live} pulse={data} /></div>
+      <div id="run-goals" hidden={panel !== "goals"} className="pt-5">
+        {view.live ? <LivePeople view={view} /> : (
+          <>
+            <p className="mb-3 text-sm text-muted">{outcome(view).people}</p>
+            <PeopleOutcomes view={view} />
+          </>
+        )}
+        <PullRequestPlan run={run} />
+      </div>
+      <div id="run-activity" hidden={panel !== "activity"} className="pt-5">
+        {view.live && <Stages stages={view.stages} />}
+        <div className="flex flex-col gap-1 text-sm text-muted">
+          {!view.live && <RunCost run={run} live={false} />}
+          {run.pullRequest && <PullRequestSubject pr={run.pullRequest} />}
+          <p className="wrap-anywhere">{run.agentModel}</p>
+          {run.startedVia && <p className="wrap-anywhere">Started over MCP by <strong className="font-semibold text-ink">{viaClient(run.startedVia)}</strong> for <strong className="font-semibold text-ink">{run.startedVia.person}</strong>.</p>}
+          {run.providedAccounts.length > 0 && <p className="wrap-anywhere">{run.providedAccounts.join(", ")} {run.providedAccounts.length === 1 ? "signs" : "sign"} in with {run.providedAccounts.length === 1 ? "an account" : "accounts"} provided by the CI job.</p>}
+          {!!run.prPlan?.signUps?.length && <p title={run.prPlan.accountReason} className="wrap-anywhere">This pull request touches how people get accounts, so {run.prPlan.signUps.join(", ")} {run.prPlan.signUps.length === 1 ? "goes" : "go"} through the real sign-up instead of using the CI account.</p>}
+          {!view.live && run.execution === "own" && <p>This run came from CI. Start it again from there.</p>}
+          {view.live && <p>Safe to leave. The run keeps going in the background.</p>}
+        </div>
+        {run.activity.length > 0 && (
+          <section className="mt-5 flex flex-col gap-2">
+            <h2 className="text-sm font-semibold">Latest activity</h2>
+            <ul className="grid gap-1 text-sm">
+              {run.activity.map((a) => (
+                <li key={a.id} className="wrap-anywhere"><span className="text-muted">{run.personas.find((p) => p.id === a.personaKey)?.name ?? (a.kind === "judge" ? "Judge" : "Replay")}: </span>{a.text}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+        <Conversation run={run} />
+        <div className="mt-5"><Trails runId={run.id} people={run.personas} live={view.live} pulse={data} /></div>
+      </div>
     </div>
   );
 }

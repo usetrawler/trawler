@@ -50,7 +50,7 @@ const press = (node: Node) => (node.props!.onClick as () => void)();
 
 const summary = (status: string, over: Partial<RunSummary> = {}): RunSummary => ({
   startedVia: null, stoppedVia: null,
-  id: "run-1", number: 7, status, cancelReason: null, projectId: "project-1", planName: null, costUsd: 0.2, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "m", judgeModel: "m", provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0,
+  id: "run-1", number: 7, status, cancelReason: null, projectId: "project-1", planName: null, savedPlan: null, costUsd: 0.2, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "m", judgeModel: "m", provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0,
   createdAt: new Date(), startedAt: new Date(), finishedAt: null, jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [], conversation: false, pullRequest: null, prPlan: null, conversationMessages: [], execution: "hosted", providedAccounts: [],
   personas: [{ id: "ana", name: "Ana" }], goalTexts: [{ id: "g1", instruction: "Get an account." }],
   ...over,
@@ -231,7 +231,7 @@ test("after Trawler was updated, Stop and Judge again ask for a reload, since tr
 test("a Run again refusal sits on its own line under the head, so the buttons stay where they were", () => {
   react.again = { error: "The workspace has no model key any more. An owner or admin can add one in Settings." };
   const tree = draw(data("succeeded")) as unknown as Node;
-  const [headRow, errorLine] = tree.props!.children as Node[];
+  const [, headRow, errorLine] = tree.props!.children as Node[];
   expect(nodes(headRow).some((node) => node.type === RunAgainError)).toBe(false);
   expect(errorLine!.props).toMatchObject({ className: "mt-3 flex wide:justify-end" });
   expect(nodes(errorLine).some((node) => node.type === RunAgainError)).toBe(true);

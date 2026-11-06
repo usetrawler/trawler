@@ -3,14 +3,16 @@ import type { ProjectRunState } from "../runs/runs.ts";
 import { PageHead, PrimaryLink } from "./page-head.tsx";
 import { PauseRuns } from "./pause-runs.tsx";
 
-export function ProjectHead({ project, address, tab, runs, runState, planId }: { project: { id: string; name: string; targetUrl: string }; address?: string; tab: "plan" | "runs"; runs: number; runState: ProjectRunState; planId?: string }) {
+export function ProjectHead({ project, address, tab, runs, runState, planId }: { project: { id: string; name: string; targetUrl: string }; address?: string; tab: "overview" | "plan" | "runs"; runs: number; runState: ProjectRunState; planId?: string }) {
   const tabs = [
-    { key: "plan", href: `/projects/${project.id}`, label: "Plan" },
+    { key: "overview", href: `/projects/${project.id}/overview`, label: "Overview" },
+    { key: "plan", href: `/projects/${project.id}`, label: "Plans" },
     { key: "runs", href: `/projects/${project.id}/runs`, label: "Runs", count: runs },
   ] as const;
   return (
     <div className="mb-8">
       <PageHead
+        compact
         eyebrow={<>Project · <a href={project.targetUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-ink">{address ?? hostOf(project.targetUrl)}<span aria-hidden> ↗</span><span className="sr-only normal-case"> (opens in a new tab)</span></a></>}
         title={project.name}
         action={
@@ -21,7 +23,7 @@ export function ProjectHead({ project, address, tab, runs, runState, planId }: {
         }
       />
       <nav aria-label="Project">
-        <ul className="-mt-4 flex gap-6 border-b border-line">
+        <ul className="-mt-4 flex flex-wrap gap-x-6 border-b border-line">
           {tabs.map((t) => (
             <li key={t.key}>
               <a

@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
 
-export function PageHead({ eyebrow, title, subtitle, action }: { eyebrow: ReactNode; title: ReactNode; subtitle?: ReactNode; action?: ReactNode }) {
+export function PageHead({ eyebrow, title, subtitle, action, compact = false }: { eyebrow: ReactNode; title: ReactNode; subtitle?: ReactNode; action?: ReactNode; compact?: boolean }) {
   return (
     <div className="mb-10 flex flex-col items-start justify-between gap-6 md:flex-row md:items-end">
       <div className="min-w-0 self-stretch md:self-auto">
         <p className="mt-[11px] font-mono text-[11px] leading-[normal] tracking-[0.1em] wrap-anywhere text-action-ink uppercase">{eyebrow}</p>
-        <h1 className="my-2.5 text-[44px] leading-[0.96] font-bold tracking-[-0.055em] wrap-anywhere md:text-[clamp(44px,5vw,72px)]">{title}</h1>
+        <h1 className={`my-2.5 font-bold wrap-anywhere ${compact ? "text-3xl leading-tight tracking-tight md:text-4xl" : "text-[44px] leading-[0.96] tracking-[-0.055em] md:text-[clamp(44px,5vw,72px)]"}`}>{title}</h1>
         {subtitle && <p className="text-base leading-[normal] text-muted">{subtitle}</p>}
       </div>
       {action}

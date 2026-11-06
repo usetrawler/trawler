@@ -330,3 +330,54 @@ describe("the Trawler app in a real MCP Apps host", () => {
     expect(await frame.locator(".control .pill").count()).toBe(0);
   });
 });
+
+test("dashboard runs lead to their exact plan snapshot and its history", async () => {
+  const prPlanId = "c5d7be67-72c2-4b8b-963d-9ad5b60458d9";
+  const pr = { number: 24, title: "Filter invoices by cycle", repository: "acme/checkout" };
+  await withOrg(db.db, orgId, async (tx) => {
+    for (const [run, version] of [[runs.base!, 4], [runs.report!, 5]] as const) {
+      await tx.updateTable("runs").set({
+        plan_name: `PR #24 v${version}`,
+        pr_plan: JSON.stringify({ prPlanId, version, mode: "change", goalIds: ["g", "h"] }),
+        pull_request: JSON.stringify(pr),
+      }).where("id", "=", run.id).execute();
+    }
+  });
+  const page = await context.newPage();
+  try {
+    const path = (number: number) => `/runs/${String(number).padStart(4, "0")}`;
+    const report = path(runs.report!.number);
+    const older = path(runs.base!.number);
+    const plan = page.getByRole("navigation", { name: "Breadcrumb" });
+    await page.goto(`${stack.origin}/runs`);
+    const row = page.locator(`a[href="${report}"]`);
+    await expect.poll(() => row.innerText()).toContain("Filter invoices by cycle");
+    expect(await row.innerText()).toContain("PR #24 v5");
+    await row.click();
+    await expect.poll(() => page.getByRole("heading", { level: 1 }).innerText()).toBe(pr.title);
+    await expect.poll(() => page.getByText("Confirmed findings", { exact: true }).isVisible()).toBe(true);
+    await hydrated(page.getByRole("button", { name: "Activity", exact: true }));
+    await page.getByRole("button", { name: "Activity", exact: true }).click();
+    await expect.poll(() => page.getByText("What each person did").isVisible()).toBe(true);
+    await page.goto(`${stack.origin}${report}#finding-ana%3Af0`);
+    await expect.poll(() => page.locator('li[id="finding-ana%3Af0"] details').getAttribute("open")).not.toBeNull();
+    await plan.getByRole("link", { name: "PR #24 v5" }).click();
+    await expect.poll(() => page.getByRole("heading", { level: 1 }).innerText()).toBe("PR #24 v5");
+    await page.getByText("People and goals", { exact: false }).click();
+    await expect.poll(() => page.getByText("Sign in and reach the invoices page.", { exact: true }).first().isVisible()).toBe(true);
+    const history = page.getByRole("region", { name: "Runs of this plan" });
+    expect(await history.getByRole("link").count()).toBe(2);
+    await history.locator(`a[href="${older}"]`).click();
+    await plan.getByRole("link", { name: "PR #24 v4" }).click();
+    await expect.poll(() => page.getByRole("heading", { level: 1 }).innerText()).toBe("PR #24 v4");
+
+    await page.setViewportSize({ width: 390, height: 850 });
+    await page.goto(`${stack.origin}/projects/${projectId}/overview`);
+    await expect.poll(() => page.getByRole("heading", { name: "Latest completed run" }).isVisible()).toBe(true);
+    await page.getByRole("navigation", { name: "Project", exact: true }).getByRole("link", { name: /^Runs/ }).click();
+    await expect.poll(() => row.getByText("PR #24 v5", { exact: true }).isVisible()).toBe(true);
+    expect(await page.locator("html").evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  } finally {
+    await page.close();
+  }
+});

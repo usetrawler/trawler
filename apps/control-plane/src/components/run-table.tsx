@@ -3,48 +3,46 @@ import { runPath, runStatusLabel, runStatusTone } from "../runs/status.ts";
 import { viaLabel } from "../runs/via.ts";
 import { LocalTime } from "./local-time.tsx";
 
-const cost = (r: RunLine) => (r.tokenCap !== null ? { value: `${(r.tokensUsed / 1_000_000).toFixed(2)}M`, label: "tokens" } : { value: `$${r.costUsd.toFixed(2)}`, label: "cost" });
+const cost = (r: RunLine) => r.tokenCap !== null ? `${(r.tokensUsed / 1_000_000).toFixed(2)}M tokens` : `$${r.costUsd.toFixed(2)}`;
 
-export function RunTable({ runs, compact = false, project = true }: { runs: RunLine[]; compact?: boolean; project?: boolean }) {
-  const columns = compact ? "grid-cols-[50px_minmax(150px,1fr)_90px_70px_70px_65px_15px]" : "grid-cols-[60px_minmax(170px,1fr)_115px_repeat(3,85px)_20px]";
+export function RunTable({ runs, project = true }: { runs: RunLine[]; project?: boolean }) {
   return (
-    <ol className="border border-line">
-      {runs.map((r) => {
-        const spent = cost(r);
-        const tone = runStatusTone(r.status);
-        const status = runStatusLabel(r.status);
-        const narrowStatus = r.unchecked ? `${status} · not checked` : status;
-        const when = <LocalTime iso={r.createdAt.toISOString()} />;
-        return (
-          <li key={r.id} className="border-b border-line last:border-b-0">
-            <a href={runPath(r.number)} className={`grid min-h-[72px] items-center gap-3 bg-panel p-3 text-ink hover:bg-[color-mix(in_srgb,var(--action)_5%,var(--panel))] ${columns} max-wide:grid-cols-[50px_minmax(140px,1fr)_95px_15px] max-md:grid-cols-[44px_minmax(0,1fr)_16px]`}>
-              <span className="font-mono text-[10px] text-muted">#{String(r.number).padStart(4, "0")}</span>
-              <span className="min-w-0">
-                {project ? (
-                  <>
-                    <strong className="block truncate">{r.projectName}{r.projectSite && <span className="font-normal text-muted"> · {r.projectSite}</span>}{r.planName && <span className="font-normal text-muted"> · {r.planName}</span>}</strong>
-                    <small className="mt-0.5 block text-[10px] text-muted">{when}<span className={`md:hidden ${tone}`}> · {narrowStatus}</span></small>
-                  </>
-                ) : (
-                  <>
-                    <strong className="block truncate">{when}{r.planName && <span className="font-normal text-muted"> · {r.planName}</span>}</strong>
-                    <small className={`mt-0.5 block text-[10px] md:hidden ${tone}`}>{narrowStatus}</small>
-                  </>
-                )}
-                {r.startedVia && <small className="mt-0.5 block text-[10px] break-words text-muted">{viaLabel(r.startedVia)}</small>}
-                <small className="mt-1 block text-[10px] text-muted wide:hidden">
-                  {r.unchecked ? "not checked" : `${r.confirmed} confirmed`} · {r.goalsReached}/{r.goalsTotal} goals · {spent.value}{spent.label === "tokens" ? " tokens" : ""}
-                </small>
-              </span>
-              <span className={`font-mono text-[10px] max-md:hidden ${tone}`}>{r.unchecked ? <><span className="wide:hidden">{narrowStatus}</span><span className="max-wide:hidden">{status}</span></> : status}</span>
-              <span className="max-wide:hidden">{r.unchecked ? <><strong className="block"><span aria-hidden>—</span></strong><small className="text-[10px] text-muted">not checked<span className="sr-only">: every replay failed</span></small></> : <><strong className="block">{r.confirmed}</strong><small className="text-[10px] text-muted">confirmed<span className="sr-only"> defects</span></small></>}</span>
-              <span className="max-wide:hidden"><strong className="block"><span aria-hidden>{r.goalsReached} / {r.goalsTotal}</span><span className="sr-only">{r.goalsReached} of {r.goalsTotal}</span></strong><small className="text-[10px] text-muted">goals<span className="sr-only"> reached</span></small></span>
-              <span className="max-wide:hidden"><strong className="block">{spent.value}</strong><small className="text-[10px] text-muted">{spent.label}</small></span>
-              <span aria-hidden className="font-bold">→</span>
-            </a>
-          </li>
-        );
-      })}
-    </ol>
+    <div className="@container overflow-hidden rounded-lg border border-line bg-paper">
+      <div aria-hidden className="run-columns hidden border-b border-line bg-panel px-3 py-2 text-xs font-semibold text-muted @[32rem]:grid">
+        <span>Run</span><span>Plan</span><span>Status</span><span>Goals</span>
+      </div>
+      <ol aria-label="Runs" className="divide-y divide-line">
+        {runs.map((r) => {
+          const planName = r.savedPlan?.name ?? r.planName;
+          const planTitle = r.savedPlan?.title;
+          return (
+            <li key={r.id}>
+              <a href={runPath(r.number)} className="run-columns grid items-start px-3 py-3 text-sm text-ink -outline-offset-2 hover:bg-soft @[32rem]:items-center">
+                <span className="min-w-0">
+                  <strong className="block font-mono text-xs">#{String(r.number).padStart(4, "0")}</strong>
+                  {project && <span className="block break-words">{r.projectName}{r.projectSite && <span className="text-muted"> · {r.projectSite}</span>}</span>}
+                  <small className="block text-xs text-muted"><LocalTime iso={r.createdAt.toISOString()} /></small>
+                  {r.startedVia && <small className="block text-xs break-words text-muted">{viaLabel(r.startedVia)}</small>}
+                </span>
+                <span className="col-start-1 row-start-2 min-w-0 @[32rem]:col-start-auto @[32rem]:row-start-auto">
+                  <small className="block text-xs text-muted @[32rem]:sr-only">Plan</small>
+                  {planName ? <><strong className="block break-words font-semibold">{planTitle || planName}</strong>{planTitle && planTitle !== planName && <small className="block break-words text-xs text-muted">{planName}</small>}</> : <span className="text-muted">No linked plan</span>}
+                </span>
+                <span className="col-start-2 row-start-1 min-w-0 @[32rem]:col-start-auto @[32rem]:row-start-auto">
+                  <strong className={`inline-block rounded bg-soft px-1.5 py-0.5 text-xs font-semibold ${r.status === "succeeded" ? "text-ink" : runStatusTone(r.status)}`}>{runStatusLabel(r.status)}</strong>
+                  <small className="mt-0.5 block text-xs text-muted">{r.unchecked ? <>Not checked<span className="sr-only">: every replay failed</span></> : <>{r.confirmed} confirmed<span className="sr-only"> defects</span></>}</small>
+                </span>
+                <span className="min-w-0">
+                  <small className="block text-xs text-muted @[32rem]:sr-only">Goals reached</small>
+                  <span className="block font-semibold tabular-nums">{r.goalsReached} / {r.goalsTotal}</span>
+                  <small className="block break-words text-xs text-muted">{cost(r)}</small>
+                </span>
+                <span aria-hidden className="col-start-3 row-start-1 justify-self-end text-muted @[32rem]:col-start-auto @[32rem]:row-start-auto">→</span>
+              </a>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }

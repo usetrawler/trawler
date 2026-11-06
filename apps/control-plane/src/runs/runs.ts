@@ -10,7 +10,7 @@ import { loadProjectConfig, planOf, ProjectNotFound } from "../projects/projects
 import { budgetLeft, budgetSpentMessage, HALTED, monthlyBudget, PAUSED, projectPaused, runsHalted, type MonthlyBudget } from "./limits.ts";
 import { FIRST_RUN_ON_US } from "./models.ts";
 import { accountsFor, DEFAULT_PLAN_MODE, hasPullRequestDetails, NOTHING, PR_PLAN_POSITION, storedPlanFor, type PrPlanRecord } from "./pr-plan.ts";
-import { prKey, runPlanName, usePrPlan, type PrKey } from "./pr-plan-store.ts";
+import { prKey, prPlanName, runPlanName, usePrPlan, type PrKey } from "./pr-plan-store.ts";
 import { peopleLimitMessage, runsPerDayMessage, type WorkspacePlan } from "./plan-limits.ts";
 import { runsToday, workspacePlan } from "./plans.ts";
 import { gaveNoVerdict } from "./report.ts";
@@ -431,6 +431,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const snapshot = run.config_snapshot as unknown as ConfigSnapshot;
   const goalText = new Map(snapshot.goals.map((g) => [g.id, g.instruction]));
   const record = run.pr_plan as unknown as PrPlanRecord | null;
+  const pullRequest = run.pull_request as unknown as PullRequest | null;
   const origin = record?.prPlanId ? await tx.selectFrom("plans as p").leftJoin("runs as r", "r.id", "p.created_by_run_id").select("r.number").where("p.id", "=", record.prPlanId).executeTakeFirst() : undefined;
   const [jobs, findings, goals, activity, screenshots, botProtection, dismissals, said] = await Promise.all([
     tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error", sql<boolean>`requested_by is not null`.as("requested"), sql<boolean>`status = 'leased' and exists (select 1 from run_events e where e.job_id = jobs.id and e.type = 'standby')`.as("on_standby")]).where("run_id", "=", runId).orderBy("position").execute(),
@@ -490,15 +491,21 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const latestScreenshot = (key: string, kind: string) => screenshots.filter((a) => a.finding_key === key && a.kind === kind).at(-1)?.id ?? null;
   return {
     id: run.id, number: run.number, status: run.status, cancelReason: run.cancel_reason as CancelReason | null, projectId: run.project_id, planName: run.plan_id === null || run.on_pull_request_plan || Number(run.plan_count) > 1 ? run.plan_name : null,
+    savedPlan: run.plan_name ? {
+      id: record?.prPlanId ?? run.plan_id,
+      name: record?.prPlanId && record.version && record.mode === "both" && pullRequest?.number
+        ? runPlanName(prPlanName(pullRequest.number), record.version)
+        : run.plan_name,
+    } : null,
     costUsd: Number(run.cost_usd), budgetUsd: Number(run.budget_usd), completionUsdPerMtok: run.completion_usd_per_mtok === null ? null : Number(run.completion_usd_per_mtok), agentModel: run.agent_model, judgeModel: run.judge_model,
     provider: run.provider, paidBy: run.paid_by as PaidBy, tokenCap: run.token_cap === null ? null : Number(run.token_cap), tokensUsed: Number(run.tokens_used),
     conversation: run.conversation,
     execution: run.execution as Execution,
     providedAccounts: run.provided_accounts as string[],
-    pullRequest: pullRequestOf(run.pull_request as unknown as PullRequest | null),
+    pullRequest: pullRequestOf(pullRequest),
     startedVia: viaOf(run.started_via),
     stoppedVia: viaOf(run.stopped_via),
-    prPlan: run.pr_plan ? plannedFor(record!, (run.pull_request as unknown as PullRequest | null)?.number ?? null, snapshot, record?.createdByRun ?? origin?.number ?? null) : null,
+    prPlan: run.pr_plan ? plannedFor(record!, pullRequest?.number ?? null, snapshot, record?.createdByRun ?? origin?.number ?? null) : null,
     createdAt: run.created_at, startedAt: run.started_at, finishedAt: run.finished_at,
     jobs,
     findings: findings.map((f) => ({

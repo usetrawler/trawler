@@ -1,3 +1,5 @@
+import { createElement } from "react";
+import { RunBreadcrumb } from "../../../components/run-breadcrumb.tsx";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
@@ -18,7 +20,7 @@ vi.mock("../../../server/shell.ts", () => ({
   },
 }));
 vi.mock("../../../runs/report.ts", () => ({ runView: () => ({}) }));
-vi.mock("./run-live.tsx", () => ({ RunLive: (props: Record<string, unknown>) => { state.live.push(props); return null; } }));
+vi.mock("./run-live.tsx", () => ({ RunLive: (props: Record<string, unknown>) => { state.live.push(props); return createElement(RunBreadcrumb, { project: props.project as { id: string; name: string }, number: 17 }); } }));
 vi.mock("../../../server/env.ts", () => ({ readEnv: () => (state.beta ? { betaEmails: state.beta } : {}) }));
 
 const { default: RunPage } = await import("./page.tsx");
@@ -50,7 +52,7 @@ test("a run's page marks its project in the nav as the section it belongs to, in
   state.access = { signedIn: true, member, run: { id: ID, projectId: "p1", number: 17 } };
   const html = renderToStaticMarkup(await open());
   const marked = html.match(/<a [^>]*aria-current="[^"]*"[^>]*>/g) ?? [];
-  expect(marked).toEqual([expect.stringMatching(/^<a href="\/projects\/p1" aria-current="true"/)]);
+  expect(marked).toEqual([expect.stringMatching(/^<a href="\/projects\/p1\/overview" aria-current="true"/)]);
   expect(state.shells).toEqual([member]);
   expect(html).toContain(">Acme workspace</p>");
   expect(html).toContain(">Ana Lopez</p>");
@@ -60,7 +62,7 @@ test("a run's page leads back to its project and the project's runs, without the
   state.access = { signedIn: true, member, run: { id: ID, projectId: "p1", number: 17 } };
   const html = renderToStaticMarkup(await open());
   const crumbs = html.match(/<nav aria-label="Breadcrumb".*?<\/nav>/)?.[0] ?? "";
-  expect(crumbs).toMatch(/<a href="\/projects\/p1"[^>]*>Acme<\/a>.*<a href="\/projects\/p1\/runs"[^>]*>Runs<\/a>.*<li aria-current="page"[^>]*>Run 0017<\/li>/);
+  expect(crumbs).toMatch(/<a href="\/projects\/p1\/overview"[^>]*>Acme<\/a>.*<a href="\/projects\/p1\/runs"[^>]*>Runs<\/a>.*<li aria-current="page"[^>]*>Run 0017<\/li>/);
   expect(html).not.toContain('aria-label="Progress"');
 });
 

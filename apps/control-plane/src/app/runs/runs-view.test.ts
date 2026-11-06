@@ -57,8 +57,8 @@ describe("RunsView", () => {
   it("inside one project, points to its plan when it has no runs and leads each row with the date", () => {
     expect(render({ runs: [], scope: "project" })).toContain("No runs yet. Start one from the plan.");
     expect(render({ runs: [], scope: "project", show: "attention" })).toContain("No run needs attention.");
-    expect(render({ scope: "project" })).not.toContain(">Acme</strong>");
-    expect(render()).toContain(">Acme</strong>");
+    expect(render({ scope: "project" })).not.toContain(">Acme</span>");
+    expect(render()).toContain(">Acme</span>");
   });
 });
 
