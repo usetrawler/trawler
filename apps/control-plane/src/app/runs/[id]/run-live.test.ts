@@ -14,7 +14,7 @@ const finding = (key: string, persona: string, extra: Partial<RunSummary["findin
   ({ key, personaKey: persona, kind: "defect", filedAs: null, goal: "g1", title: key, observed: "o", reproduction: ["Open Invoices.", "Save."], severity: "high", replay: null, verdict: null, sameAs: null, url: null, quote: null, stepPeople: null, screenshots: { reported: null, replayed: null }, dismissal: null, ...extra }) as RunSummary["findings"][number];
 const summary = (over: Partial<RunSummary>): RunSummary => ({
   startedVia: null, stoppedVia: null,
-  id: "run-1", number: 7, status: "succeeded", cancelReason: null, projectId: "project-1", planName: null, costUsd: 0.35, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash",
+  id: "run-1", number: 7, status: "succeeded", cancelReason: null, projectId: "project-1", planName: null, savedPlan: null, costUsd: 0.35, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash",
   provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0, createdAt: new Date("2026-09-25T19:40:00Z"), startedAt: new Date("2026-09-25T19:40:05Z"), finishedAt: new Date("2026-09-25T19:59:00Z"),
   jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [], conversation: false, pullRequest: null, prPlan: null, conversationMessages: [], execution: "hosted", providedAccounts: [],
   personas: [{ id: "ana", name: "Ana" }, { id: "lee", name: "Lee Park" }], goalTexts: [{ id: "g1", instruction: "Get an account." }, { id: "g2", instruction: "Send an invoice." }],
@@ -38,51 +38,54 @@ const live = summary({
 });
 const render = (run: RunSummary) => renderToStaticMarkup(createElement(RunLive, { initial: JSON.parse(JSON.stringify({ run, view: runView(run) })) }));
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replaceAll("&#x27;", "'").replace(/\s+/g, " ").trim();
-const head = (html: string) => html.slice(0, html.indexOf("<section"));
-const band = (html: string) => html.match(/<section aria-labelledby="[^"]+" class="mt-\[35px\].*?<\/section>/)?.[0] ?? "";
+const head = (html: string) => html.match(/<header.*?<\/header>/)?.[0] ?? "";
+const band = (html: string) => html.match(/<dl class="mt-5.*?<\/dl>/)?.[0] ?? "";
+const activity = (html: string) => html.slice(html.indexOf('id="run-activity"'));
 const rows = (html: string, title: string) => (html.match(new RegExp(`>${title} · \\d+</h2>.*?</section>`))?.[0] ?? "").split("<li ").slice(1).map((row) => row.slice(row.indexOf(">") + 1));
 
-test("a finished run's head gives its status and when it ended, the outcome, the product and model, then Start another run and Run again", () => {
-  const top = head(render(finished));
-  expect(text(top)).toContain("Complete · 2026-09-25 19:59 UTC");
+test("a finished run names its result, when it ended, and the actions to run again", () => {
+  const html = render(finished);
+  const top = head(html);
   expect(top).toMatch(/<h1[^>]*>1 defect confirmed by replay\.<\/h1>/);
-  expect(text(top)).toContain("app.acme.test · deepseek/deepseek-v4.1-flash");
-  expect(top).toMatch(/<div class="flex w-full flex-col gap-2 md:w-auto md:flex-row"><a href="\/projects\/project-1#start"[^>]*>Start another run<\/a><form[^>]*><input type="hidden" name="runId" value="run-1"\/><button type="submit"[^>]*>Run again/);
+  expect(text(top)).toContain("app.acme.test · 2026-09-25 19:59 UTC");
+  expect(top).toContain('href="/projects/project-1#start"');
+  expect(top).toContain(">Run again");
   expect(top).not.toContain("Stop run");
 });
 
-test("a finished run sums up who reached every goal, what the replay confirmed and dismissed, and what it cost against its cap", () => {
-  const summed = text(band(render(finished)));
-  expect(summed).toContain("Outcome 1 of 2 people reached every goal. 3 of 4 goals reached in all.");
-  expect(summed).toContain("Verified 1 of 2 reported");
-  expect(summed).toContain("Dismissed by replay 1 the replay did not bear them out");
-  expect(summed).toContain("Cost $0.35 cap was $2.00");
-  const priceless = text(band(render(summary({ ...finished, tokenCap: 3_000_000, tokensUsed: 1_200_000 }))));
+test("run state, goals and findings are separate, and spend is in Activity", () => {
+  const html = render(finished);
+  expect(text(band(html))).toBe("Run state Complete Goals reached 3 / 4 Confirmed findings 1 of 2 reported");
+  expect(html).toContain('id="run-findings" class="pt-5"');
+  expect(html).toContain('id="run-goals" hidden=""');
+  expect(html).toContain('id="run-activity" hidden=""');
+  expect(text(activity(html))).toContain("Cost $0.35 cap was $2.00");
+  const priceless = text(activity(render(summary({ ...finished, tokenCap: 3_000_000, tokensUsed: 1_200_000 }))));
   expect(priceless).toContain("Tokens 1.20M cap was 3.0M · price unknown");
 });
 
 test("a run Trawler paid for says so next to its cost, live and finished", () => {
-  expect(text(band(render(summary({ ...finished, paidBy: "trawler", budgetUsd: 1 }))))).toContain("Cost $0.35 cap was $1.00 · paid by Trawler");
-  expect(text(head(render(summary({ ...live, paidBy: "trawler", budgetUsd: 1 }))))).toContain("Live cost $0.84 of $1.00 cap · paid by Trawler");
-  expect(text(band(render(summary({ ...finished, paidBy: "trawler", tokenCap: 3_000_000, tokensUsed: 1_200_000 }))))).toContain("Tokens 1.20M cap was 3.0M · price unknown · paid by Trawler");
-  expect(text(band(render(finished)))).not.toContain("paid by Trawler");
+  expect(text(activity(render(summary({ ...finished, paidBy: "trawler", budgetUsd: 1 }))))).toContain("Cost $0.35 cap was $1.00 · paid by Trawler");
+  expect(text(render(summary({ ...live, paidBy: "trawler", budgetUsd: 1 })))).toContain("Live cost $0.84 of $1.00 cap · paid by Trawler");
+  expect(text(activity(render(summary({ ...finished, paidBy: "trawler", tokenCap: 3_000_000, tokensUsed: 1_200_000 }))))).toContain("Tokens 1.20M cap was 3.0M · price unknown · paid by Trawler");
+  expect(text(activity(render(finished)))).not.toContain("paid by Trawler");
 });
 
 test("a run says which people signed in with accounts provided by the CI job, and says nothing otherwise", () => {
-  expect(text(head(render(summary({ ...finished, providedAccounts: ["Daniel"] }))))).toContain("Daniel signs in with an account provided by the CI job.");
-  expect(text(head(render(summary({ ...live, providedAccounts: ["Daniel", "Priya"] }))))).toContain("Daniel, Priya sign in with accounts provided by the CI job.");
-  expect(text(head(render(finished)))).not.toContain("CI job");
+  expect(text(activity(render(summary({ ...finished, providedAccounts: ["Daniel"] }))))).toContain("Daniel signs in with an account provided by the CI job.");
+  expect(text(activity(render(summary({ ...live, providedAccounts: ["Daniel", "Priya"] }))))).toContain("Daniel, Priya sign in with accounts provided by the CI job.");
+  expect(text(activity(render(finished)))).not.toContain("CI job");
 });
 
 test("a run whose pull request touches how people get accounts says who goes through the real sign-up, and says nothing otherwise", () => {
   const goals = [{ id: "pr-join", instruction: "a new colleague joins the team", personaId: "lee" }];
   const plan = { number: 482, mode: "both" as const, note: null, version: null, reused: false, createdByRun: null, goals };
-  const both = text(head(render(summary({ ...finished, providedAccounts: ["Daniel"], prPlan: { ...plan, signUps: ["Priya", "Tom"] } }))));
+  const both = text(activity(render(summary({ ...finished, providedAccounts: ["Daniel"], prPlan: { ...plan, signUps: ["Priya", "Tom"] } }))));
   expect(both).toContain("Daniel signs in with an account provided by the CI job.");
   expect(both).toContain("This pull request touches how people get accounts, so Priya, Tom go through the real sign-up instead of using the CI account.");
-  expect(text(head(render(summary({ ...finished, prPlan: { ...plan, signUps: ["Priya"] } }))))).toContain("so Priya goes through the real sign-up");
-  expect(text(head(render(summary({ ...finished, providedAccounts: ["Daniel"], prPlan: plan }))))).not.toContain("real sign-up");
-  expect(text(head(render(summary({ ...finished, prPlan: { ...plan, signUps: [] } }))))).not.toContain("real sign-up");
+  expect(text(activity(render(summary({ ...finished, prPlan: { ...plan, signUps: ["Priya"] } }))))).toContain("so Priya goes through the real sign-up");
+  expect(text(activity(render(summary({ ...finished, providedAccounts: ["Daniel"], prPlan: plan }))))).not.toContain("real sign-up");
+  expect(text(activity(render(summary({ ...finished, prPlan: { ...plan, signUps: [] } }))))).not.toContain("real sign-up");
 });
 
 test("a confirmed defect is a row with its severity, number, person, title and what happened, marked as replayed, that opens to its steps and the replay", () => {
@@ -109,7 +112,7 @@ test("a defect several people found is one row naming each of them once, that op
   expect(text(row!)).toContain("Also reported by Lee Park, Ana again");
   expect(text(row!)).toContain("Lee Park , while trying to: Send an invoice. Reported as: Invoice will not save What they saw: o Steps Open Invoices. Press Save twice.");
   expect(row).toContain('href="/captures/11111111-1111-4111-8111-111111111111"');
-  expect(text(band(html))).toContain("Verified 1 of 2 reported");
+  expect(text(band(html))).toContain("Confirmed findings 1 of 2 reported");
   expect(rows(html, "Confirmed")).toHaveLength(1);
   const [single] = rows(render(finished), "Confirmed");
   expect(single).not.toContain("Also reported by");
@@ -120,26 +123,26 @@ test("a refuted defect keeps its own section and carries no replayed mark", () =
   expect(text(row!.split("</summary>")[0]!)).toBe("low severity 01 · Lee Park A typo on the button It reads Sav. →");
 });
 
-test("beside the findings, each person is listed with a mark and one line on how far they got", () => {
+test("in Goals, each person is listed with a mark and one line on how far they got", () => {
   const html = render(finished);
-  const aside = text(html.slice(html.indexOf("<aside")));
+  const aside = text(html.slice(html.indexOf('id="run-goals"')));
   expect(aside).toContain("People ✓ Ana : Goal reached. Reached all 2 goals.");
   expect(aside).toContain("× Lee Park : Goal not reached. The invoice form never saved.");
   expect(aside).toContain("Each goal of Ana ✓ Reached: Get an account. ✓ Reached: Send an invoice.");
   expect(aside).toContain("Each goal of Lee Park ✓ Reached: Get an account. ✕ Not reached: Send an invoice. — The invoice form never saved.");
 });
 
-test("a live run shows its cost against the cap, the four stages, each person and what they are on, and Stop run; no Run again and no summary yet", () => {
+test("a live run shows its cost against the cap, the four stages, each person and what they are on, and Stop run, with a summary of results so far", () => {
   const html = render(live);
-  expect(text(head(html))).toContain("Live · 2026-09-25 19:40 UTC");
-  expect(text(head(html))).toContain("Live cost $0.84 of $2.00 cap");
+  expect(text(head(html))).toContain("app.acme.test · 2026-09-25 19:40 UTC");
+  expect(text(html)).toContain("Live cost $0.84 of $2.00 cap");
   expect(text(html)).toContain("01 Use In progress 02 Replay Waiting 03 Judge Waiting 04 Report Waiting");
   expect(text(html)).toContain("AN Ana Reached all 2 goals. Goal reached");
   expect(text(html)).toContain("LP Lee Park Working on: Get an account. 0 of 2 goals reached. Exploring");
-  expect(text(html)).toContain("Safe to leave. The run keeps going; come back to this page for the report.");
+  expect(text(html)).toContain("Safe to leave. The run keeps going in the background.");
   expect(html).toMatch(/<button type="button"[^>]*>Stop run<\/button>/);
   expect(html).not.toContain("Run again");
-  expect(band(html)).toBe("");
+  expect(text(band(html))).toBe("Run state Live Goals reached 2 / 4 Confirmed so far 0");
   expect(text(html)).toContain("Confirmed · 0 A fresh agent reproduced it and the judge agreed Nothing confirmed yet.");
 });
 
@@ -200,8 +203,8 @@ test("every defect counts as reported whatever the replay made of it, friction d
       finding("x:d4", "ana", { title: "Export is empty" }), finding("x:d5", "ana"), finding("x:f1", "ana", { kind: "friction" }),
     ],
   }));
-  expect(text(band(html))).toContain("Verified 1 of 5 reported");
-  expect(text(band(html))).toContain("Dismissed by replay 1 the replay did not bear them out");
+  expect(text(band(html))).toContain("Confirmed findings 1 of 5 reported");
+  expect(rows(html, "Refuted")).toHaveLength(1);
   const [unjudged] = rows(html, "Could not be judged");
   expect(text(unjudged!.split("</summary>")[0]!)).toBe("high severity 01 · Ana Export is empty Failed: the judge timed out →");
   expect(unjudged).toMatch(/<button type="button"[^>]*>Judge again<\/button>/);
@@ -215,15 +218,15 @@ test("while a run is live, the latest things that happened are listed under the 
       { id: "1", at: new Date(), personaKey: null, kind: "judge", text: "Confirmed: Saving an invoice fails" },
     ] as RunSummary["activity"],
   }));
-  expect(text(html)).toContain("Latest Lee Park: Opened the invoices page Judge: Confirmed: Saving an invoice fails");
-  expect(html.indexOf("Working on: Get an account.")).toBeLessThan(html.indexOf(">Latest</h2>"));
+  expect(text(html)).toContain("Latest activity Lee Park: Opened the invoices page Judge: Confirmed: Saving an invoice fails");
+  expect(html.indexOf("Working on: Get an account.")).toBeLessThan(html.indexOf(">Latest activity</h2>"));
 });
 
 test("the actions stay together and move under the text until the page is wide, a finding's line is cut at two lines, and an opened finding wraps long words", () => {
   const html = render(finished);
-  expect(head(html)).toMatch(/^<div class="flex flex-col"><div class="flex flex-col items-start gap-6 wide:flex-row wide:items-end wide:justify-between"><div class="flex min-w-0 flex-col wide:flex-1">/);
-  expect(head(html)).toMatch(/<div class="flex w-full flex-col gap-2 md:w-auto md:flex-row"><a href="\/projects\/project-1#start"[^>]*>Start another run<\/a><form/);
-  expect(head(render(live))).toMatch(/<div class="flex min-w-0 flex-col md:min-w-80 md:flex-1">/);
+  expect(head(html)).toContain('class="flex flex-wrap gap-2"');
+  expect(head(html)).toContain(">Start another run</a>");
+  expect(head(html)).toContain(">Run again");
   const [row] = rows(html, "Confirmed");
   expect(row).toMatch(/<span class="mt-\[5px\] line-clamp-2 [^"]*">A 500 page\.<\/span>/);
   expect(row!.match(/<span class="mt-\[5px\][^"]*"/)?.[0]).not.toMatch(/\bblock\b/);
@@ -279,7 +282,7 @@ test("a finding shows the page it was reported on and the person's own words, an
       finding("lee:f2", "lee", { title: "An old finding", verdict: "confirmed" }),
     ],
   }));
-  const [first, second] = html.split("<li ").slice(1).map(text);
+  const [first, second] = rows(html, "Confirmed").map(text);
   expect(first).toContain("Page: /invoices/new?step=2");
   expect(first).toContain("In Ana's words “I saved it twice and still have nothing.”");
   expect(second).toContain("An old finding");
@@ -295,7 +298,7 @@ test("a defect others reported too shows each report's page and words, under the
       finding("lee:f1", "lee", { title: "Save does nothing", sameAs: "ana:f1", url: "https://app.acme.test/invoices/7", quote: "Nothing happened when I saved." }),
     ],
   }));
-  const row = text(html.split("<li ").slice(1)[0]!);
+  const row = text(rows(html, "Confirmed")[0]!);
   expect(row).toContain("Page: /invoices/7");
   expect(row).toContain("In Lee Park's words: “Nothing happened when I saved.”");
 });
@@ -350,7 +353,7 @@ test("a finding marked not a bug leaves its section and the counts for its own, 
     ],
   }));
   expect(head(html)).toMatch(/<h1[^>]*>1 defect confirmed by replay\.<\/h1>/);
-  expect(text(band(html))).toContain("Verified 1 of 1 reported");
+  expect(text(band(html))).toContain("Confirmed findings 1 of 1 reported");
   expect(rows(html, "Confirmed").map((row) => text(row.split("</summary>")[0]!))).toEqual(["high severity 01 · Ana Export is empty o ✓ Replayed →"]);
   expect(html).not.toMatch(/>Friction · /);
   const [first, second] = rows(html, "Not a bug");
@@ -386,7 +389,7 @@ test("friction replayed as a possible defect whose judge gave no verdict can be 
   expect(row).toContain("Ana filed this as friction on a goal they did not reach, so Trawler replayed it too.");
   expect(row).toMatch(/<button type="button"[^>]*>Judge again<\/button>/);
   expect(rows(html, "Friction").map((r) => text(r.split("</summary>")[0]!))).toEqual(["high severity 01 · Lee Park Menu is hard to find o →"]);
-  expect(text(band(html))).toContain("Verified 1 of 1 reported");
+  expect(text(band(html))).toContain("Confirmed findings 1 of 1 reported");
 });
 
 test("an account the beta list will refuse is told so in place of Run again and Judge again, and Start another run stays", () => {
@@ -421,8 +424,8 @@ test("a finding Trawler marked not a bug says so and links to the earlier mark i
   expect(row).not.toContain("someone no longer in this workspace");
 });
 
-test("the run page names the plan the run came from when the project has several, or the plan was removed", () => {
-  expect(render(summary({ ...finished, planName: "Invitations" }))).toMatch(/Invitations · deepseek\/deepseek-v4\.1-flash/);
+test("the breadcrumb links to the plan used by this run", () => {
+  expect(render(summary({ ...finished, savedPlan: { id: null, name: "Invitations" } }))).toMatch(/<a href="\/runs\/0007\/plan"[^>]*>Invitations<\/a>/);
   expect(render(summary({ ...finished, planName: null }))).not.toContain("Invitations");
 });
 
@@ -442,17 +445,18 @@ test("a run planned for a pull request shows the PR and the goals the lead chose
   expect(text(render(finished))).not.toContain("PR #");
 });
 
-test("a run from a pull request says at the top which one, with a link, the branch and the commit", () => {
+test("a run from a pull request names the change at the top and keeps PR metadata in Activity", () => {
   const pr = { number: 593, title: "feat: a Free organisation holds ten members", url: "https://github.com/acme/shop/pull/593", repository: "acme/shop", branch: "bp-948/free-member-cap", commit: "a1b2c3d4e5f6" };
-  const top = head(render(summary({ ...finished, pullRequest: pr })));
-  expect(text(top)).toContain("PR #593 · feat: a Free organisation holds ten members");
-  expect(text(top)).toContain("acme/shop · bp-948/free-member-cap · a1b2c3d");
-  expect(top).toContain('href="https://github.com/acme/shop/pull/593"');
-  expect(top.indexOf("PR #593")).toBeLessThan(top.indexOf("<h1"));
+  const html = render(summary({ ...finished, pullRequest: pr }));
+  const top = head(html);
+  expect(text(top)).toContain("feat: a Free organisation holds ten members");
+  expect(text(activity(html))).toContain("acme/shop · bp-948/free-member-cap · a1b2c3d");
+  expect(activity(html)).toContain('href="https://github.com/acme/shop/pull/593"');
+  expect(top).not.toContain("PR #593");
 });
 
 test("the pull request subject links only to web addresses and is absent for other runs", () => {
-  const unsafe = head(render(summary({ ...finished, pullRequest: { number: 5, title: "t", url: "javascript:alert(1)", repository: null, branch: null, commit: null } })));
+  const unsafe = activity(render(summary({ ...finished, pullRequest: { number: 5, title: "t", url: "javascript:alert(1)", repository: null, branch: null, commit: null } })));
   expect(text(unsafe)).toContain("PR #5 · t");
   expect(unsafe).not.toMatch(/href="javascript:/);
   expect(unsafe).not.toContain("alert(1)");
@@ -468,7 +472,7 @@ test("a pull request plan shows what the lead told the team", () => {
 
 test("a run started over MCP says which assistant started it, for whom, and a run started any other way says nothing of it", () => {
   const via = { kind: "mcp" as const, client: "Claude Code", clientHost: "claude.ai", person: "Ana Lopez" };
-  expect(text(head(render(summary({ startedVia: via }))))).toContain("Started over MCP by Claude Code (claude.ai) for Ana Lopez");
+  expect(text(activity(render(summary({ startedVia: via }))))).toContain("Started over MCP by Claude Code (claude.ai) for Ana Lopez");
   expect(text(head(render(finished)))).not.toContain("Started over MCP");
 });
 

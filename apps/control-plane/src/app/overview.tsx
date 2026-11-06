@@ -3,7 +3,6 @@ import { Greeting } from "../components/greeting.tsx";
 import { PageHead, PrimaryLink } from "../components/page-head.tsx";
 import { RunTable } from "../components/run-table.tsx";
 import { hostOf, type ProjectLine, type RunLine } from "../projects/overview.ts";
-import { isLive } from "../runs/report.ts";
 import { runPath, runStatusLabel, runStatusTone } from "../runs/status.ts";
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -30,39 +29,25 @@ export function overviewSubtitle(recent: RunLine[]): string {
   }
 }
 
-const HERO = "grid border border-line bg-panel md:grid-cols-2 wide:grid-cols-[minmax(0,1.5fr)_repeat(2,minmax(120px,0.5fr))_auto]";
-const CELL = ["border-b md:border-r wide:border-b-0", "border-b wide:border-r wide:border-b-0", "border-b md:border-r md:border-b-0"].map((edges) => `min-w-0 border-line p-[19px] ${edges}`);
-
-function ProjectHero({ project }: { project: ProjectLine }) {
+function ProjectRow({ project }: { project: ProjectLine }) {
   const run = project.lastRun;
-  const heading = `project-${project.id}`;
-  const follow = run ? (isLive(run.status) ? "Follow the run" : "Open latest report") : "Open the plan";
   return (
-    <article aria-labelledby={heading} className={HERO}>
-      <div className={`flex items-center gap-3 ${CELL[0]}`}>
-        <span aria-hidden className="grid h-12 w-12 shrink-0 place-items-center bg-action font-mono text-[10px] text-[#17191c]">{initials(project.name)}</span>
-        <div className="min-w-0">
-          <p className="font-mono text-[10px] text-muted uppercase">Project</p>
-          <h2 id={heading} className="my-0.5 truncate text-[21px] font-bold"><a href={`/projects/${project.id}`} className="underline-offset-4 hover:underline">{project.name}</a></h2>
-          <a href={project.targetUrl} target="_blank" rel="noreferrer" className="relative block truncate text-[11px] text-muted underline underline-offset-2">
-            {project.site ?? hostOf(project.targetUrl)}<span aria-hidden> ↗</span><span className="sr-only"> (opens in a new tab)</span>
-          </a>
-        </div>
-      </div>
-      <div className={CELL[1]}>
-        <p className="font-mono text-[10px] text-muted uppercase">Last run</p>
-        <p className="mt-1.5 text-2xl font-bold">{run ? <><span aria-hidden>{run.goalsReached} / {run.goalsTotal}</span><span className="sr-only">{run.goalsReached} of {run.goalsTotal}</span></> : "—"}</p>
-        <p className="text-[11px] text-muted">{run ? <>goals reached{run.status !== "succeeded" && <span className={runStatusTone(run.status)}> · {runStatusLabel(run.status)}</span>}</> : "no run yet"}</p>
-      </div>
-      <div className={CELL[2]}>
-        <p className="font-mono text-[10px] text-muted uppercase">Confirmed</p>
-        <p className="mt-1.5 flex items-center gap-2 text-2xl font-bold">{run && run.confirmed > 0 && <span aria-hidden className="h-2.5 w-2.5 bg-action" />}{run && !run.unchecked ? run.confirmed : <span aria-hidden>—</span>}</p>
-        <p className="text-[11px] text-muted">{!run ? "nothing reported yet" : run.unchecked ? "not checked: every replay failed" : run.confirmed === 1 ? "defect in the last run" : "defects in the last run"}</p>
-      </div>
-      <a href={run ? runPath(run.number) : `/projects/${project.id}`} className="flex min-w-0 items-center justify-center p-5 text-center hover:bg-soft">
-        {follow}<span className="sr-only"> for {project.name}{project.site && ` (${project.site})`}</span><span aria-hidden>&nbsp;→</span>
+    <li className="grid grid-cols-[minmax(0,1fr)_minmax(0,0.7fr)] items-center gap-4 p-3">
+      <a href={`/projects/${project.id}/overview`} className="flex min-w-0 items-center gap-3 rounded-sm underline-offset-4 hover:underline">
+        <span aria-hidden className="grid size-8 shrink-0 place-items-center rounded bg-panel font-mono text-xs">{initials(project.name)}</span>
+        <span className="min-w-0">
+          <strong className="block break-words">{project.name}</strong>
+          <small className="block break-all text-xs text-muted">{project.site ?? hostOf(project.targetUrl)}</small>
+        </span>
       </a>
-    </article>
+      {run ? (
+        <a href={runPath(run.number)} className="w-fit text-sm underline-offset-4 hover:underline">
+          <span className={run.status === "succeeded" ? "font-semibold" : runStatusTone(run.status)}>{runStatusLabel(run.status)}</span>
+          <span className="block text-xs text-muted">{run.unchecked ? "Findings not checked" : `${run.confirmed} confirmed`} · {run.goalsReached}/{run.goalsTotal} goals</span>
+          <span className="sr-only"> for {project.name}{project.site && ` (${project.site})`}</span>
+        </a>
+      ) : <span className="text-sm text-muted">No runs yet</span>}
+    </li>
   );
 }
 
@@ -70,14 +55,15 @@ export function Overview({ firstName, projects, recent }: { firstName: string; p
   return (
     <div>
       <PageHead
+        compact
         eyebrow={<Greeting name={firstName} />}
-        title={projects.length === 1 ? "Your product at a glance." : "Your products at a glance."}
+        title="Projects"
         subtitle={overviewSubtitle(recent)}
         action={<PrimaryLink href={projects[0] ? `/projects/${projects[0].id}#start` : "/new"}>New run</PrimaryLink>}
       />
-      <div className="flex flex-col gap-3">
-        {projects.map((p) => <ProjectHero key={p.id} project={p} />)}
-      </div>
+      <ul aria-label="Projects" className="divide-y divide-line rounded-lg border border-line bg-paper">
+        {projects.map((p) => <ProjectRow key={p.id} project={p} />)}
+      </ul>
       {recent.length > 0 && (
         <section aria-labelledby="recent-runs" className="mt-[34px]">
           <div className="flex items-end justify-between gap-4 pb-3">
@@ -87,7 +73,7 @@ export function Overview({ firstName, projects, recent }: { firstName: string; p
             </div>
             <a href="/runs" className="-my-2 py-2 text-muted hover:text-ink">View all<span aria-hidden> →</span></a>
           </div>
-          <RunTable runs={recent} compact />
+          <RunTable runs={recent} />
         </section>
       )}
     </div>

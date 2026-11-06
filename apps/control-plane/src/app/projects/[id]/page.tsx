@@ -3,12 +3,13 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { AppShell } from "../../../components/app-shell.tsx";
+import { PlanRunHistory } from "../../../components/plan-run-history.tsx";
 import { ProjectHead } from "../../../components/project-head.tsx";
 import { PlanWorkspace } from "./plan-workspace.tsx";
 import { PrPlanView } from "./pr-plan-view.tsx";
 import { modelKeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
-import { projectRunCount, testingConfirmedAt } from "../../../projects/overview.ts";
+import { projectRunCount, testingConfirmedAt, workspaceRuns } from "../../../projects/overview.ts";
 import { onPrivateNetwork } from "../../../projects/private-target.ts";
 import { FIRST_RUN_ON_US } from "../../../runs/models.ts";
 import { firstRunOnUsLeft, projectRunState, refusalToStart, RunInProgress, TooManyPeople } from "../../../runs/runs.ts";
@@ -44,10 +45,11 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   const prPlan = prPlans.find((p) => p.id === requestedPlan);
   const planId = prPlan?.id ?? plans.find((p) => p.id === requestedPlan)?.id ?? plans[0]?.id;
   if (!planId) notFound();
-  const [project, keyHint, runs, runState, onUsLeft, plan, confirmedAt] = await withOrg(getDb(), orgId, (tx) =>
-    Promise.all([projectForEditing(tx, orgId, id, planId), modelKeyHint(tx, orgId), projectRunCount(tx, orgId, id), projectRunState(tx, orgId, id), env.setup ? firstRunOnUsLeft(tx, orgId) : false, workspacePlan(tx, orgId), testingConfirmedAt(tx, orgId, id)]),
+  const [project, keyHint, runs, runState, onUsLeft, plan, confirmedAt, history] = await withOrg(getDb(), orgId, (tx) =>
+    Promise.all([projectForEditing(tx, orgId, id, planId), modelKeyHint(tx, orgId), projectRunCount(tx, orgId, id), projectRunState(tx, orgId, id), env.setup ? firstRunOnUsLeft(tx, orgId) : false, workspacePlan(tx, orgId), testingConfirmedAt(tx, orgId, id), workspaceRuns(tx, orgId, { projectId: id, planId, archivedPlan: Boolean(prPlan), size: 5 })]),
   );
   if (!project || !runState) notFound();
+  const historySection = <PlanRunHistory runs={history.runs} more={history.olderThan !== null ? `/projects/${id}/runs?plan=${planId}` : undefined} />;
   const pullRequests = prPlans.map((p) => ({ id: p.id, number: p.number, version: p.version, lastUsedAt: p.lastUsedAt }));
   if (prPlan) {
     const shell = await shellFor(member);
@@ -57,12 +59,11 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
         <div className="flex max-w-3xl flex-col gap-10">
           <PlansBar projectId={project.id} plans={plans} current={planId} canAdd={plans.length < MAX_PLANS} pullRequests={pullRequests} />
           <PrPlanView
-            projectId={project.id}
-            planId={planId}
             title={`${prPlan.name} · v${prPlan.version}`}
             people={project.personas.map((p) => ({ id: p.key, name: p.name }))}
             goals={project.goals.map((g) => ({ id: g.key, instruction: g.instruction, personaId: g.persona_key }))}
           />
+          {historySection}
         </div>
       </AppShell>
     );
@@ -105,6 +106,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
           startRefusal={refusal ? { message: refusal.message, ...(refusal instanceof RunInProgress ? { activeRun: refusal.run } : {}) } : undefined}
           closedBeta={betaRefusal(member.email) ?? undefined}
         />
+        {historySection}
       </div>
     </AppShell>
   );

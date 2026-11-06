@@ -47,6 +47,7 @@ vi.mock("../../../projects/projects.ts", () => ({
 }));
 vi.mock("../../../projects/overview.ts", async (original) => ({
   hostOf: (await original<typeof import("../../../projects/overview.ts")>()).hostOf,
+  workspaceRuns: async () => ({ runs: [], olderThan: null }),
   projectRunCount: async (_tx: unknown, orgId: string, id: string) => { state.counted.push([orgId, id]); return state.runs; },
   testingConfirmedAt: async () => null,
 }));
@@ -122,7 +123,7 @@ test("a visitor who is not signed in, or no longer belongs to any workspace, is 
 test("the plan is the page marked in the nav, under its project, and the nav is read for the signed-in workspace", async () => {
   const html = await render();
   const marked = (html.match(/<nav aria-label="Workspace".*?<\/nav>/)?.[0] ?? "").match(/<a [^>]*aria-current="[^"]*"[^>]*>/g) ?? [];
-  expect(marked).toEqual([expect.stringMatching(new RegExp(`^<a href="/projects/${ID}" aria-current="page"`))]);
+  expect(marked).toEqual([expect.stringMatching(new RegExp(`^<a href="/projects/${ID}/overview" aria-current="page"`))]);
   expect(state.shells).toEqual(["org-1"]);
   expect(html).toContain(">Acme workspace</p>");
 });
@@ -131,7 +132,7 @@ test("the plan is the project's Plan tab, next to its Runs with their number, wi
   state.runs = 3;
   const html = await render();
   const tabs = html.match(/<nav aria-label="Project">.*?<\/nav>/)?.[0] ?? "";
-  expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}" aria-current="page"[^>]*>Plan</a>`));
+  expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}" aria-current="page"[^>]*>Plans</a>`));
   expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}/runs" class="[^"]*">Runs<span[^>]*>3</span></a>`));
   expect(state.counted).toEqual([["org-1", ID]]);
   expect(html).not.toContain('aria-label="Progress"');
@@ -227,7 +228,7 @@ test("a pull request plan opens as a read-only plan view with its people's goals
   const html = await render(PR.id);
   expect(html).toContain("PR #578 · v2");
   expect(html).toContain("Made by Trawler from the pull request; it is replaced when the pull request changes.");
-  expect(html).toContain(`href="/projects/${ID}/runs?plan=${PR.id}"`);
+  expect(html).toContain('aria-label="Runs of this plan"');
   expect(html.indexOf("P1")).toBeLessThan(html.indexOf("P0"));
   expect(html).toMatch(new RegExp(`<a [^>]*aria-current="page"[^>]*href="[^"]*plan=${PR.id}"|<a [^>]*href="[^"]*plan=${PR.id}"[^>]*aria-current="page"`));
   expect(html).not.toContain("Remove plan");

@@ -94,9 +94,9 @@ test("the runs, the project's counts and the next page reach the list, each row 
 
 test("the project is marked in the nav as the section the page belongs to, the Runs tab is the page, and a new run starts at the plan's Start", async () => {
   const html = renderToStaticMarkup(await open(ID));
-  expect(html).toMatch(new RegExp(`<nav aria-label="Workspace".*<a href="/projects/${ID}" aria-current="true"`));
+  expect(html).toMatch(new RegExp(`<nav aria-label="Workspace".*<a href="/projects/${ID}/overview" aria-current="true"`));
   const tabs = html.match(/<nav aria-label="Project">.*?<\/nav>/)?.[0] ?? "";
-  expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}" class="[^"]*">Plan</a>`));
+  expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}" class="[^"]*">Plans</a>`));
   expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}/runs" aria-current="page"[^>]*>Runs<span[^>]*>3</span></a>`));
   expect(html).toMatch(new RegExp(`<a href="/projects/${ID}#start"[^>]*>New run<`));
   expect(html).not.toContain("Back to the plan");

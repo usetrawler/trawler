@@ -59,7 +59,7 @@ test("the workspace's runs and counts are read in its own organisation, with the
   expect(state.asked).toEqual([{ orgId: "org-1", show: "attention", before: 40 }]);
   expect(state.counted).toEqual([["org-1", undefined]]);
   expect(state.shells).toEqual(["org-1"]);
-  expect(html).toContain(">Every run, newest first.</h1>");
+  expect(html).toContain(">All runs</h1>");
   expect(html).toMatch(/<a href="\/runs\?show=attention" aria-current="page"/);
   expect(html).toMatch(/<a href="\/runs"[^>]*aria-current="page"[^>]*>(?:(?!<\/a>).)*All runs/);
 });

@@ -23,7 +23,7 @@ describe("AppShell", () => {
     const html = render();
     expect(link(html, "trawler")).toContain('href="/"');
     const items = [...nav(html).matchAll(/<a href="([^"]*)"[^>]*>(?:(?!<\/a>).)*?<span class="min-w-0" title="[^"]*"><span class="block truncate">([^<]*)/g)].map((m) => [m[1], m[2]]);
-    expect(items).toEqual([["/", "Overview"], ["/runs", "All runs"], ["/projects/p1", "Acme Invoices"], ["/projects/p2", "Globex Store"], ["/new", "New project"], ["/settings", "Settings"]]);
+    expect(items).toEqual([["/", "Overview"], ["/runs", "All runs"], ["/projects/p1/overview", "Acme Invoices"], ["/projects/p2/overview", "Globex Store"], ["/new", "New project"], ["/settings", "Settings"]]);
     expect(nav(html)).not.toContain("aria-current");
   });
 
@@ -33,7 +33,7 @@ describe("AppShell", () => {
 
   it("groups the projects under a Projects heading, each with its product's address under its name", () => {
     const html = nav(render());
-    expect(html).toMatch(/<p id="nav-projects" class="[^"]*">Projects<\/p><ul aria-labelledby="nav-projects"[^>]*><li[^>]*><a href="\/projects\/p1"/);
+    expect(html).toMatch(/<p id="nav-projects" class="[^"]*">Projects<\/p><ul aria-labelledby="nav-projects"[^>]*><li[^>]*><a href="\/projects\/p1\/overview"/);
     expect(html).toContain('title="Acme Invoices · app.acme.test"><span class="block truncate">Acme Invoices</span><span class="block truncate text-[10px] text-muted">app.acme.test</span></span>');
     expect(html).toMatch(/<ul aria-labelledby="nav-projects".*href="\/new".*<\/ul>/);
     expect(html).not.toMatch(/<ul aria-labelledby="nav-projects".*href="\/runs".*<\/ul>/);
@@ -44,7 +44,7 @@ describe("AppShell", () => {
     const only = (options: { current: ShellPage; parent?: boolean }) => marked(render(options));
     expect(only({ current: "overview" })).toEqual([expect.stringContaining('href="/"')]);
     expect(only({ current: "runs" })).toEqual([expect.stringContaining('href="/runs"')]);
-    expect(only({ current: { project: "p2" } })).toEqual([expect.stringContaining('href="/projects/p2"')]);
+    expect(only({ current: { project: "p2" } })).toEqual([expect.stringContaining('href="/projects/p2/overview"')]);
     expect(only({ current: "new" })).toEqual([expect.stringContaining('href="/new"')]);
     expect(only({ current: "settings" })).toEqual([expect.stringContaining('href="/settings"')]);
     expect(only({ current: { project: "gone" } })).toEqual([]);

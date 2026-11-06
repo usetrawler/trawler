@@ -13,74 +13,34 @@ const acme: ProjectLine = { id: "p1", name: "Acme Invoices", targetUrl: "https:/
 const fresh: ProjectLine = { id: "p2", name: "Globex", targetUrl: "https://shop.globex.test/", site: null, lastRun: null };
 
 const render = (projects: ProjectLine[], recent: RunLine[] = []) => renderToStaticMarkup(createElement(Overview, { firstName: "Ana", projects, recent }));
-const hero = (html: string, id: string) => html.match(new RegExp(`<article aria-labelledby="project-${id}".*?</article>`))?.[0] ?? "";
-
 describe("Overview", () => {
-  it("greets the person and starts a new run from the most recently active project's plan", () => {
+  it("lists projects with their latest activity and opens the project overview", () => {
     const html = render([acme, fresh]);
     expect(html).toContain(">Welcome back, Ana</p>");
-    expect(html).toContain(">Your products at a glance.</h1>");
-    expect(html).toMatch(/<a href="\/projects\/p1#start"[^>]*>New run<span aria-hidden="true">→<\/span><\/a>/);
-    expect(render([acme])).toContain(">Your product at a glance.</h1>");
+    expect(html).toContain(">Projects</h1>");
+    expect(html).toContain('<ul aria-label="Projects"');
+    expect(html).toContain('href="/projects/p1/overview"');
+    expect(html).toContain('href="/projects/p2/overview"');
+    expect(html).toContain('href="/projects/p1#start"');
+    expect(html).toContain(">Acme Invoices</strong>");
+    expect(html).toContain(">app.acme.test</small>");
+    expect(html).toContain('href="/runs/0009"');
+    expect(html).toContain("2 confirmed · 4/6 goals");
+    expect(html).toContain(">No runs yet</span>");
   });
 
-  it("shows each project with its host, the goals its last run reached and the defects it confirmed", () => {
-    const card = hero(render([acme, fresh]), "p1");
-    expect(card).toContain(">AI</span>");
-    expect(card).toMatch(/<h2 id="project-p1"[^>]*><a href="\/projects\/p1"[^>]*>Acme Invoices<\/a><\/h2>/);
-    expect(card).toMatch(/<a href="https:\/\/app\.acme\.test\/billing" target="_blank" rel="noreferrer" class="relative [^"]*\btruncate\b[^"]*">app\.acme\.test<span aria-hidden="true"> ↗<\/span><span class="sr-only"> \(opens in a new tab\)<\/span><\/a>/);
-    expect(card).toMatch(/><span aria-hidden="true">4 \/ 6<\/span><span class="sr-only">4 of 6<\/span><\/p><p[^>]*>goals reached<\/p>/);
-    expect(card).toMatch(/>2<\/p><p[^>]*>defects in the last run<\/p>/);
-    expect(card).toMatch(/<a href="\/runs\/0009"[^>]*>Open latest report<span class="sr-only"> for Acme Invoices<\/span>/);
+  it("shows when the latest run failed or its findings could not be checked", () => {
+    const html = render([{ ...acme, lastRun: run({ status: "failed", unchecked: true }) }]);
+    expect(html).toContain(">Failed</span>");
+    expect(html).toContain("Findings not checked · 4/6 goals");
+    expect(html).not.toContain("2 confirmed");
   });
 
-  it("marks confirmed defects with a shape as well as colour, and says one defect in the singular", () => {
-    expect(hero(render([acme]), "p1")).toMatch(/<span aria-hidden="true" class="[^"]*bg-action"><\/span>2<\/p>/);
-    const clean = hero(render([{ ...acme, lastRun: run({ confirmed: 0 }) }]), "p1");
-    expect(clean).not.toContain('bg-action"></span>');
-    expect(clean).toMatch(/font-bold">0<\/p><p[^>]*>defects in the last run<\/p>/);
-    expect(hero(render([{ ...acme, lastRun: run({ confirmed: 1 }) }]), "p1")).toContain(">defect in the last run</p>");
-  });
-
-  it("says the last run's defects were not checked when every replay failed, with no count", () => {
-    const card = hero(render([{ ...acme, lastRun: run({ confirmed: 0, unchecked: true }) }]), "p1");
-    expect(card).toMatch(/font-bold"><span aria-hidden="true">—<\/span><\/p><p[^>]*>not checked: every replay failed<\/p>/);
-    expect(card).not.toContain("defects in the last run");
-  });
-
-  it("leads a project without runs to its plan, and one with a live run to that run", () => {
-    const card = hero(render([acme, fresh]), "p2");
-    expect(card).toMatch(/>—<\/p><p[^>]*>no run yet<\/p>/);
-    expect(card).toContain(">nothing reported yet</p>");
-    expect(card).toMatch(/<a href="\/projects\/p2"[^>]*>Open the plan<span class="sr-only"> for Globex<\/span>/);
-    for (const status of ["queued", "running"]) {
-      expect(hero(render([{ ...acme, lastRun: run({ status }) }]), "p1")).toMatch(/<a href="\/runs\/0009"[^>]*>Follow the run</);
-    }
-  });
-
-  it("says how the last run ended when it did not complete", () => {
-    expect(hero(render([acme]), "p1")).toMatch(/>goals reached<\/p>/);
-    expect(hero(render([{ ...acme, lastRun: run({ status: "failed" }) }]), "p1")).toMatch(/>goals reached<span class="text-bad"> · Failed<\/span><\/p>/);
-    expect(hero(render([{ ...acme, lastRun: run({ status: "stopped_budget" }) }]), "p1")).toContain('<span class="text-warn"> · Stopped at cap</span>');
-    expect(hero(render([{ ...acme, lastRun: run({ status: "queued" }) }]), "p1")).toContain('<span class="text-muted"> · Queued</span>');
-  });
-
-  it("names a project that shares its name by its address, on the card and to a screen reader", () => {
-    const card = hero(render([{ ...acme, site: "app.acme.test/billing" }]), "p1");
-    expect(card).toContain('<span class="sr-only"> for Acme Invoices (app.acme.test/billing)</span>');
-    expect(card).toMatch(/>app\.acme\.test\/billing<span aria-hidden="true"> ↗<\/span>/);
-  });
-
-  it("lays the project cards out in one, two or four columns by width", () => {
-    expect(hero(render([acme]), "p1")).toMatch(/^<article [^>]*class="grid [^"]*\bmd:grid-cols-2\b[^"]*\bwide:grid-cols-\[minmax\(0,1\.5fr\)_repeat\(2,minmax\(120px,0\.5fr\)\)_auto\]/);
-  });
-
-  it("lists the recent runs with a way to all of them, and leaves the section out before the first run", () => {
+  it("lists recent runs with a link to all runs, and leaves the section out before the first run", () => {
     const html = render([acme], [run(), run({ id: "r8", number: 8 })]);
     expect(html).toContain('<h2 id="recent-runs"');
     expect(html).toMatch(/<a href="\/runs"[^>]*>View all/);
-    expect(html.match(/href="\/runs\/\d{4}"/g)).toEqual(['href="/runs/0009"', 'href="/runs/0009"', 'href="/runs/0008"']);
-    expect(html.slice(html.indexOf('id="recent-runs"'))).toContain(">Acme</strong>");
+    expect(html.match(/href="\/runs\/\d{4}"/g)).toEqual(['/runs/0009', '/runs/0009', '/runs/0008'].map((href) => `href="${href}"`));
     expect(render([fresh])).not.toContain("recent-runs");
   });
 });

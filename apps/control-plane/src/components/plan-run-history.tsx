@@ -1,0 +1,17 @@
+import type { RunLine } from "../projects/overview.ts";
+import { RunTable } from "./run-table.tsx";
+
+export function PlanRunHistory({ runs, more, newest }: { runs: RunLine[]; more?: string; newest?: string }) {
+  return (
+    <section className="grid gap-3" aria-label="Runs of this plan">
+      <h2 className="text-lg font-semibold">Runs of this plan</h2>
+      {runs.length > 0 ? <RunTable runs={runs} project={false} /> : <p className="text-sm text-muted">No runs here yet.</p>}
+      {(more || newest) && (
+        <div className="flex flex-wrap gap-4 text-sm">
+          {newest && <a href={newest} className="underline underline-offset-4">Newest runs</a>}
+          {more && <a href={more} className="underline underline-offset-4">{newest ? "Older runs" : "More runs"}</a>}
+        </div>
+      )}
+    </section>
+  );
+}

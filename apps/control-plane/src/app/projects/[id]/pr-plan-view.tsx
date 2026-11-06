@@ -1,14 +1,10 @@
-import Link from "next/link";
-
 export interface PrPlanViewProps {
-  projectId: string;
-  planId: string;
   title: string;
   people: Array<{ id: string; name: string }>;
   goals: Array<{ id: string; instruction: string; personaId: string }>;
 }
 
-export function PrPlanView({ projectId, planId, title, people, goals }: PrPlanViewProps) {
+export function PrPlanView({ title, people, goals }: PrPlanViewProps) {
   const name = new Map(people.map((p) => [p.id, p.name]));
   const turns: Array<{ person: string; goals: PrPlanViewProps["goals"] }> = [];
   for (const g of goals) {
@@ -21,7 +17,6 @@ export function PrPlanView({ projectId, planId, title, people, goals }: PrPlanVi
       <div className="flex flex-col gap-1">
         <h2 className="text-lg font-bold">{title}</h2>
         <p className="text-sm text-muted">Made by Trawler from the pull request; it is replaced when the pull request changes.</p>
-        <p className="text-sm"><Link href={`/projects/${projectId}/runs?plan=${planId}`} className="underline underline-offset-4 hover:text-action-ink">Runs of this plan</Link></p>
       </div>
       <ol className="flex flex-col gap-4 text-sm">
         {turns.map((turn, i) => (

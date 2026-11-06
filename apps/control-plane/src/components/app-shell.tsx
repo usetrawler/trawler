@@ -82,7 +82,7 @@ export function AppShell({ shell, current, parent = false, wide = false, childre
             </ul>
             <p id="nav-projects" className="hidden px-[11px] pt-6 pb-2 font-mono text-[10px] tracking-[0.1em] text-muted uppercase md:block">Projects</p>
             <ul aria-labelledby="nav-projects" className="flex shrink-0 gap-[3px] md:flex-col">
-              {workspace.projects.map((p) => <NavItem key={p.id} href={`/projects/${p.id}`} icon="◇" label={p.name} detail={p.address} active={marked({ project: p.id })} parent={parent} />)}
+              {workspace.projects.map((p) => <NavItem key={p.id} href={`/projects/${p.id}/overview`} icon="◇" label={p.name} detail={p.address} active={marked({ project: p.id })} parent={parent} />)}
               <NavItem href="/new" icon="+" label="New project" active={marked("new")} parent={parent} />
             </ul>
             <ul className="flex shrink-0 gap-[3px] md:mt-6 md:flex-col">
