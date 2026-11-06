@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { APICallError } from "ai";
 import { sql } from "kysely";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { ProjectConfigSchema } from "@usetrawler/protocol";
@@ -8,6 +9,7 @@ import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { createProject } from "../projects/projects.ts";
 import { planDueRuns, type PrPlanDeps } from "./pr-plan.ts";
+import { runResultOf } from "./comment.ts";
 import { claimJob, completeJob } from "./queue.ts";
 import { runSummary, startRun } from "./runs.ts";
 
@@ -171,11 +173,32 @@ test("a failing lead never fails the run: the stored plan runs and the run says 
   const { run } = await start("broken");
   await planDueRuns(lead(scriptedModel([new Error("provider is down"), new Error("provider is down")])));
   const planned = (await summary(run.id))!;
-  expect(planned.prPlan).toMatchObject({ goals: [], note: expect.stringContaining("the project's plan ran as it is") });
+  expect(planned.prPlan).toMatchObject({ goals: [], leadFailed: true, note: expect.stringContaining("the project's plan ran as it is") });
+  expect(runResultOf(planned, "https://app.trawler.test").leadFallback).toBe("The lead could not plan for this pull request (the setup model could not propose a project: provider is down), so the project's plan ran as it is.");
   expect(planned.status).toBe("queued");
   expect((await kinds(run.id)).filter((j) => j.kind === "role_session").map((j) => j.persona_key)).toEqual(["ana", "lee"]);
   expect((await kinds(run.id))[0]).toMatchObject({ kind: "pr_plan", status: "failed" });
   expect(await claimJob(t.db, keys)).toMatchObject({ runId: run.id });
+  await finish(run.id);
+});
+
+test("a provider that refuses Trawler's own key is reported as Trawler's problem, not the provider's words", async () => {
+  const { run } = await start("refused");
+  const refused = new APICallError({ message: "User not found.", url: "https://openrouter.ai/api/v1/chat/completions", requestBodyValues: {}, statusCode: 401, isRetryable: false });
+  await planDueRuns(lead(scriptedModel([refused])));
+  const planned = (await summary(run.id))!;
+  expect(planned.prPlan).toMatchObject({ leadFailed: true, note: "The lead could not plan for this pull request (the model provider refused Trawler's key; Trawler has been told), so the project's plan ran as it is." });
+  expect(planned.status).toBe("queued");
+  await finish(run.id);
+});
+
+test("a lead that found nothing to add in both mode is not reported as a lead that could not plan", async () => {
+  const { run } = await start("nothing-to-add", { planMode: "both" });
+  await planDueRuns(lead(scriptedModel([answer([])])));
+  const planned = (await summary(run.id))!;
+  expect(planned.prPlan).toMatchObject({ note: expect.stringContaining("the project's plan ran as it is") });
+  expect(planned.prPlan?.leadFailed).toBeUndefined();
+  expect(runResultOf(planned, "https://app.trawler.test").leadFallback).toBeUndefined();
   await finish(run.id);
 });
 
@@ -208,6 +231,7 @@ test("a lead that never answers is given up on after a few minutes", async () =>
   await planDueRuns(lead(null));
   const { rows } = await sql<{ status: string }>`select status from jobs where run_id = ${run.id} and kind = 'pr_plan'`.execute(t.db);
   expect(rows[0]!.status).toBe("failed");
+  expect(runResultOf((await summary(run.id))!, "https://app.trawler.test").leadFallback).toBe("The lead did not answer in time, so the project's plan ran as it is.");
   expect(await claimJob(t.db, keys)).toMatchObject({ runId: run.id });
   await finish(run.id);
 });

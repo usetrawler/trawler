@@ -532,7 +532,7 @@ function pullRequestOf(pr: PullRequest | null) {
 
 function plannedFor(record: PrPlanRecord, number: number | null, snapshot: ConfigSnapshot, createdByRun: number | null) {
   const chosen = new Set(record.goalIds);
-  return { number, mode: record.mode, note: record.note ?? null, version: record.version ?? null, reused: record.reused === true, createdByRun, ...(record.signUps?.length ? { signUps: record.signUps } : {}), ...(record.accountReason ? { accountReason: record.accountReason } : {}), ...(record.brief ? { brief: record.brief } : {}), goals: snapshot.goals.filter((g) => chosen.has(g.id)).map((g) => ({ id: g.id, instruction: g.instruction, personaId: g.personaId ?? null })) };
+  return { number, mode: record.mode, note: record.note ?? null, ...(record.leadFailed ? { leadFailed: true } : {}), version: record.version ?? null, reused: record.reused === true, createdByRun, ...(record.signUps?.length ? { signUps: record.signUps } : {}), ...(record.accountReason ? { accountReason: record.accountReason } : {}), ...(record.brief ? { brief: record.brief } : {}), goals: snapshot.goals.filter((g) => chosen.has(g.id)).map((g) => ({ id: g.id, instruction: g.instruction, personaId: g.personaId ?? null })) };
 }
 
 export type RunSummary = NonNullable<Awaited<ReturnType<typeof runSummary>>>;

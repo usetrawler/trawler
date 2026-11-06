@@ -23,6 +23,7 @@ export async function waitForRun(opts: WaitOptions): Promise<Waited> {
   let failures = 0;
   let last: RunResult | undefined;
   let shown = "";
+  let fallbackShown = false;
   for (;;) {
     opts.check?.();
     try {
@@ -32,6 +33,10 @@ export async function waitForRun(opts: WaitOptions): Promise<Waited> {
       if (line !== shown) {
         shown = line;
         opts.onProgress(line);
+      }
+      if (last.leadFallback && !fallbackShown) {
+        fallbackShown = true;
+        opts.warn(last.leadFallback);
       }
       if (last.finished) return { timedOut: false, result: last };
     } catch (err) {

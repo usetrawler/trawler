@@ -44,6 +44,18 @@ describe("renderComment", () => {
     expect(withDefect).toContain("other defects may be missing");
   });
 
+  test("does not call a run clean when the lead could not plan for the change and the project's plan ran instead", () => {
+    const leadFallback = "The lead could not plan for this pull request (the model provider refused Trawler's key; Trawler has been told), so the project's plan ran as it is.";
+    const md = renderComment({ ...base, goalsReached: 6, goalsTotal: 6, leadFallback });
+    expect(md).toContain("### Trawler could not plan for this change, so it ran the project's plan instead");
+    expect(md).not.toContain("found no confirmed defects");
+    expect(md).toContain(`${leadFallback} None of its goals was aimed at this change, so finding no defect is not proof that the change works.`);
+    const withDefect = renderComment({ ...base, leadFallback, defects: { confirmed: 1, refuted: 0, inconclusive: 0 }, confirmed: [{ title: "T", page: null, severity: "low", person: "Ana", observed: "x", steps: ["a"] }] });
+    expect(withDefect).toContain("### Trawler: 1 defect confirmed by replay");
+    expect(withDefect).toContain(leadFallback);
+    expect(renderComment({ ...base, goalsReached: 6, goalsTotal: 6 })).toContain("### Trawler found no confirmed defects");
+  });
+
   test("lists at most five unreached goals", () => {
     const md = renderComment({ ...base, goalsReached: 0, goalsTotal: 8, unreachedGoals: Array.from({ length: 8 }, (_, i) => `Goal ${i + 1}`) });
     expect(md).toContain("- Goal 5\n- and 3 more, in the report");
