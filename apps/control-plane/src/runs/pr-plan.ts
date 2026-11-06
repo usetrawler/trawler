@@ -1,4 +1,4 @@
-import type { LanguageModel } from "ai";
+import { APICallError, RetryError, type LanguageModel } from "ai";
 import { sql } from "kysely";
 import { Budget, pageText, planForPullRequest, settleTurns, type AccountFlow, type LeadTurn } from "@usetrawler/core/setup";
 import { MAX_GOALS, MAX_GOALS_PER_PERSONA, turnsOf, type Goal, type PlanMode, type PullRequest } from "@usetrawler/protocol";
@@ -22,6 +22,7 @@ export interface PrPlanRecord {
   mode: Exclude<PlanMode, "regression">;
   goalIds: string[];
   note?: string;
+  leadFailed?: boolean;
   prPlanId?: string;
   version?: number;
   reused?: boolean;
@@ -97,7 +98,21 @@ export interface PrPlanDeps {
   fetchText?: (url: string) => Promise<string>;
 }
 
-const noteOf = (err: unknown) => `The lead could not plan for this pull request (${(err instanceof Error ? err.message : String(err)).slice(0, 300)}), so the project's plan ran as it is.`;
+const TRAWLER_SIDE: Record<number, { log: string; reason: string }> = {
+  401: { log: "the provider refused Trawler's model key", reason: "the model provider refused Trawler's key; Trawler has been told" },
+  402: { log: "Trawler's model account is out of credits", reason: "Trawler's model account is out of credits; Trawler has been told" },
+};
+
+function providerStatus(err: unknown): number | undefined {
+  for (let e = err, depth = 0; e instanceof Error && depth < 5; e = RetryError.isInstance(e) ? e.lastError : e.cause, depth++) {
+    if (APICallError.isInstance(e)) return e.statusCode;
+  }
+  return undefined;
+}
+
+const trawlerSide = (err: unknown) => TRAWLER_SIDE[providerStatus(err) ?? 0];
+const reasonOf = (err: unknown) => trawlerSide(err)?.reason ?? (err instanceof Error ? err.message : String(err));
+const noteOf = (err: unknown) => `The lead could not plan for this pull request (${reasonOf(err).slice(0, 300)}), so the project's plan ran as it is.`;
 export const NOTHING = "Nothing in this pull request points at a feature, so the project's plan ran as it is.";
 
 async function claimPrPlan(db: Database) {
@@ -164,7 +179,7 @@ async function finish(db: Database, job: Claimed, outcome: Outcome): Promise<voi
     const nothingToTest = mode === "change" && "turns" in outcome && !merged;
     const notVisibleHere = "turns" in outcome ? outcome.notVisibleHere : undefined;
     const record: PrPlanRecord = {
-      mode, goalIds: merged?.added.map((g) => g.id) ?? [], ...("failure" in outcome ? { note: noteOf(outcome.failure) } : merged ? {} : { note: nothingToTest ? (notVisibleHere ? `${NOT_VISIBLE_HERE} ${notVisibleHere}` : NOTHING_TO_TEST) : NOTHING }), ...(stored ? { prPlanId: stored.id, version: stored.version, createdByRun: run.number } : {}),
+      mode, goalIds: merged?.added.map((g) => g.id) ?? [], ...("failure" in outcome ? { note: noteOf(outcome.failure), leadFailed: true } : merged ? {} : { note: nothingToTest ? (notVisibleHere ? `${NOT_VISIBLE_HERE} ${notVisibleHere}` : NOTHING_TO_TEST) : NOTHING }), ...(stored ? { prPlanId: stored.id, version: stored.version, createdByRun: run.number } : {}),
       ...("turns" in outcome ? { accountFlow: outcome.accountFlow, ...(outcome.accountReason ? { accountReason: outcome.accountReason } : {}), signUps: provided!.signUps } : {}),
       ...(merged && "turns" in outcome && outcome.brief ? { brief: outcome.brief } : {}),
     };
@@ -198,7 +213,7 @@ async function planOne(deps: PrPlanDeps): Promise<boolean> {
   if (!job) return false;
   const started = Date.now();
   const outcome = await ask(deps, job);
-  if ("failure" in outcome) await logError("the lead could not plan for a pull request", { orgId: job.org_id, runId: job.run_id, err: outcome.failure });
+  if ("failure" in outcome) await logError(trawlerSide(outcome.failure)?.log ?? "the lead could not plan for a pull request", { orgId: job.org_id, runId: job.run_id, err: outcome.failure });
   else void writeLog("info", "the lead planned for a pull request", { orgId: job.org_id, seconds: (Date.now() - started) / 1000, model: outcome.usage.model, inputTokens: outcome.usage.inputTokens, outputTokens: outcome.usage.outputTokens, costUsd: outcome.usage.costUsd, goals: outcome.turns.reduce((n, t) => n + t.goals.length, 0) }).catch(() => undefined);
   await finish(deps.db, job, outcome);
   return true;
@@ -219,7 +234,7 @@ export async function failStalePrPlans(db: Database): Promise<void> {
     for (const job of stale) {
       const note = "The lead did not answer in time, so the project's plan ran as it is.";
       await tx.updateTable("jobs").set({ status: "failed", error: note, finished_at: new Date(), lease_until: null }).where("id", "=", job.id).execute();
-      await tx.updateTable("runs").set({ pr_plan: JSON.stringify({ ...(job.pr_plan as object), goalIds: [], note }) }).where("id", "=", job.run_id).execute();
+      await tx.updateTable("runs").set({ pr_plan: JSON.stringify({ ...(job.pr_plan as object), goalIds: [], note, leadFailed: true }) }).where("id", "=", job.run_id).execute();
     }
   });
 }

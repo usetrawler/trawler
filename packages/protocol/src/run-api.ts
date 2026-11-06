@@ -108,6 +108,7 @@ export const RunResultSchema = z.object({
   cancelReason: z.string().optional(),
   skipped: z.boolean().optional(),
   skipNote: z.string().optional(),
+  leadFallback: z.string().optional(),
   commentMarkdown: z.string(),
 });
 export type RunResult = z.infer<typeof RunResultSchema>;

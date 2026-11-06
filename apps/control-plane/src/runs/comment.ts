@@ -18,6 +18,7 @@ function headline(r: CommentInput): string {
   if (r.status === "stopped_budget") return "Trawler ran out of its budget before it finished testing this change";
   if (r.defects.confirmed === 0 && (r.unverified ?? 0) > 0) return `Trawler: ${count(r.unverified!, "report")} not verified before the run ended`;
   if (r.defects.confirmed > 0) return `Trawler: ${count(r.defects.confirmed, "defect")} confirmed by replay`;
+  if (r.leadFallback) return "Trawler could not plan for this change, so it ran the project's plan instead";
   if (thinCoverage(r.goalsReached, r.goalsTotal)) return "Trawler could check only part of this change";
   return "Trawler found no confirmed defects";
 }
@@ -55,6 +56,7 @@ export function renderComment(r: CommentInput): string {
     return [COMMENT_MARKER, `### ${hidden === null ? NOTHING_TO_TEST : NOT_VISIBLE_HERE}`, ...(hidden ? [plain(hidden)] : []), `[Full report](${r.reportUrl})`].join("\n\n");
   }
   const sections = [COMMENT_MARKER, `### ${headline(r)}`];
+  if (r.leadFallback) sections.push(`${plain(r.leadFallback)} None of its goals was aimed at this change, so finding no defect is not proof that the change works.`);
   if (r.finished && r.status === "stopped_budget") sections.push(budgetLine(r));
   if (r.finished && r.confirmed.length > 0) sections.push(r.confirmed.map(defectBlock).join("\n\n"));
   if (r.finished && r.defects.confirmed === 0) {
@@ -96,6 +98,7 @@ export function runResultOf(s: RunSummary, baseUrl: string): RunResult {
     ...(s.cancelReason ? { cancelReason: s.cancelReason } : {}),
     ...(skipped ? { skipped: true } : {}),
     ...(skipped && s.prPlan?.note ? { skipNote: s.prPlan.note } : {}),
+    ...(s.prPlan?.leadFailed && s.prPlan.note ? { leadFallback: s.prPlan.note } : {}),
   };
   return { ...result, commentMarkdown: renderComment({ ...result, peopleFailed: view.personas.filter((p) => p.state === "failed").length }) };
 }
