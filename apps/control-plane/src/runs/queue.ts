@@ -173,6 +173,7 @@ async function claimOnce(db: Database, keys: Keyring, scope: ClaimScope): Promis
       .$if(scope.execution === "own", (q) => q.where("j.org_id", "=", (scope as OwnScope).orgId))
       .$if(scope.execution === "own" && (scope as OwnScope).projectId !== null, (q) => q.where("r.project_id", "=", (scope as OwnScope).projectId!))
       .$if(scope.execution === "own" && (scope as OwnScope).runId !== undefined, (q) => q.where("j.run_id", "=", (scope as OwnScope).runId!))
+      .$if(scope.execution === "own" && (scope as OwnScope).runId === undefined, (q) => q.where("r.target_override", "=", false))
       .where((eb) => eb.or([eb("r.status", "in", ACTIVE), eb("j.requested_by", "is not", null)]))
       .where(sql<boolean>`not exists (
         select 1 from jobs busy where busy.run_id = j.run_id and (

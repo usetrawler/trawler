@@ -30,7 +30,7 @@ const stop = (token: string | undefined, id: string) =>
 
 beforeAll(async () => {
   for (const org of ["org-x", "org-y"]) await sql`insert into organization (id, name, slug, "createdAt") values (${org}, ${org}, ${org}, now())`.execute(t.db);
-  for (const name of ["stopA", "stopB", "claimA", "claimB", "sweepOld", "sweepNew", "sweepHosted", "sweepRunning", "yOther", "goneStale", "goneFresh", "goneApp", "goneRunning"]) {
+  for (const name of ["stopA", "stopB", "claimA", "claimB", "claimIsolated", "claimOrdinary", "sweepOld", "sweepNew", "sweepHosted", "sweepRunning", "yOther", "goneStale", "goneFresh", "goneApp", "goneRunning"]) {
     projects[name] = await withOrg(t.db, orgOf(name), (tx) => createProject(tx, orgOf(name), { ...config, name }, keys));
   }
 });
@@ -121,6 +121,20 @@ describe("claiming the jobs of one run", () => {
     const anyJob = await call(undefined, projectToken);
     expect(anyJob.status).toBe(200);
     expect((await anyJob.json()).runId).toBe(aRun);
+  });
+
+  test("a run aimed at an address of its own CI job is left to the runner that names it, while a runner without a run still takes ordinary runs", async () => {
+    const isolated = await withOrg(t.db, "org-x", (tx) => startRun(tx, "org-x", projects.claimIsolated!, keys, { ...options, execution: "own", targetUrl: "http://localhost:8080/" }));
+    const ordinary = await start("claimOrdinary");
+    const general = await claimRun({ orgId: "org-x", projectId: null }, undefined);
+    expect(general.length).toBeGreaterThan(0);
+    expect(general).toContain(ordinary.id);
+    expect(general).not.toContain(isolated.id);
+    expect(await claimRun({ orgId: "org-x", projectId: projects.claimIsolated! }, undefined)).toEqual([]);
+    const named = await claimRun({ orgId: "org-x", projectId: projects.claimIsolated! }, isolated.id);
+    expect(named.length).toBeGreaterThan(0);
+    expect(new Set(named)).toEqual(new Set([isolated.id]));
+    await asSystem(t.db, (tx) => tx.updateTable("runs").set({ status: "cancelled" }).where("id", "in", [isolated.id, ordinary.id]).execute());
   });
 });
 
