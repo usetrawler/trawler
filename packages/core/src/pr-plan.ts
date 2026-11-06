@@ -31,7 +31,7 @@ export type AccountFlow = "provided" | "exercise";
 const REASON_CHARS = 200;
 
 const Answer = z.object({
-  turns: z.array(z.object({ person: z.string(), goals: z.array(z.object({ id: z.string(), instruction: z.string() })) })),
+  turns: z.array(z.object({ person: z.string(), goals: z.array(z.object({ id: z.string(), instruction: z.string(), promise: z.boolean().optional().catch(undefined) })) })),
   accountFlow: z.string().optional().catch(undefined).describe('"provided" or "exercise"'),
   accountReason: z.string().optional().catch(undefined),
   notVisibleHere: z.string().optional().catch(undefined),
@@ -75,7 +75,7 @@ function problemsOf(answer: z.infer<typeof Answer>, people: LeadPerson[], pr: Pu
       return leak ? [`goal ${JSON.stringify(g.id)} ${leak}; write it as the outcome a user should get, without file, code or address names`] : [];
     }),
     ...(typeof answer.brief === "string" && leaksPullRequest(answer.brief, pr) ? [`the brief ${leaksPullRequest(answer.brief, pr)}; say what the feature does in a user's words, without file, code or address names`] : []),
-  ]).concat(untriedProblems(answer));
+  ]).concat(untriedProblems(answer), promiseProblems(answer));
 }
 
 function untriedProblems(answer: z.infer<typeof Answer>): string[] {
@@ -89,6 +89,15 @@ function untriedProblems(answer: z.infer<typeof Answer>): string[] {
     if (at >= MAX_LEAD_GOALS) return [`goal ${JSON.stringify(u.goal)} for the untried case ${JSON.stringify(u.case)} is past the limit of ${MAX_LEAD_GOALS} goals; leave out a case the pull request lists instead`];
     return [];
   });
+}
+
+function promiseProblems(answer: z.infer<typeof Answer>): string[] {
+  if (answer.turns.length === 0) return [];
+  const order = answer.turns.flatMap((t) => t.goals);
+  const at = order.findIndex((g) => g.promise === true);
+  if (at < 0) return ["no goal is marked promise: true; mark the goal that plays the main thing the change promises a user, and write it if it is missing"];
+  if (at >= MAX_LEAD_GOALS) return [`the promise goal ${JSON.stringify(order[at]!.id)} is past the limit of ${MAX_LEAD_GOALS} goals; play it earlier and leave out another case the pull request lists`];
+  return [];
 }
 
 export function personId(named: string, people: LeadPerson[]): string | undefined {
