@@ -36,6 +36,7 @@ const Answer = z.object({
   accountReason: z.string().optional().catch(undefined),
   notVisibleHere: z.string().optional().catch(undefined),
   brief: z.string().optional().catch(undefined),
+  untried: z.array(z.object({ case: z.string(), goal: z.string() })).optional().catch(undefined),
 });
 
 const words = (text: string) => text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
@@ -67,29 +68,48 @@ export function leaksPullRequest(instruction: string, pr: PullRequestText): stri
 }
 
 function problemsOf(answer: z.infer<typeof Answer>, people: LeadPerson[], pr: PullRequestText): string[] {
-  const known = new Set(people.map((p) => p.id));
   return answer.turns.flatMap((turn) => [
-    ...(known.has(turn.person) ? [] : [`${JSON.stringify(turn.person)} is not one of the people; choose only ids from the list`]),
+    ...(personId(turn.person, people) ? [] : [`${JSON.stringify(turn.person)} is not one of the people; choose only ids from the list`]),
     ...turn.goals.flatMap((g) => {
       const leak = leaksPullRequest(g.instruction, pr);
       return leak ? [`goal ${JSON.stringify(g.id)} ${leak}; write it as the outcome a user should get, without file, code or address names`] : [];
     }),
     ...(typeof answer.brief === "string" && leaksPullRequest(answer.brief, pr) ? [`the brief ${leaksPullRequest(answer.brief, pr)}; say what the feature does in a user's words, without file, code or address names`] : []),
-  ]);
+  ]).concat(untriedProblems(answer));
+}
+
+function untriedProblems(answer: z.infer<typeof Answer>): string[] {
+  if (answer.turns.length === 0) return [];
+  const untried = answer.untried ?? [];
+  if (untried.length === 0) return ["untried is empty: list the cases the change implies that its title and description do not name (the other side of a check, another outcome of a decision and what a user does next, doing something again after it changed), each with the id of the goal that tries it"];
+  const order = answer.turns.flatMap((t) => t.goals.map((g) => g.id));
+  return untried.flatMap((u) => {
+    const at = order.indexOf(u.goal);
+    if (at < 0) return [`the untried case ${JSON.stringify(u.case)} points at goal ${JSON.stringify(u.goal)}, which is not in your turns; write a goal that tries it`];
+    if (at >= MAX_LEAD_GOALS) return [`goal ${JSON.stringify(u.goal)} for the untried case ${JSON.stringify(u.case)} is past the limit of ${MAX_LEAD_GOALS} goals; leave out a case the pull request lists instead`];
+    return [];
+  });
+}
+
+export function personId(named: string, people: LeadPerson[]): string | undefined {
+  if (people.some((p) => p.id === named)) return named;
+  const wanted = named.trim().toLowerCase();
+  const byName = people.filter((p) => p.name.trim().toLowerCase() === wanted || p.name.trim().toLowerCase().split(/\s+/)[0] === wanted);
+  return byName.length === 1 ? byName[0]!.id : undefined;
 }
 
 export function settleTurns(answer: z.infer<typeof Answer>, people: LeadPerson[], pr: PullRequestText, taken: Iterable<string> = []): { turns: LeadTurn[]; dropped: number; firstDrop?: string } {
-  const known = new Set(people.map((p) => p.id));
   const used = new Set(taken);
   const turns: LeadTurn[] = [];
   let kept = 0;
   let dropped = 0;
   let firstDrop: string | undefined;
   for (const turn of answer.turns) {
+    const person = personId(turn.person, people);
     const goals: LeadTurn["goals"] = [];
     for (const g of turn.goals) {
       const instruction = clip(g.instruction, GOAL_CHARS);
-      const why = !known.has(turn.person) ? `is for ${JSON.stringify(turn.person)}, who is not one of the people` : !instruction ? "is empty" : leaksPullRequest(instruction, pr) ?? (kept >= MAX_LEAD_GOALS ? "is over the limit of goals" : null);
+      const why = !person ? `is for ${JSON.stringify(turn.person)}, who is not one of the people` : !instruction ? "is empty" : leaksPullRequest(instruction, pr) ?? (kept >= MAX_LEAD_GOALS ? "is over the limit of goals" : null);
       if (why) {
         dropped++;
         firstDrop ??= `${JSON.stringify(instruction.slice(0, 160))} ${why}`;
@@ -103,8 +123,8 @@ export function settleTurns(answer: z.infer<typeof Answer>, people: LeadPerson[]
     }
     if (goals.length === 0) continue;
     const last = turns.at(-1);
-    if (last?.person === turn.person) last.goals.push(...goals);
-    else turns.push({ person: turn.person, goals });
+    if (last && last.person === person) last.goals.push(...goals);
+    else turns.push({ person: person!, goals });
   }
   return { turns, dropped, ...(firstDrop ? { firstDrop } : {}) };
 }
