@@ -98,7 +98,7 @@ test("a plan made from a pull request cannot be edited or removed, and removing 
 test("both: a stored pull request plan adds its goals to the stored plan on the next run, without asking the lead, and the run stays on the stored plan", async () => {
   const project = await newProject("both-reuse");
   const first = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { ...options, pullRequest, planMode: "both" }));
-  const lead = scriptedModel([text(JSON.stringify({ turns: [{ person: "lee", goals: [{ id: "export", instruction: "Last month's invoices come out as one spreadsheet" }] }] }))]);
+  const lead = scriptedModel([text(JSON.stringify({ turns: [{ person: "lee", goals: [{ id: "export", instruction: "Last month's invoices come out as one spreadsheet" }] }], untried: [{ case: "a month with no invoices", goal: "export" }] }))]);
   await planDueRuns({ db: t.db, model: lead, modelId: "setup-model" });
   await sql`update runs set status = 'cancelled', cancel_reason = 'stopped', finished_at = now(), sign_up_seed = null where id = ${first.id}`.execute(t.db);
   await sql`update jobs set status = 'cancelled' where run_id = ${first.id}`.execute(t.db);
@@ -115,7 +115,7 @@ test("both: a stored pull request plan adds its goals to the stored plan on the 
 test("a run on a pull request plan names the plan in the run list and on the run, and a skipped run is not something that needs attention", async () => {
   const project = await newProject("shown");
   const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { ...options, pullRequest }));
-  await planDueRuns({ db: t.db, model: scriptedModel([text(JSON.stringify({ turns: [{ person: "lee", goals: [{ id: "export", instruction: "Last month's invoices come out as one spreadsheet" }] }] }))]), modelId: "setup-model" });
+  await planDueRuns({ db: t.db, model: scriptedModel([text(JSON.stringify({ turns: [{ person: "lee", goals: [{ id: "export", instruction: "Last month's invoices come out as one spreadsheet" }] }], untried: [{ case: "a month with no invoices", goal: "export" }] }))]), modelId: "setup-model" });
   expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.planName).toBe("PR #900 v1");
   await sql`update runs set status = 'cancelled', cancel_reason = 'stopped', finished_at = now(), sign_up_seed = null where id = ${run.id}`.execute(t.db);
   const skipped = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { ...options, pullRequest: { ...pullRequest, number: 901 } }));

@@ -30,7 +30,11 @@ beforeAll(async () => {
   await sql`insert into organization (id, name, slug, "createdAt") values ('org-a', 'A', 'a', now())`.execute(t.db);
 });
 
-const answer = (turns: unknown) => text(JSON.stringify({ turns }));
+const untriedFor = (turns: unknown) => {
+  const first = (turns as Array<{ goals: Array<{ id: string }> }>)[0]?.goals[0];
+  return first ? [{ case: "the side the description does not name", goal: first.id }] : [];
+};
+const answer = (turns: unknown) => text(JSON.stringify({ turns, untried: untriedFor(turns) }));
 const lead = (model: ReturnType<typeof scriptedModel> | null): PrPlanDeps => ({ db: t.db, model, modelId: "setup-model" });
 
 async function start(name: string, over: Partial<Parameters<typeof startRun>[4]> = {}) {
@@ -314,7 +318,7 @@ test("two pull requests of one project keep separate plans", async () => {
 test("the lead's brief reaches the run's config and its plan view, and is reused with the stored plan", async () => {
   const brief = "Invoices of a month can now be downloaded as one CSV file. Try a month without invoices.";
   const { project, run: first } = await start("brief");
-  await planDueRuns(lead(scriptedModel([text(JSON.stringify({ turns: LEE_GOAL, brief }))])));
+  await planDueRuns(lead(scriptedModel([text(JSON.stringify({ turns: LEE_GOAL, brief, untried: untriedFor(LEE_GOAL) }))])));
   expect((await snapshotOf(first.id)).brief).toBe(brief);
   expect((await summary(first.id))!.prPlan).toMatchObject({ brief, reused: false });
   const job = (await claimJob(t.db, keys))!;

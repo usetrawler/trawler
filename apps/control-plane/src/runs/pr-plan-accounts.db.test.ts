@@ -30,7 +30,7 @@ beforeAll(async () => {
   await sql`insert into organization (id, name, slug, "createdAt") values ('org-a', 'A', 'a', now())`.execute(t.db);
 });
 
-const answer = (flow: Record<string, unknown>) => text(JSON.stringify({ turns: [{ person: "priya", goals: [{ id: "joins", instruction: "A new colleague joins the team and sees its workspace" }] }], ...flow }));
+const answer = (flow: Record<string, unknown>) => text(JSON.stringify({ turns: [{ person: "priya", goals: [{ id: "joins", instruction: "A new colleague joins the team and sees its workspace" }] }], untried: [{ case: "an invitation used twice", goal: "joins" }], ...flow }));
 const lead = (model: ReturnType<typeof scriptedModel> | null) => ({ db: t.db, model, modelId: "setup-model" });
 const newProject = (name: string) => withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", { ...config, name }, keys, { signsIn: ["ana"] }));
 const startOn = (project: string, over: Partial<Parameters<typeof startRun>[4]> = {}) => withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { ...options, pullRequest, ...over }));
