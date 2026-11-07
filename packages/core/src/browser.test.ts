@@ -77,6 +77,20 @@ beforeAll(async () => {
       res.end(`<!doctype html><html><body>${body}</body></html>`);
     };
     switch (req.url) {
+      case "/app-loads-late":
+        return html(`<h1>Charges</h1><p id="list">Nothing here yet.</p><script>
+          fetch("/api/me").then((r) => r.json()).then(() => fetch("/api/charges")).then((r) => r.json()).then((c) => {
+            document.getElementById("list").textContent = c.map((x) => x.name).join(", ");
+          });
+        </script>`);
+      case "/app-polls":
+        return html(`<h1>Live</h1><script>setInterval(() => fetch("/api/tick"), 100);</script>`);
+      case "/api/me":
+        return setTimeout(() => res.end(JSON.stringify({ name: "Priya" })), 400);
+      case "/api/charges":
+        return setTimeout(() => res.end(JSON.stringify([{ name: "Netflix" }, { name: "Spotify Family" }])), 400);
+      case "/api/tick":
+        return setTimeout(() => res.end("{}"), 80);
       case "/paced":
         pacedHits.push(Date.now());
         return html(`<p>Paced</p>`);
@@ -1533,6 +1547,38 @@ describe("robustness", () => {
       await navigate(b, `${origin}/sse-page`);
       await b.tools.browser_wait_for!.execute!({ text: "got hello" }, ctx);
       expect(await snapshot(b)).toContain("got hello");
+    });
+  }, 60_000);
+});
+
+describe("an app's own requests", () => {
+  test("the page is read once the app's data has arrived, not in the empty state it shows while loading", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/app-loads-late`);
+      const snap = await snapshot(b);
+      expect(snap).toContain("Charges");
+      expect(snap).toContain("Netflix, Spotify Family");
+      expect(snap).not.toContain("Nothing here yet.");
+    });
+  }, 60_000);
+
+  test("a page that never stops asking is still read, after the wait's cap", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/app-polls`);
+      const started = Date.now();
+      const snap = await snapshot(b);
+      expect(snap).toContain("Live");
+      expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+      expect(Date.now() - started).toBeLessThan(4000);
+    }, { settleMs: 1000 });
+  }, 60_000);
+
+  test("a quiet page is read at once", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/two`);
+      const started = Date.now();
+      expect(await snapshot(b)).toContain("Second page");
+      expect(Date.now() - started).toBeLessThan(1500);
     });
   }, 60_000);
 });
