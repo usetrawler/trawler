@@ -32,7 +32,9 @@ test("a new project asks only for the product's address", () => {
 test("while setup works something moves, gently for those who ask for less motion, and it says how long it takes", async () => {
   const { Progress } = await import("./setup-wizard.tsx");
   const html = renderToStaticMarkup(createElement(Progress, { step: "describe", host: "app.acme.test" }));
-  expect(html).toContain("This usually takes 1–2 minutes");
+  expect(html).toContain("This usually takes 2–3 minutes; keep this page open.");
+  const byHand = renderToStaticMarkup(createElement(Progress, { step: "propose", host: "localhost:8080", byHand: true }));
+  expect(byHand).toContain("This usually takes 1–2 minutes; keep this page open.");
   expect(html).toMatch(/aria-current="step"[^]*Finding what the product does…/);
   const moving = html.match(/class="[^"]*animate-(spin|ping)[^"]*"/g) ?? [];
   expect(moving.length).toBeGreaterThanOrEqual(3);

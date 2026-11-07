@@ -129,7 +129,7 @@ export function Progress({ step, host, checking = false, byHand = false }: { ste
       <div className="flex flex-col gap-3">
         <p className="font-mono text-xs tracking-[0.2em] text-action-ink uppercase">Building your test plan</p>
         <h2 className="text-3xl leading-tight font-bold tracking-tight break-words md:text-5xl">Understanding {host}</h2>
-        <p className="max-w-xl text-muted">{byHand ? "Trawler chooses people with different roles and goals from your description." : "Trawler reads the product's page, works out what it does, and then chooses people with different roles and goals."} This usually takes 1–2 minutes; keep this page open.</p>
+        <p className="max-w-xl text-muted">{byHand ? "Trawler chooses people with different roles and goals from your description. This usually takes 1–2 minutes" : "Trawler reads the product's page, works out what it does, and then chooses people with different roles and goals. This usually takes 2–3 minutes"}; keep this page open.</p>
         {checking && <p className="max-w-xl text-sm text-muted">Trawler did not answer. Checking whether setup finished…</p>}
       </div>
       <ol className="flex flex-col border-t border-line">
