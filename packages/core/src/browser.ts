@@ -57,6 +57,10 @@ const MAX_LONG_FORMS_FROM_PAGE = 100;
 const WITHHELD_TOO_LONG = "The action ran, but a field Trawler typed a password into now holds a value too long to check, or keeps changing it, so its result is withheld to keep the password out of it. Do not repeat the action: navigate elsewhere.";
 const WITHHELD_FOR_DIALOG = "The action ran, and a dialog is open on a page where Trawler typed a password, so its text is withheld to keep the password out of it. Answer the dialog with browser_handle_dialog, then call browser_snapshot.";
 const SCREENSHOT_MS = 5000;
+export const QUIET_MS = 300;
+export const SETTLE_MS = 3000;
+const SETTLE_STEP_MS = 50;
+const APP_REQUESTS = new Set(["fetch", "xhr"]);
 const DIALOG_GRACE_MS = 500;
 const SILENT_LEAVE_PROMPT = /\["beforeunload" dialog with message ""\]/g;
 const LEAVE_PROMPT = '"beforeunload" dialog: the browser asks "Leave site? Changes you made may not be saved."';
@@ -482,6 +486,8 @@ export async function openBrowser(opts: {
   maskCheckMs?: number;
   filledReadMs?: number;
   actionGapMs?: number;
+  quietMs?: number;
+  settleMs?: number;
 }): Promise<Browser> {
   const allowed = new Set(opts.allowedOrigins.map((o) => new URL(o).origin));
   const isAllowed = (url: string) => {
@@ -601,6 +607,48 @@ export async function openBrowser(opts: {
       challenge = found && at ? { vendor: found, url: at.slice(0, MAX_URL) } : null;
       return { found, cleared: first && !found ? first : null };
     };
+    const inFlight = new Map<Page, Map<object, Frame>>();
+    const frameOf = (request: { frame(): Frame }): Frame | null => {
+      try {
+        return request.frame();
+      } catch {
+        return null;
+      }
+    };
+    context.on("request", (request) => {
+      const frame = frameOf(request);
+      const page = frame?.page();
+      if (!frame || !page || page.isClosed()) return;
+      const pending = inFlight.get(page) ?? new Map<object, Frame>();
+      if (request.isNavigationRequest()) {
+        for (const [earlier, on] of pending) if (on === frame) pending.delete(earlier);
+      } else if (APP_REQUESTS.has(request.resourceType())) pending.set(request, frame);
+      inFlight.set(page, pending);
+    });
+    const done = (request: { frame(): Frame }) => {
+      const page = frameOf(request)?.page();
+      if (page) inFlight.get(page)?.delete(request);
+    };
+    const pendingOn = (page: Page) => {
+      const pending = inFlight.get(page);
+      if (!pending) return 0;
+      for (const [request, frame] of pending) if (frame.isDetached()) pending.delete(request);
+      return pending.size;
+    };
+    context.on("requestfinished", done);
+    context.on("requestfailed", done);
+    const settled = async (page: Page | undefined) => {
+      if (!page) return;
+      const quietMs = opts.quietMs ?? QUIET_MS;
+      const until = Date.now() + (opts.settleMs ?? SETTLE_MS);
+      let quietSince = pendingOn(page) === 0 ? Date.now() : Infinity;
+      while (Date.now() < until && !page.isClosed() && !disconnected) {
+        if (pendingOn(page) > 0) quietSince = Infinity;
+        else if (quietSince === Infinity) quietSince = Date.now();
+        else if (Date.now() - quietSince >= quietMs) return;
+        await new Promise((resolve) => setTimeout(resolve, SETTLE_STEP_MS));
+      }
+    };
     const dialogOnActingPage = () => [...openDialogs].filter(([, page]) => page === actingPage()).at(-1)?.[0];
     const modalState = (dialog: Dialog) => `### Modal state\n- ${dialogLine(dialog)}: can be handled by browser_handle_dialog`;
     context.on("page", (page) => {
@@ -612,6 +660,7 @@ export async function openBrowser(opts: {
       });
       page.on("dialogclosed", (dialog) => openDialogs.delete(dialog));
       page.on("close", () => {
+        inFlight.delete(page);
         for (const [dialog, on] of openDialogs) if (on === page) openDialogs.delete(dialog);
       });
     });
@@ -805,6 +854,7 @@ export async function openBrowser(opts: {
         }
         blockedNavigation = null;
         mitigated = null;
+        if (name === "browser_snapshot" && !dialogOnActingPage()) await settled(actingPage());
         const untilADialog = async () => {
           const running = Promise.resolve(execute(safeInput, options)) as Promise<McpResult>;
           running.catch(() => {});
@@ -897,6 +947,7 @@ export async function openBrowser(opts: {
       async screenshot() {
         const page = context.pages()[0];
         if (!page || disconnected || dialogOnActingPage() || page.url() === "about:blank") return null;
+        await settled(page);
         let timer: NodeJS.Timeout | undefined;
         const shot = await Promise.race([capture(page).catch(() => null), new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), 2 * SCREENSHOT_MS)))]);
         clearTimeout(timer);
