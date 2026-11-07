@@ -89,6 +89,10 @@ beforeAll(async () => {
         return setTimeout(() => res.end(JSON.stringify({ name: "Priya" })), 400);
       case "/api/charges":
         return setTimeout(() => res.end(JSON.stringify([{ name: "Netflix" }, { name: "Spotify Family" }])), 400);
+      case "/app-hangs":
+        return html(`<h1>Waiting</h1><a href="/two">Next page</a><script>fetch("/api/hang");</script>`);
+      case "/api/hang":
+        return void setTimeout(() => res.end("{}"), 20_000).unref();
       case "/api/tick":
         return setTimeout(() => res.end("{}"), 80);
       case "/paced":
@@ -1571,6 +1575,16 @@ describe("an app's own requests", () => {
       expect(Date.now() - started).toBeGreaterThanOrEqual(900);
       expect(Date.now() - started).toBeLessThan(4000);
     }, { settleMs: 1000 });
+  }, 60_000);
+
+  test("a request the previous page left hanging does not hold up the next page", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/app-hangs`);
+      await navigate(b, `${origin}/two`);
+      const started = Date.now();
+      expect(await snapshot(b)).toContain("Second page");
+      expect(Date.now() - started).toBeLessThan(1500);
+    });
   }, 60_000);
 
   test("a quiet page is read at once", async () => {

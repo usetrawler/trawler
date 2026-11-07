@@ -607,24 +607,33 @@ export async function openBrowser(opts: {
       challenge = found && at ? { vendor: found, url: at.slice(0, MAX_URL) } : null;
       return { found, cleared: first && !found ? first : null };
     };
-    const inFlight = new Map<Page, Set<object>>();
-    const pageOf = (request: { frame(): Frame }): Page | null => {
+    const inFlight = new Map<Page, Map<object, Frame>>();
+    const frameOf = (request: { frame(): Frame }): Frame | null => {
       try {
-        return request.frame().page();
+        return request.frame();
       } catch {
         return null;
       }
     };
     context.on("request", (request) => {
-      const page = APP_REQUESTS.has(request.resourceType()) ? pageOf(request) : null;
-      if (!page) return;
-      const pending = inFlight.get(page) ?? new Set<object>();
-      pending.add(request);
+      const frame = frameOf(request);
+      const page = frame?.page();
+      if (!frame || !page || page.isClosed()) return;
+      const pending = inFlight.get(page) ?? new Map<object, Frame>();
+      if (request.isNavigationRequest()) {
+        for (const [earlier, on] of pending) if (on === frame) pending.delete(earlier);
+      } else if (APP_REQUESTS.has(request.resourceType())) pending.set(request, frame);
       inFlight.set(page, pending);
     });
     const done = (request: { frame(): Frame }) => {
-      const page = pageOf(request);
+      const page = frameOf(request)?.page();
       if (page) inFlight.get(page)?.delete(request);
+    };
+    const pendingOn = (page: Page) => {
+      const pending = inFlight.get(page);
+      if (!pending) return 0;
+      for (const [request, frame] of pending) if (frame.isDetached()) pending.delete(request);
+      return pending.size;
     };
     context.on("requestfinished", done);
     context.on("requestfailed", done);
@@ -632,9 +641,9 @@ export async function openBrowser(opts: {
       if (!page) return;
       const quietMs = opts.quietMs ?? QUIET_MS;
       const until = Date.now() + (opts.settleMs ?? SETTLE_MS);
-      let quietSince = (inFlight.get(page)?.size ?? 0) === 0 ? Date.now() : Infinity;
+      let quietSince = pendingOn(page) === 0 ? Date.now() : Infinity;
       while (Date.now() < until && !page.isClosed() && !disconnected) {
-        if ((inFlight.get(page)?.size ?? 0) > 0) quietSince = Infinity;
+        if (pendingOn(page) > 0) quietSince = Infinity;
         else if (quietSince === Infinity) quietSince = Date.now();
         else if (Date.now() - quietSince >= quietMs) return;
         await new Promise((resolve) => setTimeout(resolve, SETTLE_STEP_MS));
