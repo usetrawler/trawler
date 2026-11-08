@@ -8,7 +8,7 @@ import { Keyring } from "../lib/secrets.ts";
 import { startRun } from "../runs/runs.ts";
 import { createProject, listPlans } from "./projects.ts";
 import { openFindings, projectCounts, projectPullRequests, runResult } from "./project-home.ts";
-import type { RunLine } from "./overview.ts";
+import { runLinesByIds, type RunLine } from "./overview.ts";
 
 const t = await testDb();
 afterAll(() => t.drop());
@@ -77,6 +77,7 @@ test("open findings are the confirmed defects of the latest finished run of each
     ["ana:plan", "Plan 1", expect.any(Number)],
   ]);
   expect(open[0]).toMatchObject({ title: "Finding lee:pr21", severity: "high", person: "Lee" });
+  expect((await withOrg(t.db, "org-a", (tx) => runLinesByIds(tx, "org-a", [pr21.id]))).get(pr21.id)!.confirmed).toBe(1);
   expect(await withOrg(t.db, "org-a", (tx) => openFindings(tx, "org-b", acme))).toEqual([]);
 });
 

@@ -20,7 +20,7 @@ export interface PullRequestLine {
   run: RunLine;
 }
 
-const prSource = sql<string | null>`CASE WHEN r.pull_request->>'number' IS NOT NULL THEN concat(lower(coalesce(r.pull_request->>'repository', '')), '#', r.pull_request->>'number') END`;
+const prSource = sql<string | null>`CASE WHEN r.pull_request->>'number' IS NOT NULL THEN concat(lower(btrim(coalesce(r.pull_request->>'repository', ''))), '#', r.pull_request->>'number') END`;
 const SEVERITY_RANK = sql<number>`CASE f.severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END`;
 
 export async function openFindings(tx: Tx, orgId: string, projectId: string): Promise<OpenFinding[]> {

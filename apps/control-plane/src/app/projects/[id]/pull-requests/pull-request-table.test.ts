@@ -23,6 +23,12 @@ test("each pull request is a row: number, title linking to the pull request, its
   expect(html).toMatch(/>#13<\/td><td[^>]*>Pull request #13<\/td><td[^>]*>v6<\/td><td class="[^"]*text-muted[^"]*">Skipped: nothing to test in the UI<\/td>/);
 });
 
+test("an address that is not a web page is shown as text, never as a link", () => {
+  const html = render([{ number: 5, title: "feat: x", url: "javascript:alert(1)", plan: { id: null, label: "v1", ofPullRequest: true }, run: run(9) }]);
+  expect(html).not.toContain("javascript:");
+  expect(html).toMatch(/>#5<\/td><td[^>]*>feat: x<\/td>/);
+});
+
 test("without pull requests the page says where they come from", () => {
   expect(render([])).toContain("No pull requests yet. A run your CI job starts for a pull request is listed here.");
 });

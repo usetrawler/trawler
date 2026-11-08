@@ -72,7 +72,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
             <PlansBar projectId={project.id} plans={plans} current={planId} canAdd={plans.length < MAX_PLANS} />
-            <p className="flex flex-wrap items-baseline gap-x-3 text-sm">
+            <div className="flex flex-wrap items-baseline gap-x-3 text-sm">
               {project.features.length > 0 && (
                 <details className="group relative text-muted">
                   <summary className="cursor-pointer list-none underline-offset-4 hover:text-ink hover:underline [&::-webkit-details-marker]:hidden">Built from {project.features.length} {project.features.length === 1 ? "feature" : "features"}</summary>
@@ -80,7 +80,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
                 </details>
               )}
               <Link href={`/projects/${project.id}/features?plan=${planId}`} className="underline underline-offset-4 hover:text-action-ink">{project.features.length > 0 ? "Change features and propose people again" : "Choose features and propose people"}</Link>
-            </p>
+            </div>
           </div>
           {prPlans.length > 0 && <p className="text-sm text-muted">Pull request plans are written by the lead for each pull request and are read-only. Find them under <a href={`/projects/${id}/pull-requests`} className="text-ink underline underline-offset-4">Pull requests</a>.</p>}
           <PlanTitle key={planId} projectId={project.id} planId={planId} name={project.plan.name} canRemove={plans.length > 1} />

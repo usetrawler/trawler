@@ -196,6 +196,7 @@ function StartLink({ href, ciOnly, blocked, held, closedBeta }: { href: string; 
 
 function personIssue(person: PlanPerson, own: Goal[], accounts: AccountView[]): string | null {
   if (!person.name.trim()) return "needs a name";
+  if (!person.brief.trim()) return "needs a description";
   if (own.length === 0) return "needs a goal";
   if (own.some((g) => !g.instruction.trim())) return "a goal needs text";
   if ((person.signsIn || person.accountRef) && !accounts.some((a) => a.ref === person.accountRef)) return "needs a test account";
@@ -257,6 +258,7 @@ export function PlanWorkspace({ projectId, planId, initialPersonas, initialGoals
     setOpen(id);
   };
   const removePerson = (id: string) => {
+    setOpen((current) => (current === id ? (personas.find((p) => p.id !== id)?.id ?? null) : current));
     setPersonas((list) => list.filter((p) => p.id !== id));
     setGoals((list) => list.filter((g) => g.personaId !== id));
   };
@@ -369,7 +371,7 @@ export function PlanWorkspace({ projectId, planId, initialPersonas, initialGoals
           {personas.length < MAX_PERSONAS && <AddButton onClick={addPerson}>Add a person</AddButton>}
         </section>
 
-        {personas.length > 1 && <aside className="lg:sticky lg:top-6"><OrderOfPlay personas={personas} goals={goals} onMove={moveGoal} /></aside>}
+        {personas.length > 1 && <aside className="lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto"><OrderOfPlay personas={personas} goals={goals} onMove={moveGoal} /></aside>}
       </div>
 
       <StartLink href={`/runs/new?project=${projectId}&plan=${planId}`} ciOnly={ciOnly} closedBeta={ciOnly ? undefined : closedBeta} held={Boolean(error || problem || dirty || saving)} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount && !ciOnly ? `${withoutAccount.name} needs a test account to sign in.` : overPlan)} />

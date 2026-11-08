@@ -71,7 +71,7 @@ function runLines(tx: Tx, orgId: string) {
       sql<string | null>`CASE WHEN r.pr_plan->>'version' IS NOT NULL THEN r.pull_request->>'title' END`.as("plan_title"),
       sql<boolean>`r.plan_id IS NULL OR (SELECT count(*) FROM plans pl WHERE pl.project_id = r.project_id AND pl.kind = 'standard') > 1 OR EXISTS (SELECT 1 FROM plans pl WHERE pl.id = r.plan_id AND pl.kind = 'pull_request')`.as("plan_shown"),
       eb.exists(eb.selectFrom("projects as twin").select("twin.id").whereRef("twin.org_id", "=", "p.org_id").whereRef("twin.name", "=", "p.name").whereRef("twin.id", "<>", "p.id")).as("name_shared"),
-      eb.selectFrom("findings as f").select((f) => f.fn.countAll<string>().as("n")).whereRef("f.run_id", "=", "r.id").where("f.kind", "=", "defect").where("f.verdict", "=", "confirmed")
+      eb.selectFrom("findings as f").select((f) => f.fn.countAll<string>().as("n")).whereRef("f.run_id", "=", "r.id").where("f.kind", "=", "defect").where("f.verdict", "=", "confirmed").where("f.same_as", "is", null)
         .where((f) => f.not(f.exists(f.selectFrom("finding_dismissals as d").select("d.run_id").whereRef("d.run_id", "=", "f.run_id").whereRef("d.finding_key", "=", "f.key"))))
         .where((f) => f.not(f.exists(f.selectFrom("jobs as j").select("j.id").whereRef("j.run_id", "=", "f.run_id").whereRef("j.finding_key", "=", "f.key").where("j.kind", "=", "judge").where("j.requested_by", "is not", null).where("j.status", "in", ["queued", "leased"]))))
         .as("confirmed"),

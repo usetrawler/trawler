@@ -28,6 +28,8 @@ describe("PlanWorkspace", () => {
     expect(html).toMatch(/· <span class="text-bad">needs a test account<\/span>/);
     expect(render([ama, kwame], accounts)).toMatch(/aria-expanded="true" aria-controls="person-ama"/);
     expect(render([{ ...ama, name: "" }], [])).toContain(">Person 1</span>");
+    const noBrief = render([kwame, { ...ama, brief: " " }], accounts);
+    expect(noBrief).toMatch(/aria-expanded="true" aria-controls="person-ama"[\s\S]*?<span class="text-bad">needs a description<\/span>/);
   });
 
   it("says how many people and steps the plan has next to whether it is saved", () => {

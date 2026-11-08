@@ -5,6 +5,7 @@ import type { runView, StageState, PersonaState } from "../../../runs/report.ts"
 import type { RunSummary } from "../../../runs/runs.ts";
 import { findingAnchor } from "../../../runs/finding-anchor.ts";
 import { SEVERITY_TONE } from "../../../runs/severity.ts";
+import { webLink } from "../../../lib/web-link.ts";
 import { runPath, runStatusLabel, runStatusTone, runTitle } from "../../../runs/status.ts";
 import { RunBreadcrumb } from "../../../components/run-breadcrumb.tsx";
 import { initials } from "../../../components/initials.ts";
@@ -264,7 +265,6 @@ function judgedText(report: View["report"], key: string): string {
   return "";
 }
 
-const webLink = (url: string | null) => (url && /^https?:\/\//i.test(url) ? url : null);
 
 function PullRequestSubject({ pr }: { pr: NonNullable<RunSummary["pullRequest"]> }) {
   const label = `${pr.number ? `PR #${pr.number}` : "Pull request"}${pr.title ? ` · ${pr.title}` : ""}`;
