@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest";
 import { scrubberWith } from "../server/log.ts";
 import { FetchRefused } from "../setup/safe-fetch.ts";
-import { checkKey, checkModelCall, detectProvider, endpointFor, listModels, priceKey, PROVIDER_LABEL, PROVIDERS } from "./providers.ts";
+import { checkKey, checkModelCall, detectProvider, endpointFor, listModels, priceKey, PROVIDER_LABEL, PROVIDERS, suggestedModel } from "./providers.ts";
 import { providerArticle } from "./provider-kinds.ts";
 import { parseOpenRouterPrices } from "./prices.ts";
 
@@ -135,4 +135,12 @@ test("an OpenAI-compatible service that lists no models is saved unchecked, and 
 test("a key for a service on a private network is refused by the guarded fetch itself, before it is sent anywhere", async () => {
   const custom = endpointFor("custom", "k-" + "x".repeat(30), { openRouterUrl: "", customUrl: "https://10.0.0.8/v1" });
   expect(await checkKey(custom)).toEqual({ ok: false, reason: "private" });
+});
+
+test("the suggested model is a preferred one the key lists, never the newest and dearest by default", () => {
+  expect(suggestedModel("anthropic", ["claude-fable-5", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"])).toBe("claude-haiku-5-5");
+  expect(suggestedModel("anthropic", ["claude-fable-5", "claude-haiku-4-5-20251001"])).toBe("claude-haiku-4-5-20251001");
+  expect(suggestedModel("anthropic", ["claude-fable-5", "claude-opus-5-5"])).toBe("");
+  expect(suggestedModel("openai", ["gpt-6-pro"])).toBe("");
+  expect(suggestedModel("custom", ["llama-4", "qwen-4"])).toBe("llama-4");
 });

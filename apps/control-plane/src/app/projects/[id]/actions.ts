@@ -8,7 +8,7 @@ import { openRouterPriceRange, openRouterPrices, priceFor, type Price, type Pric
 import { planOf, PlanNotFound, projectExists, ProjectNotFound } from "../../../projects/projects.ts";
 import { modelCheckRefusal } from "../../../llm/model-check.ts";
 import { freshEndpoint, runCheckRefusal, withinListingLimit, type KeyInput } from "../../../llm/key-input.ts";
-import { endpointFor, listModels, PREFERRED_MODELS, PROVIDER_LABEL, priceKey, type Endpoint, type Provider } from "../../../llm/providers.ts";
+import { endpointFor, listModels, PROVIDER_LABEL, priceKey, suggestedModel, type Endpoint, type Provider } from "../../../llm/providers.ts";
 import { confirmTesting, projectAuthorised } from "../../../projects/overview.ts";
 import { DEFAULT_RUN, FIRST_RUN_ON_US } from "../../../runs/models.ts";
 import { FirstRunOnUsUsed, firstRunOnUsLeft, NeedsAccount, personWithoutAccount, refusalToStart, RunInProgress, RunRefused, startRun, type PaidBy } from "../../../runs/runs.ts";
@@ -76,7 +76,7 @@ export async function modelsForKeyAction(input: KeyInput): Promise<ModelList> {
     const k = priceKey(endpoint.provider, id);
     return { id, price: k ? prices.get(k) ?? null : null };
   });
-  const suggested = PREFERRED_MODELS[endpoint.provider].find((id) => ids.includes(id)) ?? ids[0] ?? "";
+  const suggested = suggestedModel(endpoint.provider, ids);
   return { ok: true, provider: endpoint.provider, models, suggested };
 }
 
