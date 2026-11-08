@@ -16,6 +16,24 @@ function render(initialPersonas: PlanPerson[], initialAccounts: AccountView[], i
 }
 
 describe("PlanWorkspace", () => {
+  it("lists the people with one open: the first that needs something, each row saying its goals and how it gets in", () => {
+    const html = render([kwame, { ...ama, signsIn: true }], accounts);
+    const rows = [...html.matchAll(/<button type="button" aria-expanded="(true|false)" aria-controls="person-(\w+)"[^>]*>([\s\S]*?)<\/button>/g)].map((m) => [m[2], m[1], m[3]!.replace(/<[^>]+>/g, "")]);
+    expect(rows).toEqual([
+      ["kwame", "false", "KWKwame1 goal · signs in as kwame@acme.test"],
+      ["ama", "true", "AMAma1 goal · needs a test account"],
+    ]);
+    expect(html).toMatch(/<div id="person-kwame" hidden=""/);
+    expect(html).toMatch(/<div id="person-ama" class=/);
+    expect(html).toMatch(/· <span class="text-bad">needs a test account<\/span>/);
+    expect(render([ama, kwame], accounts)).toMatch(/aria-expanded="true" aria-controls="person-ama"/);
+    expect(render([{ ...ama, name: "" }], [])).toContain(">Person 1</span>");
+  });
+
+  it("says how many people and steps the plan has next to whether it is saved", () => {
+    expect(render([ama, kwame], accounts)).toMatch(/aria-live="polite"[^>]*>2 people · 2 steps · All changes saved<\/p>/);
+  });
+
   it("shows the order of play across people, marks each new turn, and hides it for a single person", () => {
     const html = render([ama, kwame], accounts, [
       { id: "submit", instruction: "Submit a pitch.", personaId: "ama" },
