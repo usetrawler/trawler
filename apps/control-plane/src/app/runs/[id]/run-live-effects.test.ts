@@ -603,10 +603,10 @@ test("the finding to act on opens by itself when the address names no finding, w
 test("Copy as issue copies the finding as Markdown with a link back to it, says so, and offers the text to copy by hand when the browser refuses", async () => {
   vi.stubGlobal("window", { location: { origin: "https://app.trawler.test" } });
   const f = { ...finding, personaName: "Ana", goalText: "Get an account.", page: null, quote: null, sameReports: [], screenshots: { reported: null, replayed: null } };
-  const copyWith = async (clipboard: unknown, primary = true) => {
+  const copyWith = async (clipboard: unknown) => {
     vi.stubGlobal("navigator", { clipboard });
     Object.assign(react, { setters: [], effects: [] });
-    const tree = CopyIssue({ f: f as never, status: "Confirmed: reproduced independently", runNumber: 7, primary });
+    const tree = CopyIssue({ f: f as never, status: "Confirmed: reproduced independently", runNumber: 7 });
     const copy = button(tree, /^Copy as issue$/);
     press(copy);
     await vi.advanceTimersByTimeAsync(0);
@@ -619,7 +619,7 @@ test("Copy as issue copies the finding as Markdown with a link back to it, says 
   expect(text).toContain("Found by Trawler in [Run 0007](https://app.trawler.test/runs/0007#finding-ana%3Af1)");
   expect(copied.markdown).toHaveBeenCalledWith(text);
   expect(copied.state).toHaveBeenCalledWith("copied");
-  expect(copied.copy.props!.className).toMatch(/\bbg-action\b/);
+  expect(copied.copy.props!.className).not.toMatch(/\bbg-action\b/);
   expect((await copyWith({ writeText: vi.fn(async () => { throw new Error("denied"); }) })).state).toHaveBeenCalledWith("failed");
   expect((await copyWith(undefined)).state).toHaveBeenCalledWith("failed");
   expect((await copyWith({ writeText: () => { throw new Error("not allowed"); } })).state).toHaveBeenCalledWith("failed");
@@ -627,7 +627,6 @@ test("Copy as issue copies the finding as Markdown with a link back to it, says 
   expect(hanging.state).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(3000);
   expect(hanging.state).toHaveBeenCalledWith("failed");
-  expect((await copyWith({ writeText }, false)).copy.props!.className).not.toMatch(/\bbg-action\b/);
 });
 
 test("every address the run page ever used opens the panel that now holds what it named, and an address naming nothing opens the run's own start", () => {

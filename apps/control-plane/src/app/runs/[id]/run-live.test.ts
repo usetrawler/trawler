@@ -41,7 +41,7 @@ const text = (html: string) => html.replace(/<[^>]+>/g, " ").replaceAll("&#x27;"
 const head = (html: string) => html.match(/<header.*?<\/header>/)?.[0] ?? "";
 const band = (html: string) => html.match(/<p data-run-meta="true".*?<\/p>/)?.[0] ?? "";
 const activity = (html: string) => html.slice(html.indexOf('id="run-details"'));
-const rows = (html: string, title: string) => (html.match(new RegExp(`>${title} · \\d+</h2>.*?</section>`))?.[0] ?? "").split("<li ").slice(1).map((row) => row.slice(row.indexOf(">") + 1));
+const rows = (html: string, title: string) => (html.match(new RegExp(`>${title} <span[^>]*>\\d+</span></h2>.*?</section>`))?.[0] ?? "").split("<li ").slice(1).map((row) => row.slice(row.indexOf(">") + 1));
 
 test("a finished run names its result, when it ended, and the actions to run again", () => {
   const html = render(finished);
@@ -62,15 +62,15 @@ test("one line under the verdict gives the run state, goals, confirmed of report
   expect(html).toContain('id="run-findings" class="pt-6"');
   expect(html).toContain('id="run-timeline" hidden=""');
   expect(html).toContain('id="run-details" hidden=""');
-  expect(text(activity(html))).toContain("Cost $0.35 cap was $2.00");
+  expect(text(activity(html))).toContain("Cost $0.35 of $2.00 cap Model deepseek/deepseek-v4.1-flash Started 2026-09-25 19:40 UTC Finished 2026-09-25 19:59 UTC Took 19 minutes");
   const priceless = text(activity(render(summary({ ...finished, tokenCap: 3_000_000, tokensUsed: 1_200_000 }))));
-  expect(priceless).toContain("Tokens 1.20M cap was 3.0M · price unknown");
+  expect(priceless).toContain("Cost 1.20M of 3.0M tokens · price unknown");
 });
 
 test("a run Trawler paid for says so next to its cost, live and finished", () => {
-  expect(text(activity(render(summary({ ...finished, paidBy: "trawler", budgetUsd: 1 }))))).toContain("Cost $0.35 cap was $1.00 · paid by Trawler");
+  expect(text(activity(render(summary({ ...finished, paidBy: "trawler", budgetUsd: 1 }))))).toContain("Cost $0.35 of $1.00 cap · paid by Trawler");
   expect(text(render(summary({ ...live, paidBy: "trawler", budgetUsd: 1 })))).toContain("Live cost $0.84 of $1.00 cap · paid by Trawler");
-  expect(text(activity(render(summary({ ...finished, paidBy: "trawler", tokenCap: 3_000_000, tokensUsed: 1_200_000 }))))).toContain("Tokens 1.20M cap was 3.0M · price unknown · paid by Trawler");
+  expect(text(activity(render(summary({ ...finished, paidBy: "trawler", tokenCap: 3_000_000, tokensUsed: 1_200_000 }))))).toContain("Cost 1.20M of 3.0M tokens · price unknown · paid by Trawler");
   expect(text(activity(render(finished)))).not.toContain("paid by Trawler");
 });
 
@@ -94,7 +94,7 @@ test("a run whose pull request touches how people get accounts says who goes thr
 test("a confirmed defect is a row with its severity, number, person, title and what happened, marked as replayed, that opens to its steps and the replay", () => {
   const [row] = rows(render(finished), "Confirmed");
   const [summaryPart, details] = row!.split("</summary>");
-  expect(text(summaryPart!)).toBe("high severity Saving an invoice fails 01 · Ana A 500 page. ✓ Reproduced →");
+  expect(text(summaryPart!)).toBe("high severity Saving an invoice fails 1 Ana A 500 page. ✓ Reproduced");
   expect(text(details!)).toContain("Steps Open Invoices. Save.");
   expect(text(details!)).toContain("What the replay saw: The same 500 page.");
 });
@@ -110,7 +110,7 @@ test("a defect several people found is one row naming each of them once, that op
     ],
   }));
   const [row] = rows(html, "Confirmed");
-  expect(text(row!)).toContain("Saving an invoice fails 01 · Ana, Lee Park");
+  expect(text(row!)).toContain("Saving an invoice fails 1 Ana, Lee Park");
   expect(text(row!)).toContain("Ana , while trying to: Get an account.");
   expect(text(row!)).toContain("Also reported by Lee Park, Ana again");
   expect(text(row!)).toContain("Lee Park , while trying to: Send an invoice. Reported as: Invoice will not save What they saw: o Steps Open Invoices. Press Save twice.");
@@ -123,7 +123,7 @@ test("a defect several people found is one row naming each of them once, that op
 
 test("a refuted defect is ruled out, tagged Refuted, and carries no reproduced mark", () => {
   const [row] = rows(render(finished), "Ruled out");
-  expect(text(row!.split("</summary>")[0]!)).toBe("low severity A typo on the button 01 · Lee Park Refuted It reads Sav. →");
+  expect(text(row!.split("</summary>")[0]!)).toBe("low severity A typo on the button 1 Lee Park Refuted It reads Sav.");
 });
 
 test("in Timeline, each person is listed with a mark, one line on how far they got, and every goal in view with its note", () => {
@@ -147,7 +147,7 @@ test("a live run shows its cost against the cap, the four stages, each person an
   expect(text(band(html))).toBe("Live · 2 of 4 goals reached · app.acme.test · 2026-09-25 19:40 UTC");
   expect(html).toContain('id="run-timeline" class="pt-6"');
   expect(html).toContain('id="run-findings" hidden=""');
-  expect(text(html)).toContain("Confirmed · 0 Reproduced independently: a fresh agent followed the steps without seeing the report, and the judge agreed. Fix these. Nothing confirmed yet.");
+  expect(text(html)).toContain("Confirmed 0 Reproduced independently: a fresh agent followed the steps without seeing the report, and the judge agreed. Fix these. Nothing confirmed yet.");
 });
 
 test("each person's line says how far they got, in every state", () => {
@@ -210,7 +210,7 @@ test("every defect counts as reported whatever the replay made of it, friction d
   expect(text(band(html))).toContain("1 of 5 reported confirmed");
   expect(rows(html, "Ruled out")).toHaveLength(1);
   const [unjudged] = rows(html, "Unverified");
-  expect(text(unjudged!.split("</summary>")[0]!)).toBe("high severity Export is empty 01 · Ana Could not be judged Failed: the judge timed out →");
+  expect(text(unjudged!.split("</summary>")[0]!)).toBe("high severity Export is empty 1 Ana Could not be judged Failed: the judge timed out");
   expect(rows(html, "Unverified").map((row) => text(row.split("</summary>")[0]!).split(" 01 ")[0])).toHaveLength(3);
   expect(unjudged).toMatch(/<button type="button"[^>]*>Judge again<\/button>/);
 });
@@ -276,7 +276,7 @@ test("a defect whose replay failed is not judged, its row gives the reason, and 
   const error = `the browser failed 3 times in a row; last error: ${"x".repeat(300)}`;
   const html = render(summary({ ...finished, jobs: [...finished.jobs, job("replay", "failed", { finding_key: "x:d1", error })], findings: [finding("x:d1", "ana", { title: "Export is empty" })] }));
   const [row] = rows(html, "Unverified");
-  expect(text(row!.split("</summary>")[0]!)).toBe(`high severity Export is empty 01 · Ana Not judged The replay failed: ${error} →`);
+  expect(text(row!.split("</summary>")[0]!)).toBe(`high severity Export is empty 1 Ana Not judged The replay failed: ${error}`);
   expect(text(row!.split("</summary>")[1]!)).toContain(`Why it was not judged: The replay failed: ${error}`);
 });
 
@@ -359,14 +359,14 @@ test("a finding marked not a bug leaves its section and the counts for its own, 
   }));
   expect(head(html)).toMatch(/<h1[^>]*>1 defect confirmed by replay\.<\/h1>/);
   expect(text(band(html))).toContain("1 of 1 reported confirmed");
-  expect(rows(html, "Confirmed").map((row) => text(row.split("</summary>")[0]!))).toEqual(["high severity Export is empty 01 · Ana o ✓ Reproduced →"]);
-  expect(html).not.toMatch(/>Rough edges · /);
+  expect(rows(html, "Confirmed").map((row) => text(row.split("</summary>")[0]!))).toEqual(["high severity Export is empty 1 Ana o ✓ Reproduced"]);
+  expect(html).not.toMatch(/>Rough edges </);
   const [first, second] = rows(html, "Ruled out");
-  expect(text(first!.split("</summary>")[0]!)).toBe("high severity Saving an invoice fails 01 · Ana, Lee Park Not a bug o →");
+  expect(text(first!.split("</summary>")[0]!)).toBe("high severity Saving an invoice fails 1 Ana, Lee Park Not a bug o");
   expect(text(first!.split("</details>")[1]!)).toBe("Not a bug, because: Saving twice is on purpose. Marked by ana@acme.test on 2026-10-02 10:00 UTC . Undo : Saving an invoice fails");
   expect(first).not.toContain(">Not a bug</button>");
   expect(text(second!.split("</details>")[1]!)).toContain("Marked by someone no longer in this workspace on");
-  expect(html).toMatch(/>Ruled out · 2<\/h2><p[^>]*>The replay did not see the problem, or your team marked it not a bug\. Later runs of this project are told, with the reason\.<\/p>/);
+  expect(html).toMatch(/>Ruled out <span[^>]*>2<\/span><\/h2><p[^>]*>The replay did not see the problem, or your team marked it not a bug\. Later runs of this project are told, with the reason\.<\/p>/);
   expect(first).toMatch(/<span class="min-w-0 wrap-anywhere text-muted">Marked by ana@acme.test/);
 });
 
@@ -391,10 +391,10 @@ test("friction replayed as a possible defect whose judge gave no verdict can be 
     findings: [finished.findings[0]!, finding("ana:fr", "ana", { kind: "friction", filedAs: "friction", title: "Balance has no history", replay: { completed: true, observed: "No transactions.", blockedAt: null } }), finding("lee:fr", "lee", { kind: "friction", title: "Menu is hard to find" })],
   }));
   const [row] = rows(html, "Unverified");
-  expect(text(row!.split("</summary>")[0]!)).toBe("high severity Balance has no history 01 · Ana Could not be judged Failed: No output generated. →");
+  expect(text(row!.split("</summary>")[0]!)).toBe("high severity Balance has no history 1 Ana Could not be judged Failed: No output generated.");
   expect(row).toContain("Ana filed this as friction on a goal they did not reach, so Trawler replayed it too.");
   expect(row).toMatch(/<button type="button"[^>]*>Judge again<\/button>/);
-  expect(rows(html, "Rough edges").map((r) => text(r.split("</summary>")[0]!))).toEqual(["high severity Menu is hard to find 01 · Lee Park o →"]);
+  expect(rows(html, "Rough edges").map((r) => text(r.split("</summary>")[0]!))).toEqual(["high severity Menu is hard to find 1 Lee Park o"]);
   expect(text(band(html))).toContain("1 of 1 reported confirmed");
 });
 
@@ -478,7 +478,7 @@ test("a pull request plan shows what the lead told the team", () => {
 
 test("a run started over MCP says which assistant started it, for whom, and a run started any other way says nothing of it", () => {
   const via = { kind: "mcp" as const, client: "Claude Code", clientHost: "claude.ai", person: "Ana Lopez" };
-  expect(text(activity(render(summary({ startedVia: via }))))).toContain("Started over MCP by Claude Code (claude.ai) for Ana Lopez");
+  expect(text(activity(render(summary({ startedVia: via }))))).toContain("Started by Claude Code (claude.ai) for Ana Lopez, over MCP");
   expect(text(head(render(finished)))).not.toContain("Started over MCP");
 });
 
@@ -486,4 +486,22 @@ test("a run an assistant stopped says who stopped it", () => {
   const via = { kind: "mcp" as const, client: "Claude Code", clientHost: null, person: "Lee Park" };
   const stopped = summary({ status: "cancelled", cancelReason: "stopped_over_mcp", stoppedVia: via });
   expect(head(render(stopped))).toMatch(/<h1[^>]*>Stopped by Claude Code for Lee Park over MCP\.<\/h1>/);
+});
+
+test("a run skipped because nothing in the change shows in the UI says so in a short headline, with no empty tabs, and opens on its details", () => {
+  const prPlan = { number: 13, mode: "change" as const, note: "Nothing in this change can be tested through the product's UI.", version: null, reused: false, createdByRun: null, goals: [] };
+  const html = render(summary({ status: "cancelled", cancelReason: "nothing_to_test", prPlan, pullRequest: { number: 13, title: "chore: store amounts as grosze", url: null, repository: "acme/app", branch: null, commit: null } as RunSummary["pullRequest"] }));
+  expect(head(html)).toMatch(/<h1[^>]*>Nothing to test in the UI\.<\/h1>/);
+  expect(text(head(html))).toContain("Nothing in this change can be tested through the product's UI, so Trawler did not start a run.");
+  expect(html).toMatch(/<nav aria-label="Run report" hidden=""/);
+  expect(html).toContain('id="run-findings" hidden=""');
+  expect(html).toContain('id="run-timeline" hidden=""');
+  expect(html).toMatch(/id="run-details" class="pt-8"/);
+  expect(text(activity(html))).toContain("Pull request PR #13 · chore: store amounts as grosze");
+});
+
+test("the details list the cost, models, times, who started the run and how long it took", () => {
+  const html = text(activity(render(summary({ ...finished, judgeModel: "anthropic/claude-sonnet-5.5", execution: "own" }))));
+  expect(html).toContain("Cost $0.35 of $2.00 cap Model deepseek/deepseek-v4.1-flash Judge model anthropic/claude-sonnet-5.5 Started 2026-09-25 19:40 UTC Finished 2026-09-25 19:59 UTC Took 19 minutes Started by Your CI job");
+  expect(text(activity(render(live)))).not.toContain("Finished");
 });

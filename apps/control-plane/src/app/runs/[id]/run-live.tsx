@@ -483,12 +483,19 @@ function took(from: string | Date, to: string | Date): string | null {
   return rest ? `${plural(hours, "hour", "hours")} ${plural(rest, "minute", "minutes")}` : plural(hours, "hour", "hours");
 }
 
+function costLine(run: RunSummary): string {
+  const payer = run.paidBy === "trawler" ? " · paid by Trawler" : "";
+  if (run.tokenCap) return `${(run.tokensUsed / 1_000_000).toFixed(2)}M of ${(run.tokenCap / 1_000_000).toFixed(1)}M tokens · price unknown${payer}`;
+  return `${usd(run.costUsd)} of ${usd(run.budgetUsd)} cap${payer}`;
+}
+
 export function RunDetails({ run, live }: { run: RunSummary; live: boolean }) {
   const started = run.startedAt ?? run.createdAt;
   const duration = run.finishedAt ? took(started, run.finishedAt) : null;
   const rows: Array<[string, React.ReactNode]> = [
-    ["Cost", spentLine(run)],
+    ["Cost", costLine(run)],
     ["Model", <span key="model" className="font-mono text-sm">{run.agentModel}</span>],
+    ...(run.judgeModel && run.judgeModel !== run.agentModel ? [["Judge model", <span key="judge" className="font-mono text-sm">{run.judgeModel}</span>] as [string, React.ReactNode]] : []),
     ["Started", <LocalTime key="started" iso={new Date(started).toISOString()} />],
   ];
   if (run.finishedAt) rows.push(["Finished", <LocalTime key="finished" iso={new Date(run.finishedAt).toISOString()} />]);
