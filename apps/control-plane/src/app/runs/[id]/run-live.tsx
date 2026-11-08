@@ -361,7 +361,7 @@ export function FindingRow({ f, n, mark, tag, note, detail, action, dismiss, cop
           <b aria-hidden className="pt-1 font-normal text-muted transition-transform group-open:rotate-90 max-md:hidden">→</b>
         </summary>
         <div className="flex flex-col gap-4 px-5 pt-1 pb-5 text-[15px] wrap-anywhere md:pl-[120px]">
-          {(copy || dismiss) && <div className="flex flex-col gap-3">{copy}{dismiss}</div>}
+          {(copy || dismiss) && <div className="flex flex-wrap items-start gap-3">{copy}{dismiss && <div className="min-w-0 flex-1">{dismiss}</div>}</div>}
           <p className="text-sm">{f.sameReports.length > 0 ? <><strong>{f.personaName}</strong><span className="text-muted">, while trying to: </span></> : <span className="text-muted">While trying to: </span>}{f.goalText}</p>
           {f.replayedAsDefect && <p className="text-sm text-muted">{f.personaName} filed this as friction on a goal they did not reach, so Trawler replayed it too.</p>}
           <p><span className="text-muted">What happened: </span>{f.observed}</p>

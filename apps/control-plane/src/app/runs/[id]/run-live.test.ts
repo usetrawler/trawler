@@ -337,7 +337,7 @@ test("every finding of a finished run opens to Not a bug, in every section, and 
   }));
   const all = ["Confirmed", "Unverified", "Rough edges", "Ruled out"].flatMap((group) => rows(html, group).map((row) => [group, row] as const));
   expect(all).toHaveLength(6);
-  for (const [group, row] of all) expect(row.split("</summary>")[1], group).toMatch(/^<div class="[^"]*"><div class="flex flex-col gap-3"><div class="flex flex-col gap-2">.*?>Copy as issue<\/button>.*?<button type="button"[^>]*>Not a bug<\/button><\/div>/);
+  for (const [group, row] of all) expect(row.split("</summary>")[1], group).toMatch(/^<div class="[^"]*"><div class="flex flex-wrap items-start gap-3"><div class="flex flex-col gap-2">.*?>Copy as issue<\/button>.*?<div class="min-w-0 flex-1"><button type="button"[^>]*>Not a bug<\/button><\/div><\/div>/);
   expect(render(summary({ ...live, findings: finished.findings }))).not.toContain(">Not a bug<");
 });
 
