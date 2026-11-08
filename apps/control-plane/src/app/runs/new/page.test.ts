@@ -21,6 +21,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "session=ana" }) }));
 vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: () => {} }),
   redirect: (to: string) => { throw Object.assign(new Error(`redirect to ${to}`), { to }); },
   notFound: () => { throw Object.assign(new Error("not found"), { notFound: true }); },
 }));
@@ -160,4 +161,12 @@ test("a project whose runs are paused says so and offers nothing to start", asyn
   expect(html).toMatch(/Runs on this project are paused, and <a href="\/runs\/0009"[^>]*>Run 0009<\/a> is still stopping/);
   expect(state.started).toEqual([]);
   expect(state.ci).toEqual([]);
+});
+
+test("a paused product on a private network still offers the CI authorisation, which pausing does not touch", async () => {
+  state.target = "http://localhost:8080/";
+  state.runState = { paused: true, liveRun: null };
+  const html = await render();
+  expect(state.ci).toHaveLength(1);
+  expect(html).not.toContain("Runs on this project are paused");
 });

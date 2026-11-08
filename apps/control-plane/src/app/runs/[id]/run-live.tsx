@@ -700,7 +700,7 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
         </div>
         {!view.live && (
           <div className="flex flex-wrap gap-2">
-            <a href={`/runs/new?project=${run.projectId}${run.savedPlan ? `&plan=${run.savedPlan.id}` : ""}`} className={secondary}>Start another run</a>
+            <a href={`/runs/new?project=${run.projectId}${run.savedPlan && !run.prPlan ? `&plan=${run.savedPlan.id}` : ""}`} className={secondary}>Start another run</a>
             {!closedBeta && run.execution !== "own" && <RunAgainButton runId={run.id} again={again} />}
           </div>
         )}

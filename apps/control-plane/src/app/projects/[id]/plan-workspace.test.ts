@@ -64,6 +64,13 @@ describe("PlanWorkspace", () => {
     expect(html).toMatch(/aria-label="Sign-in for Ama" aria-invalid="true" aria-describedby="sign-in-ama"/);
   });
 
+  it("Start a run links to the start page for this plan, described by why a start would be refused", () => {
+    const html = render([{ ...ama, signsIn: true }, kwame], accounts);
+    expect(html).toMatch(/<a href="\/runs\/new\?project=p1&amp;plan=pl1" aria-describedby="start-blocked"[^>]*>Start a run<\/a>/);
+    expect(render([kwame], accounts)).toMatch(/<a href="\/runs\/new\?project=p1&amp;plan=pl1" class="[^"]*">Start a run<\/a>/);
+    expect(render([kwame], accounts)).not.toContain('aria-disabled="true"');
+  });
+
   it("an account that is gone never shows as someone else's: the card asks for one and Start refuses", () => {
     const html = render([{ ...kwame, accountRef: "account-gone" }], accounts);
     expect(html).toMatch(/<option value="" selected="">Choose a test account<\/option>/);

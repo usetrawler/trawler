@@ -174,16 +174,24 @@ function planProblem(personas: PlanPerson[], goals: Goal[]): string | null {
   return null;
 }
 
-function StartLink({ href, ciOnly, blocked, closedBeta }: { href: string; ciOnly: boolean; blocked?: string; closedBeta?: string }) {
+const startLink = "flex h-10 shrink-0 items-center justify-center rounded-md border border-line bg-panel px-4 text-sm font-medium";
+
+function StartLink({ href, ciOnly, blocked, held, closedBeta }: { href: string; ciOnly: boolean; blocked?: string; held: boolean; closedBeta?: string }) {
+  const label = ciOnly ? "Set up runs from CI" : "Start a run";
+  const said = closedBeta ?? blocked;
   return (
     <section id="start" aria-labelledby="start-heading" className="flex flex-col gap-4 rounded-lg border border-line p-5 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex min-w-0 flex-col gap-1">
+      <div className="flex min-w-0 flex-col gap-1" aria-live="polite">
         <h2 id="start-heading" className="text-base font-medium">{ciOnly ? "Run from CI" : "Start a run"}</h2>
         {closedBeta ? <p id="start-blocked" className="border-l-2 border-warn pl-3 text-sm">{closedBeta}</p>
           : blocked ? <p id="start-blocked" className="text-sm text-warn">{blocked}</p>
           : <p className="text-sm text-muted">{ciOnly ? "This product is on a private network, so its runs start from your CI job." : "Choose the model and the cap, then start this plan."}</p>}
       </div>
-      <a href={href} className="flex h-10 shrink-0 items-center justify-center rounded-md border border-line bg-panel px-4 text-sm font-medium hover:border-muted">{ciOnly ? "Set up runs from CI" : "Start a run"}</a>
+      {held ? (
+        <span role="link" aria-disabled="true" aria-describedby="start-blocked" className={`${startLink} cursor-not-allowed text-muted opacity-60`}>{label}</span>
+      ) : (
+        <a href={href} aria-describedby={said ? "start-blocked" : undefined} className={`${startLink} hover:border-muted`}>{label}</a>
+      )}
     </section>
   );
 }
@@ -326,7 +334,7 @@ export function PlanWorkspace({ projectId, planId, initialPersonas, initialGoals
 
       {personas.length > 1 && <OrderOfPlay personas={personas} goals={goals} onMove={moveGoal} />}
 
-      <StartLink href={`/runs/new?project=${projectId}&plan=${planId}`} ciOnly={ciOnly} closedBeta={closedBeta} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : overPlan)} />
+      <StartLink href={`/runs/new?project=${projectId}&plan=${planId}`} ciOnly={ciOnly} closedBeta={closedBeta} held={Boolean(error || problem || dirty || saving)} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : overPlan)} />
     </div>
   );
 }

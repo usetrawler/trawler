@@ -49,6 +49,9 @@ test("a finished run names its result, when it ended, and the actions to run aga
   expect(top).toMatch(/<h1[^>]*>1 defect confirmed by replay\.<\/h1>/);
   expect(text(top)).toContain("app.acme.test · 2026-09-25 19:59 UTC");
   expect(top).toContain('href="/runs/new?project=project-1"');
+  expect(head(render(summary({ ...finished, savedPlan: { id: "plan-9", name: "Plan 2" } })))).toContain('href="/runs/new?project=project-1&amp;plan=plan-9"');
+  const fromPr = { number: 4, mode: "change" as const, note: null, version: 2, reused: false, createdByRun: null, goals: [] };
+  expect(head(render(summary({ ...finished, savedPlan: { id: "pr-plan-1", name: "PR #4 v2" }, prPlan: fromPr })))).toContain('href="/runs/new?project=project-1"');
   expect(top).toContain(">Run again");
   expect(top).not.toContain("Stop run");
 });

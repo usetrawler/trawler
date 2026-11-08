@@ -49,7 +49,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const startBlocked = (tree: unknown) => nodes(tree).find((node) => node.props && "href" in node.props && "ciOnly" in node.props)!.props!.blocked;
+const startLink = (tree: unknown) => nodes(tree).find((node) => node.props && "href" in node.props && "ciOnly" in node.props)!.props!;
+const startBlocked = (tree: unknown) => startLink(tree).blocked;
 
 const changedPlan = (changed: PlanPerson = { ...ama, name: "Ama Mensah" }) => {
   react.values = [{ personas: [ama], goals }, [changed], goals, [], null];
@@ -78,6 +79,7 @@ test("a change saves itself shortly after the last edit, and Start waits for it"
   const plan = changedPlan();
   plan.settle();
   expect(startBlocked(plan.tree)).toBe("Saving your changes to the plan…");
+  expect(startLink(plan.tree).held).toBe(true);
   vi.advanceTimersByTime(799);
   expect(actions.savePlanAction).not.toHaveBeenCalled();
   vi.advanceTimersByTime(1);
@@ -93,6 +95,7 @@ test("a plan that is not valid yet is not saved; the status and Start say what i
   vi.advanceTimersByTime(5000);
   expect(actions.savePlanAction).not.toHaveBeenCalled();
   expect(startBlocked(plan.tree)).toBe("Person 1 needs a name.");
+  expect(startLink(plan.tree).held).toBe(true);
   expect(nodes(plan.tree).some((node) => node.type === "p" && text(node) === "Person 1 needs a name.")).toBe(true);
   expect(nodes(plan.tree).find((node) => node.props?.["aria-live"] === "polite")!.props!.children).toBe("");
 });
