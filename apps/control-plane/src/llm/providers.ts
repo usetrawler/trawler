@@ -16,10 +16,19 @@ const PRICE_PREFIX: Partial<Record<Provider, string>> = { openai: "openai", anth
 export const PREFERRED_MODELS: Record<Provider, string[]> = {
   openrouter: ["deepseek/deepseek-v4.1-flash", "google/gemini-3.5-flash", "anthropic/claude-haiku-4.5"],
   openai: ["gpt-5-mini", "gpt-5", "gpt-4.1-mini"],
-  anthropic: ["claude-haiku-4-5", "claude-sonnet-4-5"],
+  anthropic: ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-haiku-4-5", "claude-sonnet-4-5"],
   google: ["gemini-3.5-flash", "gemini-2.5-flash"],
   custom: [],
 };
+
+export function suggestedModel(provider: Provider, ids: string[]): string {
+  const listed = (preferred: string) => ids.find((id) => id === preferred || id.startsWith(`${preferred}-20`));
+  for (const preferred of PREFERRED_MODELS[provider]) {
+    const found = listed(preferred);
+    if (found) return found;
+  }
+  return provider === "custom" ? ids[0] ?? "" : "";
+}
 
 export interface Endpoint {
   provider: Provider;
