@@ -334,7 +334,7 @@ export function PlanWorkspace({ projectId, planId, initialPersonas, initialGoals
 
       {personas.length > 1 && <OrderOfPlay personas={personas} goals={goals} onMove={moveGoal} />}
 
-      <StartLink href={`/runs/new?project=${projectId}&plan=${planId}`} ciOnly={ciOnly} closedBeta={closedBeta} held={Boolean(error || problem || dirty || saving)} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : overPlan)} />
+      <StartLink href={`/runs/new?project=${projectId}&plan=${planId}`} ciOnly={ciOnly} closedBeta={closedBeta} held={Boolean(error || problem || dirty || saving)} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount && !ciOnly ? `${withoutAccount.name} needs a test account to sign in.` : overPlan)} />
     </div>
   );
 }
