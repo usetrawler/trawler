@@ -20,7 +20,7 @@ test("a missing page says so in the mockup's words, with the way back into the a
 
 test("on a full page load the tab names the page, before its JavaScript runs and after Next draws it", () => {
   expect(metadata.title).toEqual({ absolute: "Page not found · Trawler" });
-  expect(render()).toMatch(/^<title>Page not found · Trawler<\/title><div class="app-frame /);
+  expect(render()).toMatch(/^<title>Page not found · Trawler<\/title><div class="grid min-h-dvh /);
 });
 
 test("the route check card holds the requested route, which the browser fills in, the broken route line, which high-contrast modes still draw, and the result", () => {

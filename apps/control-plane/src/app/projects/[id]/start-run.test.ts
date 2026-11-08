@@ -94,8 +94,8 @@ test("a plan with more people than the first run on Trawler takes is started wit
 test("while a run on Trawler starts the button says Starting, and while a key is checked it says so", async () => {
   const { Submit } = await import("./start-run.tsx");
   const label = (checksKey: boolean) => renderToStaticMarkup(createElement(Submit, { pending: true, noticed: false, checksKey })).replace(/<[^>]+>/g, "");
-  expect(label(false)).toBe("Starting…→");
-  expect(label(true)).toBe("Checking the key…→");
+  expect(label(false)).toBe("Starting…");
+  expect(label(true)).toBe("Checking the key…");
 });
 
 test("the Start panel links to the terms and the privacy notice, whether or not the product had a run", () => {

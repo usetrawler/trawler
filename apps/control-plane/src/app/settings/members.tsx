@@ -87,7 +87,7 @@ export const inviteSomeone = (previous: MembersState, form: FormData) => reloada
 
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" };
 const alert = "border-l-2 border-bad pl-3 text-sm text-bad";
-const tag = "font-mono text-[10px] text-muted uppercase";
+const tag = "text-xs text-muted";
 
 export const roleLabel = (role: string) => role.split(",").map((r) => ROLE_LABEL[r.trim()] ?? r.trim()).join(", ");
 const roles = (role: string) => role.split(",").map((r) => r.trim());
@@ -159,7 +159,7 @@ export function Members({ members, invitations, canManage, signInAt }: { members
           <li key={m.id} className="flex flex-col gap-3 border-t border-line py-3 first:border-t-0 first:pt-0">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="font-bold wrap-anywhere">{nameOf(m)}{m.you && <span className="font-normal text-muted"> (you)</span>}</p>
+                <p className="font-semibold wrap-anywhere">{nameOf(m)}{m.you && <span className="font-normal text-muted"> (you)</span>}</p>
                 {m.name.trim() && <p className="text-sm wrap-anywhere text-muted">{m.email}</p>}
               </div>
               <div className="ml-auto flex flex-col items-end gap-1 text-right">
@@ -203,7 +203,7 @@ export function Members({ members, invitations, canManage, signInAt }: { members
 
       {invitations.length > 0 && (
         <div className="flex flex-col gap-2 border-t border-line pt-4">
-          <h3 className="text-sm font-bold">Invited</h3>
+          <h3 className="text-sm font-semibold">Invited</h3>
           <ul className="flex flex-col gap-2">
             {invitations.map((i) => (
               <li key={i.id} className="flex flex-wrap items-center justify-between gap-3 text-sm">
@@ -284,7 +284,7 @@ export function InviteForm({ state, shown, action, held, inviting, onSent, signI
         startTransition(() => action(data));
       }}
       className="flex flex-col gap-3 border-t border-line pt-4">
-      <h3 className="text-sm font-bold">Invite someone</h3>
+      <h3 className="text-sm font-semibold">Invite someone</h3>
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex min-w-0 flex-1 basis-64 flex-col gap-2">
           <span className="text-sm text-muted">The email address they sign in with, on GitHub or Google.</span>

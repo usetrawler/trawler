@@ -54,8 +54,8 @@ test("a run's page marks its project in the nav as the section it belongs to, in
   const marked = html.match(/<a [^>]*aria-current="[^"]*"[^>]*>/g) ?? [];
   expect(marked).toEqual([expect.stringMatching(/^<a href="\/projects\/p1\/overview" aria-current="true"/)]);
   expect(state.shells).toEqual([member]);
-  expect(html).toContain(">Acme workspace</p>");
-  expect(html).toContain(">Ana Lopez</p>");
+  expect(html).toContain(">Acme workspace</span>");
+  expect(html).toContain(">Ana Lopez</span>");
 });
 
 test("a run's page leads back to its project and the project's runs, without the setup steps", async () => {

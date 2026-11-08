@@ -31,5 +31,5 @@ test("the bright orange colours only graphics; orange text uses the ink shade", 
   const src = fileURLToPath(new URL("..", import.meta.url));
   const files = readdirSync(src, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith(".tsx") && !f.includes(".test."));
   const bright = files.filter((f) => /(?<![\w-])text-action(?![\w-])/.test(readFileSync(`${src}/${f}`, "utf8"))).sort();
-  expect(bright).toEqual(["app/sign-in/sign-in-buttons.tsx", "components/app-shell.tsx", "components/brand-mark.tsx"]);
+  expect(bright).toEqual(["app/sign-in/sign-in-buttons.tsx", "components/brand-mark.tsx"]);
 });

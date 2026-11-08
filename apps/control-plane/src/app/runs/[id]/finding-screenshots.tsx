@@ -9,7 +9,7 @@ export function CaptureFrame({ shot, failed, onFailed, onOpen }: { shot: Shot; f
   };
   return (
     <figure className="relative row-span-2 grid min-w-0 grid-rows-subgrid gap-2 border border-line bg-paper p-3">
-      <figcaption className="font-mono text-[11px] tracking-[0.15em] text-muted uppercase">Screen capture · {shot.caption}</figcaption>
+      <figcaption className="text-xs text-muted">Screen capture · {shot.caption}</figcaption>
       {failed ? (
         <p className="text-sm text-muted">This screen capture could not be loaded.</p>
       ) : (

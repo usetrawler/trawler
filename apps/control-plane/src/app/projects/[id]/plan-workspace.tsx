@@ -9,7 +9,7 @@ import { CiOnlyPanel } from "./ci-only.tsx";
 import { StartRun, type StartRefusal } from "./start-run.tsx";
 import { peopleLimitMessage, type WorkspacePlan } from "../../../runs/plan-limits.ts";
 
-const field = "w-full min-w-0 border border-dashed border-line/60 bg-transparent px-2 py-1 outline-none hover:border-line focus:border-solid focus:border-ink focus:bg-paper";
+const field = "w-full min-w-0 rounded-md border border-line bg-panel px-2.5 py-1.5 outline-none hover:border-muted/60 focus:border-ink";
 
 function nextKey(prefix: string, taken: Set<string>): string {
   let n = taken.size + 1;
@@ -18,7 +18,7 @@ function nextKey(prefix: string, taken: Set<string>): string {
 }
 
 function Heading({ children }: { children: React.ReactNode }) {
-  return <h2 className="font-mono text-xs tracking-[0.2em] text-muted uppercase">{children}</h2>;
+  return <h2 className="text-xs text-muted">{children}</h2>;
 }
 
 function AddButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
@@ -70,7 +70,7 @@ export function SignIn({ projectId, planId, person, accounts, onPick, onAccounts
   });
   return (
     <div className="mt-2 flex flex-col gap-2 border-t border-line pt-3">
-      <p aria-hidden className="font-mono text-[11px] tracking-[0.15em] text-muted uppercase">Sign-in</p>
+      <p aria-hidden className="text-xs text-muted">Sign-in</p>
       <select
         aria-label={`Sign-in for ${who}`}
         aria-invalid={missing || undefined}
@@ -135,7 +135,7 @@ function OrderOfPlay({ personas, goals, onMove }: { personas: PlanPerson[]; goal
   return (
     <section className="flex flex-col gap-3" aria-labelledby="order-of-play">
       <div className="flex flex-col gap-1">
-        <h2 id="order-of-play" className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Order of play</h2>
+        <h2 id="order-of-play" className="text-xs text-muted">Order of play</h2>
         <p className="text-sm text-muted">People take turns in this order, one at a time, and each turn knows what happened before it. Put a step that needs someone else&apos;s work after it: submit, then review, then see the decision.{turns > personas.length ? ` ${turns} turns.` : ""}</p>
       </div>
       <p aria-live="polite" className="sr-only">{moved ? `Moved to step ${moved.to + 1}.` : ""}</p>
@@ -148,7 +148,7 @@ function OrderOfPlay({ personas, goals, onMove }: { personas: PlanPerson[]; goal
             <li key={g.id} className={`grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 py-2 ${newTurn ? "border-t border-line" : ""}`}>
               <span className="pt-0.5 font-mono text-xs text-muted">{String(i + 1).padStart(2, "0")}</span>
               <span className="flex min-w-0 flex-col sm:flex-row sm:gap-3">
-                <span className="shrink-0 text-sm font-bold sm:w-28 sm:truncate">{newTurn ? who : ""}</span>
+                <span className="shrink-0 text-sm font-semibold sm:w-28 sm:truncate">{newTurn ? who : ""}</span>
                 <span className="text-sm break-words">{g.instruction || <em className="text-muted">No text yet</em>}</span>
               </span>
               <span className="flex gap-1">
@@ -283,11 +283,11 @@ export function PlanWorkspace({ projectId, planId, planLabel, projectName, initi
             return (
               <li key={p.id} className="flex flex-col gap-2 border border-line bg-panel p-4">
                 <div className="flex items-start gap-2">
-                  <input aria-label={`Name of person ${i + 1}`} value={p.name} maxLength={100} onChange={(e) => updatePersona(i, { name: e.target.value })} className={`${field} font-bold`} />
+                  <input aria-label={`Name of person ${i + 1}`} value={p.name} maxLength={100} onChange={(e) => updatePersona(i, { name: e.target.value })} className={`${field} font-semibold`} />
                   {personas.length > 1 && <RemoveButton label={`Remove ${who}`} onClick={() => removePerson(p.id)} />}
                 </div>
                 <textarea aria-label={`What ${who} is like`} value={p.brief} maxLength={2000} rows={3} onChange={(e) => updatePersona(i, { brief: e.target.value })} className={`${field} resize-y text-sm text-muted`} />
-                <p className="mt-2 font-mono text-[11px] tracking-[0.15em] text-muted uppercase">Goals</p>
+                <p className="mt-2 text-xs text-muted">Goals</p>
                 <ol aria-label={`Goals of ${who}`} className="flex flex-col gap-1">
                   {own.map((g, n) => (
                     <li key={g.id} className="flex items-start gap-2">

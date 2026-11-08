@@ -20,12 +20,12 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
       </head>
       <body className="min-h-dvh bg-paper font-sans text-ink antialiased">
         <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center gap-5 px-4">
-          <h1 className="text-3xl font-bold tracking-tight">{updated ? UPDATED_SINCE_OPENED : "Something went wrong."}</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">{updated ? UPDATED_SINCE_OPENED : "Something went wrong."}</h1>
           <p className="text-muted">{updated ? "Reload the page to carry on." : "Try again, or come back in a minute."}</p>
           <button
             type="button"
             onClick={updated ? () => window.location.reload() : reset}
-            className="flex h-12 items-center justify-between gap-6 bg-action px-5 font-mono text-sm tracking-[0.12em] text-[#17191c] uppercase transition hover:brightness-110"
+            className="flex h-10 items-center justify-center gap-2 rounded-md bg-action px-4 text-sm font-medium text-[#171717] transition-[filter] hover:brightness-105"
           >
             {updated ? "Reload the page" : "Try again"} <span aria-hidden="true">→</span>
           </button>

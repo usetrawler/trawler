@@ -80,12 +80,12 @@ test("the server names the system's theme whatever is stored or shown, so hydrat
   stored["trawler-theme"] = "dark";
   attributes["data-theme"] = "dark";
   systemDark = true;
-  expect(renderToStaticMarkup(createElement(ThemeToggle))).toMatch(/^<button type="button" title="Theme: System\. Switch to Dark\." class="grid h-9 w-9 shrink-0 place-items-center border border-line bg-soft text-ink hover:border-ink">/);
+  expect(renderToStaticMarkup(createElement(ThemeToggle))).toMatch(/^<button type="button" title="Theme: System\. Switch to Dark\." aria-label="Theme: System\. Switch to Dark\." class="[^"]*">/);
 });
 
-test("the glyph follows the page's theme in CSS, so it is right before the page's JavaScript runs", () => {
+test("the icon follows the page's theme in CSS, so it is right before the page's JavaScript runs", () => {
   expect(renderToStaticMarkup(createElement(ThemeToggle))).toMatch(
-    /><span aria-hidden="true" class="in-data-\[theme\]:hidden">◐<\/span><span aria-hidden="true" class="hidden in-data-\[theme=light\]:inline">☀︎<\/span><span aria-hidden="true" class="hidden in-data-\[theme=dark\]:inline">☾<\/span><\/button>$/,
+    /><span class="in-data-\[theme\]:hidden"><svg aria-hidden="true"[^>]*><path d="M12 21a9[^"]*"><\/path><\/svg><\/span><span class="hidden in-data-\[theme=light\]:inline"><svg aria-hidden="true"[^>]*><path d="M12 17a5[^"]*"><\/path><\/svg><\/span><span class="hidden in-data-\[theme=dark\]:inline"><svg aria-hidden="true"[^>]*><path d="M21 12\.79[^"]*"><\/path><\/svg><\/span><\/button>$/,
   );
 });
 

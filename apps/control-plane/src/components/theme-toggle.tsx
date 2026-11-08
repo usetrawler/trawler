@@ -1,5 +1,6 @@
 "use client";
 import { useLayoutEffect, useSyncExternalStore } from "react";
+import { Icon } from "./icon.tsx";
 import { nextChoice, storedChoice, THEME_KEY, THEME_SCRIPT, type ThemeChoice } from "./theme.ts";
 
 const NAME: Record<ThemeChoice, string> = { system: "System", light: "Light", dark: "Dark" };
@@ -56,16 +57,17 @@ export function ThemeScript() {
   return <script type={typeof window === "undefined" ? "text/javascript" : "text/plain"} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />;
 }
 
-export function ThemeToggle() {
+export function ThemeToggle({ className = "grid size-9 shrink-0 place-items-center rounded-md border border-line bg-panel text-ink hover:border-muted/60", withLabel = false }: { className?: string; withLabel?: boolean } = {}) {
   const choice = useSyncExternalStore(subscribe, shownChoice, (): ThemeChoice => "system");
   const systemDark = useSyncExternalStore(subscribe, () => window.matchMedia(DARK).matches, () => false);
   const next = nextChoice(choice, systemDark);
   const label = `Theme: ${NAME[choice]}. Switch to ${NAME[next]}.`;
   return (
-    <button type="button" onClick={() => choose(next)} title={label} className="grid h-9 w-9 shrink-0 place-items-center border border-line bg-soft text-ink hover:border-ink">
-      <span aria-hidden className="in-data-[theme]:hidden">◐</span>
-      <span aria-hidden className="hidden in-data-[theme=light]:inline">☀︎</span>
-      <span aria-hidden className="hidden in-data-[theme=dark]:inline">☾</span>
+    <button type="button" onClick={() => choose(next)} title={label} aria-label={withLabel ? undefined : label} className={className}>
+      <span className="in-data-[theme]:hidden"><Icon name="contrast" /></span>
+      <span className="hidden in-data-[theme=light]:inline"><Icon name="sun" /></span>
+      <span className="hidden in-data-[theme=dark]:inline"><Icon name="moon" /></span>
+      {withLabel && <span>Theme: {NAME[choice]}</span>}
     </button>
   );
 }

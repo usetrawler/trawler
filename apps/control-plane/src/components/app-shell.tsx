@@ -3,7 +3,9 @@ import type { Shell } from "../server/shell.ts";
 import { BrandMark } from "./brand-mark.tsx";
 import { RevealCurrentEntry } from "./current-entry.tsx";
 import { DocsLink } from "./docs-link.tsx";
+import { Icon, type IconName } from "./icon.tsx";
 import { initials } from "./initials.ts";
+import { Menu } from "./menu.tsx";
 import { SignOutButton } from "./sign-out-button.tsx";
 import { ThemeToggle } from "./theme-toggle.tsx";
 
@@ -12,38 +14,49 @@ export type ShellPage = "overview" | "runs" | "new" | "settings" | { project: st
 const same = (current: ShellPage | undefined, page: ShellPage) =>
   typeof page === "string" ? current === page : typeof current === "object" && current.project === page.project;
 
-function NavItem({ href, icon, label, detail, count, active, parent }: { href: string; icon: string; label: string; detail?: string | null; count?: number; active: boolean; parent: boolean }) {
+const menuItem = "flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-ink hover:bg-soft";
+
+function NavItem({ href, icon, label, detail, count, active, parent }: { href: string; icon?: IconName; label: string; detail?: string | null; count?: number; active: boolean; parent: boolean }) {
   const title = detail ? `${label} · ${detail}` : label;
   return (
     <li className="shrink-0">
       <a
         href={href}
         aria-current={active ? (parent ? "true" : "page") : undefined}
-        className={`flex h-[42px] items-center gap-2.5 px-[11px] -outline-offset-2 ${active ? "bg-paper text-ink shadow-[inset_2px_0_var(--action)]" : "text-muted hover:text-ink"}`}
+        className={`flex min-h-9 items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm -outline-offset-2 ${active ? "bg-panel font-medium text-ink shadow-[0_0_0_1px_var(--line)]" : "text-muted hover:bg-soft hover:text-ink"}`}
       >
-        <span aria-hidden className="w-[18px] shrink-0 text-action">{icon}</span>
+        {icon && <Icon name={icon} />}
         <span className="min-w-0" title={title}>
           <span className="block truncate">{label}</span>
-          {detail && <span className="block truncate text-[10px] text-muted">{detail}</span>}
+          {detail && <span className="block truncate text-xs font-normal text-muted">{detail}</span>}
         </span>
-        {count !== undefined && <span className="ml-auto border border-line px-1.5 py-0.5 font-mono text-[10px]">{count}</span>}
+        {count !== undefined && <span className="ml-auto text-xs font-normal text-muted tabular-nums">{count}</span>}
       </a>
     </li>
   );
 }
 
-function Account({ user }: { user: Shell["user"] }) {
+function AccountMenu({ user, className }: { user: Shell["user"]; className: string }) {
+  const who = user.name || user.email;
   return (
-    <section aria-label="Account" className="mt-4 hidden shrink-0 border border-line p-[13px] md:block">
-      <div className="flex min-w-0 items-center gap-2.5">
-        <span aria-hidden className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-full bg-ink font-mono text-[10px] text-paper">{initials(user.name || user.email)}</span>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-bold" title={user.name || user.email}>{user.name || user.email}</p>
-          {user.name && <p className="truncate text-xs text-muted" title={user.email}>{user.email}</p>}
+    <Menu className={`group relative ${className}`}>
+      <summary aria-label={`Account: ${who}`} className="flex min-h-10 cursor-pointer list-none items-center gap-2.5 rounded-md px-2 hover:bg-soft [&::-webkit-details-marker]:hidden">
+        <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full bg-ink text-xs font-medium text-paper">{initials(who)}</span>
+        <span className="min-w-0 flex-1 max-md:sr-only">
+          <span className="block truncate text-sm font-medium" title={who}>{who}</span>
+        </span>
+        <Icon name="chevrons" className="size-4 text-muted max-md:hidden" />
+      </summary>
+      <div className="absolute z-30 w-64 rounded-lg md:w-full border border-line bg-panel p-1.5 shadow-[0_8px_24px_rgb(0_0_0/0.12)] max-md:top-full max-md:right-0 max-md:mt-1 md:bottom-full md:left-0 md:mb-1">
+        <div className="px-2.5 pt-1.5 pb-2">
+          <p className="truncate text-sm font-medium">Signed in as {who}</p>
+          {user.name && <p className="truncate text-xs text-muted">{user.email}</p>}
         </div>
+        <DocsLink className={menuItem}><Icon name="docs" />Docs</DocsLink>
+        <ThemeToggle withLabel className={menuItem} />
+        <SignOutButton icon className={menuItem} />
       </div>
-      <SignOutButton className="mt-3 h-8 w-full border border-line bg-paper text-xs hover:border-ink" />
-    </section>
+    </Menu>
   );
 }
 
@@ -51,51 +64,39 @@ export function AppShell({ shell, current, parent = false, wide = false, childre
   const { user, workspace } = shell;
   const marked = (page: ShellPage) => same(current, page);
   return (
-    <div className="app-frame min-h-dvh">
-      <a href="#main" className="sr-only z-30 bg-paper focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:px-4 focus:py-3">Skip to content</a>
-      <header className="flex h-16 items-center justify-between gap-4 border-b border-line bg-[var(--header)] px-4 backdrop-blur-md tall:sticky tall:top-0 tall:z-20 md:h-[76px] md:px-[clamp(20px,4.2vw,72px)]">
-        <a href="/" className="flex shrink-0 items-center gap-2.5 text-[22px] font-bold tracking-tight">
-          <BrandMark className="h-7 w-7" />
-          <span className="max-[360px]:sr-only">trawler</span>
-        </a>
-        <div className="flex items-center gap-3">
-          <DocsLink className="-my-2 shrink-0 py-2 font-mono text-xs tracking-[0.15em] text-muted uppercase hover:text-ink">Docs</DocsLink>
-          <span className="sr-only md:hidden">Signed in as {user.name || user.email}</span>
-          <span aria-hidden className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-full bg-ink font-mono text-[10px] text-paper max-[400px]:hidden md:hidden">{initials(user.name || user.email)}</span>
-          <SignOutButton className="-my-2 shrink-0 py-2 font-mono text-xs tracking-[0.15em] text-muted uppercase hover:text-ink md:hidden" />
-          <ThemeToggle />
+    <div className="min-h-dvh md:grid md:grid-cols-[248px_minmax(0,1fr)]">
+      <a href="#main" className="sr-only z-30 bg-panel focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:px-4 focus:py-3">Skip to content</a>
+      <div className="border-b border-line md:sticky md:top-0 md:z-20 md:flex md:h-dvh md:flex-col md:border-b-0 md:px-3 md:py-4">
+        <div className="flex h-14 items-center justify-between gap-3 px-4 md:h-auto md:px-1.5 md:pb-4">
+          <a href="/" className="flex min-w-0 items-center gap-2.5">
+            <BrandMark className="size-6 shrink-0" />
+            <span className="min-w-0">
+              <span className="block truncate text-[15px] font-semibold tracking-tight max-[360px]:sr-only">trawler</span>
+              <span className="hidden truncate text-xs text-muted md:block" title={workspace.name}>{workspace.name}</span>
+            </span>
+          </a>
+          <AccountMenu user={user} className="md:hidden" />
         </div>
-      </header>
-      <div className="md:grid md:grid-cols-[220px_minmax(0,1fr)]">
-        <div className="border-b border-line bg-panel/80 md:flex md:flex-col md:border-r md:border-b-0 md:px-3.5 md:py-[22px] tall:sticky tall:top-[76px] tall:h-[calc(100dvh-76px)] tall:self-start">
-          <div className="hidden h-[58px] shrink-0 grid-cols-[auto_1fr] items-center gap-2.5 border border-line bg-paper p-2.5 md:grid">
-            <span aria-hidden className="grid h-[30px] w-[30px] place-items-center bg-action font-mono text-[9px] text-[#17191c]">{initials(workspace.name)}</span>
-            <div className="min-w-0">
-              <p className="truncate text-[13px] font-bold" title={workspace.name}>{workspace.name}</p>
-              <p className="text-[10px] text-muted">{workspace.projects.length} {workspace.projects.length === 1 ? "project" : "projects"}</p>
-            </div>
-          </div>
-          <nav aria-label="Workspace" className="flex gap-[3px] overflow-x-auto px-2 py-1 md:mt-[25px] md:block md:overflow-visible md:p-0 tall:min-h-0 tall:flex-1 tall:overflow-y-auto">
-            <ul className="flex shrink-0 gap-[3px] md:flex-col">
-              <NavItem href="/" icon="⌂" label="Overview" active={marked("overview")} parent={parent} />
-              <NavItem href="/runs" icon="↗" label="All runs" count={workspace.runs} active={marked("runs")} parent={parent} />
-            </ul>
-            <p id="nav-projects" className="hidden px-[11px] pt-6 pb-2 font-mono text-[10px] tracking-[0.1em] text-muted uppercase md:block">Projects</p>
-            <ul aria-labelledby="nav-projects" className="flex shrink-0 gap-[3px] md:flex-col">
-              {workspace.projects.map((p) => <NavItem key={p.id} href={`/projects/${p.id}/overview`} icon="◇" label={p.name} detail={p.address} active={marked({ project: p.id })} parent={parent} />)}
-              <NavItem href="/new" icon="+" label="New project" active={marked("new")} parent={parent} />
-            </ul>
-            <ul className="flex shrink-0 gap-[3px] md:mt-6 md:flex-col">
-              <NavItem href="/settings" icon="⚙" label="Settings" active={marked("settings")} parent={parent} />
-            </ul>
-          </nav>
-          <RevealCurrentEntry current={typeof current === "object" ? current.project : (current ?? "")} />
-          <Account user={user} />
-        </div>
-        <main id="main" className="min-w-0 px-[18px] py-9 md:px-[clamp(30px,5vw,78px)] md:py-[54px]">
-          <div className={wide ? "w-full" : "mx-auto w-full max-w-3xl"}>{children}</div>
-        </main>
+        <nav aria-label="Workspace" className="flex gap-1 overflow-x-auto px-2 pb-2 md:block md:min-h-0 md:flex-1 md:overflow-y-auto md:p-0">
+          <ul className="flex shrink-0 gap-1 md:flex-col md:gap-0.5">
+            <NavItem href="/" icon="home" label="Overview" active={marked("overview")} parent={parent} />
+            <NavItem href="/runs" icon="runs" label="All runs" count={workspace.runs} active={marked("runs")} parent={parent} />
+          </ul>
+          <p id="nav-projects" className="hidden px-2.5 pt-6 pb-1.5 text-xs text-muted md:block">Projects · {workspace.projects.length}</p>
+          <ul aria-labelledby="nav-projects" className="flex shrink-0 gap-1 md:flex-col md:gap-0.5">
+            {workspace.projects.map((p) => <NavItem key={p.id} href={`/projects/${p.id}/overview`} label={p.name} detail={p.address} active={marked({ project: p.id })} parent={parent} />)}
+            <NavItem href="/new" icon="plus" label="New project" active={marked("new")} parent={parent} />
+          </ul>
+          <ul className="flex shrink-0 gap-1 md:mt-6 md:flex-col md:gap-0.5">
+            <NavItem href="/settings" icon="settings" label="Settings" active={marked("settings")} parent={parent} />
+          </ul>
+        </nav>
+        <RevealCurrentEntry current={typeof current === "object" ? current.project : (current ?? "")} />
+        <AccountMenu user={user} className="mt-3 hidden shrink-0 md:block" />
       </div>
+      <main id="main" className="min-w-0 bg-panel px-4 py-8 md:my-2 md:mr-2 md:rounded-xl md:px-[clamp(28px,4.5vw,72px)] md:py-12 md:shadow-[0_0_0_1px_var(--line)]">
+        <div className={wide ? "w-full" : "mx-auto w-full max-w-3xl"}>{children}</div>
+      </main>
     </div>
   );
 }

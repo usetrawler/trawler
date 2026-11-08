@@ -56,5 +56,5 @@ test("the inline script reveals the entry of the nav right before it, as the pag
 test("the shell puts the script right after the workspace nav", () => {
   const shell: Shell = { user: { name: "Ben", email: "ben@acme.test" }, workspace: { name: "Acme", projects: [], runs: 0 } };
   const html = renderToStaticMarkup(createElement(AppShell, { shell, current: "settings", children: "page" }));
-  expect(html).toContain(`</ul></nav><script type="text/javascript">${CURRENT_ENTRY_SCRIPT}</script><section aria-label="Account"`);
+  expect(html).toContain(`</ul></nav><script type="text/javascript">${CURRENT_ENTRY_SCRIPT}</script><details class=`);
 });

@@ -40,7 +40,7 @@ export default async function FeaturesPage({ params, searchParams }: { params: P
     <AppShell shell={shell} current={{ project: id }} wide>
       <ProjectHead project={{ id: project.id, name: project.name, targetUrl: project.target_url }} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="plan" runs={runs} runState={runState} />
       <div className="flex max-w-3xl flex-col gap-8">
-        <SetupWizard intro={<h1 className="text-3xl font-bold tracking-tight">Change features of {project.plan.name}</h1>} projectId={project.id} planId={project.plan.id} projectHost={new URL(project.target_url).host} chosenBefore={project.features} initialDescription={project.description} />
+        <SetupWizard intro={<h1 className="text-3xl font-semibold tracking-tight">Change features of {project.plan.name}</h1>} projectId={project.id} planId={project.plan.id} projectHost={new URL(project.target_url).host} chosenBefore={project.features} initialDescription={project.description} />
       </div>
     </AppShell>
   );

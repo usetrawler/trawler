@@ -77,7 +77,7 @@ test("the project's runs are the workspace's history narrowed to it, read in the
   expect(html).toMatch(/>Project · <a href="https:\/\/app\.acme\.test\/" target="_blank"[^>]*>app\.acme\.test</);
   expect(html).not.toContain("Back to the plan");
   expect(html).toContain(">Acme</h1>");
-  expect(html).toContain(">Acme workspace</p>");
+  expect(html).toContain(">Acme workspace</span>");
   expect(html).toMatch(new RegExp(`<a href="/projects/${ID}/runs\\?show=completed" aria-current="page"`));
   expect(html).toContain("There are no older runs here.");
 });

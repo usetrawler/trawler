@@ -35,8 +35,8 @@ const PERSONA_LABEL: Record<PersonaState, [string, string]> = {
   finished: ["Finished", "text-ink"], failed: ["Could not finish", "text-bad"], cancelled: ["Stopped", "text-muted"],
 };
 const SEVERITY_TONE: Record<string, string> = { high: "bg-action", medium: "bg-[#d5a557]", low: "bg-[#93b89e]" };
-const label = "font-mono text-[10px] uppercase";
-const secondary = "flex h-[50px] items-center justify-center border border-line bg-panel px-4 text-base hover:border-ink";
+const label = "text-xs";
+const secondary = "flex h-10 items-center justify-center rounded-md border border-line bg-panel px-4 text-sm font-medium hover:border-muted";
 
 type Person = View["personas"][number];
 
@@ -79,7 +79,7 @@ export function Conversation({ run }: { run: RunSummary }) {
       ) : (
         <ul className="flex flex-col gap-1.5 border-l-2 border-action pl-3 text-sm">
           {run.conversationMessages.map((m) => (
-            <li key={m.id}><span className="font-bold">{name(m.personaKey)}</span> <span className="text-muted">says</span> &ldquo;{m.text}&rdquo;</li>
+            <li key={m.id}><span className="font-semibold">{name(m.personaKey)}</span> <span className="text-muted">says</span> &ldquo;{m.text}&rdquo;</li>
           ))}
         </ul>
       )}
@@ -104,13 +104,13 @@ export function PullRequestPlan({ run }: { run: RunSummary }) {
           <p className="text-sm text-muted">{plan.mode === "both" ? "The project's plan runs as it is, with these goals added for the change." : "Only these goals run, aimed at the change."}</p>
           {plan.brief && (
             <div className="flex flex-col gap-1">
-              <p className="text-sm font-bold">What the lead told the team</p>
+              <p className="text-sm font-semibold">What the lead told the team</p>
               <p className="border-l-2 border-line pl-3 text-sm break-words whitespace-pre-line">{plan.brief}</p>
             </div>
           )}
           <ul className="flex flex-col gap-1.5 border-l-2 border-action pl-3 text-sm">
             {plan.goals.map((g) => (
-              <li key={g.id}><span className="font-bold">{name(g.personaId)}</span> <span className="text-muted">wants</span> {g.instruction}</li>
+              <li key={g.id}><span className="font-semibold">{name(g.personaId)}</span> <span className="text-muted">wants</span> {g.instruction}</li>
             ))}
           </ul>
         </>
@@ -308,13 +308,13 @@ export function FindingRow({ f, n, mark, note, detail, action, dismiss, focus, r
     <li id={anchor} className="border-b border-line bg-panel last:border-b-0">
       <details ref={details} onToggle={keepInAddress} className="group">
         <summary ref={summary} className="grid cursor-pointer list-none grid-cols-[75px_minmax(0,1fr)_85px_18px] items-start gap-3.5 p-[17px] max-md:grid-cols-1 [&::-webkit-details-marker]:hidden">
-          <span className={`inline-flex w-max px-1.5 py-[5px] font-mono text-[10px] text-[#17191c] uppercase ${SEVERITY_TONE[f.severity] ?? "bg-soft"}`}>{f.severity}<span className="sr-only"> severity</span></span>
+          <span className="inline-flex w-max items-center gap-2 pt-0.5 text-xs text-muted capitalize"><span aria-hidden className={`size-2 rounded-full ${SEVERITY_TONE[f.severity] ?? "bg-soft"}`} />{f.severity}<span className="sr-only"> severity</span></span>
           <span className="min-w-0">
-            <small className="block font-mono text-[10px] break-words text-muted">{String(n).padStart(2, "0")} · {[...new Set([f.personaName, ...f.sameReports.map((other) => other.personaName)])].join(", ")}</small>
+            <small className="block font-mono text-xs break-words text-muted">{String(n).padStart(2, "0")} · {[...new Set([f.personaName, ...f.sameReports.map((other) => other.personaName)])].join(", ")}</small>
             <strong className="mt-1 block text-[17px] leading-snug break-words">{f.title}</strong>
-            <span className="mt-[5px] line-clamp-2 text-[11px] leading-[1.4] break-words text-muted">{note ?? f.observed}</span>
+            <span className="mt-[5px] line-clamp-2 text-xs leading-[1.4] break-words text-muted">{note ?? f.observed}</span>
           </span>
-          <span className="font-mono text-[10px] text-ok uppercase max-md:empty:hidden">{mark}</span>
+          <span className="text-xs text-ok max-md:empty:hidden">{mark}</span>
           <b aria-hidden className="transition-transform group-open:rotate-90 max-md:hidden">→</b>
         </summary>
         <div className="flex flex-col gap-3 border-t border-line p-[17px] text-sm wrap-anywhere">
@@ -366,8 +366,8 @@ function Section<T extends ReportFinding & { reason?: string }>({ title, hint, i
   return (
     <section aria-labelledby={id} className="flex flex-col">
       <div className="pb-3">
-        <h2 id={id} className={`${label} text-action-ink`}>{title} · {items.length}</h2>
-        <p className="mt-[3px] text-[11px] text-muted">{hint}</p>
+        <h2 id={id} className="text-base font-medium">{title} · {items.length}</h2>
+        <p className="mt-[3px] text-xs text-muted">{hint}</p>
       </div>
       {items.length === 0 ? <p className="border border-line bg-panel p-[17px] text-sm text-muted">{empty}</p> : <ol className="border border-line">{items.map((f, i) => <FindingRow key={f.key} f={f} n={i + 1} mark={mark} note={note ? f.reason : undefined} detail={detail?.(f)} action={action?.(f)} dismiss={dismiss?.(f)} focus={f.key === focusKey} reveal={reveal} onFocused={onFocused} />)}</ol>}
     </section>
@@ -395,7 +395,7 @@ function BotProtectionNotice({ met }: { met: NonNullable<RunSummary["botProtecti
   const where = URL.canParse(met.url) ? readablePath(new URL(met.url).pathname) : null;
   return (
     <section aria-labelledby="bot-protection" className="mt-6 flex max-w-[760px] flex-col gap-2 border border-line border-l-4 border-l-warn bg-panel p-4">
-      <h2 id="bot-protection" className="text-base font-bold">Bot protection stopped Trawler</h2>
+      <h2 id="bot-protection" className="text-base font-semibold">Bot protection stopped Trawler</h2>
       <p className="text-sm">{met.vendor}&apos;s bot protection blocked Trawler&apos;s browser{where && <> at <span className="font-mono break-all">{where}</span></>}. It stops automated browsers, so what lies behind it could not be tried, and it is not reported as a defect.</p>
       <p className="text-sm">To let Trawler through, turn the check off for this staging copy, or run the project with the local runner, which can send a header that a rule in {met.vendor} lets past.</p>
       <DocsLink page="docs/reference/troubleshooting/#bot-protection-stopped-trawler" className="text-sm underline">How to let Trawler through</DocsLink>
@@ -442,12 +442,12 @@ function Stages({ stages }: { stages: View["stages"] }) {
     <ol aria-label="Stages" className="mb-4 grid grid-cols-4 border border-line max-md:grid-cols-2">
       {stages.map((s, i) => (
         <li key={s.label} className={`grid grid-cols-[auto_1fr] gap-x-2.5 gap-y-[3px] border-line p-[15px] not-last:border-r max-md:nth-2:border-r-0 max-md:nth-[-n+2]:border-b ${s.state === "done" ? "text-ok" : s.state === "active" ? "bg-[color-mix(in_srgb,var(--action)_9%,transparent)] text-ink shadow-[inset_0_-3px_var(--action)]" : "text-muted"}`}>
-          <span className="row-span-2 font-mono text-[10px]">{String(i + 1).padStart(2, "0")}</span>
+          <span className="row-span-2 font-mono text-xs">{String(i + 1).padStart(2, "0")}</span>
           <strong className="flex items-center gap-2">
             {s.label}
             {s.state === "active" && <span aria-hidden className="size-2 rounded-full bg-action motion-safe:animate-pulse" />}
           </strong>
-          <small className={`text-[11px] ${s.state === "skipped" ? "italic" : ""}`}>{STAGE_LABEL[s.state]}</small>
+          <small className={`text-xs ${s.state === "skipped" ? "italic" : ""}`}>{STAGE_LABEL[s.state]}</small>
         </li>
       ))}
     </ol>
@@ -462,7 +462,7 @@ function LivePeople({ view }: { view: View }) {
         const reached = p.goals.filter((g) => g.status === "reached").length;
         return (
           <li key={p.id} className="relative grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 border-b border-line px-1 py-[18px] max-md:grid-cols-[auto_minmax(0,1fr)]">
-            <span aria-hidden className="relative grid size-[42px] place-items-center rounded-full border border-line bg-soft font-mono text-[10px]">
+            <span aria-hidden className="relative grid size-[42px] place-items-center rounded-full border border-line bg-soft font-mono text-xs">
               {p.state === "exploring" && <span className="absolute -inset-1 rounded-full border-2 border-action border-t-transparent motion-safe:animate-spin [animation-duration:1.6s]" />}
               {initials(p.name)}
             </span>
@@ -486,7 +486,7 @@ function PeopleOutcomes({ view }: { view: View }) {
   const id = useId();
   return (
     <section aria-labelledby={id} className="border border-line bg-panel p-[17px]">
-      <h2 id={id} className={`${label} text-action-ink`}>People</h2>
+      <h2 id={id} className="text-base font-medium">People</h2>
       <ul>
         {view.personas.map((p) => {
           const good = p.state === "reached";
@@ -494,7 +494,7 @@ function PeopleOutcomes({ view }: { view: View }) {
           return (
             <li key={p.id} className="grid grid-cols-[auto_minmax(0,1fr)] gap-[9px] border-b border-line py-3 last:border-b-0">
               <span aria-hidden className={`grid size-[22px] place-items-center rounded-full text-sm ${good ? "bg-ok text-paper" : bad ? "bg-action text-[#17191c]" : "bg-soft text-muted"}`}>{good ? "✓" : bad ? "×" : "–"}</span>
-              <div className="min-w-0 text-[11px] text-muted">
+              <div className="min-w-0 text-xs text-muted">
                 <strong className="block text-xs break-words text-ink">{p.name}<span className="sr-only">: {PERSONA_LABEL[p.state][0]}.</span></strong>
                 <span className="block break-words">{personLine(p)}</span>
                 <details className="mt-1">
@@ -627,7 +627,7 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
       <RunBreadcrumb project={project} number={run.number} plan={run.savedPlan?.name ?? run.planName} />
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-3xl leading-tight font-bold tracking-tight wrap-anywhere md:text-4xl">{subject || view.headline}</h1>
+          <h1 className="text-3xl leading-tight font-semibold tracking-tight wrap-anywhere md:text-4xl">{subject || view.headline}</h1>
           <p className="mt-1 text-sm break-words text-muted">{host} · <LocalTime iso={new Date(when).toISOString()} /></p>
           {subject && <p className="mt-1 text-sm text-muted">{view.headline}</p>}
           <p role="status" aria-live="polite" className="text-sm text-warn">

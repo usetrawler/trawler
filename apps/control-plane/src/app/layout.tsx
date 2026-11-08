@@ -1,12 +1,12 @@
 import type { Metadata, Viewport } from "next";
-import { Instrument_Sans, JetBrains_Mono } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import type { ReactNode } from "react";
 import { ThemeScript } from "../components/theme-toggle.tsx";
 import { sentryMeta } from "../server/sentry.ts";
 import "./globals.css";
 
-const sans = Instrument_Sans({ subsets: ["latin", "latin-ext"], variable: "--font-instrument-sans" });
-const mono = JetBrains_Mono({ subsets: ["latin", "latin-ext"], variable: "--font-jetbrains-mono" });
+const sans = Geist({ subsets: ["latin", "latin-ext"], variable: "--font-geist-sans" });
+const mono = Geist_Mono({ subsets: ["latin", "latin-ext"], variable: "--font-geist-mono" });
 
 export const viewport: Viewport = { colorScheme: "light dark" };
 

@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { expect, test, vi } from "vitest";
 
 vi.mock("../server/sentry.ts", () => ({ sentryMeta: () => null }));
-vi.mock("next/font/google", () => ({ Instrument_Sans: () => ({ variable: "" }), JetBrains_Mono: () => ({ variable: "" }) }));
+vi.mock("next/font/google", () => ({ Geist: () => ({ variable: "" }), Geist_Mono: () => ({ variable: "" }) }));
 
 const app = fileURLToPath(new URL(".", import.meta.url));
 const pages = readdirSync(app, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith("page.tsx")).sort();
