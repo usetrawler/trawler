@@ -38,11 +38,11 @@ function WhoSignsIn({ people, accounts, planHref, fromCi }: { people: Person[]; 
       {fromCi ? (
         <p className="text-sm text-muted">In CI the job can give the people their accounts; anyone it gives none signs in as the plan says.</p>
       ) : null}
-      <ul className="divide-y divide-line rounded-lg border border-line">
+      <ul className="divide-y divide-line border-y border-line">
         {people.map((p) => {
           const line = signInLine(p, accounts);
           return (
-            <li key={p.key} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3">
+            <li key={p.key} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-3">
               <span className="font-medium">{p.name}</span>
               <span className={`text-sm ${line.missing && !fromCi ? "text-warn" : "text-muted"}`}>{line.text}</span>
             </li>
@@ -89,7 +89,7 @@ export default async function StartPage({ searchParams }: { searchParams: Promis
         {ciOnly ? (
           <CiOnlyPanel key={id} projectId={id} projectName={project.name} host={new URL(project.target_url).host} confirmedAt={confirmedAt?.toISOString() ?? null} />
         ) : runState.paused ? (
-          <p role="status" className="rounded-lg border border-line border-l-4 border-l-warn p-4 text-sm">
+          <p role="status" className="border-l-2 border-warn pl-3 text-sm">
             Runs on this project are paused{runState.liveRun ? <>, and <a href={runPath(runState.liveRun.number)} className="underline underline-offset-4">{runTitle(runState.liveRun.number)}</a> is still stopping</> : null}. Resume them from the <a href={`/projects/${id}/overview`} className="underline underline-offset-4">project</a> to start one.
           </p>
         ) : (

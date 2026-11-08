@@ -1,7 +1,8 @@
 "use client";
 import { useRouter } from "next/navigation";
+import { field, secondaryButton } from "../../../components/controls.ts";
 
-const select = "h-10 w-full min-w-0 rounded-md border border-line bg-panel px-3 text-[15px] outline-none focus:border-ink";
+const select = `${field} w-full`;
 
 export function StartPicker({ projects, project, plans, plan }: { projects: Array<{ id: string; name: string; address: string | null }>; project: string; plans: Array<{ id: string; name: string; people: number }>; plan: string }) {
   const router = useRouter();
@@ -20,7 +21,7 @@ export function StartPicker({ projects, project, plans, plan }: { projects: Arra
           {plans.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.people} {p.people === 1 ? "person" : "people"}</option>)}
         </select>
       </label>
-      <noscript><button type="submit" className="h-10 rounded-md border border-line px-4 text-sm">Show</button></noscript>
+      <noscript><button type="submit" className={secondaryButton}>Show</button></noscript>
     </form>
   );
 }
