@@ -1,9 +1,10 @@
 "use client";
 
-import { pageTitle } from "../components/page-head.tsx";
 import * as Sentry from "@sentry/nextjs";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { useEffect } from "react";
+import { primaryButton } from "../components/controls.ts";
+import { pageTitle } from "../components/page-head.tsx";
 import { ThemeScript } from "../components/theme-toggle.tsx";
 import { UPDATED_SINCE_OPENED } from "../components/updated-since-opened.ts";
 import "./globals.css";
@@ -26,9 +27,9 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
           <button
             type="button"
             onClick={updated ? () => window.location.reload() : reset}
-            className="flex h-10 items-center justify-center gap-2 rounded-md bg-action px-4 text-sm font-medium text-[#171717] transition-[filter] hover:brightness-105"
+            className={`${primaryButton} self-start`}
           >
-            {updated ? "Reload the page" : "Try again"} <span aria-hidden="true">→</span>
+            {updated ? "Reload the page" : "Try again"}
           </button>
         </main>
       </body>
