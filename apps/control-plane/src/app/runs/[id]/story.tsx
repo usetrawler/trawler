@@ -107,7 +107,10 @@ function useTrails(runId: string, people: Array<{ id: string; name: string }>, a
   useEffect(() => {
     if (!active || settled.current || (live && document.hidden)) return;
     if (inFlight.current) {
-      if (!live) again.current = true;
+      if (!live) {
+        again.current = true;
+        settled.current = true;
+      }
       return;
     }
     settled.current = !live;

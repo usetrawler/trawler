@@ -359,7 +359,7 @@ test("dashboard runs lead to their exact plan snapshot and its history", async (
     await expect.poll(() => page.locator("p[data-run-meta]").innerText()).toContain("reported confirmed");
     await hydrated(page.getByRole("button", { name: "Timeline", exact: true }));
     await page.getByRole("button", { name: "Timeline", exact: true }).click();
-    await expect.poll(() => page.getByText("What each person did").isVisible()).toBe(true);
+    await expect.poll(() => page.getByRole("heading", { name: "What happened, step by step" }).isVisible()).toBe(true);
     await page.goto(`${stack.origin}${report}#finding-ana%3Af0`);
     await expect.poll(() => page.locator('li[id="finding-ana%3Af0"] details').getAttribute("open")).not.toBeNull();
     await plan.getByRole("link", { name: "PR #24 v5" }).click();
