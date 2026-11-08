@@ -69,7 +69,7 @@ export function PlanTitle({ projectId, planId, name, canRemove }: { projectId: s
             aria-busy={pending || undefined}
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? errorId : undefined}
-            className="min-w-0 border border-dashed border-line/60 bg-transparent px-2 py-1 outline-none hover:border-line focus:border-solid focus:border-ink focus:bg-paper"
+            className="min-w-0 rounded-md border border-line bg-panel px-2.5 py-1.5 outline-none hover:border-muted/60 focus:border-ink"
           />
         </label>
         {canRemove && !confirming && (
