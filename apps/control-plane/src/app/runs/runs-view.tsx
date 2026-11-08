@@ -34,7 +34,7 @@ export function RunsView({ head, basePath, show, origin = "any", counts, runs, o
           {FILTERS.map(([filter, label]) => (
             <li key={filter} className="shrink-0">
               <a href={href(filter)} aria-current={show === filter ? "page" : undefined} className={`block border px-[11px] py-[9px] leading-5 ${show === filter ? "border-action bg-panel font-semibold" : "border-line bg-panel hover:bg-paper"}`}>
-                {label} <span className="text-[10px] leading-none font-bold text-muted">{counts[filter]}</span>
+                {label} <span className="text-xs leading-none font-semibold text-muted">{counts[filter]}</span>
               </a>
             </li>
           ))}
@@ -42,7 +42,7 @@ export function RunsView({ head, basePath, show, origin = "any", counts, runs, o
       </nav>
       <nav aria-label="Filter runs by how they started" className="mb-3">
         <ul className="-m-1 flex gap-1.5 overflow-x-auto p-1">
-          <li className="shrink-0 self-center pr-1 font-mono text-[10px] tracking-[0.1em] text-muted uppercase">Started</li>
+          <li className="shrink-0 self-center pr-1 text-xs text-muted">Started</li>
           {RUN_ORIGINS.map(([value, label]) => (
             <li key={value} className="shrink-0">
               <a href={href(show, undefined, undefined, value)} aria-current={origin === value ? "page" : undefined} className={`block border px-[11px] py-[9px] leading-5 ${origin === value ? "border-action bg-panel font-semibold" : "border-line bg-panel hover:bg-paper"}`}>{label}</a>

@@ -72,7 +72,7 @@ export function ConsentForm({ query, requestedScopes, account, workspace, contro
       This connection will act in <strong className="wrap-anywhere">{workspace}</strong>, and stays there when you switch workspaces in Trawler. Wrong workspace? Cancel, switch it in Trawler, then connect again.
     </p>
     <fieldset className="flex flex-col gap-3">
-      <legend className="mb-1 font-mono text-xs tracking-[0.2em] text-muted uppercase">Access</legend>
+      <legend className="mb-1 text-xs text-muted">Access</legend>
       <label className={choice}>
         <input type="radio" name="access" value="read" checked={access === "read"} onChange={() => !busy && setAccess("read")} aria-labelledby="access-read" aria-describedby="access-read-help" className="mt-1" />
         <span><strong id="access-read">Read access</strong><span id="access-read-help" className="block text-muted">Read projects, plans, runs and their findings.</span></span>
@@ -92,7 +92,7 @@ export function ConsentForm({ query, requestedScopes, account, workspace, contro
     </fieldset>
     {access === "control" && (
       <fieldset className="flex flex-col gap-3">
-        <legend className="mb-1 font-mono text-xs tracking-[0.2em] text-muted uppercase">Spending limit</legend>
+        <legend className="mb-1 text-xs text-muted">Spending limit</legend>
         <p className="text-sm text-muted">In any 24 hours this connection can start at most this many runs, and its runs can spend about this much: each run counts its whole cap until it has finished, then what it actually cost. This is on top of this workspace&apos;s own limits. Choose it now; a higher limit needs a new connection.</p>
         <div className="flex flex-wrap gap-4">
           <label className="flex flex-col gap-1 text-sm">

@@ -20,7 +20,7 @@ export function PlansBar({ projectId, plans, current, canAdd, pullRequests = [] 
       <StandardPlans projectId={projectId} plans={plans} current={current} canAdd={canAdd} />
       {pullRequests.length > 0 && (
         <nav aria-label="Pull request plans" className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <span className="font-mono text-[10px] tracking-[0.2em] text-muted uppercase">Pull requests</span>
+          <span className="text-xs text-muted">Pull requests</span>
           <ul className="flex flex-wrap gap-2">
             {pullRequests.map((p) => (
               <li key={p.id}>
@@ -30,7 +30,7 @@ export function PlansBar({ projectId, plans, current, canAdd, pullRequests = [] 
                   className={`flex items-center gap-2 border px-3 py-1.5 text-sm ${p.id === current ? "border-ink font-semibold text-ink" : "border-line text-muted hover:border-ink hover:text-ink"}`}
                 >
                   PR #{p.number} · v{p.version}
-                  <span className="font-mono text-[10px] font-normal"><span className="sr-only">last used </span><LocalTime iso={p.lastUsedAt.toISOString()} /></span>
+                  <span className="font-mono text-xs font-normal"><span className="sr-only">last used </span><LocalTime iso={p.lastUsedAt.toISOString()} /></span>
                 </Link>
               </li>
             ))}
@@ -53,7 +53,7 @@ function StandardPlans({ projectId, plans, current, canAdd }: { projectId: strin
               className={`flex items-center gap-2 border px-3 py-1.5 text-sm ${p.id === current ? "border-ink font-semibold text-ink" : "border-line text-muted hover:border-ink hover:text-ink"}`}
             >
               {p.name}
-              <span className="font-mono text-[10px] font-normal">{p.people}</span>
+              <span className="font-mono text-xs font-normal">{p.people}</span>
               <span className="sr-only">{p.people === 1 ? "person" : "people"}</span>
             </Link>
           </li>

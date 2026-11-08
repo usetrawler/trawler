@@ -40,7 +40,7 @@ export default async function NewPlanPage({ params }: { params: Promise<{ id: st
         {plans.length >= MAX_PLANS ? (
           <p role="alert" className="border-l-2 border-bad pl-3 text-bad">A project holds at most {MAX_PLANS} plans. Remove one to add another.</p>
         ) : (
-          <SetupWizard intro={<h1 className="text-3xl font-bold tracking-tight">Add a plan</h1>} projectId={project.id} newPlanName={name} projectHost={new URL(project.target_url).host} initialDescription={project.description} />
+          <SetupWizard intro={<h1 className="text-3xl font-semibold tracking-tight">Add a plan</h1>} projectId={project.id} newPlanName={name} projectHost={new URL(project.target_url).host} initialDescription={project.description} />
         )}
       </div>
     </AppShell>

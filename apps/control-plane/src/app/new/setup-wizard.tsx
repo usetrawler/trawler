@@ -128,8 +128,8 @@ export function Progress({ step, host, checking = false, byHand = false }: { ste
     <div role="status" className="flex flex-col gap-6">
       <Working />
       <div className="flex flex-col gap-3">
-        <p className="font-mono text-xs tracking-[0.2em] text-action-ink uppercase">Building your test plan</p>
-        <h2 className="text-3xl leading-tight font-bold tracking-tight break-words md:text-5xl">Understanding {host}</h2>
+        <p className="text-xs text-action-ink">Building your test plan</p>
+        <h2 className="text-3xl leading-tight font-semibold tracking-tight break-words md:text-5xl">Understanding {host}</h2>
         <p className="max-w-xl text-muted">{byHand ? "Trawler chooses people with different roles and goals from your description." : "Trawler reads the product's page, works out what it does, and then chooses people with different roles and goals."}{` This usually takes ${minutes} minutes; keep this page open.`}</p>
         {checking && <p className="max-w-xl text-sm text-muted">Trawler did not answer. Checking whether setup finished…</p>}
       </div>
@@ -224,7 +224,7 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
           <p className="max-w-xl text-muted">Trawler reads {projectHost} again, lists what the product does, and proposes people for the features you choose. Proposing replaces the people and goals on the plan. Test accounts stay; check who signs in with them afterwards.</p>
         )}
         {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
-        <button type="button" onClick={analyse} disabled={pending} className="flex h-12 items-center justify-between gap-6 self-start bg-action px-5 font-mono text-sm tracking-[0.12em] text-[#17191c] uppercase transition hover:brightness-110 disabled:opacity-70">
+        <button type="button" onClick={analyse} disabled={pending} className="flex h-12 items-center justify-between gap-6 self-start bg-action px-5 text-sm text-[#17191c] transition hover:brightness-110 disabled:opacity-70">
           {newPlanName !== undefined ? "Read the product" : "Read the product again"} <span aria-hidden>→</span>
         </button>
       </div>
@@ -246,7 +246,7 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
         {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
         <div className="flex flex-col-reverse items-stretch justify-between gap-4 border-t border-line pt-6 sm:flex-row sm:items-center">
           <p className="text-sm text-muted">Next: confirm what the product does and which features to try.</p>
-          <button type="submit" disabled={pending} className="flex h-12 items-center justify-between gap-6 bg-action px-5 font-mono text-sm tracking-[0.12em] text-[#17191c] uppercase transition hover:brightness-110 disabled:opacity-70">
+          <button type="submit" disabled={pending} className="flex h-12 items-center justify-between gap-6 bg-action px-5 text-sm text-[#17191c] transition hover:brightness-110 disabled:opacity-70">
             Analyse product <span aria-hidden>→</span>
           </button>
         </div>
@@ -268,8 +268,8 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
     return (
       <form className="flex flex-col gap-6" onSubmit={(e) => { e.preventDefault(); describeByHand(); }}>
         <div className="flex flex-col gap-3">
-          <p className="font-mono text-xs tracking-[0.2em] text-action-ink uppercase">{typed.host} is on a private network</p>
-          <h2 className="text-4xl leading-[0.95] font-bold tracking-tight md:text-6xl">Describe it yourself.</h2>
+          <p className="text-xs text-action-ink">{typed.host} is on a private network</p>
+          <h2 className="text-4xl leading-[0.95] font-semibold tracking-tight md:text-6xl">Describe it yourself.</h2>
           <p className="max-w-xl text-lg text-muted">Trawler cannot read a page that only your network or a CI job can reach, so tell it what the product is. The people still use it at {typed.host}, through a runner that can reach it.</p>
         </div>
         <label className="flex flex-col gap-2">
@@ -283,7 +283,7 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
         {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
         <div className="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
           <button type="button" onClick={() => { setError(null); setStage({ kind: "address" }); }} className="text-sm text-muted hover:text-ink">← Back</button>
-          <button type="submit" disabled={pending} className="flex h-12 items-center justify-between gap-6 bg-action px-5 font-mono text-sm tracking-[0.12em] text-[#17191c] uppercase transition hover:brightness-110 disabled:opacity-70">
+          <button type="submit" disabled={pending} className="flex h-12 items-center justify-between gap-6 bg-action px-5 text-sm text-[#17191c] transition hover:brightness-110 disabled:opacity-70">
             Choose the features <span aria-hidden>→</span>
           </button>
         </div>
@@ -327,12 +327,12 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-3">
-        <p className="font-mono text-xs tracking-[0.2em] text-action-ink uppercase">{stage.byHand ? "Your description" : "Trawler understood the product"}</p>
-        <h2 className="text-4xl leading-[0.95] font-bold tracking-tight md:text-6xl">Confirm the context.</h2>
+        <p className="text-xs text-action-ink">{stage.byHand ? "Your description" : "Trawler understood the product"}</p>
+        <h2 className="text-4xl leading-[0.95] font-semibold tracking-tight md:text-6xl">Confirm the context.</h2>
         <p className="max-w-xl text-lg text-muted">{stage.byHand ? "We use this only to choose the people and their goals." : "We use this only to choose the people and their goals. Edit it if we misunderstood anything."}</p>
       </div>
       <label className="flex flex-col border border-line bg-panel">
-        <span className="flex items-center justify-between border-b border-line px-4 py-2 font-mono text-[11px] tracking-[0.15em] uppercase">
+        <span className="flex items-center justify-between border-b border-line px-4 py-2 text-xs">
           <span>Product context</span><span className="text-ok">{stage.byHand ? "Written by you · editable" : "AI draft · editable"}</span>
         </span>
         <textarea aria-label="What the product does" value={stage.description} maxLength={2000} rows={4} onChange={(e) => update({ description: e.target.value })} className="resize-y bg-transparent p-4 text-lg outline-none focus:bg-paper" />
@@ -351,10 +351,10 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
       <section className="flex flex-col gap-3" aria-labelledby="features-heading">
         <div className="flex items-end justify-between gap-4">
           <div>
-            <h3 id="features-heading" className="text-xl font-bold">What should the people try?</h3>
+            <h3 id="features-heading" className="text-xl font-semibold">What should the people try?</h3>
             <p className="text-sm text-muted">{stage.byHand ? "Add each feature the people should try." : "We preselected the best match."}</p>
           </div>
-          <p className="font-mono text-[11px] tracking-[0.15em] text-muted uppercase">Select one or more</p>
+          <p className="text-xs text-muted">Select one or more</p>
         </div>
         <ul className="flex flex-col gap-2">
           {stage.features.map((f, i) => (
@@ -372,7 +372,7 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
         </ul>
         <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); addExtra(); }}>
           <input aria-label="Describe another feature" placeholder="Or describe another feature" value={extra} maxLength={300} onChange={(e) => setExtra(e.target.value)} className="h-11 flex-1 border border-line bg-soft px-3 outline-none focus:border-ink" />
-          <button type="submit" className="h-11 border border-ink px-4 font-mono text-xs tracking-[0.12em] uppercase">Add</button>
+          <button type="submit" className="h-11 border border-ink px-4 text-xs">Add</button>
         </form>
       </section>
       {projectId && <p className="text-sm text-muted">{newPlanName !== undefined ? `This creates the plan ${planName.trim()} with these people and goals. Your other plans stay as they are.` : "Proposing replaces the people and goals on the plan. Test accounts stay; check who signs in with them afterwards."}</p>}
@@ -380,7 +380,7 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
       <div className="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
         <button type="button" onClick={() => { setError(null); setStage({ kind: "address" }); }} className="text-sm text-muted hover:text-ink">← Back</button>
         <span className="text-sm text-muted">{chosen.length === 1 ? "1 feature selected" : `${chosen.length} features selected`}</span>
-        <button type="button" onClick={propose} disabled={pending || chosen.length === 0} className="flex h-12 items-center justify-between gap-6 bg-action px-5 font-mono text-sm tracking-[0.12em] text-[#17191c] uppercase transition hover:brightness-110 disabled:opacity-60">
+        <button type="button" onClick={propose} disabled={pending || chosen.length === 0} className="flex h-12 items-center justify-between gap-6 bg-action px-5 text-sm text-[#17191c] transition hover:brightness-110 disabled:opacity-60">
           Meet the test users <span aria-hidden>→</span>
         </button>
       </div>

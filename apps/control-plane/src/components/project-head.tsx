@@ -32,7 +32,7 @@ export function ProjectHead({ project, address, tab, runs, runState, planId }: {
                 className={`-mb-px flex items-center gap-2 border-b-2 pt-1 pb-3 ${tab === t.key ? "border-action font-semibold text-ink" : "border-transparent text-muted hover:text-ink"}`}
               >
                 {t.label}
-                {"count" in t && <span className="border border-line px-1.5 py-0.5 font-mono text-[10px] font-normal">{t.count}</span>}
+                {"count" in t && <span className="text-xs font-normal text-muted tabular-nums">{t.count}</span>}
               </a>
             </li>
           ))}

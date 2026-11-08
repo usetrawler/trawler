@@ -4,9 +4,9 @@ export function PageHead({ eyebrow, title, subtitle, action, compact = false }: 
   return (
     <div className="mb-10 flex flex-col items-start justify-between gap-6 md:flex-row md:items-end">
       <div className="min-w-0 self-stretch md:self-auto">
-        <p className="mt-[11px] font-mono text-[11px] leading-[normal] tracking-[0.1em] wrap-anywhere text-action-ink uppercase">{eyebrow}</p>
-        <h1 className={`my-2.5 font-bold wrap-anywhere ${compact ? "text-3xl leading-tight tracking-tight md:text-4xl" : "text-[44px] leading-[0.96] tracking-[-0.055em] md:text-[clamp(44px,5vw,72px)]"}`}>{title}</h1>
-        {subtitle && <p className="text-base leading-[normal] text-muted">{subtitle}</p>}
+        <p className="text-sm wrap-anywhere text-muted">{eyebrow}</p>
+        <h1 className={`mt-1 font-semibold tracking-tight wrap-anywhere ${compact ? "text-2xl leading-tight md:text-[28px]" : "text-3xl leading-tight md:text-4xl"}`}>{title}</h1>
+        {subtitle && <p className="mt-2 text-muted">{subtitle}</p>}
       </div>
       {action}
     </div>
@@ -15,9 +15,8 @@ export function PageHead({ eyebrow, title, subtitle, action, compact = false }: 
 
 export function PrimaryLink({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <a href={href} className="flex h-[50px] shrink-0 items-center gap-[38px] bg-action px-[18px] font-mono text-xs text-[#17191c] uppercase hover:brightness-110">
+    <a href={href} className="flex h-10 shrink-0 items-center gap-2 rounded-md bg-action px-4 text-sm font-medium text-[#171717] transition-[filter] hover:brightness-105">
       {children}
-      <span aria-hidden>→</span>
     </a>
   );
 }

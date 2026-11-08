@@ -58,7 +58,7 @@ export function PlanTitle({ projectId, planId, name, canRemove }: { projectId: s
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-3">
-          <span className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Plan name</span>
+          <span className="text-xs text-muted">Plan name</span>
           <input
             value={value}
             maxLength={100}

@@ -23,7 +23,7 @@ export function WorkspaceName({ name, canManage }: { name: string; canManage: bo
         <RenameForm name={name} />
       ) : (
         <>
-          <p className="text-lg font-bold wrap-anywhere">{name}</p>
+          <p className="text-lg font-semibold wrap-anywhere">{name}</p>
           <p className="text-sm text-muted">Only an owner or admin of this workspace can rename it.</p>
         </>
       )}

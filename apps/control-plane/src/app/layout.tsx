@@ -1,12 +1,13 @@
 import type { Metadata, Viewport } from "next";
-import { Instrument_Sans, JetBrains_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Newsreader } from "next/font/google";
 import type { ReactNode } from "react";
 import { ThemeScript } from "../components/theme-toggle.tsx";
 import { sentryMeta } from "../server/sentry.ts";
 import "./globals.css";
 
-const sans = Instrument_Sans({ subsets: ["latin", "latin-ext"], variable: "--font-instrument-sans" });
-const mono = JetBrains_Mono({ subsets: ["latin", "latin-ext"], variable: "--font-jetbrains-mono" });
+const sans = Geist({ subsets: ["latin", "latin-ext"], variable: "--font-geist-sans" });
+const mono = Geist_Mono({ subsets: ["latin", "latin-ext"], variable: "--font-geist-mono" });
+const serif = Newsreader({ subsets: ["latin", "latin-ext"], style: ["normal", "italic"], variable: "--font-newsreader" });
 
 export const viewport: Viewport = { colorScheme: "light dark" };
 
@@ -21,7 +22,7 @@ export function generateMetadata(): Metadata {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`${sans.variable} ${mono.variable}`} suppressHydrationWarning>
+    <html lang="en" className={`${sans.variable} ${mono.variable} ${serif.variable}`} suppressHydrationWarning>
       <head>
         <ThemeScript />
       </head>

@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test, vi } from "vitest";
 
-vi.mock("next/font/google", () => ({ Instrument_Sans: () => ({ variable: "sans" }), JetBrains_Mono: () => ({ variable: "mono" }) }));
+vi.mock("next/font/google", () => ({ Geist: () => ({ variable: "sans" }), Geist_Mono: () => ({ variable: "mono" }), Newsreader: () => ({ variable: "serif" }) }));
 vi.mock("../server/sentry.ts", () => ({ sentryMeta: () => null }));
 
 const { default: RootLayout, viewport } = await import("./layout.tsx");

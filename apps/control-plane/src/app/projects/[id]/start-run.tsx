@@ -47,12 +47,12 @@ export function Estimate({ price, range, goalsPerTurn, personas, modelChosen }: 
       <p className="text-sm text-muted">Estimated run</p>
       {estimate ? (
         <>
-          <p className="text-2xl font-bold">{usd(estimate.low)}–{usd(estimate.high)}</p>
+          <p className="text-2xl font-semibold">{usd(estimate.low)}–{usd(estimate.high)}</p>
           <p className="text-sm text-muted">{personas} {personas === 1 ? "person" : "people"}{turns > personas ? ` taking ${turns} turns` : ""}, plus about {usd(estimate.perDefect)} for each defect that gets replayed.</p>
         </>
       ) : (
         <>
-          <p className="text-2xl font-bold">Unknown</p>
+          <p className="text-2xl font-semibold">Unknown</p>
           <p className="text-sm text-muted">{modelChosen ? `Without a price Trawler cannot count dollars, so the run stops after ${(DEFAULT_RUN.tokenCap / 1_000_000).toFixed(0)} million tokens instead. Watch your provider's billing.` : "Choose a model to see an estimate."}</p>
         </>
       )}
@@ -73,7 +73,7 @@ function OpenRun({ run }: { run?: { id: string; number: number } }) {
 export function Submit({ blocked, pending, noticed, checksKey }: { blocked?: string; pending: boolean; noticed: boolean; checksKey: boolean }) {
   const describedBy = [blocked ? "start-blocked" : null, noticed ? "start-notice" : null].filter(Boolean).join(" ");
   return (
-    <button type="submit" disabled={pending || Boolean(blocked)} aria-describedby={describedBy || undefined} className="flex h-12 items-center justify-between gap-6 bg-action px-5 font-mono text-sm tracking-[0.12em] text-[#17191c] uppercase transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50">
+    <button type="submit" disabled={pending || Boolean(blocked)} aria-describedby={describedBy || undefined} className="flex h-12 items-center justify-between gap-6 bg-action px-5 text-sm text-[#17191c] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50">
       {pending ? (checksKey ? "Checking the key…" : "Starting…") : "Start run"}
       <span aria-hidden>→</span>
     </button>
@@ -95,7 +95,7 @@ export function OnUs({ range, goalsPerTurn, personas }: { range: PriceRange | nu
       ) : (
         <div className="flex flex-col gap-1">
           <p className="text-sm text-muted">Estimated run</p>
-          <p className="text-2xl font-bold">{range === undefined ? "…" : "Unknown"}</p>
+          <p className="text-2xl font-semibold">{range === undefined ? "…" : "Unknown"}</p>
           <p className="text-sm text-muted">{range === undefined ? `${people}. Reading the model's price…` : `${people}. The model's price could not be read just now, so there is no estimate; the cap below still holds.`}</p>
         </div>
       )}
@@ -199,7 +199,7 @@ export function StartRun({ projectId, planId, planLabel, projectName, personas, 
   if (closedBeta) {
     return (
       <form id="start" onSubmit={(e) => e.preventDefault()} className="flex flex-col gap-5 border border-line bg-panel p-5">
-        <p className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Start · <span className="text-ink">{projectName}</span>{planLabel && <> · <span className="text-ink">{planLabel}</span></>}</p>
+        <p className="text-xs text-muted">Start · <span className="text-ink">{projectName}</span>{planLabel && <> · <span className="text-ink">{planLabel}</span></>}</p>
         <p id="start-blocked" className="border-l-2 border-warn pl-3 text-sm">{closedBeta}</p>
         <div className="flex justify-end">
           <Submit blocked={closedBeta} pending={false} noticed={false} checksKey={false} />
@@ -220,7 +220,7 @@ export function StartRun({ projectId, planId, planLabel, projectName, personas, 
       className="flex flex-col gap-5 border border-line bg-panel p-5">
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="planId" value={planId} />
-      <p className="font-mono text-xs tracking-[0.2em] text-muted uppercase">Start · <span className="text-ink">{projectName}</span>{planLabel && <> · <span className="text-ink">{planLabel}</span></>}</p>
+      <p className="text-xs text-muted">Start · <span className="text-ink">{projectName}</span>{planLabel && <> · <span className="text-ink">{planLabel}</span></>}</p>
       {notice && <p id="start-notice" className="border-l-2 border-warn pl-3 text-sm">{notice.message}<OpenRun run={notice.activeRun} /></p>}
 
       {onUs ? (

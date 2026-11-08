@@ -15,13 +15,13 @@ export function PrPlanView({ title, people, goals }: PrPlanViewProps) {
   return (
     <section aria-label={title} className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <h2 className="text-lg font-bold">{title}</h2>
+        <h2 className="text-lg font-semibold">{title}</h2>
         <p className="text-sm text-muted">Made by Trawler from the pull request; it is replaced when the pull request changes.</p>
       </div>
       <ol className="flex flex-col gap-4 text-sm">
         {turns.map((turn, i) => (
           <li key={`${turn.person}-${i}`} className="flex flex-col gap-1.5">
-            <p className="font-bold">{name.get(turn.person) ?? turn.person}</p>
+            <p className="font-semibold">{name.get(turn.person) ?? turn.person}</p>
             <ul className="flex flex-col gap-1 border-l-2 border-action pl-3">
               {turn.goals.map((g) => <li key={g.id}><span className="text-muted">wants</span> {g.instruction}</li>)}
             </ul>

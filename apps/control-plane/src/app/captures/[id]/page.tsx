@@ -30,15 +30,15 @@ export default async function CapturePage({ params }: { params: Promise<{ id: st
   return (
     <AppShell shell={shell} current={{ project: capture.projectId }} parent wide>
       <nav aria-label="Breadcrumb" className="mb-[34px]">
-        <ol className="flex flex-wrap items-center gap-x-2 gap-y-4 font-mono text-[10px] text-muted">
+        <ol className="flex flex-wrap items-center gap-x-2 gap-y-4 font-mono text-xs text-muted">
           {project && <><li><a href={`/projects/${project.id}`} className="-my-2 inline-block py-2 hover:text-ink">{project.name}</a></li><li aria-hidden>/</li></>}
           <li><a href={run} className="-my-2 inline-block py-2 hover:text-ink">{runTitle(capture.runNumber)}</a></li>
           <li aria-hidden>/</li>
-          <li aria-current="page" className="font-bold text-ink">Screen capture</li>
+          <li aria-current="page" className="font-semibold text-ink">Screen capture</li>
         </ol>
       </nav>
-      <h1 className="text-2xl font-bold break-words">{title}</h1>
-      <p className="mt-2 font-mono text-[11px] tracking-[0.15em] text-muted uppercase">Screen capture · {capture.replay ? "where the replay ended" : "when reported"}</p>
+      <h1 className="text-2xl font-semibold break-words">{title}</h1>
+      <p className="mt-2 text-xs text-muted">Screen capture · {capture.replay ? "where the replay ended" : "when reported"}</p>
       <a href={`/api/artifacts/${capture.id}`} target="_blank" rel="noreferrer" tabIndex={-1} className="mt-4 block max-w-[1282px]">
         <img
           src={`/api/artifacts/${capture.id}`}

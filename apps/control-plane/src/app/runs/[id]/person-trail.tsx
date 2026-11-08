@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { Trail, TrailEntry, TrailTurn } from "../../../runs/trail.ts";
 
-const label = "font-mono text-[10px] uppercase";
+const label = "text-xs";
 
 const TOOL_LABEL: Record<string, string> = {
   browser_navigate: "Opened a page", browser_navigate_back: "Went back", browser_snapshot: "Read the page", browser_click: "Clicked",
@@ -41,7 +41,7 @@ const endTone = (t: TrailTurn) => (t.status === "failed" ? "text-bad" : (t.statu
 function Entry({ e }: { e: TrailEntry }) {
   switch (e.kind) {
     case "step":
-      return <><span className="font-mono text-[11px] text-muted">Step {e.step}</span> {e.tool ? TOOL_LABEL[e.tool] ?? e.tool : "No tool"}{e.page && <span className="font-mono text-[12px] text-muted"> · {e.page}</span>}</>;
+      return <><span className="font-mono text-xs text-muted">Step {e.step}</span> {e.tool ? TOOL_LABEL[e.tool] ?? e.tool : "No tool"}{e.page && <span className="font-mono text-[12px] text-muted"> · {e.page}</span>}</>;
     case "note":
       return <><span className="text-muted">Noted: </span>{e.text}</>;
     case "goal": {
@@ -214,7 +214,7 @@ export function Trails({ runId, people, live, pulse }: { runId: string; people: 
     <section aria-labelledby={id} className="flex flex-col">
       <div className="pb-3">
         <h2 id={id} className={`${label} text-action-ink`}>What each person did</h2>
-        <p className="mt-[3px] text-[11px] text-muted">Every step and the page it ended on, with notes, goals and findings, in order</p>
+        <p className="mt-[3px] text-xs text-muted">Every step and the page it ended on, with notes, goals and findings, in order</p>
       </div>
       <ul className="border border-line bg-panel">{people.map((p) => <PersonTrail key={p.id} runId={runId} person={p} live={live} pulse={pulse} />)}</ul>
     </section>

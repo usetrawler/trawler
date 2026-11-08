@@ -34,7 +34,7 @@ async function reloadable(action: () => Promise<ChoiceState>): Promise<ChoiceSta
 export const joinWorkspace = (previous: ChoiceState, form: FormData) => reloadable(() => joinWorkspaceAction(previous, form));
 export const startOwnWorkspace = () => reloadable(() => startOwnWorkspaceAction());
 
-const choiceButton = "flex min-h-12 w-full items-center justify-between gap-6 px-5 py-3 text-left font-mono text-sm tracking-[0.12em] uppercase aria-disabled:cursor-wait aria-disabled:opacity-60 sm:w-auto sm:whitespace-nowrap";
+const choiceButton = "flex min-h-12 w-full items-center justify-between gap-6 px-5 py-3 text-left text-sm aria-disabled:cursor-wait aria-disabled:opacity-60 sm:w-auto sm:whitespace-nowrap";
 const primary = `${choiceButton} bg-action text-[#17191c] transition hover:brightness-110`;
 const secondary = `${choiceButton} border border-line hover:border-ink`;
 const alert = "border-l-2 border-bad pl-3 text-sm text-bad focus:outline-none";
@@ -57,7 +57,7 @@ export function WorkspaceChoice({ invitations }: { invitations: InvitationRow[] 
           {invitations.map((i) => (
             <li key={i.id} className="flex flex-col gap-4 border border-line bg-panel p-5 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
-                <h2 className="text-xl font-bold wrap-anywhere">{i.orgName}</h2>
+                <h2 className="text-xl font-semibold wrap-anywhere">{i.orgName}</h2>
                 <p className="mt-1 text-sm text-muted wrap-anywhere">{invitedBy(i)}</p>
               </div>
               <form action={join} onSubmit={() => setSentFor(i.id)} className="sm:shrink-0">
