@@ -34,7 +34,7 @@ async function reloadable(action: () => Promise<ChoiceState>): Promise<ChoiceSta
 export const joinWorkspace = (previous: ChoiceState, form: FormData) => reloadable(() => joinWorkspaceAction(previous, form));
 export const startOwnWorkspace = () => reloadable(() => startOwnWorkspaceAction());
 
-const choiceButton = "flex min-h-12 w-full items-center justify-between gap-6 px-5 py-3 text-left text-sm aria-disabled:cursor-wait aria-disabled:opacity-60 sm:w-auto sm:whitespace-nowrap";
+const choiceButton = "flex min-h-12 w-full items-center justify-center gap-2 rounded-md px-5 py-3 text-center text-sm aria-disabled:cursor-wait aria-disabled:opacity-60 sm:w-auto sm:whitespace-nowrap";
 const primary = `${choiceButton} bg-action text-[#17191c] transition hover:brightness-110`;
 const secondary = `${choiceButton} border border-line hover:border-ink`;
 const alert = "border-l-2 border-bad pl-3 text-sm text-bad focus:outline-none";

@@ -15,9 +15,16 @@ export function Menu({ className, children }: { className: string; children: Rea
       close();
       menu.current.querySelector("summary")?.focus();
     };
+    const leave = (event: FocusEvent) => {
+      const next = event.relatedTarget as Node | null;
+      if (next && !menu.current?.contains(next)) close();
+    };
+    const node = menu.current;
+    node?.addEventListener("focusout", leave);
     document.addEventListener("pointerdown", outside);
     document.addEventListener("keydown", escape);
     return () => {
+      node?.removeEventListener("focusout", leave);
       document.removeEventListener("pointerdown", outside);
       document.removeEventListener("keydown", escape);
     };

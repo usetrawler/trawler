@@ -47,14 +47,14 @@ function AccountMenu({ user, className }: { user: Shell["user"]; className: stri
         </span>
         <Icon name="chevrons" className="size-4 text-muted max-md:hidden" />
       </summary>
-      <div className="absolute z-30 w-64 rounded-lg border border-line bg-panel p-1.5 shadow-[0_8px_24px_rgb(0_0_0/0.12)] max-md:top-full max-md:right-0 max-md:mt-1 md:bottom-full md:left-0 md:mb-1">
+      <div className="absolute z-30 w-64 rounded-lg md:w-full border border-line bg-panel p-1.5 shadow-[0_8px_24px_rgb(0_0_0/0.12)] max-md:top-full max-md:right-0 max-md:mt-1 md:bottom-full md:left-0 md:mb-1">
         <div className="px-2.5 pt-1.5 pb-2">
           <p className="truncate text-sm font-medium">Signed in as {who}</p>
           {user.name && <p className="truncate text-xs text-muted">{user.email}</p>}
         </div>
         <DocsLink className={menuItem}><Icon name="docs" />Docs</DocsLink>
         <ThemeToggle withLabel className={menuItem} />
-        <SignOutButton className={menuItem} />
+        <SignOutButton icon className={menuItem} />
       </div>
     </Menu>
   );
@@ -66,7 +66,7 @@ export function AppShell({ shell, current, parent = false, wide = false, childre
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[248px_minmax(0,1fr)]">
       <a href="#main" className="sr-only z-30 bg-panel focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:px-4 focus:py-3">Skip to content</a>
-      <div className="border-b border-line md:sticky md:top-0 md:flex md:h-dvh md:flex-col md:border-b-0 md:px-3 md:py-4">
+      <div className="border-b border-line md:sticky md:top-0 md:z-20 md:flex md:h-dvh md:flex-col md:border-b-0 md:px-3 md:py-4">
         <div className="flex h-14 items-center justify-between gap-3 px-4 md:h-auto md:px-1.5 md:pb-4">
           <a href="/" className="flex min-w-0 items-center gap-2.5">
             <BrandMark className="size-6 shrink-0" />

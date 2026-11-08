@@ -88,7 +88,6 @@
   --color-bad: var(--bad);
   --color-info: var(--info);
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-serif: var(--font-newsreader), ui-serif, Georgia, serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
@@ -99,12 +98,6 @@ body {
   line-height: 1.6;
 }
 
-
-@media (min-width: 48rem) and (min-height: 36rem) {
-  html {
-    scroll-padding-top: 76px;
-  }
-}
 
 @keyframes halo {
   50% {

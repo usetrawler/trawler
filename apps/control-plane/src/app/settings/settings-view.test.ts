@@ -101,7 +101,7 @@ test("a saved or removed key is reported, with any runs it stopped, and a key no
 });
 
 test("the key's status line sits under its heading, is always there for screen readers, and takes no room while empty", () => {
-  expect(render(createElement(ModelKey, { saved, addedBy: null, canManage: true }))).toMatch(/^<section aria-labelledby="key-heading" [^>]*><h2 id="key-heading" tabindex="-1" class="font-mono text-xs tracking-\[0\.2em\] text-muted uppercase">Model key<\/h2><p role="status" class="text-sm text-ok empty:-mt-4"><\/p>/);
+  expect(render(createElement(ModelKey, { saved, addedBy: null, canManage: true }))).toMatch(/^<section aria-labelledby="key-heading" [^>]*><h2 id="key-heading" tabindex="-1" class="text-base font-medium">Model key<\/h2><p role="status" class="text-sm text-ok empty:-mt-4"><\/p>/);
 });
 
 test("an owner or admin edits the workspace name; a member reads it as text, with nothing to submit", () => {

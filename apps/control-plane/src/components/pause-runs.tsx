@@ -85,10 +85,10 @@ export function PauseRuns({ projectId, paused, liveRun }: { projectId: string; p
         <div role="group" aria-labelledby="pause-confirm" onKeyDown={(e) => { if (e.key === "Escape") keepRunning(); }} className="flex max-w-md flex-col items-start gap-3 border border-line bg-panel p-4 md:items-end">
           <p id="pause-confirm" className="text-sm">Pausing stops <a href={runPath(asking.number)} className="underline underline-offset-4">{runTitle(asking.number)}</a>{others(asking)} now. What {asking.more ? "they" : "it"} found so far is kept.</p>
           <div className="flex flex-wrap gap-3">
-            <button type="button" aria-describedby="pause-confirm" aria-disabled={pending || undefined} onClick={(e) => { hold(e); if (!pending) pause(asking); }} className="flex h-[50px] shrink-0 items-center border border-bad px-[18px] text-xs text-bad aria-disabled:cursor-wait aria-disabled:opacity-60">
+            <button type="button" aria-describedby="pause-confirm" aria-disabled={pending || undefined} onClick={(e) => { hold(e); if (!pending) pause(asking); }} className="flex h-10 shrink-0 items-center rounded-md border border-bad px-4 text-sm font-medium text-bad aria-disabled:cursor-wait aria-disabled:opacity-60">
               {pending ? "Pausing…" : `Pause and stop ${runTitle(asking.number)}${others(asking)}`}
             </button>
-            <button type="button" ref={keep} aria-describedby="pause-confirm" aria-disabled={pending || undefined} onClick={keepRunning} className="h-[50px] px-3 text-sm text-muted hover:text-ink aria-disabled:cursor-wait aria-disabled:opacity-60">{asking.more ? "Keep them running" : "Keep it running"}</button>
+            <button type="button" ref={keep} aria-describedby="pause-confirm" aria-disabled={pending || undefined} onClick={keepRunning} className="h-10 px-3 text-sm text-muted hover:text-ink aria-disabled:cursor-wait aria-disabled:opacity-60">{asking.more ? "Keep them running" : "Keep it running"}</button>
           </div>
           {error && <p role="alert" className={alert}>{error}</p>}
         </div>
