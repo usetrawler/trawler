@@ -1,13 +1,15 @@
 "use client";
-import { pageTitle } from "../../../components/page-head.tsx";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
-import { useCallback, useEffect, useId, useRef, useState, useTransition } from "react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState, useTransition } from "react";
+import { area, dangerButton, secondaryButton } from "../../../components/controls.ts";
+import { Icon } from "../../../components/icon.tsx";
+import { pageTitle } from "../../../components/page-head.tsx";
 import type { runView, StageState, PersonaState } from "../../../runs/report.ts";
 import type { RunSummary } from "../../../runs/runs.ts";
 import { findingAnchor } from "../../../runs/finding-anchor.ts";
 import { SEVERITY_TONE } from "../../../runs/severity.ts";
 import { webLink } from "../../../lib/web-link.ts";
-import { runPath, runStatusLabel, runStatusTone, runTitle } from "../../../runs/status.ts";
+import { NOTHING_TO_TEST, runPath, runStatusLabel, runStatusTone, runTitle } from "../../../runs/status.ts";
 import { RunBreadcrumb } from "../../../components/run-breadcrumb.tsx";
 import { DocsLink } from "../../../components/docs-link.tsx";
 import { LocalTime } from "../../../components/local-time.tsx";
@@ -42,7 +44,6 @@ const PERSONA_LABEL: Record<PersonaState, [string, string]> = {
   finished: ["Finished", "text-ink"], failed: ["Could not finish", "text-bad"], cancelled: ["Stopped", "text-muted"],
 };
 const label = "text-xs";
-const secondary = "flex h-10 items-center justify-center rounded-md border border-line bg-panel px-4 text-sm font-medium hover:border-muted";
 
 type Person = View["personas"][number];
 
@@ -82,7 +83,7 @@ export function PullRequestPlan({ run }: { run: RunSummary }) {
   const title = plan.goals.length > 0 ? `Planned for ${pr}` : plan.note ? `Pull request${plan.number ? ` #${plan.number}` : ""}` : `Planning for ${pr}`;
   return (
     <section aria-labelledby="pr-plan" className="mt-6 flex flex-col gap-2">
-      <h2 id="pr-plan" className={`${label} text-muted`}>{title}</h2>
+      <h2 id="pr-plan" className="font-medium">{title}</h2>
       {plan.goals.length > 0 ? (
         <>
           {plan.version !== null && (
@@ -91,13 +92,13 @@ export function PullRequestPlan({ run }: { run: RunSummary }) {
           <p className="text-sm text-muted">{plan.mode === "both" ? "The project's plan runs as it is, with these goals added for the change." : "Only these goals run, aimed at the change."}</p>
           {plan.brief && (
             <div className="flex flex-col gap-1">
-              <p className="text-sm font-semibold">What the lead told the team</p>
+              <p className="text-sm font-medium">What the lead told the team</p>
               <p className="border-l-2 border-line pl-3 text-sm break-words whitespace-pre-line">{plan.brief}</p>
             </div>
           )}
-          <ul className="flex flex-col gap-1.5 border-l-2 border-action pl-3 text-sm">
+          <ul className="flex flex-col gap-1.5 border-l-2 border-line pl-3 text-sm">
             {plan.goals.map((g) => (
-              <li key={g.id}><span className="font-semibold">{name(g.personaId)}</span> <span className="text-muted">wants</span> {g.instruction}</li>
+              <li key={g.id}><span className="font-medium">{name(g.personaId)}</span> <span className="text-muted">wants</span> {g.instruction}</li>
             ))}
           </ul>
         </>
@@ -119,11 +120,11 @@ export function CancelButton({ runId, onDone }: { runId: string; onDone: () => v
       return unstable_isUnrecognizedActionError(err) ? updatedSinceOpened("Reload the page to stop the run.") : "The run could not be stopped. Try again.";
     }
   };
-  if (!asking) return <button type="button" onClick={() => setAsking(true)} className={secondary}>Stop run</button>;
+  if (!asking) return <button type="button" onClick={() => setAsking(true)} className={secondaryButton}>Stop run</button>;
   return (
     <div className="flex flex-wrap items-center gap-3 text-sm">
       <span className="text-muted">Stop now? What was found so far is kept.</span>
-      <button type="button" disabled={pending} onClick={() => { setFailed(null); start(async () => { setFailed(await stop()); onDone(); }); }} className="h-10 border border-bad px-4 text-bad disabled:opacity-60">
+      <button type="button" disabled={pending} onClick={() => { setFailed(null); start(async () => { setFailed(await stop()); onDone(); }); }} className={dangerButton}>
         {pending ? "Stopping…" : "Stop"}
       </button>
       <button type="button" onClick={() => setAsking(false)} className="h-10 px-2 text-muted">Keep running</button>
@@ -151,7 +152,7 @@ export function JudgeAgainButton({ runId, findingKey, judging, onDone }: { runId
   };
   return (
     <div className="flex flex-wrap items-center gap-3 text-sm">
-      <button type="button" aria-disabled={busy} aria-describedby={hint} onClick={judge} className="h-10 border border-line bg-panel px-4 hover:border-ink aria-disabled:opacity-60 aria-disabled:hover:border-line">
+      <button type="button" aria-disabled={busy} aria-describedby={hint} onClick={judge} className={secondaryButton}>
         {judging ? "Judging again…" : pending ? "Starting…" : "Judge again"}
       </button>
       <span id={hint} className="text-muted">Runs only the judge on the stored replay, without a browser. It is paid from this run's remaining cap.</span>
@@ -177,7 +178,7 @@ export function NotABugButton({ runId, findingKey, title, working, onDone, onRef
     opener.current?.focus();
   }, [asking]);
   if (!asking && working) return <p ref={opener} tabIndex={-1} className="text-sm text-muted outline-none">You can mark it not a bug once Trawler has finished working on this run.</p>;
-  if (!asking) return <button ref={opener} type="button" onClick={() => setAsking(true)} className="h-10 w-max border border-line bg-panel px-4 text-sm hover:border-ink">Not a bug</button>;
+  if (!asking) return <button ref={opener} type="button" onClick={() => setAsking(true)} className={`${secondaryButton} w-max`}>Not a bug</button>;
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (pending) return;
@@ -195,10 +196,10 @@ export function NotABugButton({ runId, findingKey, title, working, onDone, onRef
   return (
     <form onSubmit={submit} className="flex flex-col gap-2 text-sm">
       <label htmlFor={field}>Why is it not a bug?</label>
-      <textarea id={field} required autoFocus maxLength={500} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} aria-describedby={error ? `${hint} ${problem}` : hint} aria-invalid={error?.why === "reason" ? true : undefined} className="w-full min-w-0 resize-y border border-line bg-paper px-2 py-1 text-base outline-none focus:border-ink" />
+      <textarea id={field} required autoFocus maxLength={500} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} aria-describedby={error ? `${hint} ${problem}` : hint} aria-invalid={error?.why === "reason" ? true : undefined} className={`${area} w-full resize-y`} />
       <p id={hint} className="text-muted">The people in later runs of this project are told, with your reason, and asked not to report it again.</p>
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" aria-disabled={pending || undefined} className="h-10 border border-ink px-4 hover:bg-soft aria-disabled:cursor-wait aria-disabled:opacity-60">{pending ? "Saving…" : "Mark as not a bug"}</button>
+        <button type="submit" aria-disabled={pending || undefined} className={secondaryButton}>{pending ? "Saving…" : "Mark as not a bug"}</button>
         <button type="button" onClick={() => { cancelled.current = true; setAsking(false); setError(null); }} className="h-10 px-2 text-muted hover:text-ink">Cancel</button>
         {error && <span id={problem} role="alert" className="text-bad">{error.error}</span>}
       </div>
@@ -231,7 +232,7 @@ export function UndoNotABug({ runId, f, onDone, onRefused }: { runId: string; f:
         ) : (
           <span className="min-w-0 wrap-anywhere text-muted">Marked by {f.dismissal.by ?? "someone no longer in this workspace"} on <LocalTime iso={new Date(f.dismissal.at).toISOString()} />.</span>
         )}
-        <button type="button" aria-disabled={pending || undefined} onClick={undo} className="h-10 border border-line bg-panel px-4 hover:border-ink aria-disabled:cursor-wait aria-disabled:opacity-60">{pending ? "Undoing…" : "Undo"}<span className="sr-only">: {f.title}</span></button>
+        <button type="button" aria-disabled={pending || undefined} onClick={undo} className={secondaryButton}>{pending ? "Undoing…" : "Undo"}<span className="sr-only">: {f.title}</span></button>
         {error && <span role="alert" className="text-bad">{error}</span>}
       </div>
     </div>
@@ -255,8 +256,8 @@ function PullRequestSubject({ pr }: { pr: NonNullable<RunSummary["pullRequest"]>
   const href = webLink(pr.url);
   const where = [pr.repository, pr.branch, pr.commit?.slice(0, 7)].filter(Boolean).join(" · ");
   return (
-    <div className="mt-2.5 flex flex-col gap-0.5">
-      <p className="text-xl font-semibold break-words">
+    <div className="flex flex-col gap-0.5">
+      <p className="break-words">
         {href ? <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:text-muted">{label}<span aria-hidden> ↗</span><span className="sr-only"> (opens in a new tab)</span></a> : label}
       </p>
       {where && <p className="font-mono text-sm break-words text-muted">{where}</p>}
@@ -264,10 +265,7 @@ function PullRequestSubject({ pr }: { pr: NonNullable<RunSummary["pullRequest"]>
   );
 }
 
-const primaryButton = "flex h-10 w-max items-center justify-center gap-2 rounded-md bg-action px-4 text-sm font-medium text-[#171717] transition-[filter] hover:brightness-105";
-const quietButton = "flex h-10 w-max items-center justify-center gap-2 rounded-md border border-line bg-panel px-4 text-sm font-medium hover:border-muted";
-
-export function CopyIssue({ f, status, runNumber, primary }: { f: ReportFinding; status: string; runNumber: number; primary: boolean }) {
+export function CopyIssue({ f, status, runNumber }: { f: ReportFinding; status: string; runNumber: number }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   const [markdown, setMarkdown] = useState("");
   const copy = () => {
@@ -287,7 +285,7 @@ export function CopyIssue({ f, status, runNumber, primary }: { f: ReportFinding;
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-3">
-        <button type="button" onClick={copy} className={primary ? primaryButton : quietButton}>Copy as issue</button>
+        <button type="button" onClick={copy} className={secondaryButton}>Copy as issue</button>
         <span role="status" className="text-sm text-muted">{state === "copied" ? "Copied as Markdown, with the steps and links back to this run." : ""}</span>
       </div>
       {state === "failed" && (
@@ -336,22 +334,22 @@ export function FindingRow({ f, n, mark, tag, note, detail, action, dismiss, cop
     else if (window.location.hash === `#${anchor}`) window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#findings`);
   };
   return (
-    <li id={anchor} className="border-b border-line bg-panel last:border-b-0">
+    <li id={anchor}>
       <details ref={details} onToggle={keepInAddress} className="group">
-        <summary ref={summary} className="grid cursor-pointer list-none grid-cols-[84px_minmax(0,1fr)_96px_16px] items-start gap-4 px-5 py-4 hover:bg-soft max-md:grid-cols-1 max-md:gap-2 [&::-webkit-details-marker]:hidden">
+        <summary ref={summary} className="grid cursor-pointer list-none grid-cols-[84px_minmax(0,1fr)_auto_16px] items-start gap-4 py-4 hover:bg-soft max-md:grid-cols-1 max-md:gap-2 [&::-webkit-details-marker]:hidden">
           <span className="inline-flex w-max items-center gap-2 pt-1 text-sm text-muted capitalize"><span aria-hidden className={`size-2 rounded-full ${SEVERITY_TONE[f.severity] ?? "bg-soft"}`} />{f.severity}<span className="sr-only"> severity</span></span>
           <span className="min-w-0">
             <strong className="block text-base leading-snug font-medium break-words">{f.title}</strong>
             <small className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm break-words text-muted">
-              <span><span className="font-mono text-xs">{String(n).padStart(2, "0")}</span> · {[...new Set([f.personaName, ...f.sameReports.map((other) => other.personaName)])].join(", ")}</span>
+              <span className="inline-flex items-center gap-2"><span aria-label={`Finding ${n}`} className="grid h-5 min-w-5 place-items-center rounded border border-line px-1 text-xs text-ink tabular-nums">{n}</span>{[...new Set([f.personaName, ...f.sameReports.map((other) => other.personaName)])].join(", ")}</span>
               {tag && <span className="rounded border border-line px-1.5 text-xs text-ink">{tag}</span>}
             </small>
             <span className="mt-1 line-clamp-2 text-sm break-words text-muted group-open:hidden">{note ?? f.observed}</span>
           </span>
           <span className="pt-1 text-sm text-ok max-md:empty:hidden">{mark}</span>
-          <b aria-hidden className="pt-1 font-normal text-muted transition-transform group-open:rotate-90 max-md:hidden">→</b>
+          <span aria-hidden className="pt-1.5 text-muted transition-transform group-open:rotate-180 max-md:hidden"><Icon name="chevron" /></span>
         </summary>
-        <div className="flex flex-col gap-4 px-5 pt-1 pb-5 text-[15px] wrap-anywhere md:pl-[120px]">
+        <div className="flex flex-col gap-4 pt-1 pb-5 text-[15px] wrap-anywhere md:pl-[100px]">
           {(copy || dismiss) && <div className="flex flex-wrap items-start gap-3">{copy}{dismiss && <div className="min-w-0 flex-1">{dismiss}</div>}</div>}
           <p className="text-sm">{f.sameReports.length > 0 ? <><strong>{f.personaName}</strong><span className="text-muted">, while trying to: </span></> : <span className="text-muted">While trying to: </span>}{f.goalText}</p>
           {f.replayedAsDefect && <p className="text-sm text-muted">{f.personaName} filed this as friction on a goal they did not reach, so Trawler replayed it too.</p>}
@@ -361,7 +359,7 @@ export function FindingRow({ f, n, mark, tag, note, detail, action, dismiss, cop
             <p className="mb-1 font-medium">Steps</p>
             <ol className="list-decimal pl-5 break-words">{f.reproduction.map((step, i) => <li key={i}>{step}</li>)}</ol>
           </div>
-          {f.page && <p className="break-words"><span className="text-muted">Page: </span><span className="font-mono text-[13px]">{f.page}</span></p>}
+          {f.page && f.page !== "/" && <p className="break-words"><span className="text-muted">Page: </span><span className="font-mono text-[13px]">{f.page}</span></p>}
           <FindingScreenshots title={f.title} screenshots={f.screenshots} onOpen={address} />
           {replay?.observed && <p><span className="text-muted">What the replay saw: </span>{replay.observed}</p>}
           {f.quote && (
@@ -389,7 +387,7 @@ export function FindingRow({ f, n, mark, tag, note, detail, action, dismiss, cop
           )}
         </div>
       </details>
-      {action && <div className="border-t border-line px-5 py-3">{action}</div>}
+      {action && <div className="pb-4 md:pl-[100px]">{action}</div>}
     </li>
   );
 }
@@ -397,7 +395,7 @@ export function FindingRow({ f, n, mark, tag, note, detail, action, dismiss, cop
 type Part<T extends ReportFinding> = { items: T[]; tag?: string; mark?: string; note?: boolean; detail?: (f: T) => string | undefined; action?: (f: T) => React.ReactNode; dismiss?: (f: T) => React.ReactNode };
 const part = <T extends ReportFinding>(p: Part<T>) => p as unknown as Part<ReportFinding & { reason?: string }>;
 
-function Group({ title, hint, parts, empty, issueStatus, primary, runNumber, openFirst, focusKey, reveal, onFocused }: { title: string; hint: string; parts: Array<Part<ReportFinding & { reason?: string }>>; empty?: string; issueStatus: (tag?: string) => string; primary?: boolean; runNumber: number; openFirst?: boolean; focusKey?: string | null; reveal?: boolean; onFocused?: () => void }) {
+function Group({ title, hint, parts, empty, issueStatus, runNumber, openFirst, focusKey, reveal, onFocused }: { title: string; hint: string; parts: Array<Part<ReportFinding & { reason?: string }>>; empty?: string; issueStatus: (tag?: string) => string; runNumber: number; openFirst?: boolean; focusKey?: string | null; reveal?: boolean; onFocused?: () => void }) {
   const id = useId();
   const count = parts.reduce((sum, p) => sum + p.items.length, 0);
   if (count === 0 && !empty) return null;
@@ -405,14 +403,14 @@ function Group({ title, hint, parts, empty, issueStatus, primary, runNumber, ope
   return (
     <section aria-labelledby={id} className="flex flex-col">
       <div className="pb-3">
-        <h2 id={id} className="text-base font-medium">{title} · {count}</h2>
+        <h2 id={id} className="flex items-baseline gap-2 font-medium">{title} <span className="text-sm font-normal text-muted tabular-nums">{count}</span></h2>
         <p className="mt-1 text-sm text-muted">{hint}</p>
       </div>
-      {count === 0 ? <p className="rounded-lg border border-line p-5 text-sm text-muted">{empty}</p> : (
-        <ol className="overflow-hidden rounded-lg border border-line">
+      {count === 0 ? <p className="text-sm text-muted">{empty}</p> : (
+        <ol className="divide-y divide-line border-y border-line">
           {parts.flatMap((p) => p.items.map((f) => {
             n += 1;
-            return <FindingRow key={f.key} f={f} n={n} mark={p.mark} tag={p.tag} note={p.note ? f.reason : undefined} detail={p.detail?.(f)} action={p.action?.(f)} dismiss={p.dismiss?.(f)} copy={<CopyIssue f={f} status={issueStatus(p.tag)} runNumber={runNumber} primary={Boolean(primary)} />} autoOpen={openFirst && n === 1} focus={f.key === focusKey} reveal={reveal} onFocused={onFocused} />;
+            return <FindingRow key={f.key} f={f} n={n} mark={p.mark} tag={p.tag} note={p.note ? f.reason : undefined} detail={p.detail?.(f)} action={p.action?.(f)} dismiss={p.dismiss?.(f)} copy={<CopyIssue f={f} status={issueStatus(p.tag)} runNumber={runNumber} />} autoOpen={openFirst && n === 1} focus={f.key === focusKey} reveal={reveal} onFocused={onFocused} />;
           }))}
         </ol>
       )}
@@ -472,6 +470,46 @@ function RunMeta({ run, view, host, when }: { run: RunSummary; view: View; host:
       {parts.map((part) => <span key={String(part)}> · {part}</span>)}
       <span> · <LocalTime iso={when.toISOString()} /></span>
     </p>
+  );
+}
+
+function took(from: string | Date, to: string | Date): string | null {
+  const minutes = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60_000);
+  if (!Number.isFinite(minutes) || minutes < 0) return null;
+  if (minutes < 1) return "Under a minute";
+  if (minutes < 60) return plural(minutes, "minute", "minutes");
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${plural(hours, "hour", "hours")} ${plural(rest, "minute", "minutes")}` : plural(hours, "hour", "hours");
+}
+
+export function RunDetails({ run, live }: { run: RunSummary; live: boolean }) {
+  const started = run.startedAt ?? run.createdAt;
+  const duration = run.finishedAt ? took(started, run.finishedAt) : null;
+  const rows: Array<[string, React.ReactNode]> = [
+    ["Cost", spentLine(run)],
+    ["Model", <span key="model" className="font-mono text-sm">{run.agentModel}</span>],
+    ["Started", <LocalTime key="started" iso={new Date(started).toISOString()} />],
+  ];
+  if (run.finishedAt) rows.push(["Finished", <LocalTime key="finished" iso={new Date(run.finishedAt).toISOString()} />]);
+  if (duration) rows.push(["Took", duration]);
+  rows.push(["Started by", run.startedVia ? <>{viaClient(run.startedVia)} for {run.startedVia.person}, over MCP</> : run.execution === "own" ? "Your CI job" : "Someone in this workspace"]);
+  if (run.pullRequest) rows.push(["Pull request", <PullRequestSubject key="pr" pr={run.pullRequest} />]);
+  if (run.providedAccounts.length > 0) rows.push(["Accounts", `${run.providedAccounts.join(", ")} ${run.providedAccounts.length === 1 ? "signs" : "sign"} in with ${run.providedAccounts.length === 1 ? "an account" : "accounts"} provided by the CI job.`]);
+  if (run.prPlan?.signUps?.length) rows.push(["Sign-up", <span key="signup" title={run.prPlan.accountReason}>This pull request touches how people get accounts, so {run.prPlan.signUps.join(", ")} {run.prPlan.signUps.length === 1 ? "goes" : "go"} through the real sign-up instead of using the CI account.</span>]);
+  return (
+    <div className="flex max-w-3xl flex-col gap-4">
+      <dl className="grid grid-cols-1 border-t border-line sm:grid-cols-[10rem_minmax(0,1fr)]">
+        {rows.map(([name, value]) => (
+          <Fragment key={name}>
+            <dt className="pt-3 text-sm text-muted sm:border-b sm:border-line sm:py-3">{name}</dt>
+            <dd className="border-b border-line pb-3 wrap-anywhere sm:py-3">{value}</dd>
+          </Fragment>
+        ))}
+      </dl>
+      {live && <p className="text-sm text-muted">Cost and duration are final when the run ends.</p>}
+      {!live && run.execution === "own" && <p className="text-sm text-muted">This run came from CI. Start it again from there.</p>}
+    </div>
   );
 }
 
@@ -673,6 +711,7 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
   const dismiss = view.live ? undefined : (f: ReportFinding) => <NotABugButton runId={run.id} findingKey={f.key} title={f.title} working={view.refreshes} onDone={moved} onRefused={refresh} />;
   const when = view.live ? run.createdAt : run.finishedAt ?? run.createdAt;
   const subject = run.pullRequest?.title?.trim();
+  const skipped = run.cancelReason === "nothing_to_test";
   const totalFindings = report.confirmed.length + report.couldNotJudge.length + report.inconclusive.length + report.notJudged.length + report.refuted.length + report.friction.length + report.dismissed.length;
   return (
     <div className="flex flex-col">
@@ -681,6 +720,7 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
         <div className="min-w-0">
           <h1 className={pageTitle}>{view.headline}</h1>
           {subject && <p className="mt-1 break-words text-ink">{subject}</p>}
+          {skipped && <p className="mt-2 max-w-2xl text-muted">{NOTHING_TO_TEST}</p>}
           <RunMeta run={run} view={view} host={host} when={new Date(when)} />
           <p role="status" aria-live="polite" className="text-sm text-warn">
             {(gone || stale) && <span className="mt-2 block">{gone ? "This run is no longer available." : "Lost contact with Trawler. Retrying…"}</span>}
@@ -689,7 +729,7 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
         </div>
         {!view.live && (
           <div className="flex flex-wrap gap-2">
-            <a href={`/runs/new?project=${run.projectId}${run.savedPlan && !run.prPlan ? `&plan=${run.savedPlan.id}` : ""}`} className={secondary}>Start another run</a>
+            <a href={`/runs/new?project=${run.projectId}${run.savedPlan && !run.prPlan ? `&plan=${run.savedPlan.id}` : ""}`} className={secondaryButton}>Start another run</a>
             {!closedBeta && run.execution !== "own" && <RunAgainButton runId={run.id} again={again} />}
           </div>
         )}
@@ -703,7 +743,7 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
         </div>
       )}
       {run.botProtection && <BotProtectionNotice met={run.botProtection} />}
-      <nav aria-label="Run report" className="mt-6 flex flex-wrap gap-x-6 border-b border-line">
+      <nav aria-label="Run report" hidden={skipped} className="mt-6 flex flex-wrap gap-x-6 border-b border-line">
         {PANELS.map(([key, name]) => (
           <button key={key} type="button" aria-pressed={panel === key} aria-controls={`run-${key}`} onClick={() => openPanel(key)}
             className={`-mb-px flex min-h-11 items-center gap-1.5 border-b-2 text-[15px] ${panel === key ? "border-ink font-medium text-ink" : "border-transparent text-muted hover:text-ink"}`}>
@@ -711,9 +751,9 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
           </button>
         ))}
       </nav>
-      <div id="run-findings" hidden={panel !== "findings"} className="pt-6">
+      <div id="run-findings" hidden={skipped || panel !== "findings"} className="pt-6">
         <div className="flex min-w-0 flex-col gap-10">
-          <Group title="Confirmed" hint="Reproduced independently: a fresh agent followed the steps without seeing the report, and the judge agreed. Fix these." runNumber={run.number} primary openFirst={!view.live}
+          <Group title="Confirmed" hint="Reproduced independently: a fresh agent followed the steps without seeing the report, and the judge agreed. Fix these." runNumber={run.number} openFirst={!view.live}
             issueStatus={() => "Confirmed: reproduced independently"} empty={view.live ? "Nothing confirmed yet." : "No defect was confirmed."} focusKey={focusKey} reveal={reveal} onFocused={focused}
             parts={[part({ items: report.confirmed, mark: "✓ Reproduced", dismiss })]} />
           <Group title="Unverified" hint="Reported, but the replay and the judge did not settle it. Judge again where it is offered, or read the timeline and decide." runNumber={run.number}
@@ -738,7 +778,7 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
             ]} />
         </div>
       </div>
-      <div id="run-timeline" hidden={panel !== "timeline"} className="pt-6">
+      <div id="run-timeline" hidden={skipped || panel !== "timeline"} className="pt-6">
         {view.live && <Stages stages={view.stages} />}
         <TimelineLanes run={run} live={view.live} now={now} />
         <div className={`mt-10 grid gap-12 ${run.conversation ? "lg:grid-cols-[minmax(0,1fr)_22rem]" : ""}`}>
@@ -760,16 +800,8 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
         {view.live && <p className="mt-4 text-sm text-muted">Safe to leave. The run keeps going in the background.</p>}
         <div className="mt-12"><Story run={run} live={view.live} pulse={data} active={panel === "timeline"} filter={storyFilter} onFilter={setStoryFilter} /></div>
       </div>
-      <div id="run-details" hidden={panel !== "details"} className="pt-6">
-        <div className="flex flex-col gap-1 text-sm text-muted">
-          {!view.live && <RunCost run={run} live={false} />}
-          {run.pullRequest && <PullRequestSubject pr={run.pullRequest} />}
-          <p className="wrap-anywhere">{run.agentModel}</p>
-          {run.startedVia && <p className="wrap-anywhere">Started over MCP by <strong className="font-semibold text-ink">{viaClient(run.startedVia)}</strong> for <strong className="font-semibold text-ink">{run.startedVia.person}</strong>.</p>}
-          {run.providedAccounts.length > 0 && <p className="wrap-anywhere">{run.providedAccounts.join(", ")} {run.providedAccounts.length === 1 ? "signs" : "sign"} in with {run.providedAccounts.length === 1 ? "an account" : "accounts"} provided by the CI job.</p>}
-          {!!run.prPlan?.signUps?.length && <p title={run.prPlan.accountReason} className="wrap-anywhere">This pull request touches how people get accounts, so {run.prPlan.signUps.join(", ")} {run.prPlan.signUps.length === 1 ? "goes" : "go"} through the real sign-up instead of using the CI account.</p>}
-          {!view.live && run.execution === "own" && <p>This run came from CI. Start it again from there.</p>}
-        </div>
+      <div id="run-details" hidden={!skipped && panel !== "details"} className={skipped ? "pt-8" : "pt-6"}>
+        <RunDetails run={run} live={view.live} />
         <PullRequestPlan run={run} />
       </div>
     </div>

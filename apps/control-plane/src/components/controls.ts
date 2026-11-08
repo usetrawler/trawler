@@ -8,6 +8,7 @@ const buttonBase = "inline-flex h-10 shrink-0 items-center justify-center gap-2 
 
 export const primaryButton = `${buttonBase} bg-action text-[#171717] transition-[filter] hover:brightness-105`;
 export const secondaryButton = `${buttonBase} border border-line bg-panel transition-colors hover:border-muted`;
+export const dangerButton = `${buttonBase} border border-bad text-bad transition-colors hover:bg-bad/10`;
 export const textButton = "text-sm text-muted underline underline-offset-4 hover:text-ink";
 
 export const chip = "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-sm transition-colors";
