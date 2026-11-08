@@ -79,13 +79,23 @@ function PullRequests({ projectId, lines, total }: { projectId: string; lines: P
   );
 }
 
-export function ProjectHomeView({ projectId, runs, findings, going, pullRequests, pullRequestCount }: { projectId: string; runs: number; findings: OpenFinding[]; going: RunLine[]; pullRequests: PullRequestLine[]; pullRequestCount: number }) {
+function Latest({ run }: { run: RunLine | undefined }) {
+  if (!run) return null;
+  const source = sourceOf(run);
+  return (
+    <p className="text-sm text-muted">
+      Latest run: <a href={runPath(run.number)} className="text-ink underline underline-offset-4">{runTitle(run.number)}</a>{source ? ` · ${source}` : ""} · <span className={run.status === "failed" ? "text-bad" : run.status === "stopped_budget" ? "text-warn" : undefined}>{runResult(run)}</span> · <LocalTime iso={run.createdAt.toISOString()} />
+    </p>
+  );
+}
+
+export function ProjectHomeView({ projectId, runs, findings, going, latest, pullRequests, pullRequestCount }: { projectId: string; runs: number; findings: OpenFinding[]; going: RunLine[]; latest?: RunLine; pullRequests: PullRequestLine[]; pullRequestCount: number }) {
   return (
     <div className="flex max-w-3xl flex-col gap-10">
       <div className="flex flex-col gap-4">
         <p className="text-2xl leading-tight font-medium tracking-tight wrap-anywhere md:text-[28px]">{homeHeadline(findings, runs)}</p>
         {runs === 0 && <p className="text-muted">Check the <a href={`/projects/${projectId}`} className="text-ink underline underline-offset-4">plan</a>, then start a run to see what people find.</p>}
-        <Going runs={going} />
+        {going.length > 0 ? <Going runs={going} /> : <Latest run={latest} />}
       </div>
       <Findings findings={findings} />
       <PullRequests projectId={projectId} lines={pullRequests.slice(0, SHOWN_PULL_REQUESTS)} total={pullRequestCount} />

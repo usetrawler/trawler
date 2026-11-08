@@ -31,22 +31,23 @@ export default async function ProjectHome({ params }: { params: Promise<{ id: st
   const result = await withOrg(getDb(), orgId, async (tx) => {
     const project = await projectHead(tx, orgId, id);
     if (!project) return null;
-    const [runState, counts, going, findings, pullRequests] = await Promise.all([
+    const [runState, counts, going, latest, findings, pullRequests] = await Promise.all([
       projectRunState(tx, orgId, id),
       projectCounts(tx, orgId, id),
       workspaceRuns(tx, orgId, { projectId: id, active: true, size: 3 }),
+      workspaceRuns(tx, orgId, { projectId: id, size: 1 }),
       openFindings(tx, orgId, id),
       projectPullRequests(tx, orgId, id, 3),
     ]);
-    return runState && { project, runState, counts, going: going.runs, findings, pullRequests };
+    return runState && { project, runState, counts, going: going.runs, latest: latest.runs[0], findings, pullRequests };
   });
   if (!result) notFound();
-  const { project, runState, counts, going, findings, pullRequests } = result;
+  const { project, runState, counts, going, latest, findings, pullRequests } = result;
   const shell = await shellFor(member);
   return (
     <AppShell shell={shell} current={{ project: id }} wide>
       <ProjectHead project={project} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="home" counts={counts} runState={runState} />
-      <ProjectHomeView projectId={id} runs={counts.runs} findings={findings} going={going} pullRequests={pullRequests} pullRequestCount={counts.pullRequests} />
+      <ProjectHomeView projectId={id} runs={counts.runs} findings={findings} going={going} {...(latest ? { latest } : {})} pullRequests={pullRequests} pullRequestCount={counts.pullRequests} />
     </AppShell>
   );
 }

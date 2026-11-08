@@ -115,7 +115,7 @@ test("the plan is the project's Plan tab, next to its Runs with their number, wi
 
 test("the plan says how many features it was built from, with a way to change them and propose people again", async () => {
   const html = await render();
-  expect(html).toContain(">Built from 1 feature<");
+  expect(html).toMatch(/<summary[^>]*>Built from 1 feature<\/summary><ul[^>]*><li>Send an invoice<\/li><\/ul>/);
   expect(html).toMatch(new RegExp(`<a [^>]*href="/projects/${ID}/features\\?plan=[0-9a-f-]+"[^>]*>Change features and propose people again</a>`));
 });
 

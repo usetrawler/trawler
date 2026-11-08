@@ -73,7 +73,12 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
           <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
             <PlansBar projectId={project.id} plans={plans} current={planId} canAdd={plans.length < MAX_PLANS} />
             <p className="flex flex-wrap items-baseline gap-x-3 text-sm">
-              {project.features.length > 0 && <span className="text-muted">Built from {project.features.length} {project.features.length === 1 ? "feature" : "features"}</span>}
+              {project.features.length > 0 && (
+                <details className="group relative text-muted">
+                  <summary className="cursor-pointer list-none underline-offset-4 hover:text-ink hover:underline [&::-webkit-details-marker]:hidden">Built from {project.features.length} {project.features.length === 1 ? "feature" : "features"}</summary>
+                  <ul className="mt-2 flex flex-col gap-1 text-ink">{project.features.map((f) => <li key={f}>{f}</li>)}</ul>
+                </details>
+              )}
               <Link href={`/projects/${project.id}/features?plan=${planId}`} className="underline underline-offset-4 hover:text-action-ink">{project.features.length > 0 ? "Change features and propose people again" : "Choose features and propose people"}</Link>
             </p>
           </div>
