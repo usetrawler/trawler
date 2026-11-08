@@ -99,7 +99,7 @@ function Lane({ name, detail, tone, initialsText, children }: { name: string; de
   return (
     <li className="grid grid-cols-[10rem_minmax(0,1fr)] items-center" style={{ minHeight: ROW }}>
       <span className="flex min-w-0 items-center gap-2.5">
-        <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full text-[11px] font-semibold" style={{ background: tone.bar, color: tone.onBar }}>{initialsText}</span>
+        <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full text-xs font-semibold" style={{ background: tone.bar, color: tone.onBar }}>{initialsText}</span>
         <span className="min-w-0 text-sm leading-5">
           <span className="block truncate font-medium">{name}</span>
           <span className="block truncate text-xs text-muted">{detail}</span>
@@ -167,7 +167,7 @@ export function TimelineLanes({ run, live, now }: { run: RunSummary; live: boole
               if (a === undefined || b === undefined) return null;
               return <span key={i} className="absolute w-px bg-[repeating-linear-gradient(180deg,var(--muted)_0_3px,transparent_3px_6px)] opacity-60" style={{ left: `${at(h.at)}%`, top: Math.min(a, b) * ROW + ROW / 2, height: Math.abs(a - b) * ROW }} />;
             })}
-            {live && <span className="absolute -top-2 -bottom-2 w-0.5 rounded bg-ok" style={{ left: `${at(now)}%` }}><span className="absolute -top-4 -left-3 text-[11px] font-medium text-ok">now</span></span>}
+            {live && <span className="absolute -top-2 -bottom-2 w-0.5 rounded bg-ok" style={{ left: `${at(now)}%` }}><span className="absolute -top-4 -left-3 text-xs font-medium text-ok">now</span></span>}
           </div>
         </div>
         <p aria-hidden className="mt-3 ml-40 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted">

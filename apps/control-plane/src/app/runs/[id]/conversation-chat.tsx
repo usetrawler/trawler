@@ -70,7 +70,7 @@ export function ConversationChat({ run, live, now }: { run: RunSummary; live: bo
             {messages.length === 0 ? "No one has said anything yet." : `${messages.length} ${messages.length === 1 ? "message" : "messages"}${minutes ? ` in ${minutes} ${minutes === 1 ? "minute" : "minutes"}` : ""}${live ? " so far · new ones appear as they are said" : ""}`}
           </p>
         </div>
-        <span aria-hidden className="flex">{people.map((p) => <span key={p.id} className="-ml-1.5 grid size-[26px] place-items-center rounded-full text-[11px] font-semibold ring-2 ring-panel" style={{ background: p.tone.bar, color: p.tone.onBar }}>{letterOf(p.name)}</span>)}</span>
+        <span aria-hidden className="flex">{people.map((p) => <span key={p.id} className="-ml-1.5 grid size-[26px] place-items-center rounded-full text-xs font-semibold ring-2 ring-panel" style={{ background: p.tone.bar, color: p.tone.onBar }}>{letterOf(p.name)}</span>)}</span>
       </div>
       {messages.length > 0 && (
         <ol className="flex flex-col gap-3.5" aria-live={live ? "polite" : undefined}>

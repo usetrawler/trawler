@@ -23,7 +23,7 @@ function NavItem({ href, icon, label, detail, count, live, active, parent }: { h
       <a
         href={href}
         aria-current={active ? (parent ? "true" : "page") : undefined}
-        className={`flex min-h-9 items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm -outline-offset-2 ${active ? "bg-panel font-medium text-ink shadow-[0_0_0_1px_var(--line)]" : "text-muted hover:bg-soft hover:text-ink"}`}
+        className={`relative flex min-h-9 items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm -outline-offset-2 ${active ? "bg-panel font-medium text-ink shadow-[0_0_0_1px_var(--line)]" : "text-muted hover:bg-soft hover:text-ink"}`}
       >
         {icon && <Icon name={icon} />}
         <span className="min-w-0" title={title}>
