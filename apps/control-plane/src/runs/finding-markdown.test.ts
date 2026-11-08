@@ -47,7 +47,7 @@ test("a finding without a page, a replay, words or captures leaves those lines o
 });
 
 test("text the agent wrote cannot mention people, link, embed images, add markup or leave its quote", () => {
-  expect(plain("ping @octo and @org/team")).toBe("ping @​octo and @​org/team");
+  expect(plain("ping @octo and @org/team")).toBe("ping @\u200bocto and @\u200borg/team");
   expect(plain("![x](https://evil.test/p.png) [click](https://evil.test) <img src=x> `code` *bold* #12")).toBe("\\!\\[x\\](https://evil.test/p.png) \\[click\\](https://evil.test) \\<img src=x\\> \\`code\\` \\*bold\\* \\#12");
   const md = findingMarkdown({ ...finding, title: "Broken\n## Injected heading", reproduction: ["Open.\n- [ ] sneaky item"], quote: "first line\nsecond line\n# heading" }, where);
   expect(md).toContain("## Broken \\#\\# Injected heading\n");
