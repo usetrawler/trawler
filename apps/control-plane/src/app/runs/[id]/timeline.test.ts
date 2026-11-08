@@ -6,7 +6,7 @@ import type { Trail } from "../../../runs/trail.ts";
 import { chatItems, ConversationChat, withMentions } from "./conversation-chat.tsx";
 import { toneOf } from "./person-tones.ts";
 import { filtered, storyEntries, storyGroups } from "./story.tsx";
-import { handoffs, timelineSpan, TimelineLanes, turnsOfPeople } from "./timeline-lanes.tsx";
+import { handoffs, timelineSpan, TimelineLanes, timeScale, turnsOfPeople } from "./timeline-lanes.tsx";
 
 const T = (min: number) => new Date(Date.UTC(2026, 10, 8, 9, 50) + min * 60_000);
 type Job = RunSummary["jobs"][number];
@@ -97,4 +97,19 @@ test("the story merges everyone's steps and words in time order, folds steps on 
   expect(filtered(all, "conversation").map((e) => e.kind)).toEqual(["message", "message"]);
   expect(filtered(all, "milestones").map((e) => e.kind)).toEqual(["goal", "finding"]);
   expect(filtered(all, { person: "devon" }).map((e) => e.kind)).toEqual(["finding", "message"]);
+});
+
+test("a long quiet stretch folds into a narrow break, so the busy parts keep their width", () => {
+  const span = { start: T(0).getTime(), end: T(360).getTime() };
+  const scale = timeScale(span, [T(0).getTime(), T(4).getTime(), T(9).getTime()]);
+  expect(scale.breaks).toEqual([{ from: T(9).getTime(), to: T(360).getTime(), left: expect.closeTo(96, 5) }]);
+  expect(scale.at(T(9).getTime())).toBeCloseTo(96, 5);
+  expect(scale.at(T(4).getTime())).toBeCloseTo((4 / 9) * 96, 5);
+  expect(scale.at(T(360).getTime())).toBeCloseTo(100, 5);
+  expect(scale.ticks[0]).toBe(T(0).getTime());
+  const even = timeScale({ start: T(0).getTime(), end: T(10).getTime() }, [T(2).getTime(), T(5).getTime(), T(8).getTime()]);
+  expect(even.breaks).toEqual([]);
+  expect(even.at(T(5).getTime())).toBeCloseTo(50, 5);
+  expect(timeScale({ start: T(0).getTime(), end: T(12).getTime() }, [T(1).getTime(), T(11).getTime()]).breaks).toHaveLength(1);
+  expect(timeScale({ start: T(0).getTime(), end: T(4).getTime() }, [T(0.5).getTime(), T(3.5).getTime()]).breaks).toEqual([]);
 });

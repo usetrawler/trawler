@@ -434,7 +434,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const pullRequest = run.pull_request as unknown as PullRequest | null;
   const origin = record?.prPlanId ? await tx.selectFrom("plans as p").leftJoin("runs as r", "r.id", "p.created_by_run_id").select("r.number").where("p.id", "=", record.prPlanId).executeTakeFirst() : undefined;
   const [jobs, findings, goals, activity, screenshots, botProtection, dismissals, said, marks] = await Promise.all([
-    tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error", "started_at", "finished_at", sql<number>`(select count(*)::int from run_events e where e.job_id = jobs.id and e.type = 'step')`.as("steps"), sql<boolean>`requested_by is not null`.as("requested"), sql<boolean>`status = 'leased' and exists (select 1 from run_events e where e.job_id = jobs.id and e.type = 'standby')`.as("on_standby")]).where("run_id", "=", runId).orderBy("position").execute(),
+    tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error", "started_at", "finished_at", sql<number>`coalesce((usage->>'steps')::int, (select count(*)::int from run_events e where e.job_id = jobs.id and e.type = 'step'))`.as("steps"), sql<boolean>`requested_by is not null`.as("requested"), sql<boolean>`status = 'leased' and exists (select 1 from run_events e where e.job_id = jobs.id and e.type = 'standby')`.as("on_standby")]).where("run_id", "=", runId).orderBy("position").execute(),
     tx.selectFrom("findings").select(["key", "persona_key", "kind", "filed_as", "goal", "title", "observed", "reproduction", "severity", "replay", "verdict", "same_as", "url", "quote", "step_people"]).where("run_id", "=", runId).orderBy("created_at").orderBy("key").execute(),
     tx.selectFrom("goal_outcomes").select(["persona_key", "goal", "status", "note"]).where("run_id", "=", runId).orderBy("persona_key").orderBy("goal").execute(),
     tx
@@ -485,10 +485,11 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
     tx
       .selectFrom("run_events as e")
       .innerJoin("jobs as j", "j.id", "e.job_id")
-      .select(["e.id", "e.type", "e.at", "e.payload", "e.job_id", "j.persona_key", "j.kind"])
+      .select(["e.id", "e.type", "e.at", "e.job_id", "j.persona_key", "j.kind",
+        sql<Record<string, unknown>>`jsonb_build_object('type', e.type, 'outcome', e.payload->'outcome', 'findingId', coalesce(e.payload->'finding'->>'id', e.payload->>'findingId'), 'findingKind', e.payload->'finding'->>'kind', 'title', e.payload->'finding'->>'title', 'text', e.payload->>'text', 'verdict', e.payload->>'verdict')`.as("payload")])
       .where("e.run_id", "=", runId)
       .where("e.type", "in", ["goal_status", "finding", "message", "verdict"])
-      .orderBy("e.id")
+      .orderBy("e.id", "desc")
       .limit(TIMELINE_MARKS)
       .execute(),
   ]);
@@ -529,8 +530,8 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
     goalTexts: snapshot.goals.map((g) => ({ id: g.id, instruction: g.instruction, ...(g.personaId ? { personaId: g.personaId } : {}) })),
     conversationMessages: said.toReversed().map((m) => ({ id: String(m.id), at: m.at, personaKey: m.persona_key, text: (m.payload as unknown as Extract<RunEvent, { type: "message" }>).text })),
     activity: activity.map((a) => ({ id: String(a.id), at: a.at, personaKey: a.persona_key, kind: a.kind, text: activityText(a.payload as unknown as RunEvent, goalText, findingTitle) })),
-    marks: marks.flatMap((m) => {
-      const mark = timelineMark(m.payload as unknown as RunEvent, m.persona_key, goalText);
+    marks: marks.toReversed().flatMap((m) => {
+      const mark = timelineMark(m.payload as unknown as MarkFields, m.persona_key, goalText);
       return mark ? [{ id: String(m.id), at: m.at, jobId: m.job_id, jobKind: m.kind, personaKey: m.persona_key, ...mark }] : [];
     }),
   };
@@ -544,12 +545,14 @@ type TimelineMark =
   | { kind: "message"; text: string }
   | { kind: "verdict"; findingKey: string; verdict: Verdict };
 
-function timelineMark(e: RunEvent, personaKey: string | null, goalText: Map<string, string>): TimelineMark | null {
+type MarkFields = { type: string; outcome: { goal: string; status: "reached" | "failed" | "not_attempted" } | null; findingId: string | null; findingKind: "defect" | "friction" | null; title: string | null; text: string | null; verdict: Verdict | null };
+
+function timelineMark(e: MarkFields, personaKey: string | null, goalText: Map<string, string>): TimelineMark | null {
   switch (e.type) {
-    case "goal_status": return { kind: "goal", status: e.outcome.status, goal: goalText.get(e.outcome.goal) ?? e.outcome.goal };
-    case "finding": return { kind: "finding", findingKey: `${personaKey}:${e.finding.id}`, findingKind: e.finding.kind, title: e.finding.title };
-    case "message": return { kind: "message", text: e.text };
-    case "verdict": return { kind: "verdict", findingKey: e.findingId, verdict: e.verdict };
+    case "goal_status": return e.outcome ? { kind: "goal", status: e.outcome.status, goal: goalText.get(e.outcome.goal) ?? e.outcome.goal } : null;
+    case "finding": return e.findingId ? { kind: "finding", findingKey: `${personaKey}:${e.findingId}`, findingKind: e.findingKind ?? "defect", title: e.title ?? "" } : null;
+    case "message": return e.text ? { kind: "message", text: e.text } : null;
+    case "verdict": return e.findingId && e.verdict ? { kind: "verdict", findingKey: e.findingId, verdict: e.verdict } : null;
     default: return null;
   }
 }

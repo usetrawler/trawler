@@ -25,6 +25,60 @@ export function timelineSpan(run: Pick<RunSummary, "jobs" | "marks">, now: numbe
   return { start, end };
 }
 
+const BREAK_MIN_MS = 5 * 60_000;
+const BREAK_SHARE = 0.2;
+const BREAK_WIDTH = 4;
+
+export interface TimeBreak {
+  from: number;
+  to: number;
+  left: number;
+}
+
+export interface TimeScale {
+  at: (t: number) => number;
+  breaks: TimeBreak[];
+  ticks: number[];
+}
+
+export function timeScale(span: Span, moments: number[]): TimeScale {
+  const total = span.end - span.start;
+  const points = [...new Set([span.start, span.end, ...moments.filter((t) => t >= span.start && t <= span.end)])].sort((a, b) => a - b);
+  const gaps: Array<{ from: number; to: number }> = [];
+  for (let i = 1; i < points.length; i++) {
+    const gap = points[i]! - points[i - 1]!;
+    if (gap > BREAK_MIN_MS && gap > total * BREAK_SHARE) gaps.push({ from: points[i - 1]!, to: points[i]! });
+  }
+  const shown = total - gaps.reduce((n, g) => n + (g.to - g.from), 0);
+  const room = 100 - gaps.length * BREAK_WIDTH;
+  const at = (t: number) => {
+    const clamped = Math.min(span.end, Math.max(span.start, t));
+    let x = 0;
+    let cursor = span.start;
+    for (const g of gaps) {
+      if (clamped <= g.from) break;
+      x += ((g.from - cursor) / shown) * room;
+      if (clamped < g.to) return x + ((clamped - g.from) / (g.to - g.from)) * BREAK_WIDTH;
+      x += BREAK_WIDTH;
+      cursor = g.to;
+    }
+    return x + ((clamped - cursor) / shown) * room;
+  };
+  const edges = [span.start, ...gaps.flatMap((g) => [g.from, g.to]), span.end];
+  const ticks: number[] = [];
+  for (const t of edges) if (ticks.every((u) => Math.abs(at(u) - at(t)) >= 12)) ticks.push(t);
+  for (let i = 0; i + 1 < edges.length; i += 2) {
+    const mid = (edges[i]! + edges[i + 1]!) / 2;
+    if (ticks.every((u) => Math.abs(at(u) - at(mid)) >= 12)) ticks.push(mid);
+  }
+  return { at, breaks: gaps.map((g) => ({ ...g, left: at(g.from) })), ticks: ticks.sort((a, b) => a - b) };
+}
+
+const lasted = (ms: number) => {
+  const minutes = Math.round(ms / 60_000);
+  return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+};
+
 export interface Turn {
   jobId: string;
   personaKey: string;
@@ -113,8 +167,10 @@ function Lane({ name, detail, tone, initialsText, children }: { name: string; de
 export function TimelineLanes({ run, live, now }: { run: RunSummary; live: boolean; now: number }) {
   const span = timelineSpan(run, now, live);
   if (!span) return null;
-  const at = (t: number) => Math.min(100, Math.max(0, ((t - span.start) / (span.end - span.start)) * 100));
   const turns = turnsOfPeople(run.jobs, now);
+  const laneJobs = run.jobs.filter((j) => LANE_KINDS.has(j.kind) && ms(j.started_at) !== null);
+  const scale = timeScale(span, [...laneJobs.flatMap((j) => [ms(j.started_at)!, ms(j.finished_at)].filter((t): t is number => t !== null)), ...run.marks.map((m) => ms(m.at)!)]);
+  const at = scale.at;
   const passes = handoffs(turns);
   const toneOfPerson = new Map(run.personas.map((p, i) => [p.id, toneOf(i)]));
   const findingNumber = new Map(run.marks.filter((m) => m.kind === "finding").map((m, i) => [m.kind === "finding" ? m.findingKey : "", i + 1]));
@@ -122,7 +178,7 @@ export function TimelineLanes({ run, live, now }: { run: RunSummary; live: boole
   const replays = run.jobs.filter((j) => j.kind === "replay" && ms(j.started_at) !== null);
   const verdicts = run.marks.filter((m) => m.kind === "verdict");
   const row = new Map(run.personas.map((p, i) => [p.id, i]));
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => span.start + f * (span.end - span.start));
+  const ticks = scale.ticks;
   const firstStart = new Map<string, number>();
   for (const t of turns) if (!firstStart.has(t.personaKey)) firstStart.set(t.personaKey, t.start);
   return (
@@ -131,7 +187,7 @@ export function TimelineLanes({ run, live, now }: { run: RunSummary; live: boole
       <div className="min-w-[44rem]">
         <div aria-hidden className="grid grid-cols-[10rem_minmax(0,1fr)] font-mono text-xs text-muted">
           <span />
-          <span className="relative block h-5">{ticks.map((t, i) => <span key={i} className={`absolute ${i === 0 ? "" : i === ticks.length - 1 ? "-translate-x-full" : "-translate-x-1/2"}`} style={{ left: `${(i / (ticks.length - 1)) * 100}%` }}><ClockTime iso={new Date(t).toISOString()} /></span>)}</span>
+          <span className="relative block h-5">{ticks.map((t, i) => <span key={i} className={`absolute ${i === 0 ? "" : i === ticks.length - 1 ? "-translate-x-full" : "-translate-x-1/2"}`} style={{ left: `${at(t)}%` }}><ClockTime iso={new Date(t).toISOString()} /></span>)}</span>
         </div>
         <div className="relative">
           <ul aria-label="People">
@@ -167,7 +223,13 @@ export function TimelineLanes({ run, live, now }: { run: RunSummary; live: boole
               if (a === undefined || b === undefined) return null;
               return <span key={i} className="absolute w-px bg-[repeating-linear-gradient(180deg,var(--muted)_0_3px,transparent_3px_6px)] opacity-60" style={{ left: `${at(h.at)}%`, top: Math.min(a, b) * ROW + ROW / 2, height: Math.abs(a - b) * ROW }} />;
             })}
-            {live && <span className="absolute -top-2 -bottom-2 w-0.5 rounded bg-ok" style={{ left: `${at(now)}%` }}><span className="absolute -top-4 -left-3 text-xs font-medium text-ok">now</span></span>}
+            {scale.breaks.map((b) => (
+              <span key={b.from} className="absolute inset-y-0 bg-panel" style={{ left: `${b.left}%`, width: `${BREAK_WIDTH}%` }}>
+                <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-[repeating-linear-gradient(180deg,var(--line)_0_4px,transparent_4px_8px)]" />
+                <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded bg-panel px-0.5 text-xs whitespace-nowrap text-muted [writing-mode:vertical-rl]">{lasted(b.to - b.from)} later</span>
+              </span>
+            ))}
+            {live && <span className="absolute -top-2 -bottom-2 w-0.5 rounded bg-ok" style={{ left: `${at(now)}%` }}><span className={`absolute -top-5 text-xs font-medium text-ok ${at(now) > 92 ? "right-1" : "-left-3"}`}>now</span></span>}
           </div>
         </div>
         <p aria-hidden className="mt-3 ml-40 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted">

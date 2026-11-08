@@ -74,25 +74,6 @@ export function outcome(view: View): { people: string; goals: string } {
   };
 }
 
-export function Conversation({ run }: { run: RunSummary }) {
-  if (!run.conversation) return null;
-  const name = (personaKey: string | null) => run.personas.find((p) => p.id === personaKey)?.name ?? "Someone";
-  return (
-    <section aria-labelledby="conversation" className="mt-6 flex flex-col gap-2">
-      <h2 id="conversation" className={`${label} text-muted`}>Conversation</h2>
-      {run.conversationMessages.length === 0 ? (
-        <p className="text-sm text-muted">No one has said anything yet.</p>
-      ) : (
-        <ul className="flex flex-col gap-1.5 border-l-2 border-action pl-3 text-sm">
-          {run.conversationMessages.map((m) => (
-            <li key={m.id}><span className="font-semibold">{name(m.personaKey)}</span> <span className="text-muted">says</span> &ldquo;{m.text}&rdquo;</li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
 export function PullRequestPlan({ run }: { run: RunSummary }) {
   const plan = run.prPlan;
   if (!plan) return null;

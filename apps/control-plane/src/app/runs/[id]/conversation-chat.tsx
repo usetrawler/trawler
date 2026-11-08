@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ClockTime } from "../../../components/local-time.tsx";
 import { findingAnchor } from "../../../runs/finding-anchor.ts";
 import type { RunSummary } from "../../../runs/runs.ts";
@@ -60,6 +60,20 @@ export function ConversationChat({ run, live, now }: { run: RunSummary; live: bo
   const firstShown = all ? 0 : Math.max(0, items.findIndex((i) => i === messages[Math.max(0, messages.length - SHOWN)]));
   const shown = items.slice(firstShown);
   const working = live ? run.jobs.find((j) => j.kind === "role_session" && j.status === "leased" && j.persona_key) : undefined;
+  useEffect(() => {
+    const showAddressed = () => {
+      const id = window.location.hash.startsWith("#message-") ? window.location.hash.slice("#message-".length) : null;
+      if (id && !shown.some((i) => i.kind === "message" && i.id === id) && messages.some((m) => m.id === id)) setAll(true);
+    };
+    showAddressed();
+    window.addEventListener("hashchange", showAddressed);
+    return () => window.removeEventListener("hashchange", showAddressed);
+  });
+  useEffect(() => {
+    if (!all) return;
+    const id = window.location.hash.slice(1);
+    if (id.startsWith("message-")) document.getElementById(id)?.scrollIntoView({ block: "center" });
+  }, [all]);
   const minutes = messages.length > 1 ? Math.max(1, Math.round((messages.at(-1)!.at - messages[0]!.at) / 60_000)) : 0;
   return (
     <section aria-labelledby="conversation" className="flex min-w-0 flex-col gap-4">
@@ -72,7 +86,7 @@ export function ConversationChat({ run, live, now }: { run: RunSummary; live: bo
         </div>
         <span aria-hidden className="flex">{people.map((p) => <span key={p.id} className="-ml-1.5 grid size-[26px] place-items-center rounded-full text-xs font-semibold ring-2 ring-panel" style={{ background: p.tone.bar, color: p.tone.onBar }}>{letterOf(p.name)}</span>)}</span>
       </div>
-      {messages.length > 0 && (
+      {(items.length > 0 || working) && (
         <ol className="flex flex-col gap-3.5" aria-live={live ? "polite" : undefined}>
           {!all && firstShown > 0 && (
             <li className="pl-[42px]"><button type="button" onClick={() => setAll(true)} className="text-sm text-muted underline underline-offset-4 hover:text-ink">Show the earlier {messages.length - Math.min(SHOWN, messages.length)} {messages.length - SHOWN === 1 ? "message" : "messages"}</button></li>
@@ -117,7 +131,7 @@ export function ConversationChat({ run, live, now }: { run: RunSummary; live: bo
           {working && (() => {
             const who = person(working.persona_key);
             return (
-              <li className="grid grid-cols-[30px_minmax(0,1fr)] items-start gap-3">
+              <li aria-live="off" className="grid grid-cols-[30px_minmax(0,1fr)] items-start gap-3">
                 <Avatar person={who} />
                 <div>
                   <p className="text-[13px]"><b className="text-sm font-semibold" style={{ color: who?.tone.text }}>{who?.name}</b> <span className="text-ok">is working · step {working.steps}</span></p>

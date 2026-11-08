@@ -4,7 +4,7 @@ import { ClockTime } from "../../../components/local-time.tsx";
 import { findingAnchor } from "../../../runs/finding-anchor.ts";
 import type { RunSummary } from "../../../runs/runs.ts";
 import type { Trail, TrailEntry, TrailTurn } from "../../../runs/trail.ts";
-import { mergeEarlier, mergeNewest, shownEntry, TOOL_LABEL, trailAnchor, turnEnd } from "./person-trail.tsx";
+import { mergeEarlier, mergeNewest, shownEntry, TOOL_LABEL, trailAnchor, turnEnd } from "./trail-helpers.ts";
 import { letterOf, toneOf, type PersonTone } from "./person-tones.ts";
 
 export type StoryFilter = { person: string } | "everyone" | "conversation" | "milestones";
@@ -71,52 +71,58 @@ export function storyGroups(entries: StoryEntry[], turns: Map<string, TrailTurn>
 function useTrails(runId: string, people: Array<{ id: string; name: string }>, active: boolean, live: boolean, pulse: unknown) {
   const [trails, setTrails] = useState<Record<string, Trail>>({});
   const [failed, setFailed] = useState<string[]>([]);
+  const [earlierFailed, setEarlierFailed] = useState(false);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const settled = useRef(false);
+  const latest = useRef(0);
+  const inFlight = useRef(false);
   const ids = people.map((p) => p.id).join("\n");
   const address = useCallback((id: string) => `/api/runs/${runId}/people/${encodeURIComponent(id)}/trail`, [runId]);
+  const fetchTrail = useCallback(async (url: string): Promise<Trail | null> => {
+    const res = await fetch(url, { cache: "no-store" });
+    if (res.status === 401) {
+      window.location.assign("/sign-in");
+      return null;
+    }
+    if (!res.ok) throw new Error(String(res.status));
+    return (await res.json()) as Trail;
+  }, []);
   const load = useCallback(async () => {
-    const results = await Promise.all(ids.split("\n").filter(Boolean).map(async (id) => {
-      try {
-        const res = await fetch(address(id), { cache: "no-store" });
-        if (res.status === 401) {
-          window.location.assign("/sign-in");
-          return [id, null] as const;
-        }
-        if (!res.ok) throw new Error(String(res.status));
-        return [id, (await res.json()) as Trail] as const;
-      } catch {
-        return [id, null] as const;
-      }
-    }));
-    setTrails((had) => Object.fromEntries(results.map(([id, got]) => [id, got ? mergeNewest(had[id] ?? null, got) : had[id]]).filter(([, t]) => t)) as Record<string, Trail>);
-    setFailed(results.filter(([, got]) => !got).map(([id]) => id));
-  }, [ids, address]);
+    const request = ++latest.current;
+    inFlight.current = true;
+    try {
+      const results = await Promise.all(ids.split("\n").filter(Boolean).map(async (id) => [id, await fetchTrail(address(id)).catch(() => null)] as const));
+      if (request !== latest.current) return;
+      setTrails((had) => Object.fromEntries(results.map(([id, got]) => [id, got ? mergeNewest(had[id] ?? null, got) : had[id]]).filter(([, t]) => t)) as Record<string, Trail>);
+      setFailed(results.filter(([, got]) => !got).map(([id]) => id));
+    } finally {
+      if (request === latest.current) inFlight.current = false;
+    }
+  }, [ids, address, fetchTrail]);
   useEffect(() => {
-    if (!active || settled.current) return;
+    if (!active || settled.current || inFlight.current || (live && document.hidden)) return;
     settled.current = !live;
     void load();
   }, [active, live, pulse, load]);
   const loadEarlier = useCallback(async () => {
     setLoadingEarlier(true);
+    setEarlierFailed(false);
     try {
-      const results = await Promise.all(Object.entries(trails).filter(([, t]) => t.olderThan !== null).map(async ([id, t]) => {
-        const res = await fetch(`${address(id)}?before=${t.olderThan}`, { cache: "no-store" });
-        if (!res.ok) throw new Error(String(res.status));
-        return [id, (await res.json()) as Trail, t.olderThan!] as const;
-      }));
+      const results = await Promise.all(Object.entries(trails).filter(([, t]) => t.olderThan !== null).map(async ([id, t]) => [id, await fetchTrail(`${address(id)}?before=${t.olderThan}`), t.olderThan!] as const));
       setTrails((had) => {
         const next = { ...had };
-        for (const [id, got, before] of results) next[id] = mergeEarlier(had[id] ?? null, got, before) ?? had[id]!;
+        for (const [id, got, before] of results) if (got) next[id] = mergeEarlier(had[id] ?? null, got, before) ?? had[id]!;
         return next;
       });
+      return true;
     } catch {
-      setFailed(["earlier"]);
+      setEarlierFailed(true);
+      return false;
     } finally {
       setLoadingEarlier(false);
     }
-  }, [trails, address]);
-  return { trails, failed, load, loadEarlier, loadingEarlier };
+  }, [trails, address, fetchTrail]);
+  return { trails, failed, earlierFailed, load, loadEarlier, loadingEarlier };
 }
 
 function Row({ row, people }: { row: StoryRow; people: Person[] }) {
@@ -159,9 +165,44 @@ function Row({ row, people }: { row: StoryRow; people: Person[] }) {
   );
 }
 
+const endTone = (t: TrailTurn) => (t.status === "failed" ? "text-bad" : (t.status === "succeeded" && t.stoppedBy === "finish") || t.status === "queued" || t.status === "leased" ? "text-muted" : "text-warn");
+
+export function StoryList({ groups, people, ref }: { groups: StoryGroup[]; people: Person[]; ref?: React.Ref<HTMLOListElement> }) {
+  const turnsOf = new Map<string, Set<string>>();
+  for (const g of groups) if (g.turn) turnsOf.set(g.personaKey, (turnsOf.get(g.personaKey) ?? new Set()).add(g.turn.id));
+  const lastOfTurn = new Map<string, string>();
+  for (const g of groups) if (g.turn) lastOfTurn.set(g.turn.id, g.key);
+  return (
+    <ol ref={ref} tabIndex={-1} className="flex flex-col outline-none">
+      {groups.map((g) => {
+        const who = people.find((p) => p.id === g.personaKey);
+        const steps = g.rows.reduce((n, r) => n + (r.kind === "steps" ? r.count : 0), 0);
+        const several = (turnsOf.get(g.personaKey)?.size ?? 0) > 1;
+        return (
+          <li key={g.key} className="relative pb-5 pl-[42px]">
+            <span aria-hidden className="absolute top-[34px] bottom-0 left-[14px] w-0.5 rounded" style={{ background: who?.tone.tint }} />
+            <span aria-hidden className="absolute top-0 left-0 grid size-[30px] place-items-center rounded-full text-xs font-semibold" style={{ background: who?.tone.bar, color: who?.tone.onBar }}>{letterOf(who?.name ?? "?")}</span>
+            <p className="pt-1 text-sm text-muted">
+              <b className="font-medium text-ink">{who?.name ?? "Someone"}</b>
+              {g.turn && several && <> · turn {g.turn.number}</>} · <ClockTime iso={g.from} />{g.to !== g.from && <>–<ClockTime iso={g.to} /></>}
+              {steps > 0 && <> · {steps} {steps === 1 ? "step" : "steps"}</>}
+            </p>
+            <ol className="mt-1">{g.rows.map((r) => <Row key={r.key} row={r} people={people} />)}</ol>
+            {g.turn && lastOfTurn.get(g.turn.id) === g.key && <p className={`mt-1.5 text-xs ${endTone(g.turn)}`}>{turnEnd(g.turn)}</p>}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 export function Story({ run, live, pulse, active, filter, onFilter }: { run: RunSummary; live: boolean; pulse: unknown; active: boolean; filter: StoryFilter; onFilter: (f: StoryFilter) => void }) {
   const people: Person[] = run.personas.map((p, i) => ({ ...p, tone: toneOf(i) }));
-  const { trails, failed, load, loadEarlier, loadingEarlier } = useTrails(run.id, run.personas, active, live, pulse);
+  const { trails, failed, earlierFailed, load, loadEarlier, loadingEarlier } = useTrails(run.id, run.personas, active, live, pulse);
+  const list = useRef<HTMLOListElement>(null);
+  const earlierThenFocus = async () => {
+    if (await loadEarlier()) list.current?.focus();
+  };
   const turns = new Map(Object.values(trails).flatMap((t) => t.turns.map((turn) => [turn.id, turn] as const)));
   const groups = storyGroups(filtered(storyEntries(trails, run.conversationMessages), filter), turns);
   const loaded = Object.keys(trails).length > 0;
@@ -183,12 +224,13 @@ export function Story({ run, live, pulse, active, filter, onFilter }: { run: Run
       </div>
       {failed.length > 0 && (
         <div className="flex flex-wrap items-center gap-3 text-sm">
-          <span role="alert" className="text-bad">{failed[0] === "earlier" ? "Earlier steps could not be loaded." : `What ${failed.map((id) => people.find((p) => p.id === id)?.name ?? id).join(" and ")} did could not be loaded.`}</span>
-          <button type="button" onClick={() => void (failed[0] === "earlier" ? loadEarlier() : load())} className="h-10 rounded-md border border-line bg-panel px-4 hover:border-muted">Try again</button>
+          <span role="alert" className="text-bad">What {failed.map((id) => people.find((p) => p.id === id)?.name ?? id).join(" and ")} did could not be loaded.</span>
+          <button type="button" onClick={() => { list.current?.focus(); void load(); }} className="h-10 rounded-md border border-line bg-panel px-4 hover:border-muted">Try again</button>
         </div>
       )}
+      {earlierFailed && <p role="alert" className="text-sm text-bad">Earlier steps could not be loaded. Choose Show earlier to try again.</p>}
       {earlier && (
-        <button type="button" aria-disabled={loadingEarlier || undefined} onClick={() => { if (!loadingEarlier) void loadEarlier(); }} className="h-10 w-max rounded-md border border-line bg-panel px-4 text-sm hover:border-muted aria-disabled:cursor-wait aria-disabled:opacity-60">
+        <button type="button" aria-disabled={loadingEarlier || undefined} onClick={() => { if (!loadingEarlier) void earlierThenFocus(); }} className="h-10 w-max rounded-md border border-line bg-panel px-4 text-sm hover:border-muted aria-disabled:cursor-wait aria-disabled:opacity-60">
           {loadingEarlier ? "Loading…" : "Show earlier"}
         </button>
       )}
@@ -197,25 +239,7 @@ export function Story({ run, live, pulse, active, filter, onFilter }: { run: Run
       ) : groups.length === 0 ? (
         <p className="text-sm text-muted">{filter === "conversation" ? "No one has said anything yet." : "Nothing to show yet."}</p>
       ) : (
-        <ol className="flex flex-col">
-          {groups.map((g) => {
-            const who = people.find((p) => p.id === g.personaKey);
-            const steps = g.rows.reduce((n, r) => n + (r.kind === "steps" ? r.count : 0), 0);
-            return (
-              <li key={g.key} className="relative pb-5 pl-[42px]">
-                <span aria-hidden className="absolute top-[34px] bottom-0 left-[14px] w-0.5 rounded" style={{ background: who?.tone.tint }} />
-                <span aria-hidden className="absolute top-0 left-0 grid size-[30px] place-items-center rounded-full text-xs font-semibold" style={{ background: who?.tone.bar, color: who?.tone.onBar }}>{letterOf(who?.name ?? "?")}</span>
-                <p className="pt-1 text-sm text-muted">
-                  <b className="font-medium text-ink">{who?.name ?? "Someone"}</b>
-                  {g.turn && <> · turn {g.turn.number}</>} · <ClockTime iso={g.from} />{g.to !== g.from && <>–<ClockTime iso={g.to} /></>}
-                  {steps > 0 && <> · {steps} {steps === 1 ? "step" : "steps"}</>}
-                </p>
-                <ol className="mt-1">{g.rows.map((r) => <Row key={r.key} row={r} people={people} />)}</ol>
-                {g.turn && g.turn.status !== "succeeded" && g.turn.status !== "leased" && <p className="mt-1.5 text-xs text-muted">{turnEnd(g.turn)}</p>}
-              </li>
-            );
-          })}
-        </ol>
+        <StoryList ref={list} groups={groups} people={people} />
       )}
     </section>
   );
