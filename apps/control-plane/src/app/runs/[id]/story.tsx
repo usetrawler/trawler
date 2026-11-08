@@ -248,7 +248,7 @@ export function Story({ run, live, pulse, active, filter, onFilter }: { run: Run
         </button>
       )}
       {!loaded && failed.length === 0 ? (
-        <p role="status" className="text-sm text-muted">Loading…</p>
+        <p role="status" className="text-sm text-muted">Loading the steps…</p>
       ) : groups.length === 0 ? (
         <p className="text-sm text-muted">{filter === "conversation" ? "No one has said anything yet." : "Nothing to show yet."}</p>
       ) : (

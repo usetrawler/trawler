@@ -95,6 +95,16 @@ export function turnsOfPeople(jobs: Job[], now: number): Turn[] {
     .sort((a, b) => a.start - b.start);
 }
 
+export function joinTurns(turns: Turn[], at: (t: number) => number, gap = 1): Turn[] {
+  const out: Turn[] = [];
+  for (const t of turns) {
+    const last = out.at(-1);
+    if (last && at(t.start) - at(last.end) < gap) last.end = Math.max(last.end, t.end);
+    else out.push({ ...t });
+  }
+  return out;
+}
+
 export interface Handoff {
   from: string;
   to: string;
@@ -186,6 +196,7 @@ export function TimelineLanes({ run, live, now }: { run: RunSummary; live: boole
   return (
     <section aria-labelledby="timeline-lanes" className="overflow-x-auto pb-1">
       <h2 id="timeline-lanes" className="sr-only">When each person acted</h2>
+      <p aria-hidden className="mb-3 text-sm text-muted sm:hidden">Swipe sideways to see the whole run.</p>
       <div className="min-w-[44rem]">
         <div aria-hidden className="grid grid-cols-[10rem_minmax(0,1fr)] font-mono text-xs text-muted">
           <span />
@@ -197,19 +208,19 @@ export function TimelineLanes({ run, live, now }: { run: RunSummary; live: boole
               const tone = toneOfPerson.get(p.id)!;
               const own = goalsOf(p.id);
               const reached = own.filter((g) => g.status === "reached").length;
-              const mine = turns.filter((t) => t.personaKey === p.id);
+              const mine = joinTurns(turns.filter((t) => t.personaKey === p.id), at);
               const first = firstStart.get(p.id);
               return (
                 <Lane key={p.id} name={p.name} detail={own.length ? `${reached} of ${own.length} ${own.length === 1 ? "goal" : "goals"}` : "no goals yet"} tone={tone} initialsText={letterOf(p.name)}>
                   {first !== undefined && first > span.start && <span aria-hidden className="absolute top-1/2 h-0.5 -translate-y-1/2 bg-[repeating-linear-gradient(90deg,var(--line)_0_4px,transparent_4px_8px)]" style={{ left: 0, width: `${at(first)}%` }} />}
-                  {mine.map((t) => <span key={t.jobId} aria-hidden className={`absolute top-1/2 h-2.5 -translate-y-1/2 rounded-md ${live && t.end === now ? "motion-safe:animate-pulse" : ""}`} style={{ left: `${at(t.start)}%`, width: `max(4px, ${at(t.end) - at(t.start)}%)`, background: tone.bar }} />)}
+                  {mine.map((t) => <span key={t.jobId} aria-hidden className={`absolute top-1/2 h-2.5 -translate-y-1/2 rounded-md ${live && t.end === now ? "motion-safe:animate-pulse" : ""}`} style={{ left: `${at(t.start)}%`, width: `max(10px, ${at(t.end) - at(t.start)}%)`, background: tone.bar }} />)}
                   {run.marks.filter((m) => m.personaKey === p.id && m.jobKind === "role_session" && m.kind !== "verdict").map((m) => <Marker key={m.id} mark={m} left={at(ms(m.at)!)} tone={tone} findingNumber={findingNumber} />)}
                 </Lane>
               );
             })}
             {replays.length > 0 && (
               <Lane name="Reproduced" detail="independently" tone={SYSTEM_TONE} initialsText="R">
-                {replays.map((j) => <span key={j.id} aria-hidden className="absolute top-1/2 h-2.5 -translate-y-1/2 rounded-md" style={{ left: `${at(ms(j.started_at)!)}%`, width: `max(4px, ${at(ms(j.finished_at) ?? now) - at(ms(j.started_at)!)}%)`, background: SYSTEM_TONE.bar }} />)}
+                {replays.map((j) => <span key={j.id} aria-hidden className="absolute top-1/2 h-2.5 -translate-y-1/2 rounded-md" style={{ left: `${at(ms(j.started_at)!)}%`, width: `max(10px, ${at(ms(j.finished_at) ?? now) - at(ms(j.started_at)!)}%)`, background: SYSTEM_TONE.bar }} />)}
               </Lane>
             )}
             {verdicts.length > 0 && (

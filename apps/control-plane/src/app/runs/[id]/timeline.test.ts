@@ -6,7 +6,7 @@ import type { Trail } from "../../../runs/trail.ts";
 import { chatItems, ConversationChat, withMentions } from "./conversation-chat.tsx";
 import { toneOf } from "./person-tones.ts";
 import { filtered, storyEntries, storyGroups } from "./story.tsx";
-import { handoffs, timelineSpan, TimelineLanes, timeScale, turnsOfPeople } from "./timeline-lanes.tsx";
+import { handoffs, joinTurns, timelineSpan, TimelineLanes, timeScale, turnsOfPeople } from "./timeline-lanes.tsx";
 
 const T = (min: number) => new Date(Date.UTC(2026, 10, 8, 9, 50) + min * 60_000);
 type Job = RunSummary["jobs"][number];
@@ -124,3 +124,10 @@ test("when every stretch would fold, the scale stays even and never yields a pos
   expect(live.ticks.every(Number.isFinite)).toBe(true);
 });
 
+
+test("a person's turns separated by a sliver of time draw as one bar, and a real pause keeps them apart", () => {
+  const at = (t: number) => t / 10;
+  const turns = [{ jobId: "a", personaKey: "ana", start: 0, end: 100 }, { jobId: "b", personaKey: "ana", start: 105, end: 200 }, { jobId: "c", personaKey: "ana", start: 400, end: 410 }];
+  expect(joinTurns(turns, at)).toEqual([{ jobId: "a", personaKey: "ana", start: 0, end: 200 }, { jobId: "c", personaKey: "ana", start: 400, end: 410 }]);
+  expect(turns[0]!.end).toBe(100);
+});
