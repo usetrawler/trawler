@@ -76,7 +76,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
               {project.features.length > 0 && (
                 <details className="group relative text-muted">
                   <summary className="cursor-pointer list-none underline-offset-4 hover:text-ink hover:underline [&::-webkit-details-marker]:hidden">Built from {project.features.length} {project.features.length === 1 ? "feature" : "features"}</summary>
-                  <ul className="mt-2 flex flex-col gap-1 text-ink">{project.features.map((f) => <li key={f}>{f}</li>)}</ul>
+                  <ul className="absolute left-0 z-10 mt-2 flex w-max max-w-xs flex-col gap-1 rounded-md border border-line bg-panel p-3 text-ink shadow-sm">{project.features.map((f) => <li key={f}>{f}</li>)}</ul>
                 </details>
               )}
               <Link href={`/projects/${project.id}/features?plan=${planId}`} className="underline underline-offset-4 hover:text-action-ink">{project.features.length > 0 ? "Change features and propose people again" : "Choose features and propose people"}</Link>
