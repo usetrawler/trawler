@@ -27,6 +27,7 @@ type Changed = { onDone: Moved; onRefused: () => Promise<void> };
 type Outcome = { error?: string; why?: "reason" | "settled" | "other" };
 
 const POLL_MS = 2000;
+const COPY_WAIT_MS = 3000;
 const usd = (n: number) => `$${n.toFixed(2)}`;
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -289,9 +290,15 @@ export function CopyIssue({ f, status, runNumber, primary }: { f: ReportFinding;
     const origin = window.location.origin;
     const text = findingMarkdown(f, { status, runTitle: runTitle(runNumber), runUrl: `${origin}${runPath(runNumber)}#${findingAnchor(f.key)}`, origin });
     setMarkdown(text);
-    const written = navigator.clipboard?.writeText(text);
+    let written: Promise<void> | undefined;
+    try {
+      written = navigator.clipboard?.writeText(text);
+    } catch {
+      written = undefined;
+    }
     if (!written) return setState("failed");
-    written.then(() => setState("copied"), () => setState("failed"));
+    const tooLong = new Promise<never>((_, refuse) => setTimeout(() => refuse(new Error("timed out")), COPY_WAIT_MS));
+    Promise.race([written, tooLong]).then(() => setState("copied"), () => setState("failed"));
   };
   return (
     <div className="flex flex-col gap-2">
@@ -329,7 +336,7 @@ export function FindingRow({ f, n, mark, tag, note, detail, action, dismiss, cop
     return () => window.removeEventListener("hashchange", openWhenAddressed);
   }, [anchor]);
   useEffect(() => {
-    if (!autoOpen || !details.current || window.location.hash.startsWith("#finding-")) return;
+    if (!autoOpen || !details.current || details.current.open || window.location.hash.startsWith("#finding-")) return;
     details.current.dataset.opened = "auto";
     details.current.open = true;
   }, [autoOpen]);
@@ -342,7 +349,7 @@ export function FindingRow({ f, n, mark, tag, note, detail, action, dismiss, cop
       return;
     }
     if (event.currentTarget.open) address();
-    else if (window.location.hash === `#${anchor}`) window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    else if (window.location.hash === `#${anchor}`) window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#findings`);
   };
   return (
     <li id={anchor} className="border-b border-line bg-panel last:border-b-0">
@@ -577,10 +584,10 @@ function PeopleOutcomes({ view }: { view: View }) {
 const PANELS = [["findings", "Findings"], ["timeline", "Timeline"], ["details", "Details"]] as const;
 type Panel = (typeof PANELS)[number][0];
 
-function panelForHash(hash: string, unaddressed: Panel): Panel {
+export function panelForHash(hash: string, unaddressed: Panel): Panel {
   if (hash === "#findings" || hash.startsWith("#finding-")) return "findings";
-  if (hash === "#timeline" || hash === "#goals" || hash.startsWith("#trail-")) return "timeline";
-  if (hash === "#details" || hash === "#activity" || hash === "#conversation" || hash === "#pr-plan") return "details";
+  if (hash === "#timeline" || hash === "#goals" || hash === "#activity" || hash === "#conversation" || hash.startsWith("#trail-")) return "timeline";
+  if (hash === "#details" || hash === "#pr-plan") return "details";
   return unaddressed;
 }
 
@@ -665,7 +672,7 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
       window.removeEventListener("hashchange", syncPanel);
       window.removeEventListener("popstate", syncPanel);
     };
-  }, [panel]);
+  }, [panel, startPanel]);
   const openPanel = (next: Panel) => {
     if (next === panel) return;
     window.history.pushState(window.history.state, "", `#${next}`);

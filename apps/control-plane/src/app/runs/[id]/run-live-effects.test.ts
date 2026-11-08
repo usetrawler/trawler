@@ -33,7 +33,7 @@ vi.mock("react", async (original) => ({
 const actions = vi.hoisted(() => ({ cancelRunAction: vi.fn(), judgeAgainAction: vi.fn(), runAgainAction: vi.fn(), dismissFindingAction: vi.fn(), undoDismissalAction: vi.fn() }));
 vi.mock("./actions.ts", () => actions);
 
-const { CancelButton, CopyIssue, FindingRow, JudgeAgainButton, NotABugButton, RunLive, UndoNotABug } = await import("./run-live.tsx");
+const { CancelButton, CopyIssue, FindingRow, JudgeAgainButton, NotABugButton, RunLive, UndoNotABug, panelForHash } = await import("./run-live.tsx");
 const { RunAgainError } = await import("./run-again-button.tsx");
 const { UnrecognizedActionError } = await import("next/dist/client/components/unrecognized-action-error.js");
 type Moved = (key: string, text: string) => Promise<void>;
@@ -302,7 +302,7 @@ test("a finding named in the address opens when the page loads or the address ch
   toggle({ currentTarget: { open: true } });
   expect(replaceState).toHaveBeenCalledOnce();
   toggle({ currentTarget: { open: false } });
-  expect(replaceState).toHaveBeenLastCalledWith(null, "", "/runs/run-1?from=list");
+  expect(replaceState).toHaveBeenLastCalledWith(null, "", "/runs/run-1?from=list#findings");
   location.hash = "#finding-ana%3Af2";
   toggle({ currentTarget: { open: false } });
   expect(replaceState).toHaveBeenCalledTimes(2);
@@ -591,6 +591,13 @@ test("the finding to act on opens by itself when the address names no finding, w
   expect(replaceState).toHaveBeenCalledWith(null, "", "#finding-ana%3Af1");
   expect(open(true, "#finding-ana%3Af9").details.open).toBe(false);
   expect(open(false, "").details.open).toBe(false);
+  location.hash = "";
+  const already = { open: true, dataset: {} as Record<string, string> };
+  Object.assign(react, { effects: [], refIndex: 0 });
+  react.refs = [{ current: null }, { current: already }];
+  FindingRow({ f: finding as never, n: 1, autoOpen: true });
+  react.effects[2]!();
+  expect(already.dataset.opened).toBeUndefined();
 });
 
 test("Copy as issue copies the finding as Markdown with a link back to it, says so, and offers the text to copy by hand when the browser refuses", async () => {
@@ -615,5 +622,18 @@ test("Copy as issue copies the finding as Markdown with a link back to it, says 
   expect(copied.copy.props!.className).toMatch(/\bbg-action\b/);
   expect((await copyWith({ writeText: vi.fn(async () => { throw new Error("denied"); }) })).state).toHaveBeenCalledWith("failed");
   expect((await copyWith(undefined)).state).toHaveBeenCalledWith("failed");
+  expect((await copyWith({ writeText: () => { throw new Error("not allowed"); } })).state).toHaveBeenCalledWith("failed");
+  const hanging = await copyWith({ writeText: () => new Promise(() => {}) });
+  expect(hanging.state).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(hanging.state).toHaveBeenCalledWith("failed");
   expect((await copyWith({ writeText }, false)).copy.props!.className).not.toMatch(/\bbg-action\b/);
+});
+
+test("every address the run page ever used opens the panel that now holds what it named, and an address naming nothing opens the run's own start", () => {
+  for (const hash of ["#findings", "#finding-ana%3Af1"]) expect(panelForHash(hash, "timeline")).toBe("findings");
+  for (const hash of ["#timeline", "#goals", "#activity", "#conversation", "#trail-ana"]) expect(panelForHash(hash, "findings")).toBe("timeline");
+  for (const hash of ["#details", "#pr-plan"]) expect(panelForHash(hash, "findings")).toBe("details");
+  expect(panelForHash("", "findings")).toBe("findings");
+  expect(panelForHash("", "timeline")).toBe("timeline");
 });
