@@ -5,6 +5,7 @@ import { RevealCurrentEntry } from "./current-entry.tsx";
 import { DocsLink } from "./docs-link.tsx";
 import { Icon, type IconName } from "./icon.tsx";
 import { initials } from "./initials.ts";
+import { Menu } from "./menu.tsx";
 import { SignOutButton } from "./sign-out-button.tsx";
 import { ThemeToggle } from "./theme-toggle.tsx";
 
@@ -38,7 +39,7 @@ function NavItem({ href, icon, label, detail, count, active, parent }: { href: s
 function AccountMenu({ user, className }: { user: Shell["user"]; className: string }) {
   const who = user.name || user.email;
   return (
-    <details className={`group relative ${className}`}>
+    <Menu className={`group relative ${className}`}>
       <summary aria-label={`Account: ${who}`} className="flex min-h-10 cursor-pointer list-none items-center gap-2.5 rounded-md px-2 hover:bg-soft [&::-webkit-details-marker]:hidden">
         <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full bg-ink text-xs font-medium text-paper">{initials(who)}</span>
         <span className="min-w-0 flex-1 max-md:sr-only">
@@ -55,7 +56,7 @@ function AccountMenu({ user, className }: { user: Shell["user"]; className: stri
         <ThemeToggle withLabel className={menuItem} />
         <SignOutButton className={menuItem} />
       </div>
-    </details>
+    </Menu>
   );
 }
 
