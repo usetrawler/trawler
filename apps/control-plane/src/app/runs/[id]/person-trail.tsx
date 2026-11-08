@@ -4,7 +4,7 @@ import type { Trail, TrailEntry, TrailTurn } from "../../../runs/trail.ts";
 
 const label = "text-xs";
 
-const TOOL_LABEL: Record<string, string> = {
+export const TOOL_LABEL: Record<string, string> = {
   browser_navigate: "Opened a page", browser_navigate_back: "Went back", browser_snapshot: "Read the page", browser_click: "Clicked",
   browser_type: "Typed", browser_hover: "Hovered", browser_select_option: "Chose an option", browser_press_key: "Pressed a key",
   browser_wait_for: "Waited", browser_handle_dialog: "Answered a dialog", browser_file_upload: "Closed a file picker",
@@ -57,7 +57,7 @@ function Entry({ e }: { e: TrailEntry }) {
   }
 }
 
-const shownEntry = (e: TrailEntry) => !(e.kind === "step" && e.tool && OWN_ENTRY.has(e.tool));
+export const shownEntry = (e: TrailEntry) => !(e.kind === "step" && e.tool && OWN_ENTRY.has(e.tool));
 
 export function TrailView({ trail, loadingEarlier, onEarlier, focusEntry }: { trail: Trail; loadingEarlier: boolean; onEarlier: () => void; focusEntry?: number | null }) {
   const focusRef = useRef<HTMLLIElement>(null);

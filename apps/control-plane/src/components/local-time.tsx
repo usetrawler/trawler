@@ -17,3 +17,12 @@ export function LocalTime({ iso }: { iso: string }) {
   const text = useSyncExternalStore(neverChanges, () => localText(iso), () => utcText(iso));
   return <time dateTime={iso}>{text}</time>;
 }
+
+export function clockText(iso: string): string {
+  return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+}
+
+export function ClockTime({ iso }: { iso: string }) {
+  const text = useSyncExternalStore(neverChanges, () => clockText(iso), () => utcText(iso).slice(11, 16));
+  return <time dateTime={iso}>{text}</time>;
+}

@@ -10,7 +10,7 @@ export type TrailEntry = { id: number; turn: string; at: string } & (
   | { kind: "step"; step: number; tool: string | null; page: string | null }
   | { kind: "note"; text: string }
   | { kind: "goal"; status: "reached" | "failed" | "not_attempted"; goal: string; note: string }
-  | { kind: "finding"; findingKind: "defect" | "friction"; title: string }
+  | { kind: "finding"; findingKind: "defect" | "friction"; title: string; findingKey: string }
   | { kind: "blocked"; address: string }
   | { kind: "bot_protection"; vendor: string; page: string | null }
 );
@@ -33,14 +33,14 @@ export interface Trail {
 const hostOf = (address: string) => (URL.canParse(address) ? new URL(address).host : address);
 const withoutQuery = (address: string) => (URL.canParse(address) ? `${new URL(address).origin}${new URL(address).pathname}` : null);
 
-function entryOf(row: { id: string; job_id: string; at: Date; payload: unknown }, target: string, goalText: Map<string, string>): TrailEntry | null {
+function entryOf(row: { id: string; job_id: string; at: Date; payload: unknown }, target: string, goalText: Map<string, string>, personaKey: string): TrailEntry | null {
   const e = row.payload as RunEvent;
   const base = { id: Number(row.id), turn: row.job_id, at: new Date(row.at).toISOString() };
   switch (e.type) {
     case "step": return { ...base, kind: "step", step: e.step, tool: e.tool, page: pageLabel(e.url ?? null, target) };
     case "note": return { ...base, kind: "note", text: e.text };
     case "goal_status": return { ...base, kind: "goal", status: e.outcome.status, goal: goalText.get(e.outcome.goal) ?? e.outcome.goal, note: e.outcome.note ?? "" };
-    case "finding": return { ...base, kind: "finding", findingKind: e.finding.kind, title: e.finding.title };
+    case "finding": return { ...base, kind: "finding", findingKind: e.finding.kind, title: e.finding.title, findingKey: `${personaKey}:${e.finding.id}` };
     case "blocked_request": return { ...base, kind: "blocked", address: hostOf(e.url) };
     case "bot_protection": return { ...base, kind: "bot_protection", vendor: e.vendor, page: pageLabel(withoutQuery(e.url), target) };
     default: return null;
@@ -72,7 +72,7 @@ export async function personTrail(tx: Tx, orgId: string, runId: string, personaK
   const page = rows.slice(0, TRAIL_PAGE).reverse();
   return {
     turns: jobs.map((j, i) => ({ id: j.id, number: i + 1, status: j.status, stoppedBy: j.stopped_by, error: j.error, entries: count.get(j.id) ?? 0 })),
-    entries: page.flatMap((row) => entryOf(row, snapshot.targetUrl, goalText) ?? []),
+    entries: page.flatMap((row) => entryOf(row, snapshot.targetUrl, goalText, personaKey) ?? []),
     olderThan: rows.length > TRAIL_PAGE ? Number(page[0]!.id) : null,
   };
 }

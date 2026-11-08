@@ -15,7 +15,10 @@ import { updatedSinceOpened } from "../../../components/updated-since-opened.ts"
 import { cancelRunAction, dismissFindingAction, judgeAgainAction, undoDismissalAction } from "./actions.ts";
 import { viaClient } from "../../../runs/via.ts";
 import { FindingScreenshots } from "./finding-screenshots.tsx";
-import { trailAnchor, Trails } from "./person-trail.tsx";
+import { ConversationChat } from "./conversation-chat.tsx";
+import { Story, type StoryFilter } from "./story.tsx";
+import { TimelineLanes } from "./timeline-lanes.tsx";
+import { letterOf, toneOf } from "./person-tones.ts";
 import { RunAgainButton, RunAgainError, useRunAgain } from "./run-again-button.tsx";
 import { findingMarkdown } from "../../../runs/finding-markdown.ts";
 
@@ -517,62 +520,40 @@ function Stages({ stages }: { stages: View["stages"] }) {
   );
 }
 
-function LivePeople({ view }: { view: View }) {
+function PeopleColumn({ view, steps, onShow }: { view: View; steps: Map<string, number>; onShow: (personId: string) => void }) {
   return (
-    <ul aria-label="People" className="border-t border-line">
-      {view.personas.map((p) => {
-        const [state, tone] = PERSONA_LABEL[p.state];
-        const reached = p.goals.filter((g) => g.status === "reached").length;
-        return (
-          <li key={p.id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 border-b border-line py-4 max-sm:grid-cols-[auto_minmax(0,1fr)]">
-            <span aria-hidden className="relative grid size-10 place-items-center rounded-full bg-soft text-xs text-muted">
-              {p.state === "exploring" && <span className="absolute -inset-1 rounded-full border-2 border-ink border-t-transparent motion-safe:animate-spin [animation-duration:1.6s]" />}
-              {initials(p.name)}
-            </span>
-            <span className="min-w-0">
-              <span className="flex flex-wrap items-baseline gap-x-2">
-                <strong className="font-medium break-words">{p.name}</strong>
-                <span className={`text-sm ${tone}`}>{state}</span>
-              </span>
-              <span className="mt-1 block break-words">{personLine(p)}</span>
-            </span>
-            <span className="flex w-36 flex-col items-end gap-1.5 text-sm text-muted max-sm:col-start-2 max-sm:items-start">
-              {reached} of {plural(p.goals.length, "goal", "goals")}
-              <span aria-hidden className="h-1 w-full rounded-full bg-soft"><span className="block h-full rounded-full bg-ink" style={{ width: `${p.goals.length ? (reached / p.goals.length) * 100 : 0}%` }} /></span>
-            </span>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-function PeopleOutcomes({ view }: { view: View }) {
-  const id = useId();
-  return (
-    <section aria-labelledby={id} className="rounded-lg border border-line p-5">
-      <h2 id={id} className="text-base font-medium">Goals</h2>
-      <ul>
-        {view.personas.map((p) => {
-          const good = p.state === "reached";
-          const bad = p.state === "missed" || p.state === "failed";
+    <section aria-labelledby="people-goals" className="flex min-w-0 flex-col">
+      <h2 id="people-goals" className="text-lg font-medium">{view.live ? "Right now" : "Goals"}</h2>
+      {!view.live && <p className="text-sm text-muted">{outcome(view).people}</p>}
+      <ul aria-label="People" className="mt-3">
+        {view.personas.map((p, i) => {
+          const [state, tone] = PERSONA_LABEL[p.state];
+          const reached = p.goals.filter((g) => g.status === "reached").length;
+          const colour = toneOf(i);
           return (
-            <li key={p.id} className="grid grid-cols-[auto_minmax(0,1fr)] gap-[9px] border-b border-line py-3 last:border-b-0">
-              <span aria-hidden className={`grid size-[22px] place-items-center rounded-full text-sm ${good ? "bg-ok text-paper" : bad ? "bg-action text-[#17191c]" : "bg-soft text-muted"}`}>{good ? "✓" : bad ? "×" : "–"}</span>
-              <div className="min-w-0 text-sm text-muted">
-                <strong className="block font-medium break-words text-ink">{p.name}<span className="sr-only">: {PERSONA_LABEL[p.state][0]}.</span></strong>
-                <span className="block break-words">{personLine(p)}</span>
+            <li key={p.id} className="border-t border-line py-4 first:border-t-0 first:pt-1">
+              <div className="flex items-center gap-2.5">
+                <span aria-hidden className="relative grid size-[30px] shrink-0 place-items-center rounded-full text-xs font-semibold" style={{ background: colour.bar, color: colour.onBar }}>
+                  {p.state === "exploring" && <span className="absolute -inset-1 rounded-full border-2 border-t-transparent motion-safe:animate-spin [animation-duration:1.6s]" style={{ borderColor: colour.bar, borderTopColor: "transparent" }} />}
+                  {letterOf(p.name)}
+                </span>
+                <strong className="min-w-0 font-medium break-words">{p.name}</strong>
+                <span className={`text-sm ${tone}`}>{state}</span>
+                <span className="ml-auto shrink-0 text-sm text-muted tabular-nums">{reached} of {plural(p.goals.length, "goal", "goals")}</span>
+              </div>
+              <div className="mt-1.5 pl-10 text-sm text-muted">
+                <p className="break-words">{personLine(p)}</p>
                 <ul aria-label={`Goals of ${p.name}`} className="mt-2 flex flex-col gap-1.5">
-                    {p.goals.map((g) => (
-                      <li key={g.id} className="break-words">
-                        <span aria-hidden className={g.status === "reached" ? "text-ok" : g.status === "failed" ? "text-warn" : ""}>{g.status === "reached" ? "✓" : g.status === "failed" ? "✕" : "·"}</span>
-                        <span className="sr-only">{g.status === "reached" ? "Reached: " : g.status === "failed" ? "Not reached: " : "No answer: "}</span> <span className="text-ink">{g.goal}</span>
-                        {g.note && <span> — {g.note}</span>}
-                      </li>
-                    ))}
+                  {p.goals.map((g) => (
+                    <li key={g.id} className="break-words">
+                      <span aria-hidden className={g.status === "reached" ? "text-ok" : g.status === "failed" ? "text-bad" : ""}>{g.status === "reached" ? "✓" : g.status === "failed" ? "✕" : "·"}</span>
+                      <span className="sr-only">{g.status === "reached" ? "Reached: " : g.status === "failed" ? "Not reached: " : "No answer: "}</span> <span className="text-ink">{g.goal}</span>
+                      {g.note && <span> — {g.note}</span>}
+                    </li>
+                  ))}
                 </ul>
                 {(p.defects > 0 || p.friction > 0) && <span className="mt-1 block">{plural(p.defects, "defect report", "defect reports")} · {plural(p.friction, "friction", "frictions")}</span>}
-                <a href={`#${trailAnchor(p.id)}`} className="mt-1 inline-block underline underline-offset-4 hover:text-ink">What they did<span className="sr-only">: {p.name}</span></a>
+                <button type="button" onClick={() => onShow(p.id)} className="mt-1.5 underline underline-offset-4 hover:text-ink">What {p.name} did{steps.get(p.id) ? ` · ${plural(steps.get(p.id)!, "step", "steps")}` : ""}</button>
               </div>
             </li>
           );
@@ -582,12 +563,23 @@ function PeopleOutcomes({ view }: { view: View }) {
   );
 }
 
+function stepsOf(run: RunSummary): Map<string, number> {
+  const steps = new Map<string, number>();
+  for (const j of run.jobs) if (j.kind === "role_session" && j.persona_key) steps.set(j.persona_key, (steps.get(j.persona_key) ?? 0) + Number(j.steps ?? 0));
+  return steps;
+}
+
+function stableNow(run: RunSummary): number {
+  const times = [run.createdAt, run.startedAt, run.finishedAt, ...run.jobs.flatMap((j) => [j.started_at, j.finished_at]), ...run.marks.map((m) => m.at)];
+  return Math.max(...times.filter((t) => t !== null).map((t) => new Date(t).getTime()));
+}
+
 const PANELS = [["findings", "Findings"], ["timeline", "Timeline"], ["details", "Details"]] as const;
 type Panel = (typeof PANELS)[number][0];
 
 export function panelForHash(hash: string, unaddressed: Panel): Panel {
   if (hash === "#findings" || hash.startsWith("#finding-")) return "findings";
-  if (hash === "#timeline" || hash === "#goals" || hash === "#activity" || hash === "#conversation" || hash.startsWith("#trail-")) return "timeline";
+  if (hash === "#timeline" || hash === "#goals" || hash === "#activity" || hash === "#conversation" || hash.startsWith("#trail-") || hash.startsWith("#message-")) return "timeline";
   if (hash === "#details" || hash === "#pr-plan") return "details";
   return unaddressed;
 }
@@ -637,6 +629,8 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
   const [reveal, setReveal] = useState(false);
   const startPanel: Panel = initial.view.live ? "timeline" : "findings";
   const [panel, setPanel] = useState<Panel>(startPanel);
+  const [storyFilter, setStoryFilter] = useState<StoryFilter>("everyone");
+  const [now, setNow] = useState(() => stableNow(initial.run));
   const focused = useCallback(() => setFocusKey(null), []);
   const again = useRunAgain();
   const moved = useCallback<Moved>(async (key, text) => {
@@ -656,11 +650,18 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
     setFocusKey(finished[0]!);
   }, [view.report]);
   useEffect(() => {
+    setNow(Date.now());
+    if (!view.live) return;
+    const timer = setInterval(() => setNow(Date.now()), POLL_MS);
+    return () => clearInterval(timer);
+  }, [view.live]);
+  useEffect(() => {
     const syncPanel = () => {
       const hash = window.location.hash;
       const next = panelForHash(hash, startPanel);
       if (next !== panel) return setPanel(next);
-      if (!/^#(?:finding-|trail-|pr-plan$|conversation$)/.test(hash)) return;
+      if (hash.startsWith("#trail-")) setStoryFilter({ person: decodeURIComponent(hash.slice("#trail-".length)) });
+      if (!/^#(?:finding-|trail-|message-|pr-plan$|conversation$)/.test(hash)) return;
       const addressed = document.getElementById(hash.slice(1));
       if (!addressed) return;
       const { top, bottom } = addressed.getBoundingClientRect();
@@ -751,30 +752,26 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
         </div>
       </div>
       <div id="run-timeline" hidden={panel !== "timeline"} className="pt-6">
-        {view.live ? (
-          <>
-            <Stages stages={view.stages} />
-            <LivePeople view={view} />
-            {view.live && <p className="mt-3 text-sm text-muted">Safe to leave. The run keeps going in the background.</p>}
-          </>
-        ) : (
-          <>
-            <p className="mb-3 text-muted">{outcome(view).people}</p>
-            <PeopleOutcomes view={view} />
-          </>
-        )}
-        {run.activity.length > 0 && (
-          <section className="mt-6 flex flex-col gap-2">
-            <h2 className="text-base font-medium">Latest activity</h2>
-            <ul className="grid gap-1 text-sm">
-              {run.activity.map((a) => (
-                <li key={a.id} className="wrap-anywhere"><span className="text-muted">{run.personas.find((p) => p.id === a.personaKey)?.name ?? (a.kind === "judge" ? "Judge" : "Replay")}: </span>{a.text}</li>
-              ))}
-            </ul>
-          </section>
-        )}
-        <Conversation run={run} />
-        <div className="mt-6"><Trails runId={run.id} people={run.personas} live={view.live} pulse={data} /></div>
+        {view.live && <Stages stages={view.stages} />}
+        <TimelineLanes run={run} live={view.live} now={now} />
+        <div className={`mt-10 grid gap-12 ${run.conversation ? "lg:grid-cols-[minmax(0,1fr)_22rem]" : ""}`}>
+          {run.conversation && <ConversationChat run={run} live={view.live} now={now} />}
+          <div className="flex min-w-0 flex-col gap-8">
+            <PeopleColumn view={view} steps={stepsOf(run)} onShow={(id) => { setStoryFilter({ person: id }); document.getElementById("story")?.scrollIntoView({ block: "start" }); }} />
+            {view.live && run.activity.length > 0 && (
+              <section className="flex flex-col gap-2">
+                <h2 className="text-base font-medium">Latest activity</h2>
+                <ul className="grid gap-1 text-sm">
+                  {run.activity.map((a) => (
+                    <li key={a.id} className="wrap-anywhere"><span className="text-muted">{run.personas.find((p) => p.id === a.personaKey)?.name ?? (a.kind === "judge" ? "Judge" : "Replay")}: </span>{a.text}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </div>
+        </div>
+        {view.live && <p className="mt-4 text-sm text-muted">Safe to leave. The run keeps going in the background.</p>}
+        <div className="mt-12"><Story run={run} live={view.live} pulse={data} active={panel === "timeline"} filter={storyFilter} onFilter={setStoryFilter} /></div>
       </div>
       <div id="run-details" hidden={panel !== "details"} className="pt-6">
         <div className="flex flex-col gap-1 text-sm text-muted">

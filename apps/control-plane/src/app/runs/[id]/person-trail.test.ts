@@ -16,7 +16,7 @@ test("a trail shows each step with its tool and page, notes, goals, findings and
       { id: 11, turn: "t1", at: "", kind: "step", step: 2, tool: "note", page: "/invoices/new" },
       { id: 2, turn: "t1", at: "", kind: "note", text: "Send is greyed out." },
       { id: 3, turn: "t1", at: "", kind: "goal", status: "failed", goal: "Send an invoice.", note: "It never sent." },
-      { id: 4, turn: "t1", at: "", kind: "finding", findingKind: "defect", title: "Send does nothing" },
+      { id: 4, turn: "t1", at: "", kind: "finding", findingKind: "defect", title: "Send does nothing", findingKey: "ana:f1" },
       { id: 5, turn: "t1", at: "", kind: "blocked", address: "tracker.example" },
       { id: 6, turn: "t1", at: "", kind: "bot_protection", vendor: "Cloudflare", page: "/login" },
       { id: 7, turn: "t2", at: "", kind: "step", step: 1, tool: null, page: null },
