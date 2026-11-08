@@ -5,6 +5,7 @@ import { AppShell } from "../../../../components/app-shell.tsx";
 import { ProjectHead } from "../../../../components/project-head.tsx";
 import { withOrg } from "../../../../db/tenancy.ts";
 import { projectHead, runCounts, workspaceRuns } from "../../../../projects/overview.ts";
+import { projectCounts } from "../../../../projects/project-home.ts";
 import { projectRunState } from "../../../../runs/runs.ts";
 import { signedInMember } from "../../../../server/auth.ts";
 import { getDb } from "../../../../server/db.ts";
@@ -39,16 +40,16 @@ export default async function ProjectRunsPage({ params, searchParams }: { params
     const plan = parsePlanQuery(query, [...standard, ...pullRequests]);
     const archivedPlan = pullRequests.some((p) => p.id === plan);
     const plans = [...standard, ...pullRequests.filter((p, i) => i < SHOWN_PULL_REQUEST_PLANS || p.id === plan).map((p) => ({ id: p.id, name: `${p.name} · v${p.version}` }))];
-    const [history, counts, total] = await Promise.all([workspaceRuns(tx, orgId, { projectId: id, ...(plan ? { planId: plan, ...(archivedPlan ? { archivedPlan: true } : {}) } : {}), ...(origin === "any" ? {} : { origin }), show, before }), runCounts(tx, orgId, id, plan, origin === "any" ? undefined : origin, archivedPlan), plan ? runCounts(tx, orgId, id) : null]);
-    return { project, runState, history, counts, total: total ?? counts, plans, plan };
+    const [history, counts, tabs] = await Promise.all([workspaceRuns(tx, orgId, { projectId: id, ...(plan ? { planId: plan, ...(archivedPlan ? { archivedPlan: true } : {}) } : {}), ...(origin === "any" ? {} : { origin }), show, before }), runCounts(tx, orgId, id, plan, origin === "any" ? undefined : origin, archivedPlan), projectCounts(tx, orgId, id)]);
+    return { project, runState, history, counts, tabs, plans, plan };
   });
   if (!found) notFound();
-  const { project, runState, history, counts, total, plans, plan } = found;
+  const { project, runState, history, counts, tabs, plans, plan } = found;
   const shell = await shellFor(member);
   return (
     <AppShell shell={shell} current={{ project: id }} parent wide>
       <RunsView
-        head={<ProjectHead project={project} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="runs" runs={total.all} runState={runState} {...(plan ? { planId: plan } : {})} />}
+        head={<ProjectHead project={project} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="runs" counts={tabs} runState={runState} {...(plan ? { planId: plan } : {})} />}
         basePath={`/projects/${id}/runs`}
         show={show} origin={origin} counts={counts} runs={history.runs} olderThan={history.olderThan} paged={before !== undefined} scope="project" plans={plans.map((p) => ({ id: p.id, name: p.name }))} {...(plan ? { plan } : {})}
       />

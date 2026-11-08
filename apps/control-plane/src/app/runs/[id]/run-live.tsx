@@ -4,6 +4,8 @@ import { useCallback, useEffect, useId, useRef, useState, useTransition } from "
 import type { runView, StageState, PersonaState } from "../../../runs/report.ts";
 import type { RunSummary } from "../../../runs/runs.ts";
 import { findingAnchor } from "../../../runs/finding-anchor.ts";
+import { SEVERITY_TONE } from "../../../runs/severity.ts";
+import { webLink } from "../../../lib/web-link.ts";
 import { runPath, runStatusLabel, runStatusTone, runTitle } from "../../../runs/status.ts";
 import { RunBreadcrumb } from "../../../components/run-breadcrumb.tsx";
 import { initials } from "../../../components/initials.ts";
@@ -36,7 +38,6 @@ const PERSONA_LABEL: Record<PersonaState, [string, string]> = {
   waiting: ["Waiting", "text-muted"], exploring: ["Exploring", "text-info"], standby: ["On standby", "text-muted"], reached: ["Goal reached", "text-ok"], missed: ["Goal not reached", "text-warn"],
   finished: ["Finished", "text-ink"], failed: ["Could not finish", "text-bad"], cancelled: ["Stopped", "text-muted"],
 };
-const SEVERITY_TONE: Record<string, string> = { high: "bg-action", medium: "bg-[#d5a557]", low: "bg-[#93b89e]" };
 const label = "text-xs";
 const secondary = "flex h-10 items-center justify-center rounded-md border border-line bg-panel px-4 text-sm font-medium hover:border-muted";
 
@@ -264,7 +265,6 @@ function judgedText(report: View["report"], key: string): string {
   return "";
 }
 
-const webLink = (url: string | null) => (url && /^https?:\/\//i.test(url) ? url : null);
 
 function PullRequestSubject({ pr }: { pr: NonNullable<RunSummary["pullRequest"]> }) {
   const label = `${pr.number ? `PR #${pr.number}` : "Pull request"}${pr.title ? ` · ${pr.title}` : ""}`;

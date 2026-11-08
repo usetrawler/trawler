@@ -374,7 +374,8 @@ test("dashboard runs lead to their exact plan snapshot and its history", async (
 
     await page.setViewportSize({ width: 390, height: 850 });
     await page.goto(`${stack.origin}/projects/${projectId}/overview`);
-    await expect.poll(() => page.getByRole("heading", { name: "Latest completed run" }).isVisible()).toBe(true);
+    await expect.poll(() => page.getByRole("heading", { name: "Pull requests", exact: true }).isVisible()).toBe(true);
+    expect(await page.getByRole("link", { name: /^#24 Filter invoices by cycle/ }).getAttribute("href")).toBe(report);
     await page.getByRole("navigation", { name: "Project", exact: true }).getByRole("link", { name: /^Runs/ }).click();
     await expect.poll(() => row.getByText("PR #24 v5", { exact: true }).isVisible()).toBe(true);
     expect(await page.locator("html").evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);

@@ -48,8 +48,10 @@ vi.mock("../../../projects/projects.ts", () => ({
 vi.mock("../../../projects/overview.ts", async (original) => ({
   hostOf: (await original<typeof import("../../../projects/overview.ts")>()).hostOf,
   workspaceRuns: async () => ({ runs: [], olderThan: null }),
-  projectRunCount: async (_tx: unknown, orgId: string, id: string) => { state.counted.push([orgId, id]); return state.runs; },
   testingConfirmedAt: async () => null,
+}));
+vi.mock("../../../projects/project-home.ts", () => ({
+  projectCounts: async (_tx: unknown, orgId: string, id: string) => { state.counted.push([orgId, id]); return { runs: state.runs, pullRequests: state.prPlans.length }; },
 }));
 vi.mock("../../../server/env.ts", () => ({ readEnv: () => ({ openRouterUrl: "https://openrouter.test/api/v1", ...(state.platformKey ? { setup: { apiKey: "sk-or-v1-" + "p".repeat(40), model: "m" } } : {}), ...(state.beta ? { betaEmails: state.beta } : {}) }) }));
 vi.mock("../../../runs/runs.ts", async (original) => ({
@@ -102,18 +104,20 @@ test("the plan is the project's Plan tab, next to its Runs with their number, wi
   state.runs = 3;
   const html = await render();
   const tabs = html.match(/<nav aria-label="Project">.*?<\/nav>/)?.[0] ?? "";
-  expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}" aria-current="page"[^>]*>Plans</a>`));
+  expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}" aria-current="page"[^>]*>Plan</a>`));
   expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}/runs" class="[^"]*">Runs<span[^>]*>3</span></a>`));
   expect(state.counted).toEqual([["org-1", ID]]);
   expect(html).not.toContain('aria-label="Progress"');
   expect(html).toMatch(new RegExp(`<a href="/runs/new\\?project=${ID}&amp;plan=[0-9a-f-]+"[^>]*>New run<`));
-  expect(html).toMatch(/>Project · <a href="https:\/\/app\.acme\.test\/"[^>]*>app\.acme\.test</);
+  expect(html).toMatch(/<a href="https:\/\/app\.acme\.test\/"[^>]*>app\.acme\.test</);
+  expect(html).not.toContain("Invoices.");
 });
 
-test("the plan shows the features it was set up for, with a way to change them", async () => {
+test("the plan says how many features it was built from, with a way to change them and propose people again", async () => {
   const html = await render();
-  expect(html).toContain("Send an invoice");
-  expect(html).toMatch(new RegExp(`<a [^>]*href="/projects/${ID}/features\\?plan=[0-9a-f-]+"[^>]*>Change features</a>`));
+  expect(html).toMatch(/<summary[^>]*>Built from (<!-- -->)?1(<!-- -->)? (<!-- -->)?feature<\/summary><ul[^>]*><li>Send an invoice<\/li><\/ul><\/details>/);
+  expect(html).not.toMatch(/<p[\s>](?:(?!<\/p>).)*<details/);
+  expect(html).toMatch(new RegExp(`<a [^>]*href="/projects/${ID}/features\\?plan=[0-9a-f-]+"[^>]*>Change features and propose people again</a>`));
 });
 
 test("a project without runs still offers its Runs tab, counted as none", async () => {
@@ -152,19 +156,17 @@ test("a project with one plan cannot remove it", async () => {
 
 const PR = { id: "44444444-4444-4444-8444-444444444444", name: "PR #578", repo: "acme/shop", number: 578, version: 2, lastUsedAt: new Date("2026-10-05T10:30:00Z"), people: 2 };
 
-test("pull request plans are a separate group next to the plan tabs, apart from the plans a project can add", async () => {
+test("pull request plans are not on the plan page: a line says the lead writes them, read-only, under Pull requests", async () => {
   state.prPlans = [PR, { ...PR, id: "55555555-5555-4555-8555-555555555555", name: "PR #577", number: 577, version: 1 }];
   const html = await render();
-  const group = html.match(/<nav aria-label="Pull request plans".*?<\/nav>/)?.[0] ?? "";
-  expect(group).toContain("Pull requests");
-  expect(group).toMatch(new RegExp(`href="/projects/${ID}\\?plan=${PR.id}"[^>]*>PR #578 · v2`));
-  expect(group).toContain("PR #577 · v1");
-  expect(html.match(/<nav aria-label="Plans".*?<\/nav>/)?.[0]).not.toContain("PR #");
+  expect(html).not.toContain("PR #578");
+  expect(html).toMatch(new RegExp(`Pull request plans are written by the lead for each pull request and are read-only\\. Find them under <a href="/projects/${ID}/pull-requests"[^>]*>Pull requests</a>`));
+  expect(html.match(/<nav aria-label="Project">.*?<\/nav>/)?.[0]).toMatch(/>Pull requests<span[^>]*>2<\/span>/);
   expect(html).toContain("Add plan");
 });
 
-test("without pull request plans the tabs show no group", async () => {
-  expect(await render()).not.toContain("Pull request plans");
+test("without pull request plans the plan page does not mention them", async () => {
+  expect(await render()).not.toContain("Pull request plans are written");
 });
 
 test("a pull request plan opens as a read-only plan view with its people's goals in the order of play, and no editor or Start panel", async () => {
@@ -179,7 +181,8 @@ test("a pull request plan opens as a read-only plan view with its people's goals
   expect(html).toContain("Made by Trawler from the pull request; it is replaced when the pull request changes.");
   expect(html).toContain('aria-label="Runs of this plan"');
   expect(html.indexOf("P1")).toBeLessThan(html.indexOf("P0"));
-  expect(html).toMatch(new RegExp(`<a [^>]*aria-current="page"[^>]*href="[^"]*plan=${PR.id}"|<a [^>]*href="[^"]*plan=${PR.id}"[^>]*aria-current="page"`));
+  expect(html.match(/<nav aria-label="Project">.*?<\/nav>/)?.[0]).toMatch(new RegExp(`<a href="/projects/${ID}/pull-requests" aria-current="page"`));
+  expect(html).toMatch(new RegExp(`<a href="/projects/${ID}/pull-requests"[^>]*><span aria-hidden="true">← </span>Pull requests</a>`));
   expect(html).not.toContain("Remove plan");
   expect(html).not.toContain("Change features");
   expect(state.planned).toEqual([]);

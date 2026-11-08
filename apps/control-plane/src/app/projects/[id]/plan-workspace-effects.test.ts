@@ -97,7 +97,7 @@ test("a plan that is not valid yet is not saved; the status and Start say what i
   expect(startBlocked(plan.tree)).toBe("Person 1 needs a name.");
   expect(startLink(plan.tree).held).toBe(true);
   expect(nodes(plan.tree).some((node) => node.type === "p" && text(node) === "Person 1 needs a name.")).toBe(true);
-  expect(nodes(plan.tree).find((node) => node.props?.["aria-live"] === "polite")!.props!.children).toBe("");
+  expect(text(nodes(plan.tree).find((node) => node.props?.["aria-live"] === "polite")!)).not.toMatch(/sav/i);
 });
 
 test("a save from a page left open across an update says to reload, and keeps the changes on screen", async () => {
