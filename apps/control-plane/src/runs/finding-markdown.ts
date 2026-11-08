@@ -15,13 +15,13 @@ const capitalised = (word: string) => word.charAt(0).toUpperCase() + word.slice(
 
 export const plain = (text: string) =>
   text
-    .replace(/[\\`*_[\]<>|~#]/g, "\\$&")
+    .replace(/[\\`*_[\]<>|~#&]/g, "\\$&")
     .replace(/!/g, "\\!")
     .replace(/@(?=\w)/g, "@\u200b");
 
 const line = (text: string) => plain(text.replace(/\s+/g, " ").trim());
 
-const quoted = (text: string) => plain(text.trim()).split(/\r?\n/).map((row) => `> ${row}`.trimEnd());
+const quoted = (text: string) => plain(text.trim()).split(/\r\n|\r|\n/).map((row) => `> ${row}`.trimEnd());
 
 export function findingMarkdown(f: IssueFinding, where: { status: string; runTitle: string; runUrl: string; origin: string }): string {
   const replayed = (f.replay as { observed?: string } | null)?.observed;

@@ -54,4 +54,6 @@ test("text the agent wrote cannot mention people, link, embed images, add markup
   expect(md).toContain("1. Open. - \\[ \\] sneaky item\n");
   expect(md).toContain("> first line\n> second line\n> \\# heading\n> — Ana");
   expect(md.split("\n").filter((row) => row.startsWith("## "))).toHaveLength(1);
+  expect(plain("&#64;octocat and &#x40;org &#35;12")).toBe("\\&\\#64;octocat and \\&\\#x40;org \\&\\#35;12");
+  expect(findingMarkdown({ ...finding, observed: "first\rsecond\r\nthird\nfourth" }, where)).toContain("> first\n> second\n> third\n> fourth\n");
 });
