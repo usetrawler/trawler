@@ -16,6 +16,7 @@ test("every page is named in its tab as the page, then Trawler; the overview spe
   expect(generateMetadata().title).toEqual({ default: "Trawler", template: "%s · Trawler" });
   expect(Object.fromEntries(pages.map((p) => [p, staticTitle(p) ?? dynamicTitle(p)]))).toEqual({
     "captures/[id]/page.tsx": ["capturePageTitle", undefined],
+    "findings/page.tsx": '"Findings"',
     "new/page.tsx": '"New project"',
     "page.tsx": '{ absolute: "Overview · Trawler" }',
     "projects/[id]/features/page.tsx": ["projectPageTitle", "Features"],

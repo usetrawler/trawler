@@ -9,7 +9,7 @@ const run = (number: number, patch: Partial<RunLine> = {}): RunLine => ({
   id: `r${number}`, number, status: "succeeded", createdAt: new Date("2026-11-07T09:00:00Z"), costUsd: 0.2, tokenCap: null, tokensUsed: 0, confirmed: 0, unchecked: false, goalsReached: 3, goalsTotal: 4,
   projectId: "p1", projectName: "Recurro", projectSite: null, planName: null, startedVia: null, origin: "app", ...patch,
 });
-const finding = (key: string, patch: Partial<OpenFinding> = {}): OpenFinding => ({ key, title: `Title ${key}`, severity: "high", person: "Maya", source: "PR #21", runNumber: 292, reportedAt: new Date("2026-11-07T10:00:00Z"), ...patch });
+const finding = (key: string, patch: Partial<OpenFinding> = {}): OpenFinding => ({ projectId: "p1", key, title: `Title ${key}`, severity: "high", person: "Maya", source: "PR #21", runNumber: 292, reportedAt: new Date("2026-11-07T10:00:00Z"), ...patch });
 const pr = (number: number, r: RunLine, patch: Partial<PullRequestLine> = {}): PullRequestLine => ({ number, title: `feat: change ${number}`, url: null, plan: { id: "pp", label: "v16", ofPullRequest: true }, run: r, ...patch });
 const render = (props: Partial<Parameters<typeof ProjectHomeView>[0]> = {}) => renderToStaticMarkup(createElement(ProjectHomeView, { projectId: "p1", runs: 12, finished: 10, findings: [], going: [], pullRequests: [], pullRequestCount: 0, ...props }));
 

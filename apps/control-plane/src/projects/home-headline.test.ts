@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { homeHeadline } from "./home-headline.ts";
 import type { OpenFinding } from "./project-home.ts";
 
-const from = (...sources: string[]): OpenFinding[] => sources.map((source, i) => ({ key: `k${i}`, title: "t", severity: "high", person: null, source, runNumber: i + 1, reportedAt: new Date() }));
+const from = (...sources: string[]): OpenFinding[] => sources.map((source, i) => ({ projectId: "p1", key: `k${i}`, title: "t", severity: "high", person: null, source, runNumber: i + 1, reportedAt: new Date() }));
 
 test("the project's headline says how many confirmed defects are open and where they came from", () => {
   expect(homeHeadline([], 0, 0)).toBe("No runs yet.");

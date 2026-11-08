@@ -22,7 +22,7 @@ const RunArg = z.union([z.number().int().min(1).max(2_147_483_647), z.string().m
 type Refusal = Extract<Outcome<never>, { ok: false }>;
 
 export function refusalText(refusal: Refusal, origin: string, project?: string): string {
-  const where = refusal.status === 412 ? `${origin}/projects/${project ?? ""}`.replace(/\/$/, "") : refusal.code === "model_key" ? `${origin}/settings` : null;
+  const where = refusal.status === 412 ? `${origin}/projects/${project ?? ""}`.replace(/\/$/, "") : refusal.code === "model_key" ? `${origin}/settings?section=model` : null;
   return where ? `${refusal.error} An assistant cannot clear this. A person can, here: ${where}` : refusal.error;
 }
 

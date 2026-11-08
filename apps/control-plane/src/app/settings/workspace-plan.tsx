@@ -9,7 +9,7 @@ export function WorkspacePlan({ plan, projects, runsToday }: { plan: Plan; proje
   ];
   return (
     <section aria-labelledby="plan-heading" className={panel}>
-      <h2 id="plan-heading" className={heading}>Plan</h2>
+      <h2 id="plan-heading" className={heading}>Billing</h2>
       <p className="text-sm">
         <span className="text-muted">This workspace is on </span>
         <span className="font-semibold">{PLAN_LABEL[plan.plan]}</span>

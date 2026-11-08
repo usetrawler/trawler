@@ -9,7 +9,7 @@ import { listProjects } from "../../projects/projects.ts";
 import { monthlyBudget, monthSpent } from "../../runs/limits.ts";
 import { projectsCounted, runsToday, workspacePlan } from "../../runs/plans.ts";
 import { withOrg } from "../../db/tenancy.ts";
-import { canManageBilling, getAuth, signedInMember } from "../../server/auth.ts";
+import { canManageBilling, getAuth, signedInMember, type Member } from "../../server/auth.ts";
 import { getDb } from "../../server/db.ts";
 import { readEnv } from "../../server/env.ts";
 import { shellFor } from "../../server/shell.ts";
@@ -22,69 +22,101 @@ import { McpAccess } from "./mcp-access.tsx";
 import { McpConnections } from "./mcp-connections.tsx";
 import { ModelKey } from "./model-key.tsx";
 import { MonthlyBudget } from "./monthly-budget.tsx";
+import { sectionOf, SettingsNav, type Section } from "./settings-nav.tsx";
 import { WorkspaceName } from "./workspace-name.tsx";
 import { WorkspacePlan } from "./workspace-plan.tsx";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Settings" };
 
-export default async function SettingsPage() {
-  const member = await signedInMember(await headers());
-  if (!member) redirect("/sign-in");
-  const { orgId } = member;
+async function general({ member }: { member: Member }) {
+  return <WorkspaceName name={member.orgName} canManage={canManageBilling(member)} />;
+}
+
+async function membersSection({ member }: { member: Member }) {
   const auth = getAuth();
+  const [members, invitations] = await Promise.all([auth.workspaceMembers(member.orgId), auth.pendingInvitations(member.orgId)]);
+  return (
+    <Members
+      members={members.map((m) => ({ id: m.id, name: m.name, email: m.email, role: m.role, joinedAt: m.joinedAt.toISOString(), you: m.userId === member.userId }))}
+      invitations={invitations.map((i) => ({ id: i.id, email: i.email, role: i.role, expiresAt: i.expiresAt.toISOString(), addressHasWorkspace: i.addressHasWorkspace }))}
+      canManage={canManageBilling(member)}
+      signInAt={new URL(readEnv().baseURL).host}
+    />
+  );
+}
+
+async function modelAndBudget({ member }: { member: Member }) {
+  const { orgId } = member;
   const canManage = canManageBilling(member);
-  const mcpPool = auth.mcp?.pool ?? null;
-  const [{ details, budget, spent, plan, projects, today, tokens, projectList, mcp }, members, invitations] = await Promise.all([
-    withOrg(getDb(), orgId, async (tx) => ({
-      details: await modelKeyDetails(tx, orgId), budget: await monthlyBudget(tx, orgId), spent: await monthSpent(tx, orgId),
-      mcp: await mcpSettings(tx, orgId), plan: await workspacePlan(tx, orgId), projects: await projectsCounted(tx, orgId), today: await runsToday(tx, orgId),
-      tokens: canManage ? await listApiTokens(tx, orgId) : [], projectList: canManage || mcpPool ? await listProjects(tx, orgId) : [],
-    })),
-    auth.workspaceMembers(orgId),
-    auth.pendingInvitations(orgId),
-  ]);
+  const { details, budget, spent } = await withOrg(getDb(), orgId, async (tx) => ({ details: await modelKeyDetails(tx, orgId), budget: await monthlyBudget(tx, orgId), spent: await monthSpent(tx, orgId) }));
+  const addedBy = details?.addedBy ? await getAuth().memberEmail(orgId, details.addedBy) : null;
+  return (
+    <>
+      <ModelKey
+        saved={details ? { provider: details.provider, hint: details.hint, baseUrl: details.baseUrl, addedAt: details.addedAt.toISOString() } : null}
+        addedBy={addedBy}
+        canManage={canManage}
+      />
+      <MonthlyBudget limitUsd={budget?.limitUsd ?? null} spentUsd={spent} month={new Date().toLocaleString("en-GB", { month: "long", timeZone: "UTC" })} canManage={canManage} />
+    </>
+  );
+}
+
+async function tokensAndMcp({ member }: { member: Member }) {
+  const { orgId } = member;
+  const canManage = canManageBilling(member);
+  const mcpPool = getAuth().mcp?.pool ?? null;
+  const { tokens, projectList, mcp } = await withOrg(getDb(), orgId, async (tx) => ({
+    mcp: await mcpSettings(tx, orgId),
+    tokens: canManage ? await listApiTokens(tx, orgId) : [],
+    projectList: canManage || mcpPool ? await listProjects(tx, orgId) : [],
+  }));
   const connections = mcpPool ? await connectionsOf(mcpPool, member.userId, orgId, member.role) : [];
   const controlling = connections.filter((c) => c.runControl);
   const usage = controlling.length === 0 ? new Map() : await withOrg(getDb(), orgId, async (tx) => new Map(await Promise.all(controlling.map(async (c) => [c.id, await connectionUsage(tx, orgId, c.id)] as const))));
-  const addedBy = details?.addedBy ? await auth.memberEmail(orgId, details.addedBy) : null;
   return (
-    <AppShell shell={await shellFor(member)} current="settings">
-      <PageHead
-        eyebrow="Settings"
-        title="Workspace, plan, members, model key, budget and API tokens."
-        subtitle="The name, what the plan allows, the people in it, the model key every run of this workspace uses, and what runs may spend in a month."
+    <>
+      <ApiTokens
+        tokens={tokens.map((t) => ({ id: t.id, name: t.name, prefix: t.prefix, projectName: t.projectName, createdAt: t.createdAt.toISOString(), lastUsedAt: t.lastUsedAt?.toISOString() ?? null }))}
+        projects={projectList.map((p) => ({ id: p.id, name: p.name }))}
+        canManage={canManage}
       />
-      <div className="flex flex-col gap-8">
-        <WorkspaceName name={member.orgName} canManage={canManage} />
-        <WorkspacePlan plan={plan} projects={projects} runsToday={today} />
-        <Members
-          members={members.map((m) => ({ id: m.id, name: m.name, email: m.email, role: m.role, joinedAt: m.joinedAt.toISOString(), you: m.userId === member.userId }))}
-          invitations={invitations.map((i) => ({ id: i.id, email: i.email, role: i.role, expiresAt: i.expiresAt.toISOString(), addressHasWorkspace: i.addressHasWorkspace }))}
-          canManage={canManage}
-          signInAt={new URL(readEnv().baseURL).host}
+      {mcpPool && <McpAccess orgId={orgId} connectionsAllowed={mcp.connectionsAllowed} runControlAllowed={mcp.runControlAllowed} canManage={canManage} />}
+      {mcpPool && (
+        <McpConnections
+          connections={connections.map((c) => ({
+            id: c.id, clientName: c.clientName, clientHost: c.clientHost, runControl: c.runControl, createdAt: c.createdAt.toISOString(), lastUsedAt: c.lastUsedAt?.toISOString() ?? null,
+            limit: usage.get(c.id) ? { ...usage.get(c.id)!, nextFreeAt: usage.get(c.id)!.nextFreeAt?.toISOString() ?? null } : null,
+            projectName: c.projectId ? projectList.find((p) => p.id === c.projectId)?.name ?? "a project that no longer exists" : null,
+          }))}
         />
-        <ModelKey
-          saved={details ? { provider: details.provider, hint: details.hint, baseUrl: details.baseUrl, addedAt: details.addedAt.toISOString() } : null}
-          addedBy={addedBy}
-          canManage={canManage}
-        />
-        <MonthlyBudget limitUsd={budget?.limitUsd ?? null} spentUsd={spent} month={new Date().toLocaleString("en-GB", { month: "long", timeZone: "UTC" })} canManage={canManage} />
-        <ApiTokens
-          tokens={tokens.map((t) => ({ id: t.id, name: t.name, prefix: t.prefix, projectName: t.projectName, createdAt: t.createdAt.toISOString(), lastUsedAt: t.lastUsedAt?.toISOString() ?? null }))}
-          projects={projectList.map((p) => ({ id: p.id, name: p.name }))}
-          canManage={canManage}
-        />
-        {mcpPool && <McpAccess orgId={orgId} connectionsAllowed={mcp.connectionsAllowed} runControlAllowed={mcp.runControlAllowed} canManage={canManage} />}
-        {mcpPool && (
-          <McpConnections
-            connections={connections.map((c) => ({
-              id: c.id, clientName: c.clientName, clientHost: c.clientHost, runControl: c.runControl, createdAt: c.createdAt.toISOString(), lastUsedAt: c.lastUsedAt?.toISOString() ?? null,
-              limit: usage.get(c.id) ? { ...usage.get(c.id)!, nextFreeAt: usage.get(c.id)!.nextFreeAt?.toISOString() ?? null } : null,
-              projectName: c.projectId ? projectList.find((p) => p.id === c.projectId)?.name ?? "a project that no longer exists" : null,
-            }))}
-          />
-        )}
+      )}
+    </>
+  );
+}
+
+async function billing({ member }: { member: Member }) {
+  const { orgId } = member;
+  const { plan, projects, today } = await withOrg(getDb(), orgId, async (tx) => ({ plan: await workspacePlan(tx, orgId), projects: await projectsCounted(tx, orgId), today: await runsToday(tx, orgId) }));
+  return <WorkspacePlan plan={plan} projects={projects} runsToday={today} />;
+}
+
+const CONTENT: Record<Section, (props: { member: Member }) => Promise<React.ReactNode>> = { general, members: membersSection, model: modelAndBudget, tokens: tokensAndMcp, billing };
+
+export default async function SettingsPage({ searchParams }: { searchParams?: Promise<{ section?: string | string[] }> } = {}) {
+  const section = sectionOf((await searchParams)?.section);
+  const member = await signedInMember(await headers());
+  if (!member) redirect("/sign-in");
+  const content = await CONTENT[section]({ member });
+  return (
+    <AppShell shell={await shellFor(member)} current="settings" wide>
+      <PageHead compact eyebrow={member.orgName} title="Settings" />
+      <div className="grid gap-8 md:grid-cols-[13rem_minmax(0,1fr)] md:gap-12">
+        <SettingsNav current={section} />
+        <div className="flex max-w-3xl min-w-0 flex-col gap-8">
+          {content}
+        </div>
       </div>
     </AppShell>
   );

@@ -65,6 +65,7 @@ vi.mock("./actions.ts", () => ({
 }));
 
 const { default: SettingsPage } = await import("./page.tsx");
+const open = (section?: string) => SettingsPage(section ? { searchParams: Promise.resolve({ section }) } : undefined);
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 const owner = { userId: "user-1", name: "Ana", email: "ana@acme.test", orgId: "org-1", orgName: "Acme", role: "owner" };
 const addedAt = new Date("2026-09-25T18:50:00.000Z");
@@ -83,31 +84,51 @@ beforeEach(() => {
 
 test("settings name who added the key among this workspace's members, and mark Settings in the panel as the page you are on", async () => {
   state.key = { provider: "openrouter", hint: "…a1b2", baseUrl: null, addedBy: "user-2", addedAt };
-  const html = renderToStaticMarkup(await SettingsPage());
+  const html = renderToStaticMarkup(await open("model"));
   expect(text(html)).toContain("Added by lee@acme.test on 2026-09-25 18:50 UTC");
   expect(state.lookedUp).toEqual([["org-1", "user-2"]]);
   expect(html).toMatch(/<a href="\/settings" aria-current="page"[^>]*>.*?Settings/);
-  expect(html.match(/<input[^>]*\bname="name"[^>]*>/)?.[0]).toContain('value="Acme"');
   expect(state.tenants).toEqual(["org-1"]);
+  expect(renderToStaticMarkup(await open()).match(/<input[^>]*\bname="name"[^>]*>/)?.[0]).toContain('value="Acme"');
 });
 
-test("the page is headed like the app's other pages", async () => {
-  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("Settings Workspace, plan, members, model key, budget and API tokens. The name, what the plan allows, the people in it, the model key every run of this workspace uses, and what runs may spend in a month.");
+test("the page is headed with the workspace, and a side menu leads to each part of the settings, marking the one open", async () => {
+  const html = renderToStaticMarkup(await open());
+  expect(text(html)).toContain(" Acme Settings ");
+  const items = [...(html.match(/<nav aria-label="Settings"[^>]*>.*?<\/nav>/)?.[0] ?? "").matchAll(/<a href="([^"]*)"( aria-current="page")?[^>]*>([^<]*)<\/a>/g)].map((m) => [m[3], m[1], Boolean(m[2])]);
+  expect(items).toEqual([
+    ["General", "/settings", true], ["Members", "/settings?section=members", false], ["Model &amp; budget", "/settings?section=model", false], ["API tokens &amp; MCP", "/settings?section=tokens", false], ["Billing", "/settings?section=billing", false],
+  ]);
+  expect(renderToStaticMarkup(await open("billing"))).toMatch(/<a href="\/settings\?section=billing" aria-current="page"/);
+});
+
+test("each part reads only what it shows, and an unknown part opens General", async () => {
+  const general = renderToStaticMarkup(await open("nowhere"));
+  expect(general).toContain('id="workspace-heading"');
+  expect(general).not.toContain('id="members-heading"');
+  expect(general).not.toContain('id="key-heading"');
+  expect(state.listed).toEqual([]);
+  expect(state.tenants).toEqual([]);
+  expect(state.connectionCalls).toEqual([]);
+  const members = renderToStaticMarkup(await open("members"));
+  expect(members).toContain('id="members-heading"');
+  expect(members).not.toContain('id="workspace-heading"');
+  expect(state.tenants).toEqual([]);
 });
 
 test("a key added by someone who is no longer in this workspace says so, and a workspace without a key looks nobody up", async () => {
   state.key = { provider: "openrouter", hint: "…a1b2", baseUrl: null, addedBy: "user-gone", addedAt };
-  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("Added by someone no longer in this workspace on");
+  expect(text(renderToStaticMarkup(await open("model")))).toContain("Added by someone no longer in this workspace on");
   state.key = null;
   state.lookedUp = [];
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await open("model"));
   expect(state.lookedUp).toEqual([]);
 });
 
 test("a member gets the name and the key to read, with who can change them", async () => {
   state.member = { ...owner, role: "member" };
   state.key = { provider: "openrouter", hint: "…a1b2", baseUrl: null, addedBy: "user-2", addedAt };
-  const html = renderToStaticMarkup(await SettingsPage());
+  const html = renderToStaticMarkup(await open()) + renderToStaticMarkup(await open("model"));
   expect(text(html)).toContain("Only an owner or admin of this workspace can rename it.");
   expect(text(html)).toContain("Only an owner or admin of this workspace can change the key.");
   expect(html).not.toContain("<form");
@@ -115,88 +136,83 @@ test("a member gets the name and the key to read, with who can change them", asy
 
 test("someone signed out, or no longer in the workspace, is sent to sign in", async () => {
   state.member = null;
-  await expect(SettingsPage()).rejects.toMatchObject({ to: "/sign-in" });
+  await expect(open()).rejects.toMatchObject({ to: "/sign-in" });
 });
 
 test("the members of this workspace and its invitations are listed, marking you, and invitations tell where to sign in", async () => {
-  const html = renderToStaticMarkup(await SettingsPage());
+  const html = renderToStaticMarkup(await open("members"));
   expect(state.listed.sort()).toEqual(["invitations:org-1", "members:org-1"]);
   expect(text(html)).toContain("Ana (you) ana@acme.test Owner Joined 2026-09-20 10:00 UTC");
   expect(text(html)).toContain("Lee lee@acme.test Member Joined 2026-09-21 10:00 UTC");
   expect(text(html)).toContain("Invited max@acme.test Admin Expires 2026-10-03 10:00 UTC");
   expect(text(html)).not.toContain("can no longer use this invitation");
   state.invited = [{ ...state.invited[0]!, addressHasWorkspace: true }];
-  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("max@acme.test Admin This address has since signed in and belongs to a workspace, so it can no longer use this invitation.");
-  expect(html.indexOf('id="workspace-heading"')).toBeLessThan(html.indexOf('id="members-heading"'));
-  expect(html.indexOf('id="members-heading"')).toBeLessThan(html.indexOf('id="key-heading"'));
+  expect(text(renderToStaticMarkup(await open("members")))).toContain("max@acme.test Admin This address has since signed in and belongs to a workspace, so it can no longer use this invitation.");
   state.actionResult = { invited: "new@acme.test" };
-  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("Invited new@acme.test. Ask them to sign in at app.usetrawler.test with this address; no email is sent.");
+  expect(text(renderToStaticMarkup(await open("members")))).toContain("Invited new@acme.test. Ask them to sign in at app.usetrawler.test with this address; no email is sent.");
 });
 
 test("the monthly budget shows this month's spend to everyone, and only an owner or admin can change it", async () => {
   state.budget = { limitUsd: 50, spentUsd: 12.4 };
   state.spent = 12.4;
   const month = new Date().toLocaleString("en-GB", { month: "long", timeZone: "UTC" });
-  const ownerView = text(renderToStaticMarkup(await SettingsPage()));
+  const ownerView = text(renderToStaticMarkup(await open("model")));
   expect(ownerView).toContain(`Monthly budget Spent on runs since ${month} 1 (UTC): $12.40 of $50.00`);
   expect(ownerView).toContain("Save budget");
   expect(ownerView).toContain("Remove budget");
-  expect(renderToStaticMarkup(await SettingsPage()).match(/<input[^>]*name="monthly"[^>]*>/)?.[0]).toMatch(/type="number"[^>]*value="50.00"/);
+  expect(renderToStaticMarkup(await open("model")).match(/<input[^>]*name="monthly"[^>]*>/)?.[0]).toMatch(/type="number"[^>]*value="50.00"/);
   state.member = { ...owner, role: "member" };
-  const memberView = text(renderToStaticMarkup(await SettingsPage()));
+  const memberView = text(renderToStaticMarkup(await open("model")));
   expect(memberView).toContain("$12.40 of $50.00");
   expect(memberView).toContain("Only an owner or admin of this workspace can change the budget.");
   expect(memberView).not.toContain("Save budget");
   state.budget = null;
-  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("No budget is set, so only each run's own cap limits what runs spend.".replace("'", "&#x27;"));
+  expect(text(renderToStaticMarkup(await open("model")))).toContain("No budget is set, so only each run's own cap limits what runs spend.".replace("'", "&#x27;"));
 });
 
 test("the plan shows what the workspace has used of its limits, and what to do past them", async () => {
   state.today = 2;
-  const free = text(renderToStaticMarkup(await SettingsPage()));
-  expect(free).toContain("Plan This workspace is on Free");
+  const free = text(renderToStaticMarkup(await open("billing")));
+  expect(free).toContain("Billing This workspace is on Free");
   expect(free).toContain("Projects 1 of 1");
   expect(free).not.toContain("demo");
   expect(free).toContain("Hosted runs today (UTC) 2 of 3 Counted when a run starts, including Run again.");
   expect(free).toContain("People in a run 4");
   expect(free).toContain("run the product on your own machine with the local runner, or write to contact@usetrawler.com about the Team plan.");
   state.plan = { plan: "enterprise", limits: { projects: Infinity, runsPerDay: Infinity, people: 12 } };
-  const enterprise = text(renderToStaticMarkup(await SettingsPage()));
+  const enterprise = text(renderToStaticMarkup(await open("billing")));
   expect(enterprise).toContain("This workspace is on Enterprise");
   expect(enterprise).toContain("1, no limit");
   expect(enterprise).toContain("Trawler sets the plan. Write to contact@usetrawler.com to change it or raise a limit.");
-  const html = renderToStaticMarkup(await SettingsPage());
-  expect(html.indexOf('id="workspace-heading"')).toBeLessThan(html.indexOf('id="plan-heading"'));
-  expect(html.indexOf('id="plan-heading"')).toBeLessThan(html.indexOf('id="members-heading"'));
 });
 
 test("AI assistant access shows both choices to everyone, and only an owner or admin can change them", async () => {
-  const ownerHtml = renderToStaticMarkup(await SettingsPage());
+  const ownerHtml = renderToStaticMarkup(await open("tokens"));
   expect(text(ownerHtml)).toContain("AI assistant access (MCP)");
   expect(ownerHtml.match(/<input[^>]*name="org"[^>]*>/)?.[0]).toContain('value="org-1"');
   expect(ownerHtml.match(/<input[^>]*name="connections"[^>]*>/)?.[0]).toContain("checked");
   expect(ownerHtml.match(/<input[^>]*name="runControl"[^>]*>/)?.[0]).not.toContain("checked");
   state.mcp = { connectionsAllowed: false, runControlAllowed: false };
-  const off = renderToStaticMarkup(await SettingsPage());
+  const off = renderToStaticMarkup(await open("tokens"));
   expect(off.match(/<input[^>]*name="connections"[^>]*>/)?.[0]).not.toContain("checked");
   expect(off.match(/<input[^>]*name="runControl"[^>]*>/)?.[0]).toContain("disabled");
   state.member = { ...owner, role: "member" };
   state.mcp = { connectionsAllowed: true, runControlAllowed: true };
-  const memberView = text(renderToStaticMarkup(await SettingsPage()));
+  const memberView = text(renderToStaticMarkup(await open("tokens")));
   expect(memberView).toContain("Connections: allowed · Run control: allowed");
   expect(memberView).toContain("Only an owner or admin of this workspace can change this.");
-  expect(renderToStaticMarkup(await SettingsPage())).not.toContain('name="connections"');
+  expect(renderToStaticMarkup(await open("tokens"))).not.toContain('name="connections"');
 });
 
 test("your connections are listed with who published the client, what it reaches and when it was used, and each can be disconnected", async () => {
-  expect(text(renderToStaticMarkup(await SettingsPage()))).toContain("No assistant is connected.");
+  expect(text(renderToStaticMarkup(await open("tokens")))).toContain("No assistant is connected.");
   state.connections = [
     { id: "g-1", clientName: "Claude Code", clientHost: "claude.ai", projectId: "p-1", runControl: false, createdAt: new Date("2026-10-08T10:00:00Z"), lastUsedAt: null },
     { id: "g-2", clientName: "Cursor", clientHost: null, projectId: "p-gone", runControl: true, createdAt: new Date("2026-10-07T10:00:00Z"), lastUsedAt: new Date("2026-10-08T09:00:00Z") },
     { id: "g-3", clientName: "Plain", clientHost: null, projectId: null, runControl: false, createdAt: new Date("2026-10-06T10:00:00Z"), lastUsedAt: null },
   ];
   state.usage = { "g-2": { runsPerDay: 5, spendUsdPerDay: 20, runs: 2, spentUsd: 3.5, nextFreeAt: new Date("2026-10-09T08:00:00Z") } };
-  const html = renderToStaticMarkup(await SettingsPage());
+  const html = renderToStaticMarkup(await open("tokens"));
   const view = text(html);
   expect(view).toContain("Your AI assistant connections");
   expect(view).toContain("Last 24 hours: 2 of 5 runs, $3.50 of $20.00 spent, counting the whole cap of runs that have not finished.");
@@ -216,13 +232,13 @@ test("your connections are listed with who published the client, what it reaches
 test("a member sees and disconnects their own connections too, since a connection acts as them", async () => {
   state.member = { ...owner, role: "member" };
   state.connections = [{ id: "g-1", clientName: "Claude Code", clientHost: null, projectId: "p-1", runControl: false, createdAt: new Date("2026-10-08T10:00:00Z"), lastUsedAt: null }];
-  expect(renderToStaticMarkup(await SettingsPage())).toContain('aria-label="Disconnect Claude Code, only Checkout, connected 2026-10-08"');
+  expect(renderToStaticMarkup(await open("tokens"))).toContain('aria-label="Disconnect Claude Code, only Checkout, connected 2026-10-08"');
   expect(state.connectionCalls.at(-1)?.slice(1)).toEqual(["user-1", "org-1", "member"]);
 });
 
 test("a deployment without MCP shows neither MCP section", async () => {
   state.mcpOn = false;
-  const view = text(renderToStaticMarkup(await SettingsPage()));
+  const view = text(renderToStaticMarkup(await open("tokens")));
   expect(view).not.toContain("AI assistant access (MCP)");
   expect(view).not.toContain("Your AI assistant connections");
 });

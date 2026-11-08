@@ -67,12 +67,12 @@ test("with connections switched off the page says so, offers Cancel and Go to Tr
   state.consent = consent({ settings: { connectionsAllowed: false, runControlAllowed: false } });
   const owner = await render();
   expect(words(owner)).toContain("MCP connections are switched off for this workspace.");
-  expect(owner).toContain('href="/settings"');
+  expect(owner).toContain('href="/settings?section=tokens"');
   expect(owner).toContain("Cancel the connection");
   expect(owner).not.toContain("Allow read access");
   state.workspace = { orgId: "org-1", orgName: "Acme", role: "member" };
   const member = await render();
-  expect(member).not.toContain('href="/settings"');
+  expect(member).not.toContain('href="/settings');
   expect(member).toContain("Cancel the connection");
 });
 

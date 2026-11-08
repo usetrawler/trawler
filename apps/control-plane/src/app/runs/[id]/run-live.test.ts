@@ -138,9 +138,9 @@ test("a live run shows its cost against the cap, the four stages, each person an
   const html = render(live);
   expect(text(head(html))).toContain("app.acme.test · 2026-09-25 19:40 UTC");
   expect(text(html)).toContain("Live cost $0.84 of $2.00 cap");
-  expect(text(html)).toContain("01 Use In progress 02 Replay Waiting 03 Judge Waiting 04 Report Waiting");
-  expect(text(html)).toContain("AN Ana Reached all 2 goals. Goal reached");
-  expect(text(html)).toContain("LP Lee Park Working on: Get an account. 0 of 2 goals reached. Exploring");
+  expect(text(html)).toContain("Use : In progress Replay : Waiting Judge : Waiting Report : Waiting");
+  expect(text(html)).toContain("AN Ana Goal reached Reached all 2 goals. 2 of 2 goals");
+  expect(text(html)).toContain("LP Lee Park Exploring Working on: Get an account. 0 of 2 goals");
   expect(text(html)).toContain("Safe to leave. The run keeps going in the background.");
   expect(html).toMatch(/<button type="button"[^>]*>Stop run<\/button>/);
   expect(html).not.toContain("Run again");
@@ -257,7 +257,7 @@ test("a confirmed defect's card shows both screenshots after its steps, and a ca
 test("while a run is live the active stage and the person exploring visibly move, only for those who allow motion, and nothing moves once it ends", () => {
   const html = render(live);
   const moving = html.match(/class="[^"]*animate-(spin|ping|pulse)[^"]*"/g) ?? [];
-  expect(moving).toHaveLength(3);
+  expect(moving).toHaveLength(2);
   expect(moving.every((c) => /motion-safe:animate-/.test(c))).toBe(true);
   expect(render({ ...live, status: "succeeded", finishedAt: new Date("2026-09-25T20:00:00Z") })).not.toMatch(/animate-(spin|ping|pulse)/);
 });
@@ -266,7 +266,7 @@ test("a person on standby shows as on standby while their job is leased, and not
   const standing = job("role_session", "leased", { persona_key: "ana", on_standby: true });
   const goals = live.goals;
   const onStandby = render({ ...live, jobs: [standing, job("role_session", "leased", { persona_key: "lee" })], goals, activity: [{ id: "1", at: new Date(), personaKey: "ana", kind: "role_session", text: "Is on standby for the others" }] });
-  expect(text(onStandby)).toContain("Ana Goals done; on standby for the others. On standby");
+  expect(text(onStandby)).toContain("Ana On standby Goals done; on standby for the others.");
   expect(text(onStandby)).toContain("Ana: Is on standby for the others");
   const after = render({ ...live, jobs: [{ ...standing, status: "succeeded", on_standby: false }, job("role_session", "leased", { persona_key: "lee" })], goals });
   expect(text(after)).not.toContain("On standby");

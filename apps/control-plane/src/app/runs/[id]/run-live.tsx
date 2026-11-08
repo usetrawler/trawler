@@ -494,24 +494,23 @@ function RunMeta({ run, view, host, when }: { run: RunSummary; view: View; host:
 function RunCost({ run, live }: { run: RunSummary; live: boolean }) {
   const spent = spentOf(run, live);
   return (
-    <div className="w-fit text-xs text-muted">
-      <strong className="font-semibold text-ink">{spent.title} {spent.value}</strong> <span>{spent.of}</span>
-      {live && <div className="mt-1 h-0.5 bg-line" aria-hidden><div className="h-full bg-action" style={{ width: `${spent.share}%` }} /></div>}
+    <div className="w-fit text-sm text-muted">
+      <span className="text-muted">{spent.title}</span> <strong className="font-medium text-ink tabular-nums">{spent.value}</strong> <span>{spent.of}</span>
+      {live && <div className="mt-2 h-1 w-56 max-w-full rounded-full bg-soft" aria-hidden><div className="h-full rounded-full bg-ink" style={{ width: `${spent.share}%` }} /></div>}
     </div>
   );
 }
 
 function Stages({ stages }: { stages: View["stages"] }) {
   return (
-    <ol aria-label="Stages" className="mb-4 grid grid-cols-4 border border-line max-md:grid-cols-2">
+    <ol aria-label="Stages" className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
       {stages.map((s, i) => (
-        <li key={s.label} className={`grid grid-cols-[auto_1fr] gap-x-2.5 gap-y-[3px] border-line p-[15px] not-last:border-r max-md:nth-2:border-r-0 max-md:nth-[-n+2]:border-b ${s.state === "done" ? "text-ok" : s.state === "active" ? "bg-[color-mix(in_srgb,var(--action)_9%,transparent)] text-ink shadow-[inset_0_-3px_var(--action)]" : "text-muted"}`}>
-          <span className="row-span-2 font-mono text-xs">{String(i + 1).padStart(2, "0")}</span>
-          <strong className="flex items-center gap-2">
-            {s.label}
-            {s.state === "active" && <span aria-hidden className="size-2 rounded-full bg-action motion-safe:animate-pulse" />}
-          </strong>
-          <small className={`text-xs ${s.state === "skipped" ? "italic" : ""}`}>{STAGE_LABEL[s.state]}</small>
+        <li key={s.label} className={`flex items-center gap-2 ${s.state === "active" ? "font-medium text-ink" : s.state === "done" ? "text-ink" : "text-muted"}`}>
+          {i > 0 && <span aria-hidden className="mr-1 h-px w-5 bg-line" />}
+          {s.state === "done" && <span aria-hidden>✓</span>}
+          {s.state === "active" && <span aria-hidden className="size-2 rounded-full bg-ok motion-safe:animate-pulse" />}
+          <span className={s.state === "skipped" ? "line-through" : undefined}>{s.label}</span>
+          <span className="sr-only">: {STAGE_LABEL[s.state]}</span>
         </li>
       ))}
     </ol>
@@ -525,20 +524,22 @@ function LivePeople({ view }: { view: View }) {
         const [state, tone] = PERSONA_LABEL[p.state];
         const reached = p.goals.filter((g) => g.status === "reached").length;
         return (
-          <li key={p.id} className="relative grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 border-b border-line px-1 py-[18px] max-md:grid-cols-[auto_minmax(0,1fr)]">
-            <span aria-hidden className="relative grid size-[42px] place-items-center rounded-full border border-line bg-soft font-mono text-xs">
-              {p.state === "exploring" && <span className="absolute -inset-1 rounded-full border-2 border-action border-t-transparent motion-safe:animate-spin [animation-duration:1.6s]" />}
+          <li key={p.id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 border-b border-line py-4 max-sm:grid-cols-[auto_minmax(0,1fr)]">
+            <span aria-hidden className="relative grid size-10 place-items-center rounded-full bg-soft text-xs text-muted">
+              {p.state === "exploring" && <span className="absolute -inset-1 rounded-full border-2 border-ink border-t-transparent motion-safe:animate-spin [animation-duration:1.6s]" />}
               {initials(p.name)}
             </span>
             <span className="min-w-0">
-              <strong className="block break-words">{p.name}</strong>
-              <span className="mt-[3px] block text-xs break-words text-muted">{personLine(p)}{p.state === "exploring" && <span className="sr-only"> {reached} of {plural(p.goals.length, "goal", "goals")} reached.</span>}</span>
+              <span className="flex flex-wrap items-baseline gap-x-2">
+                <strong className="font-medium break-words">{p.name}</strong>
+                <span className={`text-sm ${tone}`}>{state}</span>
+              </span>
+              <span className="mt-1 block break-words">{personLine(p)}</span>
             </span>
-            <span className={`${label} ${tone} flex items-center gap-2 max-md:col-start-2`}>
-              {p.state === "exploring" && <span aria-hidden className="size-1.5 rounded-full bg-current motion-safe:animate-ping" />}
-              {state}
+            <span className="flex w-36 flex-col items-end gap-1.5 text-sm text-muted max-sm:col-start-2 max-sm:items-start">
+              {reached} of {plural(p.goals.length, "goal", "goals")}
+              <span aria-hidden className="h-1 w-full rounded-full bg-soft"><span className="block h-full rounded-full bg-ink" style={{ width: `${p.goals.length ? (reached / p.goals.length) * 100 : 0}%` }} /></span>
             </span>
-            <span aria-hidden className="absolute right-0 -bottom-px left-0 h-0.5 bg-soft"><span className="block h-full bg-ok" style={{ width: `${p.goals.length ? (reached / p.goals.length) * 100 : 0}%` }} /></span>
           </li>
         );
       })}
