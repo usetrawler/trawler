@@ -9,7 +9,7 @@ import { Menu } from "./menu.tsx";
 import { SignOutButton } from "./sign-out-button.tsx";
 import { ThemeToggle } from "./theme-toggle.tsx";
 
-export type ShellPage = "overview" | "runs" | "new" | "settings" | { project: string };
+export type ShellPage = "overview" | "findings" | "runs" | "new" | "settings" | { project: string };
 
 const same = (current: ShellPage | undefined, page: ShellPage) =>
   typeof page === "string" ? current === page : typeof current === "object" && current.project === page.project;
@@ -80,6 +80,7 @@ export function AppShell({ shell, current, parent = false, wide = false, childre
         <nav aria-label="Workspace" className="flex gap-1 overflow-x-auto px-2 pb-2 md:block md:min-h-0 md:flex-1 md:overflow-y-auto md:p-0">
           <ul className="flex shrink-0 gap-1 md:flex-col md:gap-0.5">
             <NavItem href="/" icon="home" label="Overview" active={marked("overview")} parent={parent} />
+            <NavItem href="/findings" icon="inbox" label="Findings" active={marked("findings")} parent={parent} />
             <NavItem href="/runs" icon="runs" label="All runs" count={workspace.runs} active={marked("runs")} parent={parent} />
           </ul>
           <p id="nav-projects" className="hidden px-2.5 pt-6 pb-1.5 text-xs text-muted md:block">Projects · {workspace.projects.length}</p>

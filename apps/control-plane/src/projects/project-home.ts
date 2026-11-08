@@ -3,6 +3,7 @@ import type { Tx } from "../db/tenancy.ts";
 import { runLinesByIds, type RunLine } from "./overview.ts";
 
 export interface OpenFinding {
+  projectId: string;
   key: string;
   title: string;
   severity: string;
@@ -23,18 +24,18 @@ export interface PullRequestLine {
 const prSource = sql<string | null>`CASE WHEN r.pull_request->>'number' IS NOT NULL THEN concat(lower(btrim(coalesce(r.pull_request->>'repository', ''))), '#', r.pull_request->>'number') END`;
 const SEVERITY_RANK = sql<number>`CASE f.severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END`;
 
-export async function openFindings(tx: Tx, orgId: string, projectId: string): Promise<OpenFinding[]> {
-  const { rows } = await sql<{ key: string; title: string; severity: string; person: string | null; pr: string | null; plan_name: string; number: number; created_at: Date }>`
+export async function openFindings(tx: Tx, orgId: string, projectId?: string): Promise<OpenFinding[]> {
+  const { rows } = await sql<{ project_id: string; key: string; title: string; severity: string; person: string | null; pr: string | null; plan_name: string; number: number; created_at: Date }>`
     WITH latest AS (
-      SELECT DISTINCT ON (source) id, number, pull_request, plan_name, config_snapshot
+      SELECT DISTINCT ON (project_id, source) id, project_id, number, pull_request, plan_name, config_snapshot
       FROM (
         SELECT r.*, coalesce(${prSource}, concat('plan:', coalesce(r.plan_id::text, r.plan_name))) AS source
         FROM runs r
-        WHERE r.org_id = ${orgId} AND r.project_id = ${projectId} AND r.status IN ('succeeded', 'stopped_budget')
+        WHERE r.org_id = ${orgId} ${projectId === undefined ? sql`` : sql`AND r.project_id = ${projectId}`} AND r.status IN ('succeeded', 'stopped_budget')
       ) r
-      ORDER BY source, number DESC
+      ORDER BY project_id, source, number DESC
     )
-    SELECT f.key, f.title, f.severity, f.created_at, l.number, l.plan_name, l.pull_request->>'number' AS pr,
+    SELECT l.project_id, f.key, f.title, f.severity, f.created_at, l.number, l.plan_name, l.pull_request->>'number' AS pr,
       (SELECT p->>'name' FROM jsonb_array_elements(l.config_snapshot->'personas') p WHERE p->>'id' = f.persona_key LIMIT 1) AS person
     FROM latest l
     JOIN findings f ON f.run_id = l.id
@@ -43,7 +44,7 @@ export async function openFindings(tx: Tx, orgId: string, projectId: string): Pr
       AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.run_id = f.run_id AND j.finding_key = f.key AND j.kind = 'judge' AND j.requested_by IS NOT NULL AND j.status IN ('queued', 'leased'))
     ORDER BY ${SEVERITY_RANK}, f.created_at DESC, f.key
   `.execute(tx);
-  return rows.map((r) => ({ key: r.key, title: r.title, severity: r.severity, person: r.person, source: r.pr ? `PR #${r.pr}` : r.plan_name, runNumber: r.number, reportedAt: r.created_at }));
+  return rows.map((r) => ({ projectId: r.project_id, key: r.key, title: r.title, severity: r.severity, person: r.person, source: r.pr ? `PR #${r.pr}` : r.plan_name, runNumber: r.number, reportedAt: r.created_at }));
 }
 
 export async function projectPullRequests(tx: Tx, orgId: string, projectId: string, limit?: number): Promise<PullRequestLine[]> {

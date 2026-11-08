@@ -79,6 +79,8 @@ test("open findings are the confirmed defects of the latest finished run of each
   expect(open[0]).toMatchObject({ title: "Finding lee:pr21", severity: "high", person: "Lee" });
   expect((await withOrg(t.db, "org-a", (tx) => runLinesByIds(tx, "org-a", [pr21.id]))).get(pr21.id)!.confirmed).toBe(1);
   expect(await withOrg(t.db, "org-a", (tx) => openFindings(tx, "org-b", acme))).toEqual([]);
+  const everywhere = await withOrg(t.db, "org-a", (tx) => openFindings(tx, "org-a"));
+  expect(everywhere.map((f) => [f.projectId, f.key])).toEqual([[acme, "lee:pr21"], [other, "ana:other"], [acme, "ana:pr22"], [acme, "ana:plan"]]);
 });
 
 test("each pull request is listed once, newest run first, with its title, the plan the run used and the run's result", async () => {

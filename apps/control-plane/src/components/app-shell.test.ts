@@ -18,11 +18,11 @@ const menus = (html: string) => html.match(/<details class="[^"]*">.*?<\/details
 const marked = (html: string) => nav(html).match(/<a [^>]*aria-current="[^"]*"[^>]*>(?:(?!<\/a>).)*<\/a>/g) ?? [];
 
 describe("AppShell", () => {
-  it("leads home from the brand, and to the overview, all runs, each project, a new project and the settings from the nav", () => {
+  it("leads home from the brand, and to the overview, findings, all runs, each project, a new project and the settings from the nav", () => {
     const html = render();
     expect(link(html, "trawler")).toContain('href="/"');
     const items = [...nav(html).matchAll(/<a href="([^"]*)"[^>]*>(?:(?!<\/a>).)*?<span class="min-w-0" title="[^"]*"><span class="block truncate">([^<]*)/g)].map((m) => [m[1], m[2]]);
-    expect(items).toEqual([["/", "Overview"], ["/runs", "All runs"], ["/projects/p1/overview", "Acme Invoices"], ["/projects/p2/overview", "Globex Store"], ["/new", "New project"], ["/settings", "Settings"]]);
+    expect(items).toEqual([["/", "Overview"], ["/findings", "Findings"], ["/runs", "All runs"], ["/projects/p1/overview", "Acme Invoices"], ["/projects/p2/overview", "Globex Store"], ["/new", "New project"], ["/settings", "Settings"]]);
     expect(nav(html)).not.toContain("aria-current");
   });
 
