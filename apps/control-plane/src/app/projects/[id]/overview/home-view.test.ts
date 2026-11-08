@@ -53,3 +53,10 @@ test("the latest three pull requests follow, each with its plan, its run and the
   expect(html).toMatch(/<a href="\/projects\/p1\/pull-requests"[^>]*>All 12<span class="sr-only"> pull requests<\/span><\/a>/);
   expect(render({ pullRequests: [pr(24, run(300))], pullRequestCount: 1 })).not.toContain("All 1");
 });
+
+test("an empty home says what to do next: check the plan, see why the last run stopped, or start after the next change", () => {
+  const said = (props: Partial<Parameters<typeof ProjectHomeView>[0]>) => render(props).replace(/<[^>]+>/g, "");
+  expect(said({ runs: 3, finished: 0 })).toContain("Open the latest run to see why it stopped, then start another from the plan.");
+  expect(said({ runs: 3, finished: 2 })).toContain("Nothing confirmed is waiting for you.");
+  expect(said({ runs: 0, finished: 0 })).toContain("Check the plan, then start a run");
+});
