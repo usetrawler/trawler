@@ -20,6 +20,14 @@ test("findings are grouped by project in the panel's order, each group linking t
   expect(html).toContain("The other project has no confirmed defects in its latest runs.");
 });
 
+test("two projects with the same name are told apart by their address", () => {
+  const twins = [{ id: "a", name: "Shop", address: "shop.test/eu" }, { id: "b", name: "Shop", address: "shop.test/us" }];
+  const html = renderToStaticMarkup(createElement(FindingsView, { projects: twins, findings: [finding("a", "k1"), finding("b", "k2")], going: [] }));
+  expect(html).toMatch(/>Shop<\/a><span[^>]*>shop\.test\/eu<\/span>/);
+  expect(html).toMatch(/>Shop<\/a><span[^>]*>shop\.test\/us<\/span>/);
+  expect(render([finding("p1", "k")])).not.toMatch(/>Recurro<\/a><span[^>]*>localhost/);
+});
+
 test("with nothing open the page says so, and runs that are going show with their project", () => {
   const html = render([], [live]);
   expect(html).toContain(">No confirmed defects are open.</p>");

@@ -272,7 +272,7 @@ describe("the consent page on a phone, with the keyboard, and when the wrong acc
           return (el?.getAttribute("aria-label") || el?.textContent || el?.getAttribute("value") || el?.tagName || "").trim().slice(0, 40);
         }));
       }
-      expect(reached).toEqual(["Not you? Switch account", "read", expect.stringContaining("All projects in"), "Settings, Your AI assistant connections", "Allow read access", "Cancel"]);
+      expect(reached).toEqual(["Not you? Switch account", "read", expect.stringContaining("All projects in"), "Settings, API tokens & MCP", "Allow read access", "Cancel"]);
       await mobile.keyboard.press("Shift+Tab");
       await mobile.keyboard.press("Enter");
       const tokens = await redeem(clientId, verifier, await callback.next());

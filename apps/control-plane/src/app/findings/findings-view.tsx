@@ -17,6 +17,7 @@ export function FindingsView({ projects, findings, going }: { projects: NavProje
         <section key={project.id} aria-labelledby={`findings-${project.id}`} className="flex flex-col gap-2">
           <h2 id={`findings-${project.id}`} className="flex items-baseline gap-2 font-medium">
             <a href={`/projects/${project.id}/overview`} className="hover:underline hover:underline-offset-4">{project.name}</a>
+            {projects.some((o) => o.id !== project.id && o.name === project.name) && <span className="text-sm font-normal text-muted">{project.address}</span>}
             <span className="text-sm font-normal text-muted tabular-nums">{own.length}</span>
           </h2>
           <FindingRows findings={own} />
