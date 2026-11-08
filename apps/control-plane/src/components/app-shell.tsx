@@ -16,7 +16,7 @@ const same = (current: ShellPage | undefined, page: ShellPage) =>
 
 const menuItem = "flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-ink hover:bg-soft";
 
-function NavItem({ href, icon, label, detail, count, active, parent }: { href: string; icon?: IconName; label: string; detail?: string | null; count?: number; active: boolean; parent: boolean }) {
+function NavItem({ href, icon, label, detail, count, live, active, parent }: { href: string; icon?: IconName; label: string; detail?: string | null; count?: number; live?: boolean; active: boolean; parent: boolean }) {
   const title = detail ? `${label} · ${detail}` : label;
   return (
     <li className="shrink-0">
@@ -31,6 +31,7 @@ function NavItem({ href, icon, label, detail, count, active, parent }: { href: s
           {detail && <span className="block truncate text-xs font-normal text-muted">{detail}</span>}
         </span>
         {count !== undefined && <span className="ml-auto text-xs font-normal text-muted tabular-nums">{count}</span>}
+        {live && <span className="ml-auto flex shrink-0 items-center"><span aria-hidden className="size-2 rounded-full bg-ok" /><span className="sr-only">, a run is going</span></span>}
       </a>
     </li>
   );
@@ -85,7 +86,7 @@ export function AppShell({ shell, current, parent = false, wide = false, childre
           </ul>
           <p id="nav-projects" className="hidden px-2.5 pt-6 pb-1.5 text-xs text-muted md:block">Projects · {workspace.projects.length}</p>
           <ul aria-labelledby="nav-projects" className="flex shrink-0 gap-1 md:flex-col md:gap-0.5">
-            {workspace.projects.map((p) => <NavItem key={p.id} href={`/projects/${p.id}/overview`} label={p.name} detail={p.address} active={marked({ project: p.id })} parent={parent} />)}
+            {workspace.projects.map((p) => <NavItem key={p.id} href={`/projects/${p.id}/overview`} label={p.name} detail={p.address} live={p.live} active={marked({ project: p.id })} parent={parent} />)}
             <NavItem href="/new" icon="plus" label="New project" active={marked("new")} parent={parent} />
           </ul>
           <ul className="flex shrink-0 gap-1 md:mt-6 md:flex-col md:gap-0.5">

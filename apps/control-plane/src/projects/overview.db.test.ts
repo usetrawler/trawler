@@ -152,9 +152,9 @@ test("a project's runs are the same history narrowed to that project, with the p
   expect(await withOrg(t.db, "org-a", (tx) => projectHead(tx, "org-a", beta))).toEqual({ id: beta, name: "Beta", targetUrl: "https://beta.acme.test/" });
 });
 
-test("the navigation lists the workspace's projects, the most recently active first, and counts its runs", async () => {
+test("the navigation lists the workspace's projects, the most recently active first, marks those with a run queued or live, and counts its runs", async () => {
   expect(await withOrg(t.db, "org-a", (tx) => workspaceNav(tx, "org-a"))).toEqual({
-    projects: [{ id: fresh, name: "Fresh", address: "fresh.acme.test" }, { id: beta, name: "Beta", address: "beta.acme.test" }, { id: acme, name: "Acme", address: "app.acme.test" }, { id: empty, name: "Empty", address: "empty.acme.test" }],
+    projects: [{ id: fresh, name: "Fresh", address: "fresh.acme.test" }, { id: beta, name: "Beta", address: "beta.acme.test", live: true }, { id: acme, name: "Acme", address: "app.acme.test", live: true }, { id: empty, name: "Empty", address: "empty.acme.test" }],
     runs: 6,
   });
 });

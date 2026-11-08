@@ -43,7 +43,7 @@ export default async function RunPlanPage({ params, searchParams }: { params: Pr
   const runs = run.savedPlan?.id ? history.runs : history.runs.filter((r) => r.number === run.number);
   return (
     <AppShell shell={shell} current={{ project: run.projectId }} parent wide>
-      <RunBreadcrumb project={project} number={run.number} plan={planName} onPlan />
+      <RunBreadcrumb project={project} number={run.number} plan={planName} onPlan fromPullRequest={Boolean(run.pullRequest?.number)} />
       <PageHead compact eyebrow="Test plan" title={planName} subtitle={<>Plan used in <a href={report} className="text-ink underline underline-offset-4">{runTitle(run.number)}</a></>} />
       <div className="grid gap-6">
         <section aria-label="Test scope" className="grid gap-2">

@@ -688,7 +688,7 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
   const totalFindings = report.confirmed.length + report.couldNotJudge.length + report.inconclusive.length + report.notJudged.length + report.refuted.length + report.friction.length + report.dismissed.length;
   return (
     <div className="flex flex-col">
-      <RunBreadcrumb project={project} number={run.number} plan={run.savedPlan?.name ?? run.planName} />
+      <RunBreadcrumb project={project} number={run.number} plan={run.savedPlan?.name ?? run.planName} fromPullRequest={Boolean(run.pullRequest?.number)} />
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="text-2xl leading-tight font-semibold tracking-tight wrap-anywhere md:text-[28px]">{view.headline}</h1>
