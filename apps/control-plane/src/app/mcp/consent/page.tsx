@@ -49,7 +49,7 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
       </p>
       {!consent.settings.connectionsAllowed
         ? <>
-            <p className="border-l-2 border-bad pl-3 text-sm">{CONNECTIONS_OFF}{canChangeSettings && <> You can switch them on in <a href="/settings" className="underline underline-offset-4">Settings</a>.</>}</p>
+            <p className="border-l-2 border-bad pl-3 text-sm">{CONNECTIONS_OFF}{canChangeSettings && <> You can switch them on in <a href="/settings?section=tokens" className="underline underline-offset-4">Settings</a>.</>}</p>
             <ConsentEscape query={query} />
           </>
         : <ConsentForm query={query} requestedScopes={consent.scopes} account={{ name: person!.user.name, email: person!.user.email }} workspace={consent.org_name} controlOffered={options.controlOffered} controlNote={options.controlNote} projects={projects} />}

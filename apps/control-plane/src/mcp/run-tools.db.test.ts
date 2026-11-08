@@ -145,7 +145,7 @@ test("every refusal of Start reaches the assistant as a plain error, and the one
   await withOrg(t.db, "org-nokey", (tx) => setMcpSettings(tx, "org-nokey", { connectionsAllowed: true, runControlAllowed: true }, "owner"));
   const nokey = await call(caller("org-nokey", nokeyGrant), "start_run", { project: projects.nokey });
   expect(nokey.isError).toBe(true);
-  expect(nokey.text).toContain(`A person can, here: ${ORIGIN}/settings`);
+  expect(nokey.text).toContain(`A person can, here: ${ORIGIN}/settings?section=model`);
   const busy = await call(who, "start_run", { project: projects.r3, cap: 1 });
   expect(busy.isError).toBe(false);
   const inProgress = await call(who, "start_run", { project: projects.r3, cap: 1 });

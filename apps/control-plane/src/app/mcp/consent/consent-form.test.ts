@@ -67,7 +67,7 @@ test("the controls are real, keyboard-reachable elements, and none is disabled a
 test("the page tells how long a connection lasts and where to disconnect it, with a working link", () => {
   const html = render();
   expect(words(html)).toContain("a connection nobody has used for 30 days stops working");
-  expect(html).toMatch(/<a href="\/settings"[^>]*>Settings, Your AI assistant connections<\/a>/);
+  expect(html).toMatch(/<a href="\/settings\?section=tokens"[^>]*>Settings, API tokens &amp; MCP<\/a>/);
 });
 
 test("a client that does not ask to stay connected is told it works for about 15 minutes, not 30 days", () => {
