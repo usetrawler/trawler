@@ -231,10 +231,10 @@ export function TimelineLanes({ run, live, now }: { run: RunSummary; live: boole
                 <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded bg-panel px-0.5 py-1 text-xs whitespace-nowrap text-muted shadow-[0_0_0_1px_var(--line)] [writing-mode:vertical-rl]">{lasted(b.to - b.from)} later</span>
               </span>
             ))}
-            {live && <span className="absolute -top-2 -bottom-2 w-0.5 rounded bg-ok" style={{ left: `${at(now)}%` }}><span className={`absolute -top-5 text-xs font-medium text-ok ${at(now) > 92 ? "right-1" : "-left-3"}`}>now</span></span>}
+            {live && <span className="absolute -top-2 -bottom-2 w-0.5 rounded bg-ok" style={{ left: `${at(now)}%` }}><span className={`absolute -bottom-5 text-xs font-medium text-ok ${at(now) > 92 ? "right-1" : "-left-3"}`}>now</span></span>}
           </div>
         </div>
-        <p aria-hidden className="mt-3 ml-40 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted">
+        <p aria-hidden className="mt-6 ml-40 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted">
           <span className="inline-flex items-center gap-1.5"><i className="inline-block h-2 w-4 rounded" style={{ background: toneOf(0).bar }} />a turn</span>
           <span className="inline-flex items-center gap-1.5"><i className="inline-block h-0.5 w-4 bg-[repeating-linear-gradient(90deg,var(--muted)_0_3px,transparent_3px_6px)]" />waiting</span>
           <span className="inline-flex items-center gap-1.5"><i className="inline-block h-2.5 w-3 rounded-[3px_3px_3px_1px] shadow-[0_0_0_1.5px_var(--muted)]" />said something</span>
