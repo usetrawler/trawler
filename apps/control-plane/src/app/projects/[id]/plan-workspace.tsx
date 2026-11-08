@@ -5,8 +5,6 @@ import { MAX_GOALS_PER_PERSONA, MAX_PERSONAS, turnsOf, type Goal, type Persona }
 import type { KeyHint } from "../../../credentials/credentials.ts";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { addAccountAction, removeAccountAction, savePlanAction, type AccountView } from "./plan-actions.ts";
-import { CiOnlyPanel } from "./ci-only.tsx";
-import { StartRun, type StartRefusal } from "./start-run.tsx";
 import { peopleLimitMessage, type WorkspacePlan } from "../../../runs/plan-limits.ts";
 
 const field = "w-full min-w-0 rounded-md border border-line bg-panel px-2.5 py-1.5 outline-none hover:border-muted/60 focus:border-ink";
@@ -176,22 +174,35 @@ function planProblem(personas: PlanPerson[], goals: Goal[]): string | null {
   return null;
 }
 
-export function PlanWorkspace({ projectId, planId, planLabel, projectName, initialPersonas, initialGoals, initialAccounts, keyHint, canManageKey, authorisedBefore, firstRunOnUs, startRefusal, closedBeta, workspacePlan, ciOnly }: {
-  projectId: string; planId: string; planLabel?: string; projectName: string; initialPersonas: PlanPerson[]; initialGoals: Goal[]; initialAccounts: AccountView[]; keyHint: KeyHint | null; canManageKey: boolean; authorisedBefore: boolean; firstRunOnUs?: boolean; startRefusal?: StartRefusal; closedBeta?: string; workspacePlan?: WorkspacePlan; ciOnly?: { host: string; confirmedAt: string | null };
+function StartLink({ href, ciOnly, blocked, closedBeta }: { href: string; ciOnly: boolean; blocked?: string; closedBeta?: string }) {
+  return (
+    <section id="start" aria-labelledby="start-heading" className="flex flex-col gap-4 rounded-lg border border-line p-5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 flex-col gap-1">
+        <h2 id="start-heading" className="text-base font-medium">{ciOnly ? "Run from CI" : "Start a run"}</h2>
+        {closedBeta ? <p id="start-blocked" className="border-l-2 border-warn pl-3 text-sm">{closedBeta}</p>
+          : blocked ? <p id="start-blocked" className="text-sm text-warn">{blocked}</p>
+          : <p className="text-sm text-muted">{ciOnly ? "This product is on a private network, so its runs start from your CI job." : "Choose the model and the cap, then start this plan."}</p>}
+      </div>
+      <a href={href} className="flex h-10 shrink-0 items-center justify-center rounded-md border border-line bg-panel px-4 text-sm font-medium hover:border-muted">{ciOnly ? "Set up runs from CI" : "Start a run"}</a>
+    </section>
+  );
+}
+
+export function PlanWorkspace({ projectId, planId, initialPersonas, initialGoals, initialAccounts, closedBeta, workspacePlan, ciOnly = false }: {
+  projectId: string; planId: string; initialPersonas: PlanPerson[]; initialGoals: Goal[]; initialAccounts: AccountView[]; closedBeta?: string; workspacePlan?: WorkspacePlan; ciOnly?: boolean;
 }) {
   const [saved, setSaved] = useState({ personas: initialPersonas, goals: initialGoals });
   const [personas, setPersonas] = useState(initialPersonas);
   const [goals, setGoals] = useState(initialGoals);
   const [accounts, setAccounts] = useState(initialAccounts);
   const [error, setError] = useState<{ message: string; retry: boolean } | null>(null);
-  const [starting, setStarting] = useState(false);
   const [saving, startSaving] = useTransition();
   const status = useRef<HTMLParagraphElement>(null);
   const dirty = JSON.stringify({ personas, goals }) !== JSON.stringify(saved);
   const problem = dirty ? planProblem(personas, goals) : null;
 
   useEffect(() => {
-    if (!dirty || problem || saving || error || starting) return;
+    if (!dirty || problem || saving || error) return;
     const timer = setTimeout(() => save({ personas, goals }), AUTOSAVE_MS);
     return () => clearTimeout(timer);
   });
@@ -315,7 +326,7 @@ export function PlanWorkspace({ projectId, planId, planLabel, projectName, initi
 
       {personas.length > 1 && <OrderOfPlay personas={personas} goals={goals} onMove={moveGoal} />}
 
-      {ciOnly ? <CiOnlyPanel projectId={projectId} projectName={projectName} host={ciOnly.host} confirmedAt={ciOnly.confirmedAt} /> : <StartRun projectId={projectId} planId={planId} projectName={projectName} planLabel={planLabel} personas={saved.personas.length} goalsPerTurn={turnsOf(saved).map((t) => t.goalIds.length)} keyHint={keyHint} canManageKey={canManageKey} authorisedBefore={authorisedBefore} firstRunOnUs={firstRunOnUs} refusal={startRefusal} closedBeta={closedBeta} onStarting={setStarting} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : overPlan)} />}
+      <StartLink href={`/runs/new?project=${projectId}&plan=${planId}`} ciOnly={ciOnly} closedBeta={closedBeta} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount ? `${withoutAccount.name} needs a test account to sign in.` : overPlan)} />
     </div>
   );
 }
