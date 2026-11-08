@@ -29,7 +29,7 @@ test("a key added by someone who has left says so, and an OpenAI-compatible key 
 
 test("an owner or admin without a key is asked for one here, without the page jumping to it", () => {
   const html = render(createElement(ModelKey, { saved: null, addedBy: null, canManage: true }));
-  expect(text(html)).toContain("No model key yet. Runs are paid with it: add one here, or in the Start panel of a plan.");
+  expect(text(html)).toContain("No model key yet. Runs are paid with it: add one here, or when you start a run.");
   expect(html).toMatch(/<input [^>]*name="apiKey"/);
   expect(html.match(/<input [^>]*name="apiKey"[^>]*>/)?.[0]).not.toContain("autofocus");
   expect(html).toMatch(/<button type="submit"[^>]*>Save key<\/button>/);

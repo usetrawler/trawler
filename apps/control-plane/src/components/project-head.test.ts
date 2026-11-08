@@ -31,8 +31,8 @@ test("a project that shares its name shows the address the panel gives it, under
   expect(html).toMatch(/<a href="https:\/\/app\.acme\.test\/billing" target="_blank" rel="noreferrer" class="underline [^"]*">app\.acme\.test\/billing<span aria-hidden="true"> ↗<\/span>/);
 });
 
-test("a new run starts at the plan's Start section", () => {
-  expect(render("runs")).toMatch(/<a href="\/projects\/p1#start"[^>]*>New run<\/a>/);
+test("a new run opens the start page for this project", () => {
+  expect(render("runs")).toMatch(/<a href="\/runs\/new\?project=p1"[^>]*>New run<\/a>/);
 });
 
 test("runs can be paused from the head, and a paused project offers Resume runs instead of a new run", () => {

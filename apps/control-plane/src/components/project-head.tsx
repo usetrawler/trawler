@@ -18,7 +18,7 @@ export function ProjectHead({ project, address, tab, runs, runState, planId }: {
         action={
           <div className="flex flex-wrap items-end gap-3 md:justify-end">
             <PauseRuns projectId={project.id} paused={runState.paused} liveRun={runState.liveRun} />
-            {!runState.paused && <PrimaryLink href={`/projects/${project.id}${planId ? `?plan=${planId}` : ""}#start`}>New run</PrimaryLink>}
+            {!runState.paused && <PrimaryLink href={`/runs/new?project=${project.id}${planId ? `&plan=${planId}` : ""}`}>New run</PrimaryLink>}
           </div>
         }
       />

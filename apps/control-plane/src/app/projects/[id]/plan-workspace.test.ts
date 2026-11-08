@@ -11,13 +11,13 @@ const accounts: AccountView[] = [{ ref: "account-1", username: "kwame@acme.test"
 const ama: Persona = { id: "ama", name: "Ama", brief: "Brand new." };
 const kwame: Persona = { id: "kwame", name: "Kwame", brief: "Has an account.", accountRef: "account-1" };
 
-function render(initialPersonas: PlanPerson[], initialAccounts: AccountView[], authorisedBefore = false, initialGoals = initialPersonas.map((p, i) => ({ id: `g${i}`, instruction: "Send an invoice.", personaId: p.id }))) {
-  return renderToStaticMarkup(createElement(PlanWorkspace, { projectId: "p1", planId: "pl1", projectName: "Acme", initialPersonas, initialGoals, initialAccounts, keyHint: null, canManageKey: true, authorisedBefore }));
+function render(initialPersonas: PlanPerson[], initialAccounts: AccountView[], initialGoals = initialPersonas.map((p, i) => ({ id: `g${i}`, instruction: "Send an invoice.", personaId: p.id }))) {
+  return renderToStaticMarkup(createElement(PlanWorkspace, { projectId: "p1", planId: "pl1", initialPersonas, initialGoals, initialAccounts }));
 }
 
 describe("PlanWorkspace", () => {
   it("shows the order of play across people, marks each new turn, and hides it for a single person", () => {
-    const html = render([ama, kwame], accounts, false, [
+    const html = render([ama, kwame], accounts, [
       { id: "submit", instruction: "Submit a pitch.", personaId: "ama" },
       { id: "review", instruction: "Review Ama's pitch.", personaId: "kwame" },
       { id: "decision", instruction: "See the decision.", personaId: "ama" },
@@ -32,7 +32,7 @@ describe("PlanWorkspace", () => {
   });
 
   it("shows each person's own goals on their card", () => {
-    const html = render([ama, kwame], accounts, false, [
+    const html = render([ama, kwame], accounts, [
       { id: "submit", instruction: "Submit a pitch.", personaId: "ama" },
       { id: "review", instruction: "Review a pitch.", personaId: "kwame" },
       { id: "approve", instruction: "Approve a pitch.", personaId: "kwame" },
@@ -42,11 +42,6 @@ describe("PlanWorkspace", () => {
     expect(cards[1]).toMatch(/^Kwame"[\s\S]*Review a pitch\.[\s\S]*Approve a pitch\./);
     expect(html).toContain('aria-label="Remove goal 1 of Kwame"');
     expect(html).not.toContain('aria-label="Remove goal 1 of Ama"');
-  });
-
-  it("passes on to Start whether the project has had a run, so the box is asked only before the first", () => {
-    expect(render([ama], [])).toContain('name="authorised"');
-    expect(render([ama], [], true)).not.toContain('name="authorised"');
   });
 
   it("each card says how its person gets in, and the separate test accounts section is gone", () => {
@@ -69,6 +64,19 @@ describe("PlanWorkspace", () => {
     expect(html).toMatch(/aria-label="Sign-in for Ama" aria-invalid="true" aria-describedby="sign-in-ama"/);
   });
 
+  it("Start a run links to the start page for this plan, described by why a start would be refused", () => {
+    const html = render([{ ...ama, signsIn: true }, kwame], accounts);
+    expect(html).toMatch(/<a href="\/runs\/new\?project=p1&amp;plan=pl1" aria-describedby="start-blocked"[^>]*>Start a run<\/a>/);
+    expect(render([kwame], accounts)).toMatch(/<a href="\/runs\/new\?project=p1&amp;plan=pl1" class="[^"]*">Start a run<\/a>/);
+    expect(render([kwame], accounts)).not.toContain('aria-disabled="true"');
+  });
+
+  it("on a private network the CI job can give the accounts, so a person without one does not stop Run from CI", () => {
+    const html = renderToStaticMarkup(createElement(PlanWorkspace, { projectId: "p1", planId: "pl1", initialPersonas: [{ ...ama, signsIn: true }], initialGoals: [{ id: "g", instruction: "Look.", personaId: "ama" }], initialAccounts: accounts, ciOnly: true }));
+    expect(html).not.toContain('id="start-blocked"');
+    expect(html).toMatch(/<a href="\/runs\/new\?project=p1&amp;plan=pl1" class="[^"]*">Set up runs from CI<\/a>/);
+  });
+
   it("an account that is gone never shows as someone else's: the card asks for one and Start refuses", () => {
     const html = render([{ ...kwame, accountRef: "account-gone" }], accounts);
     expect(html).toMatch(/<option value="" selected="">Choose a test account<\/option>/);
@@ -79,8 +87,8 @@ describe("PlanWorkspace", () => {
     const free: WorkspacePlan = { plan: "free", limits: { projects: 1, runsPerDay: 3, people: 4 } };
     const people = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `p${i}`, name: `P${i}`, brief: "b" }));
     const at = (n: number, workspacePlan = free) => renderToStaticMarkup(createElement(PlanWorkspace, {
-      projectId: "p1", planId: "pl1", projectName: "Acme", initialPersonas: people(n), initialGoals: people(n).map((p) => ({ id: `g-${p.id}`, instruction: "Look.", personaId: p.id })),
-      initialAccounts: [], keyHint: null, canManageKey: true, authorisedBefore: true, workspacePlan,
+      projectId: "p1", planId: "pl1", initialPersonas: people(n), initialGoals: people(n).map((p) => ({ id: `g-${p.id}`, instruction: "Look.", personaId: p.id })),
+      initialAccounts: [], workspacePlan,
     }));
     expect(at(5)).toMatch(/id="start-blocked"[^>]*>The Free plan takes up to 4 people in a run, and the plan on this project has 5\. Remove people from the plan, run it on your own machine with the local runner, or write to contact@usetrawler\.com about the Team plan\.</);
     expect(at(4)).not.toContain('id="start-blocked"');
@@ -91,7 +99,13 @@ describe("PlanWorkspace", () => {
 describe("the beta list", () => {
   it("passes the refusal of an account outside it to the Start panel", () => {
     const message = "Hosted runs are in private beta. Write to contact@usetrawler.com to get access.";
-    const html = renderToStaticMarkup(createElement(PlanWorkspace, { projectId: "p1", planId: "pl1", projectName: "Acme", initialPersonas: [{ id: "ana", name: "Ana", brief: "b", signsIn: false }], initialGoals: [{ id: "g", instruction: "Get in.", personaId: "ana" }], initialAccounts: [], keyHint: null, canManageKey: true, authorisedBefore: false, closedBeta: message }));
+    const html = renderToStaticMarkup(createElement(PlanWorkspace, { projectId: "p1", planId: "pl1", initialPersonas: [{ id: "ana", name: "Ana", brief: "b", signsIn: false }], initialGoals: [{ id: "g", instruction: "Get in.", personaId: "ana" }], initialAccounts: [], closedBeta: message }));
     expect(html).toContain(`<p id="start-blocked" class="border-l-2 border-warn pl-3 text-sm">${message}</p>`);
+  });
+
+  it("leaves it out on a private network, where runs start from the CI job and not on Trawler", () => {
+    const message = "Hosted runs are in private beta. Write to contact@usetrawler.com to get access.";
+    const html = renderToStaticMarkup(createElement(PlanWorkspace, { projectId: "p1", planId: "pl1", initialPersonas: [{ id: "ana", name: "Ana", brief: "b", signsIn: false }], initialGoals: [{ id: "g", instruction: "Get in.", personaId: "ana" }], initialAccounts: [], closedBeta: message, ciOnly: true }));
+    expect(html).not.toContain(message);
   });
 });

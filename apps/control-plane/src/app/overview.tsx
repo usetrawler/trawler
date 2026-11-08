@@ -59,7 +59,7 @@ export function Overview({ firstName, projects, recent }: { firstName: string; p
         eyebrow={<Greeting name={firstName} />}
         title="Projects"
         subtitle={overviewSubtitle(recent)}
-        action={<PrimaryLink href={projects[0] ? `/projects/${projects[0].id}#start` : "/new"}>New run</PrimaryLink>}
+        action={<PrimaryLink href={projects[0] ? "/runs/new" : "/new"}>New run</PrimaryLink>}
       />
       <ul aria-label="Projects" className="divide-y divide-line rounded-lg border border-line bg-paper">
         {projects.map((p) => <ProjectRow key={p.id} project={p} />)}

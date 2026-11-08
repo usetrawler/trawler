@@ -21,7 +21,7 @@ describe("Overview", () => {
     expect(html).toContain('<ul aria-label="Projects"');
     expect(html).toContain('href="/projects/p1/overview"');
     expect(html).toContain('href="/projects/p2/overview"');
-    expect(html).toContain('href="/projects/p1#start"');
+    expect(html).toContain('href="/runs/new"');
     expect(html).toContain(">Acme Invoices</strong>");
     expect(html).toContain(">app.acme.test</small>");
     expect(html).toContain('href="/runs/0009"');

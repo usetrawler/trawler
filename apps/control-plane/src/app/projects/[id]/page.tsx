@@ -7,20 +7,17 @@ import { PlanRunHistory } from "../../../components/plan-run-history.tsx";
 import { ProjectHead } from "../../../components/project-head.tsx";
 import { PlanWorkspace } from "./plan-workspace.tsx";
 import { PrPlanView } from "./pr-plan-view.tsx";
-import { modelKeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
-import { projectRunCount, testingConfirmedAt, workspaceRuns } from "../../../projects/overview.ts";
+import { projectRunCount, workspaceRuns } from "../../../projects/overview.ts";
 import { onPrivateNetwork } from "../../../projects/private-target.ts";
-import { FIRST_RUN_ON_US } from "../../../runs/models.ts";
-import { firstRunOnUsLeft, projectRunState, refusalToStart, RunInProgress, TooManyPeople } from "../../../runs/runs.ts";
+import { projectRunState } from "../../../runs/runs.ts";
 import { workspacePlan } from "../../../runs/plans.ts";
 import { listPlans, listPullRequestPlans, MAX_PLANS, projectForEditing } from "../../../projects/projects.ts";
 import { PlansBar } from "./plans-bar.tsx";
 import { PlanTitle } from "./plan-title.tsx";
 import { betaRefusal } from "../../../server/beta.ts";
-import { canManageBilling, signedInMember } from "../../../server/auth.ts";
+import { signedInMember } from "../../../server/auth.ts";
 import { getDb } from "../../../server/db.ts";
-import { readEnv } from "../../../server/env.ts";
 import { shellFor } from "../../../server/shell.ts";
 import { projectPageTitle } from "../../../server/titles.ts";
 
@@ -40,13 +37,12 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   if (!member) redirect("/sign-in");
   const { orgId } = member;
   if (!UUID.test(id)) notFound();
-  const env = readEnv();
   const [plans, prPlans] = await withOrg(getDb(), orgId, (tx) => Promise.all([listPlans(tx, orgId, id), listPullRequestPlans(tx, orgId, id)]));
   const prPlan = prPlans.find((p) => p.id === requestedPlan);
   const planId = prPlan?.id ?? plans.find((p) => p.id === requestedPlan)?.id ?? plans[0]?.id;
   if (!planId) notFound();
-  const [project, keyHint, runs, runState, onUsLeft, plan, confirmedAt, history] = await withOrg(getDb(), orgId, (tx) =>
-    Promise.all([projectForEditing(tx, orgId, id, planId), modelKeyHint(tx, orgId), projectRunCount(tx, orgId, id), projectRunState(tx, orgId, id), env.setup ? firstRunOnUsLeft(tx, orgId) : false, workspacePlan(tx, orgId), testingConfirmedAt(tx, orgId, id), workspaceRuns(tx, orgId, { projectId: id, planId, archivedPlan: Boolean(prPlan), size: 5 })]),
+  const [project, runs, runState, plan, history] = await withOrg(getDb(), orgId, (tx) =>
+    Promise.all([projectForEditing(tx, orgId, id, planId), projectRunCount(tx, orgId, id), projectRunState(tx, orgId, id), workspacePlan(tx, orgId), workspaceRuns(tx, orgId, { projectId: id, planId, archivedPlan: Boolean(prPlan), size: 5 })]),
   );
   if (!project || !runState) notFound();
   const historySection = <PlanRunHistory runs={history.runs} more={history.olderThan !== null ? `/projects/${id}/runs?plan=${planId}` : undefined} />;
@@ -68,9 +64,6 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
       </AppShell>
     );
   }
-  const offeredOnUs = onUsLeft && project.personas.length <= FIRST_RUN_ON_US.maxPeople;
-  const refused = await withOrg(getDb(), orgId, (tx) => refusalToStart(tx, orgId, id, offeredOnUs ? "trawler" : "workspace", planId));
-  const refusal = refused instanceof TooManyPeople ? null : refused;
   const shell = await shellFor(member);
   return (
     <AppShell shell={shell} current={{ project: id }} wide>
@@ -92,18 +85,11 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
           key={planId}
           projectId={project.id}
           planId={planId}
-          projectName={project.name}
-          planLabel={plans.length > 1 ? project.plan.name : undefined}
           initialPersonas={project.personas.map((p) => ({ id: p.key, name: p.name, brief: p.brief, signsIn: p.signs_in || p.account_ref !== null, ...(p.account_ref ? { accountRef: p.account_ref } : {}) }))}
           initialGoals={project.goals.map((g) => ({ id: g.key, instruction: g.instruction, personaId: g.persona_key }))}
           initialAccounts={project.accounts.map((a) => ({ ref: a.ref, username: a.username, hint: a.password_hint }))}
-          keyHint={keyHint}
-          canManageKey={canManageBilling(member)}
-          authorisedBefore={runs > 0 || confirmedAt !== null}
-          ciOnly={onPrivateNetwork(project.target_url) ? { host: new URL(project.target_url).host, confirmedAt: confirmedAt?.toISOString() ?? null } : undefined}
-          firstRunOnUs={onUsLeft}
+          ciOnly={onPrivateNetwork(project.target_url)}
           workspacePlan={plan}
-          startRefusal={refusal ? { message: refusal.message, ...(refusal instanceof RunInProgress ? { activeRun: refusal.run } : {}) } : undefined}
           closedBeta={betaRefusal(member.email) ?? undefined}
         />
         {historySection}

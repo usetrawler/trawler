@@ -84,36 +84,6 @@ beforeEach(() => {
   state.beta = undefined;
 });
 
-test("while the beta list is set, an account outside it is told so on the Start panel before Start, and one on it, or any account without a list, is not", async () => {
-  state.beta = ["lee@acme.test"];
-  await render();
-  state.beta = ["lee@acme.test", "ana@acme.test"];
-  await render();
-  state.member = { ...state.member!, email: "Ana@Acme.test" };
-  await render();
-  state.beta = undefined;
-  await render();
-  expect(state.planned.map((props) => props.closedBeta)).toEqual(["Hosted runs are in private beta. Write to contact@usetrawler.com to get access.", undefined, undefined, undefined]);
-});
-
-test("the Start panel offers the first run on Trawler while the workspace has not used it and this server can pay; refusals are judged for the run the panel will start", async () => {
-  await render();
-  state.onUsLeft = false;
-  await render();
-  state.onUsLeft = true;
-  state.platformKey = false;
-  await render();
-  expect(state.planned.map((props) => props.firstRunOnUs)).toEqual([true, false, false]);
-  expect(state.refusalFor).toEqual(["trawler", "workspace", "workspace"]);
-});
-
-test("a plan with more people than the first run on Trawler takes is judged as a run paid with a key", async () => {
-  state.people = 5;
-  await render();
-  expect(state.planned[0]!.firstRunOnUs).toBe(true);
-  expect(state.refusalFor).toEqual(["workspace"]);
-});
-
 test("a visitor who is not signed in, or no longer belongs to any workspace, is sent to sign in before anything is read", async () => {
   state.member = null;
   await expect(ProjectPage({ params: Promise.resolve({ id: ID }), searchParams: Promise.resolve({}) })).rejects.toMatchObject({ to: "/sign-in" });
@@ -136,7 +106,7 @@ test("the plan is the project's Plan tab, next to its Runs with their number, wi
   expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}/runs" class="[^"]*">Runs<span[^>]*>3</span></a>`));
   expect(state.counted).toEqual([["org-1", ID]]);
   expect(html).not.toContain('aria-label="Progress"');
-  expect(html).toMatch(new RegExp(`<a href="/projects/${ID}\\?plan=[0-9a-f-]+#start"[^>]*>New run<`));
+  expect(html).toMatch(new RegExp(`<a href="/runs/new\\?project=${ID}&amp;plan=[0-9a-f-]+"[^>]*>New run<`));
   expect(html).toMatch(/>Project · <a href="https:\/\/app\.acme\.test\/"[^>]*>app\.acme\.test</);
 });
 
@@ -152,35 +122,14 @@ test("a project without runs still offers its Runs tab, counted as none", async 
   expect(html).toMatch(new RegExp(`<a href="/projects/${ID}/runs" class="[^"]*">Runs<span[^>]*>0</span></a>`));
 });
 
-test("the Start panel is told whether the project has had a run, so the authorisation is asked only before the first", async () => {
-  await render();
-  state.runs = 3;
-  await render();
-  expect(state.planned.map((props) => props.authorisedBefore)).toEqual([false, true]);
-});
-
-test("the Start panel is told what refuses a start right now, with the live run to open", async () => {
-  const { RunInProgress } = await vi.importActual<typeof import("../../../runs/runs.ts")>("../../../runs/runs.ts");
-  state.refusal = new RunInProgress({ id: "live-run", number: 7 });
-  await render();
-  expect(state.planned[0]!.startRefusal).toEqual({ message: "Run 0007 is still going on this project. Wait for it to finish or stop it, then start again.", activeRun: { id: "live-run", number: 7 } });
-  state.planned = [];
-  state.refusal = null;
-  await render();
-  expect(state.planned[0]!.startRefusal).toBeUndefined();
-});
-
 test("a project whose run state cannot be read is not found", async () => {
   state.runState = null as unknown as typeof state.runState;
   await expect(render()).rejects.toMatchObject({ notFound: true });
 });
 
 test("the plan editor gets the workspace's plan, and too many people for it is left to the editor, which sees the plan as it is edited", async () => {
-  const { TooManyPeople } = await import("../../../runs/runs.ts");
-  state.refusal = new TooManyPeople(FREE, 5);
   renderToStaticMarkup(await ProjectPage({ params: Promise.resolve({ id: ID }), searchParams: Promise.resolve({}) }));
   expect(state.planned[0]!.workspacePlan).toEqual(FREE);
-  expect(state.planned[0]!.startRefusal).toBeUndefined();
 });
 
 test("the plan tab lists the project's plans, opens the one asked for and falls back to the first", async () => {

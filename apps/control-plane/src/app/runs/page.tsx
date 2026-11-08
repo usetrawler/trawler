@@ -24,7 +24,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
   return (
     <AppShell shell={shell} current="runs" wide>
       <RunsView
-        head={<PageHead compact eyebrow="Workspace" title="All runs" action={<PrimaryLink href={newest ? `/projects/${newest.id}#start` : "/new"}>New run</PrimaryLink>} />}
+        head={<PageHead compact eyebrow="Workspace" title="All runs" action={<PrimaryLink href={newest ? `/runs/new?project=${newest.id}` : "/new"}>New run</PrimaryLink>} />}
         basePath="/runs"
         show={show} origin={origin} counts={counts} runs={history.runs} olderThan={history.olderThan} paged={before !== undefined}
       />

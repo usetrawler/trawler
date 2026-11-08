@@ -98,7 +98,7 @@ test("the project is marked in the nav as the section the page belongs to, the R
   const tabs = html.match(/<nav aria-label="Project">.*?<\/nav>/)?.[0] ?? "";
   expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}" class="[^"]*">Plans</a>`));
   expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}/runs" aria-current="page"[^>]*>Runs<span[^>]*>3</span></a>`));
-  expect(html).toMatch(new RegExp(`<a href="/projects/${ID}#start"[^>]*>New run<`));
+  expect(html).toMatch(new RegExp(`<a href="/runs/new\\?project=${ID}"[^>]*>New run<`));
   expect(html).not.toContain("Back to the plan");
 });
 
@@ -133,7 +133,7 @@ test("a plan of the project narrows the runs and their counts, a plan it does no
   expect(state.planCounted).toEqual([second, undefined]);
   expect(html).toContain("Runs of a plan");
   expect(html).toMatch(/>Runs<span[^>]*>3<\/span>/);
-  expect(html).toMatch(new RegExp(`href="/projects/${ID}\\?plan=${second}#start"`));
+  expect(html).toMatch(new RegExp(`href="/runs/new\\?project=${ID}&amp;plan=${second}"`));
   await open(ID, { plan: "33333333-3333-4333-8333-333333333333" });
   expect(state.asked.at(-1)).not.toHaveProperty("planId");
   expect(state.planCounted.at(-1)).toBeUndefined();
