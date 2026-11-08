@@ -26,8 +26,8 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
           New to Trawler? <DocsLink className="underline underline-offset-4 hover:text-ink">Read the docs</DocsLink>
         </p>
       </section>
-      <section className="flex flex-col gap-4 border border-line bg-panel p-6">
-        <p className="text-xs text-muted">Sign in</p>
+      <section aria-labelledby="sign-in-heading" className="flex flex-col gap-4 rounded-xl bg-panel p-6 shadow-[0_0_0_1px_var(--line)]">
+        <h2 id="sign-in-heading" className="font-medium">Sign in</h2>
         {error && <p role="alert" className="text-sm text-bad">Signing in did not work. Please try again.</p>}
         <SignInButtons providers={signInProviders()} />
         <LegalLinks lead="By signing in you accept" />
