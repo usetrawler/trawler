@@ -1,7 +1,7 @@
 export interface IssueFinding {
   title: string;
   severity: string;
-  personName: string;
+  personaName: string;
   goalText: string;
   observed: string;
   reproduction: string[];
@@ -22,7 +22,7 @@ export function findingMarkdown(f: IssueFinding, where: { status: string; runTit
   return [
     `## ${f.title}`,
     "",
-    `**${capitalised(f.severity)}** · ${where.status} · reported by ${f.personName}, while trying to: ${f.goalText}`,
+    `**${capitalised(f.severity)}** · ${where.status} · reported by ${f.personaName}, while trying to: ${f.goalText}`,
     ...(f.page ? [`Page: \`${f.page}\``] : []),
     "",
     "### What happened",
@@ -31,7 +31,7 @@ export function findingMarkdown(f: IssueFinding, where: { status: string; runTit
     "### Steps to reproduce",
     ...f.reproduction.map((step, i) => `${i + 1}. ${step}`),
     ...(replayed ? ["", "### What the replay saw", replayed] : []),
-    ...(f.quote ? ["", `> ${f.quote}`, `> — ${f.personName}`] : []),
+    ...(f.quote ? ["", `> ${f.quote}`, `> — ${f.personaName}`] : []),
     "",
     ...(captures.length > 0 ? [`Screen captures: ${captures.join(" · ")}`] : []),
     `Found by Trawler in [${where.runTitle}](${where.runUrl})`,

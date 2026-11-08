@@ -4,7 +4,7 @@ import { findingMarkdown, type IssueFinding } from "./finding-markdown.ts";
 const finding: IssueFinding = {
   title: "Saving an invoice fails",
   severity: "high",
-  personName: "Ana",
+  personaName: "Ana",
   goalText: "Send an invoice.",
   observed: "A 500 page.",
   reproduction: ["Open Invoices.", "Save."],
