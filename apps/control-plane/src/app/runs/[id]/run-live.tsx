@@ -15,6 +15,7 @@ import { viaClient } from "../../../runs/via.ts";
 import { FindingScreenshots } from "./finding-screenshots.tsx";
 import { trailAnchor, Trails } from "./person-trail.tsx";
 import { RunAgainButton, RunAgainError, useRunAgain } from "./run-again-button.tsx";
+import { findingMarkdown } from "../../../runs/finding-markdown.ts";
 
 type View = ReturnType<typeof runView>;
 type Data = { run: RunSummary; view: View };
@@ -26,6 +27,7 @@ type Changed = { onDone: Moved; onRefused: () => Promise<void> };
 type Outcome = { error?: string; why?: "reason" | "settled" | "other" };
 
 const POLL_MS = 2000;
+const COPY_WAIT_MS = 3000;
 const usd = (n: number) => `$${n.toFixed(2)}`;
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -278,7 +280,43 @@ function PullRequestSubject({ pr }: { pr: NonNullable<RunSummary["pullRequest"]>
   );
 }
 
-export function FindingRow({ f, n, mark, note, detail, action, dismiss, focus, reveal, onFocused }: { f: ReportFinding; n: number; mark?: string; note?: string; detail?: string; action?: React.ReactNode; dismiss?: React.ReactNode; focus?: boolean; reveal?: boolean; onFocused?: () => void }) {
+const primaryButton = "flex h-10 w-max items-center justify-center gap-2 rounded-md bg-action px-4 text-sm font-medium text-[#171717] transition-[filter] hover:brightness-105";
+const quietButton = "flex h-10 w-max items-center justify-center gap-2 rounded-md border border-line bg-panel px-4 text-sm font-medium hover:border-muted";
+
+export function CopyIssue({ f, status, runNumber, primary }: { f: ReportFinding; status: string; runNumber: number; primary: boolean }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const [markdown, setMarkdown] = useState("");
+  const copy = () => {
+    const origin = window.location.origin;
+    const text = findingMarkdown(f, { status, runTitle: runTitle(runNumber), runUrl: `${origin}${runPath(runNumber)}#${findingAnchor(f.key)}`, origin });
+    setMarkdown(text);
+    let written: Promise<void> | undefined;
+    try {
+      written = navigator.clipboard?.writeText(text);
+    } catch {
+      written = undefined;
+    }
+    if (!written) return setState("failed");
+    const tooLong = new Promise<never>((_, refuse) => setTimeout(() => refuse(new Error("timed out")), COPY_WAIT_MS));
+    Promise.race([written, tooLong]).then(() => setState("copied"), () => setState("failed"));
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="button" onClick={copy} className={primary ? primaryButton : quietButton}>Copy as issue</button>
+        <span role="status" className="text-sm text-muted">{state === "copied" ? "Copied as Markdown, with the steps and links back to this run." : ""}</span>
+      </div>
+      {state === "failed" && (
+        <>
+          <p role="alert" className="text-sm text-bad">The browser did not let Trawler copy. Select the text below and copy it yourself.</p>
+          <textarea aria-label={`Issue text for ${f.title}`} readOnly rows={8} value={markdown} onFocus={(e) => e.currentTarget.select()} className="w-full min-w-0 rounded-md border border-line bg-paper p-2 font-mono text-xs" />
+        </>
+      )}
+    </div>
+  );
+}
+
+export function FindingRow({ f, n, mark, tag, note, detail, action, dismiss, copy, autoOpen, focus, reveal, onFocused }: { f: ReportFinding; n: number; mark?: string; tag?: string; note?: string; detail?: string; action?: React.ReactNode; dismiss?: React.ReactNode; copy?: React.ReactNode; autoOpen?: boolean; focus?: boolean; reveal?: boolean; onFocused?: () => void }) {
   const replay = f.replay as { observed: string } | null;
   const summary = useRef<HTMLElement>(null);
   const details = useRef<HTMLDetailsElement>(null);
@@ -297,44 +335,57 @@ export function FindingRow({ f, n, mark, note, detail, action, dismiss, focus, r
     window.addEventListener("hashchange", openWhenAddressed);
     return () => window.removeEventListener("hashchange", openWhenAddressed);
   }, [anchor]);
+  useEffect(() => {
+    if (!autoOpen || !details.current || details.current.open || window.location.hash.startsWith("#finding-")) return;
+    details.current.dataset.opened = "auto";
+    details.current.open = true;
+  }, [autoOpen]);
   const address = () => {
     if (window.location.hash !== `#${anchor}`) window.history.replaceState(null, "", `#${anchor}`);
   };
-  const keepInAddress = (event: { currentTarget: { open: boolean } }) => {
+  const keepInAddress = (event: { currentTarget: { open: boolean; dataset?: DOMStringMap } }) => {
+    if (event.currentTarget.dataset?.opened === "auto") {
+      delete event.currentTarget.dataset.opened;
+      return;
+    }
     if (event.currentTarget.open) address();
-    else if (window.location.hash === `#${anchor}`) window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    else if (window.location.hash === `#${anchor}`) window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#findings`);
   };
   return (
     <li id={anchor} className="border-b border-line bg-panel last:border-b-0">
       <details ref={details} onToggle={keepInAddress} className="group">
-        <summary ref={summary} className="grid cursor-pointer list-none grid-cols-[75px_minmax(0,1fr)_85px_18px] items-start gap-3.5 p-[17px] max-md:grid-cols-1 [&::-webkit-details-marker]:hidden">
-          <span className="inline-flex w-max items-center gap-2 pt-0.5 text-xs text-muted capitalize"><span aria-hidden className={`size-2 rounded-full ${SEVERITY_TONE[f.severity] ?? "bg-soft"}`} />{f.severity}<span className="sr-only"> severity</span></span>
+        <summary ref={summary} className="grid cursor-pointer list-none grid-cols-[84px_minmax(0,1fr)_96px_16px] items-start gap-4 px-5 py-4 hover:bg-soft max-md:grid-cols-1 max-md:gap-2 [&::-webkit-details-marker]:hidden">
+          <span className="inline-flex w-max items-center gap-2 pt-1 text-sm text-muted capitalize"><span aria-hidden className={`size-2 rounded-full ${SEVERITY_TONE[f.severity] ?? "bg-soft"}`} />{f.severity}<span className="sr-only"> severity</span></span>
           <span className="min-w-0">
-            <small className="block font-mono text-xs break-words text-muted">{String(n).padStart(2, "0")} · {[...new Set([f.personaName, ...f.sameReports.map((other) => other.personaName)])].join(", ")}</small>
-            <strong className="mt-1 block text-[17px] leading-snug break-words">{f.title}</strong>
-            <span className="mt-[5px] line-clamp-2 text-xs leading-[1.4] break-words text-muted">{note ?? f.observed}</span>
+            <strong className="block text-base leading-snug font-medium break-words">{f.title}</strong>
+            <small className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm break-words text-muted">
+              <span><span className="font-mono text-xs">{String(n).padStart(2, "0")}</span> · {[...new Set([f.personaName, ...f.sameReports.map((other) => other.personaName)])].join(", ")}</span>
+              {tag && <span className="rounded border border-line px-1.5 text-xs text-ink">{tag}</span>}
+            </small>
+            <span className="mt-1 line-clamp-2 text-sm break-words text-muted group-open:hidden">{note ?? f.observed}</span>
           </span>
-          <span className="text-xs text-ok max-md:empty:hidden">{mark}</span>
-          <b aria-hidden className="transition-transform group-open:rotate-90 max-md:hidden">→</b>
+          <span className="pt-1 text-sm text-ok max-md:empty:hidden">{mark}</span>
+          <b aria-hidden className="pt-1 font-normal text-muted transition-transform group-open:rotate-90 max-md:hidden">→</b>
         </summary>
-        <div className="flex flex-col gap-3 border-t border-line p-[17px] text-sm wrap-anywhere">
-          <p>{f.sameReports.length > 0 ? <><strong>{f.personaName}</strong><span className="text-muted">, while trying to: </span></> : <span className="text-muted">While trying to: </span>}{f.goalText}</p>
-          {f.replayedAsDefect && <p className="text-muted">{f.personaName} filed this as friction on a goal they did not reach, so Trawler replayed it too.</p>}
+        <div className="flex flex-col gap-4 px-5 pt-1 pb-5 text-[15px] wrap-anywhere md:pl-[120px]">
+          {(copy || dismiss) && <div className="flex flex-wrap items-start gap-3">{copy}{dismiss && <div className="min-w-0 flex-1">{dismiss}</div>}</div>}
+          <p className="text-sm">{f.sameReports.length > 0 ? <><strong>{f.personaName}</strong><span className="text-muted">, while trying to: </span></> : <span className="text-muted">While trying to: </span>}{f.goalText}</p>
+          {f.replayedAsDefect && <p className="text-sm text-muted">{f.personaName} filed this as friction on a goal they did not reach, so Trawler replayed it too.</p>}
+          <p><span className="text-muted">What happened: </span>{f.observed}</p>
+          {detail && <p className="break-words"><span className="text-muted">Why it was not judged: </span>{detail}</p>}
           <div>
-            <p className="mb-1 text-muted">Steps</p>
+            <p className="mb-1 font-medium">Steps</p>
             <ol className="list-decimal pl-5 break-words">{f.reproduction.map((step, i) => <li key={i}>{step}</li>)}</ol>
           </div>
           {f.page && <p className="break-words"><span className="text-muted">Page: </span><span className="font-mono text-[13px]">{f.page}</span></p>}
           <FindingScreenshots title={f.title} screenshots={f.screenshots} onOpen={address} />
-          <p><span className="text-muted">What happened: </span>{f.observed}</p>
+          {replay?.observed && <p><span className="text-muted">What the replay saw: </span>{replay.observed}</p>}
           {f.quote && (
             <figure className="flex flex-col gap-1 border-l-2 border-line pl-3">
               <figcaption className={`${label} text-muted`}>In {f.personaName}&apos;s words</figcaption>
               <blockquote className="break-words italic">“{f.quote}”</blockquote>
             </figure>
           )}
-          {replay?.observed && <p><span className="text-muted">What the replay saw: </span>{replay.observed}</p>}
-          {detail && <p className="break-words"><span className="text-muted">Why it was not judged: </span>{detail}</p>}
           {f.sameReports.length > 0 && (
             <div className="flex flex-col gap-3 border-t border-line pt-3">
               <p className={`${label} text-muted`}>Also reported by {[...new Set(f.sameReports.map((other) => (other.personaName === f.personaName ? `${other.personaName} again` : other.personaName)))].join(", ")}</p>
@@ -352,24 +403,35 @@ export function FindingRow({ f, n, mark, note, detail, action, dismiss, focus, r
               ))}
             </div>
           )}
-          {dismiss && <div className="border-t border-line pt-3">{dismiss}</div>}
         </div>
       </details>
-      {action && <div className="border-t border-line px-[17px] py-3">{action}</div>}
+      {action && <div className="border-t border-line px-5 py-3">{action}</div>}
     </li>
   );
 }
 
-function Section<T extends ReportFinding & { reason?: string }>({ title, hint, items, empty, mark, note, detail, action, dismiss, focusKey, reveal, onFocused }: { title: string; hint: string; items: T[]; empty?: string; mark?: string; note?: boolean; detail?: (f: T) => string | undefined; action?: (f: T) => React.ReactNode; dismiss?: (f: T) => React.ReactNode; focusKey?: string | null; reveal?: boolean; onFocused?: () => void }) {
+type Part<T extends ReportFinding> = { items: T[]; tag?: string; mark?: string; note?: boolean; detail?: (f: T) => string | undefined; action?: (f: T) => React.ReactNode; dismiss?: (f: T) => React.ReactNode };
+const part = <T extends ReportFinding>(p: Part<T>) => p as unknown as Part<ReportFinding & { reason?: string }>;
+
+function Group({ title, hint, parts, empty, issueStatus, primary, runNumber, openFirst, focusKey, reveal, onFocused }: { title: string; hint: string; parts: Array<Part<ReportFinding & { reason?: string }>>; empty?: string; issueStatus: (tag?: string) => string; primary?: boolean; runNumber: number; openFirst?: boolean; focusKey?: string | null; reveal?: boolean; onFocused?: () => void }) {
   const id = useId();
-  if (items.length === 0 && !empty) return null;
+  const count = parts.reduce((sum, p) => sum + p.items.length, 0);
+  if (count === 0 && !empty) return null;
+  let n = 0;
   return (
     <section aria-labelledby={id} className="flex flex-col">
       <div className="pb-3">
-        <h2 id={id} className="text-base font-medium">{title} · {items.length}</h2>
-        <p className="mt-[3px] text-xs text-muted">{hint}</p>
+        <h2 id={id} className="text-base font-medium">{title} · {count}</h2>
+        <p className="mt-1 text-sm text-muted">{hint}</p>
       </div>
-      {items.length === 0 ? <p className="border border-line bg-panel p-[17px] text-sm text-muted">{empty}</p> : <ol className="border border-line">{items.map((f, i) => <FindingRow key={f.key} f={f} n={i + 1} mark={mark} note={note ? f.reason : undefined} detail={detail?.(f)} action={action?.(f)} dismiss={dismiss?.(f)} focus={f.key === focusKey} reveal={reveal} onFocused={onFocused} />)}</ol>}
+      {count === 0 ? <p className="rounded-lg border border-line p-5 text-sm text-muted">{empty}</p> : (
+        <ol className="overflow-hidden rounded-lg border border-line">
+          {parts.flatMap((p) => p.items.map((f) => {
+            n += 1;
+            return <FindingRow key={f.key} f={f} n={n} mark={p.mark} tag={p.tag} note={p.note ? f.reason : undefined} detail={p.detail?.(f)} action={p.action?.(f)} dismiss={p.dismiss?.(f)} copy={<CopyIssue f={f} status={issueStatus(p.tag)} runNumber={runNumber} primary={Boolean(primary)} />} autoOpen={openFirst && n === 1} focus={f.key === focusKey} reveal={reveal} onFocused={onFocused} />;
+          }))}
+        </ol>
+      )}
     </section>
   );
 }
@@ -403,27 +465,29 @@ function BotProtectionNotice({ met }: { met: NonNullable<RunSummary["botProtecti
   );
 }
 
-function RunOverview({ run, view }: { run: RunSummary; view: View }) {
+function spentLine(run: RunSummary): string {
+  const payer = run.paidBy === "trawler" ? ", paid by Trawler" : "";
+  if (run.tokenCap) return `${(run.tokensUsed / 1_000_000).toFixed(2)}M of ${(run.tokenCap / 1_000_000).toFixed(1)}M tokens${payer}`;
+  return `${usd(run.costUsd)} of ${usd(run.budgetUsd)} cap${payer}`;
+}
+
+function RunMeta({ run, view, host, when }: { run: RunSummary; view: View; host: string; when: Date }) {
   const status = run.cancelReason === "nothing_to_test" ? "skipped" : run.status;
   const hasGoals = view.goalsTotal > 0 && (view.live || status === "succeeded" || run.goals.length > 0);
   const confirmed = view.report.confirmed.length;
   const checked = view.live || status === "succeeded" || confirmed > 0;
+  const parts = [
+    hasGoals && `${view.goalsReached} of ${plural(view.goalsTotal, "goal", "goals")} reached`,
+    checked && view.reported > 0 && `${confirmed} of ${view.reported} reported ${view.live ? "confirmed so far" : "confirmed"}`,
+    !view.live && spentLine(run),
+    host,
+  ].filter(Boolean);
   return (
-    <dl className="mt-5 grid grid-cols-3 divide-x divide-line rounded-lg border border-line bg-paper">
-      <div className="min-w-0 p-2.5 sm:p-3.5">
-        <dt className="text-xs text-muted">Run state</dt>
-        <dd className={`mt-1 wrap-anywhere font-semibold ${status === "succeeded" ? "" : runStatusTone(status)}`}>{runStatusLabel(status)}</dd>
-      </div>
-      <div className="min-w-0 p-2.5 sm:p-3.5">
-        <dt className="text-xs text-muted">Goals reached</dt>
-        <dd className="mt-1 font-semibold tabular-nums">{hasGoals ? `${view.goalsReached} / ${view.goalsTotal}` : "—"}</dd>
-      </div>
-      <div className="min-w-0 p-2.5 sm:p-3.5">
-        <dt className="text-xs text-muted">{view.live ? "Confirmed so far" : "Confirmed findings"}</dt>
-        <dd className={`mt-1 font-semibold tabular-nums ${confirmed ? "text-action-ink" : ""}`}>{checked ? confirmed : "—"}</dd>
-        {view.reported > 0 && <dd className="text-xs text-muted">of {view.reported} reported</dd>}
-      </div>
-    </dl>
+    <p data-run-meta className="mt-2 text-sm break-words text-muted">
+      <strong className={`font-medium ${status === "succeeded" ? "text-ink" : runStatusTone(status)}`}>{runStatusLabel(status)}</strong>
+      {parts.map((part) => <span key={String(part)}> · {part}</span>)}
+      <span> · <LocalTime iso={when.toISOString()} /></span>
+    </p>
   );
 }
 
@@ -485,8 +549,8 @@ function LivePeople({ view }: { view: View }) {
 function PeopleOutcomes({ view }: { view: View }) {
   const id = useId();
   return (
-    <section aria-labelledby={id} className="border border-line bg-panel p-[17px]">
-      <h2 id={id} className="text-base font-medium">People</h2>
+    <section aria-labelledby={id} className="rounded-lg border border-line p-5">
+      <h2 id={id} className="text-base font-medium">Goals</h2>
       <ul>
         {view.personas.map((p) => {
           const good = p.state === "reached";
@@ -494,12 +558,10 @@ function PeopleOutcomes({ view }: { view: View }) {
           return (
             <li key={p.id} className="grid grid-cols-[auto_minmax(0,1fr)] gap-[9px] border-b border-line py-3 last:border-b-0">
               <span aria-hidden className={`grid size-[22px] place-items-center rounded-full text-sm ${good ? "bg-ok text-paper" : bad ? "bg-action text-[#17191c]" : "bg-soft text-muted"}`}>{good ? "✓" : bad ? "×" : "–"}</span>
-              <div className="min-w-0 text-xs text-muted">
-                <strong className="block text-xs break-words text-ink">{p.name}<span className="sr-only">: {PERSONA_LABEL[p.state][0]}.</span></strong>
+              <div className="min-w-0 text-sm text-muted">
+                <strong className="block font-medium break-words text-ink">{p.name}<span className="sr-only">: {PERSONA_LABEL[p.state][0]}.</span></strong>
                 <span className="block break-words">{personLine(p)}</span>
-                <details className="mt-1">
-                  <summary className="cursor-pointer hover:text-ink">Each goal<span className="sr-only"> of {p.name}</span></summary>
-                  <ul className="mt-1 flex flex-col gap-1">
+                <ul aria-label={`Goals of ${p.name}`} className="mt-2 flex flex-col gap-1.5">
                     {p.goals.map((g) => (
                       <li key={g.id} className="break-words">
                         <span aria-hidden className={g.status === "reached" ? "text-ok" : g.status === "failed" ? "text-warn" : ""}>{g.status === "reached" ? "✓" : g.status === "failed" ? "✕" : "·"}</span>
@@ -507,8 +569,7 @@ function PeopleOutcomes({ view }: { view: View }) {
                         {g.note && <span> — {g.note}</span>}
                       </li>
                     ))}
-                  </ul>
-                </details>
+                </ul>
                 {(p.defects > 0 || p.friction > 0) && <span className="mt-1 block">{plural(p.defects, "defect report", "defect reports")} · {plural(p.friction, "friction", "frictions")}</span>}
                 <a href={`#${trailAnchor(p.id)}`} className="mt-1 inline-block underline underline-offset-4 hover:text-ink">What they did<span className="sr-only">: {p.name}</span></a>
               </div>
@@ -520,13 +581,14 @@ function PeopleOutcomes({ view }: { view: View }) {
   );
 }
 
-const PANELS = [["findings", "Findings"], ["goals", "Goals"], ["activity", "Activity"]] as const;
+const PANELS = [["findings", "Findings"], ["timeline", "Timeline"], ["details", "Details"]] as const;
 type Panel = (typeof PANELS)[number][0];
 
-function panelForHash(hash: string): Panel {
-  if (hash === "#goals" || hash === "#pr-plan") return "goals";
-  if (hash === "#activity" || hash === "#conversation" || hash.startsWith("#trail-")) return "activity";
-  return "findings";
+export function panelForHash(hash: string, unaddressed: Panel): Panel {
+  if (hash === "#findings" || hash.startsWith("#finding-")) return "findings";
+  if (hash === "#timeline" || hash === "#goals" || hash === "#activity" || hash === "#conversation" || hash.startsWith("#trail-")) return "timeline";
+  if (hash === "#details" || hash === "#pr-plan") return "details";
+  return unaddressed;
 }
 
 export function RunLive({ initial, closedBeta, project }: { initial: Data; closedBeta?: string; project?: { id: string; name: string } }) {
@@ -572,7 +634,8 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
   const [announcement, setAnnouncement] = useState({ text: "", n: 0 });
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const [reveal, setReveal] = useState(false);
-  const [panel, setPanel] = useState<Panel>("findings");
+  const startPanel: Panel = initial.view.live ? "timeline" : "findings";
+  const [panel, setPanel] = useState<Panel>(startPanel);
   const focused = useCallback(() => setFocusKey(null), []);
   const again = useRunAgain();
   const moved = useCallback<Moved>(async (key, text) => {
@@ -594,7 +657,7 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
   useEffect(() => {
     const syncPanel = () => {
       const hash = window.location.hash;
-      const next = panelForHash(hash);
+      const next = panelForHash(hash, startPanel);
       if (next !== panel) return setPanel(next);
       if (!/^#(?:finding-|trail-|pr-plan$|conversation$)/.test(hash)) return;
       const addressed = document.getElementById(hash.slice(1));
@@ -609,7 +672,7 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
       window.removeEventListener("hashchange", syncPanel);
       window.removeEventListener("popstate", syncPanel);
     };
-  }, [panel]);
+  }, [panel, startPanel]);
   const openPanel = (next: Panel) => {
     if (next === panel) return;
     window.history.pushState(window.history.state, "", `#${next}`);
@@ -627,9 +690,9 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
       <RunBreadcrumb project={project} number={run.number} plan={run.savedPlan?.name ?? run.planName} />
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-3xl leading-tight font-semibold tracking-tight wrap-anywhere md:text-4xl">{subject || view.headline}</h1>
-          <p className="mt-1 text-sm break-words text-muted">{host} · <LocalTime iso={new Date(when).toISOString()} /></p>
-          {subject && <p className="mt-1 text-sm text-muted">{view.headline}</p>}
+          <h1 className="text-2xl leading-tight font-semibold tracking-tight wrap-anywhere md:text-[28px]">{view.headline}</h1>
+          {subject && <p className="mt-1 break-words text-ink">{subject}</p>}
+          <RunMeta run={run} view={view} host={host} when={new Date(when)} />
           <p role="status" aria-live="polite" className="text-sm text-warn">
             {(gone || stale) && <span className="mt-2 block">{gone ? "This run is no longer available." : "Lost contact with Trawler. Retrying…"}</span>}
             <span className="sr-only">{runStatusLabel(run.status)}. {view.headline} <span key={announcement.n}>{announcement.text}</span></span>
@@ -644,61 +707,64 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
       </header>
       {!view.live && again.error && <div className="mt-3 flex wide:justify-end"><RunAgainError again={again} /></div>}
       {!view.live && closedBeta && run.execution !== "own" && <p className="mt-3 max-w-md self-end border-l-2 border-warn pl-3 text-sm max-wide:self-start">{closedBeta}</p>}
-      <RunOverview run={run} view={view} />
       {view.live && (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <RunCost run={run} live />
           <CancelButton runId={run.id} onDone={refresh} />
         </div>
       )}
       {run.botProtection && <BotProtectionNotice met={run.botProtection} />}
-      <nav aria-label="Run report" className="mt-5 flex flex-wrap gap-x-5 border-b border-line">
+      <nav aria-label="Run report" className="mt-6 flex flex-wrap gap-x-6 border-b border-line">
         {PANELS.map(([key, name]) => (
           <button key={key} type="button" aria-pressed={panel === key} aria-controls={`run-${key}`} onClick={() => openPanel(key)}
-            className={`-mb-px flex min-h-10 items-center gap-1.5 border-b-2 text-sm ${panel === key ? "border-action font-semibold text-ink" : "border-transparent text-muted hover:text-ink"}`}>
-            {name}{key === "findings" && totalFindings > 0 && <span className="rounded bg-soft px-1.5 text-xs">{totalFindings}</span>}
+            className={`-mb-px flex min-h-11 items-center gap-1.5 border-b-2 text-[15px] ${panel === key ? "border-ink font-medium text-ink" : "border-transparent text-muted hover:text-ink"}`}>
+            {name}{key === "findings" && totalFindings > 0 && <span className="text-sm font-normal text-muted tabular-nums">{totalFindings}</span>}
           </button>
         ))}
       </nav>
-      <div id="run-findings" hidden={panel !== "findings"} className="pt-5">
-        <div className="flex min-w-0 flex-col gap-6">
-          <Section title="Confirmed" hint="A fresh agent reproduced it and the judge agreed" items={report.confirmed} mark="✓ Replayed" empty={view.live ? "Nothing confirmed yet." : "No defect was confirmed."} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} />
-          <Section<UnjudgedFinding> title="Could not be judged" hint="The judge gave no verdict; the replay is kept" items={report.couldNotJudge} note detail={(f) => (f.action === "judging" ? undefined : f.reason)} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} action={(f) =>
-            f.action === "judge_again" && closedBeta ? <p className="text-sm text-muted">{closedBeta}</p>
-            : f.action === "judge_again" || f.action === "judging" ? <JudgeAgainButton runId={run.id} findingKey={f.key} judging={f.action === "judging"} onDone={refresh} />
-            : f.action === "after_run" ? <p className="text-sm text-muted">You can judge it again after the run, if its cap has room left.</p>
-            : <p className="text-sm text-muted">This run has spent its cap, so it cannot be judged again.</p>} />
-          <Section title="Inconclusive" hint="The replay could not settle it" items={report.inconclusive} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} />
-          <Section title="Not judged" hint="Reported, but not replayed and judged to the end" items={report.notJudged} note detail={(f) => f.reason} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} />
-          <Section title="Refuted" hint="The replay did not see the problem, or saw only a detail the product never promised" items={report.refuted} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} />
-          <Section title="Friction" hint="Not broken, but slowed someone down" items={report.friction} dismiss={dismiss} focusKey={focusKey} reveal={reveal} onFocused={focused} />
-          <Section<DismissedFinding> title="Not a bug" hint="Marked not a bug by your team, or by Trawler for a repeat of one; the people in later runs of this project are told, with the reason" items={report.dismissed} action={(f) => <UndoNotABug runId={run.id} f={f} onDone={moved} onRefused={refresh} />} focusKey={focusKey} reveal={reveal} onFocused={focused} />
+      <div id="run-findings" hidden={panel !== "findings"} className="pt-6">
+        <div className="flex min-w-0 flex-col gap-10">
+          <Group title="Confirmed" hint="Reproduced independently: a fresh agent followed the steps without seeing the report, and the judge agreed. Fix these." runNumber={run.number} primary openFirst={!view.live}
+            issueStatus={() => "Confirmed: reproduced independently"} empty={view.live ? "Nothing confirmed yet." : "No defect was confirmed."} focusKey={focusKey} reveal={reveal} onFocused={focused}
+            parts={[part({ items: report.confirmed, mark: "✓ Reproduced", dismiss })]} />
+          <Group title="Unverified" hint="Reported, but the replay and the judge did not settle it. Judge again where it is offered, or read the timeline and decide." runNumber={run.number}
+            issueStatus={(tag) => `Unverified (${(tag ?? "").toLowerCase()})`} focusKey={focusKey} reveal={reveal} onFocused={focused}
+            parts={[
+              part<UnjudgedFinding>({ items: report.couldNotJudge, tag: "Could not be judged", note: true, detail: (f) => (f.action === "judging" ? undefined : f.reason), dismiss, action: (f) =>
+                f.action === "judge_again" && closedBeta ? <p className="text-sm text-muted">{closedBeta}</p>
+                : f.action === "judge_again" || f.action === "judging" ? <JudgeAgainButton runId={run.id} findingKey={f.key} judging={f.action === "judging"} onDone={refresh} />
+                : f.action === "after_run" ? <p className="text-sm text-muted">You can judge it again after the run, if its cap has room left.</p>
+                : <p className="text-sm text-muted">This run has spent its cap, so it cannot be judged again.</p> }),
+              part({ items: report.inconclusive, tag: "Inconclusive", dismiss }),
+              part<UnjudgedFinding>({ items: report.notJudged as UnjudgedFinding[], tag: "Not judged", note: true, detail: (f) => f.reason, dismiss }),
+            ]} />
+          <Group title="Rough edges" hint="Not broken, but slowed someone down. These are not replayed." runNumber={run.number}
+            issueStatus={() => "Rough edge (not replayed)"} focusKey={focusKey} reveal={reveal} onFocused={focused}
+            parts={[part({ items: report.friction, dismiss })]} />
+          <Group title="Ruled out" hint="The replay did not see the problem, or your team marked it not a bug. Later runs of this project are told, with the reason." runNumber={run.number}
+            issueStatus={(tag) => (tag ?? "Ruled out")} focusKey={focusKey} reveal={reveal} onFocused={focused}
+            parts={[
+              part({ items: report.refuted, tag: "Refuted", dismiss }),
+              part<DismissedFinding>({ items: report.dismissed, tag: "Not a bug", action: (f) => <UndoNotABug runId={run.id} f={f} onDone={moved} onRefused={refresh} /> }),
+            ]} />
         </div>
       </div>
-      <div id="run-goals" hidden={panel !== "goals"} className="pt-5">
-        {view.live ? <LivePeople view={view} /> : (
+      <div id="run-timeline" hidden={panel !== "timeline"} className="pt-6">
+        {view.live ? (
           <>
-            <p className="mb-3 text-sm text-muted">{outcome(view).people}</p>
+            <Stages stages={view.stages} />
+            <LivePeople view={view} />
+            {view.live && <p className="mt-3 text-sm text-muted">Safe to leave. The run keeps going in the background.</p>}
+          </>
+        ) : (
+          <>
+            <p className="mb-3 text-muted">{outcome(view).people}</p>
             <PeopleOutcomes view={view} />
           </>
         )}
-        <PullRequestPlan run={run} />
-      </div>
-      <div id="run-activity" hidden={panel !== "activity"} className="pt-5">
-        {view.live && <Stages stages={view.stages} />}
-        <div className="flex flex-col gap-1 text-sm text-muted">
-          {!view.live && <RunCost run={run} live={false} />}
-          {run.pullRequest && <PullRequestSubject pr={run.pullRequest} />}
-          <p className="wrap-anywhere">{run.agentModel}</p>
-          {run.startedVia && <p className="wrap-anywhere">Started over MCP by <strong className="font-semibold text-ink">{viaClient(run.startedVia)}</strong> for <strong className="font-semibold text-ink">{run.startedVia.person}</strong>.</p>}
-          {run.providedAccounts.length > 0 && <p className="wrap-anywhere">{run.providedAccounts.join(", ")} {run.providedAccounts.length === 1 ? "signs" : "sign"} in with {run.providedAccounts.length === 1 ? "an account" : "accounts"} provided by the CI job.</p>}
-          {!!run.prPlan?.signUps?.length && <p title={run.prPlan.accountReason} className="wrap-anywhere">This pull request touches how people get accounts, so {run.prPlan.signUps.join(", ")} {run.prPlan.signUps.length === 1 ? "goes" : "go"} through the real sign-up instead of using the CI account.</p>}
-          {!view.live && run.execution === "own" && <p>This run came from CI. Start it again from there.</p>}
-          {view.live && <p>Safe to leave. The run keeps going in the background.</p>}
-        </div>
         {run.activity.length > 0 && (
-          <section className="mt-5 flex flex-col gap-2">
-            <h2 className="text-sm font-semibold">Latest activity</h2>
+          <section className="mt-6 flex flex-col gap-2">
+            <h2 className="text-base font-medium">Latest activity</h2>
             <ul className="grid gap-1 text-sm">
               {run.activity.map((a) => (
                 <li key={a.id} className="wrap-anywhere"><span className="text-muted">{run.personas.find((p) => p.id === a.personaKey)?.name ?? (a.kind === "judge" ? "Judge" : "Replay")}: </span>{a.text}</li>
@@ -707,7 +773,19 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
           </section>
         )}
         <Conversation run={run} />
-        <div className="mt-5"><Trails runId={run.id} people={run.personas} live={view.live} pulse={data} /></div>
+        <div className="mt-6"><Trails runId={run.id} people={run.personas} live={view.live} pulse={data} /></div>
+      </div>
+      <div id="run-details" hidden={panel !== "details"} className="pt-6">
+        <div className="flex flex-col gap-1 text-sm text-muted">
+          {!view.live && <RunCost run={run} live={false} />}
+          {run.pullRequest && <PullRequestSubject pr={run.pullRequest} />}
+          <p className="wrap-anywhere">{run.agentModel}</p>
+          {run.startedVia && <p className="wrap-anywhere">Started over MCP by <strong className="font-semibold text-ink">{viaClient(run.startedVia)}</strong> for <strong className="font-semibold text-ink">{run.startedVia.person}</strong>.</p>}
+          {run.providedAccounts.length > 0 && <p className="wrap-anywhere">{run.providedAccounts.join(", ")} {run.providedAccounts.length === 1 ? "signs" : "sign"} in with {run.providedAccounts.length === 1 ? "an account" : "accounts"} provided by the CI job.</p>}
+          {!!run.prPlan?.signUps?.length && <p title={run.prPlan.accountReason} className="wrap-anywhere">This pull request touches how people get accounts, so {run.prPlan.signUps.join(", ")} {run.prPlan.signUps.length === 1 ? "goes" : "go"} through the real sign-up instead of using the CI account.</p>}
+          {!view.live && run.execution === "own" && <p>This run came from CI. Start it again from there.</p>}
+        </div>
+        <PullRequestPlan run={run} />
       </div>
     </div>
   );

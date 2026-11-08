@@ -33,7 +33,7 @@ vi.mock("react", async (original) => ({
 const actions = vi.hoisted(() => ({ cancelRunAction: vi.fn(), judgeAgainAction: vi.fn(), runAgainAction: vi.fn(), dismissFindingAction: vi.fn(), undoDismissalAction: vi.fn() }));
 vi.mock("./actions.ts", () => actions);
 
-const { CancelButton, FindingRow, JudgeAgainButton, NotABugButton, RunLive, UndoNotABug } = await import("./run-live.tsx");
+const { CancelButton, CopyIssue, FindingRow, JudgeAgainButton, NotABugButton, RunLive, UndoNotABug, panelForHash } = await import("./run-live.tsx");
 const { RunAgainError } = await import("./run-again-button.tsx");
 const { UnrecognizedActionError } = await import("next/dist/client/components/unrecognized-action-error.js");
 type Moved = (key: string, text: string) => Promise<void>;
@@ -302,7 +302,7 @@ test("a finding named in the address opens when the page loads or the address ch
   toggle({ currentTarget: { open: true } });
   expect(replaceState).toHaveBeenCalledOnce();
   toggle({ currentTarget: { open: false } });
-  expect(replaceState).toHaveBeenLastCalledWith(null, "", "/runs/run-1?from=list");
+  expect(replaceState).toHaveBeenLastCalledWith(null, "", "/runs/run-1?from=list#findings");
   location.hash = "#finding-ana%3Af2";
   toggle({ currentTarget: { open: false } });
   expect(replaceState).toHaveBeenCalledTimes(2);
@@ -506,7 +506,7 @@ test("a finding marked not a bug, or taken back, is fetched again, is scrolled t
   const fetched = vi.fn(async () => new Response(JSON.stringify(next)));
   vi.stubGlobal("fetch", fetched);
   const confirmed = nodes(draw(initial)).find((node) => node.props?.title === "Confirmed")!;
-  const offered = (confirmed.props!.dismiss as (f: unknown) => Node)(initial.view.report.confirmed[0]);
+  const offered = ((confirmed.props!.parts as Array<{ dismiss: (f: unknown) => Node }>)[0]!.dismiss)(initial.view.report.confirmed[0]);
   expect(offered.props!.working).toBe(false);
   await (offered.props!.onDone as Moved)("ana:f1", "Saving fails: marked not a bug.");
   expect(react.setters[0]).toHaveBeenCalledWith(next);
@@ -517,8 +517,8 @@ test("a finding marked not a bug, or taken back, is fetched again, is scrolled t
   await (offered.props!.onRefused as () => Promise<void>)();
   expect(fetched).toHaveBeenCalledTimes(2);
 
-  const notABug = nodes(draw(next)).find((node) => node.props?.title === "Not a bug")!;
-  const undo = (notABug.props!.action as (f: unknown) => Node)(next.view.report.dismissed[0]);
+  const ruledOut = nodes(draw(next)).find((node) => node.props?.title === "Ruled out")!;
+  const undo = ((ruledOut.props!.parts as Array<{ tag: string; action: (f: unknown) => Node }>).find((part) => part.tag === "Not a bug")!.action)(next.view.report.dismissed[0]);
   const refetched = vi.fn(async () => new Response(JSON.stringify(initial)));
   vi.stubGlobal("fetch", refetched);
   await (undo.props!.onDone as Moved)("ana:f1", "Saving fails: no longer marked not a bug.");
@@ -533,7 +533,7 @@ test("a finding marked not a bug, or taken back, is fetched again, is scrolled t
 test("Not a bug is offered once a run has ended, and knows while Trawler still works on it", () => {
   const defect = { key: "ana:f1", personaKey: "ana", kind: "defect", goal: "g1", title: "Saving fails", observed: "o", reproduction: ["Open."], severity: "high", replay: null, verdict: "confirmed", dismissal: null };
   const offered = (run: ReturnType<typeof data>) => {
-    const dismiss = nodes(draw(run)).find((node) => node.props?.title === "Confirmed")!.props!.dismiss as ((f: unknown) => Node) | undefined;
+    const dismiss = (nodes(draw(run)).find((node) => node.props?.title === "Confirmed")!.props!.parts as Array<{ dismiss?: (f: unknown) => Node }>)[0]!.dismiss;
     return dismiss && dismiss({ key: "ana:f1", title: "Saving fails" }).props!.working;
   };
   const busy = (status: string, requested: boolean) => [{ id: "j", kind: requested ? "judge" : "role_session", status, persona_key: "ana", finding_key: requested ? "ana:f1" : null, usage: null, stopped_by: null, error: null, requested }] as RunSummary["jobs"];
@@ -567,4 +567,73 @@ test("when friction judged again is not borne out, the page says it was kept as 
   react.effects[1]!();
   const update = react.setters[3]!.mock.calls[0]![0] as (was: { text: string; n: number }) => { text: string; n: number };
   expect(update({ text: "", n: 0 }).text).toBe("Balance has no history: kept as friction.");
+});
+
+test("the finding to act on opens by itself when the address names no finding, without writing itself into the address", () => {
+  const location = { hash: "", pathname: "/runs/0007", search: "" };
+  const replaceState = vi.fn();
+  vi.stubGlobal("window", { location, history: { replaceState }, addEventListener: () => {}, removeEventListener: () => {} });
+  const open = (autoOpen: boolean, hash: string) => {
+    location.hash = hash;
+    const details = { open: false, dataset: {} as Record<string, string> };
+    Object.assign(react, { effects: [], refIndex: 0 });
+    react.refs = [{ current: null }, { current: details }];
+    const tree = FindingRow({ f: finding as never, n: 1, autoOpen });
+    react.effects[2]!();
+    return { details, toggle: nodes(tree).find((node) => node.type === "details")!.props!.onToggle as (event: { currentTarget: unknown }) => void };
+  };
+  const first = open(true, "");
+  expect(first.details.open).toBe(true);
+  first.toggle({ currentTarget: first.details });
+  expect(replaceState).not.toHaveBeenCalled();
+  expect(first.details.dataset.opened).toBeUndefined();
+  first.toggle({ currentTarget: first.details });
+  expect(replaceState).toHaveBeenCalledWith(null, "", "#finding-ana%3Af1");
+  expect(open(true, "#finding-ana%3Af9").details.open).toBe(false);
+  expect(open(false, "").details.open).toBe(false);
+  location.hash = "";
+  const already = { open: true, dataset: {} as Record<string, string> };
+  Object.assign(react, { effects: [], refIndex: 0 });
+  react.refs = [{ current: null }, { current: already }];
+  FindingRow({ f: finding as never, n: 1, autoOpen: true });
+  react.effects[2]!();
+  expect(already.dataset.opened).toBeUndefined();
+});
+
+test("Copy as issue copies the finding as Markdown with a link back to it, says so, and offers the text to copy by hand when the browser refuses", async () => {
+  vi.stubGlobal("window", { location: { origin: "https://app.trawler.test" } });
+  const f = { ...finding, personaName: "Ana", goalText: "Get an account.", page: null, quote: null, sameReports: [], screenshots: { reported: null, replayed: null } };
+  const copyWith = async (clipboard: unknown, primary = true) => {
+    vi.stubGlobal("navigator", { clipboard });
+    Object.assign(react, { setters: [], effects: [] });
+    const tree = CopyIssue({ f: f as never, status: "Confirmed: reproduced independently", runNumber: 7, primary });
+    const copy = button(tree, /^Copy as issue$/);
+    press(copy);
+    await vi.advanceTimersByTimeAsync(0);
+    return { copy, state: react.setters[0]!, markdown: react.setters[1]! };
+  };
+  const writeText = vi.fn(async (_text: string) => {});
+  const copied = await copyWith({ writeText });
+  const text = writeText.mock.calls[0]![0];
+  expect(text.startsWith("## Saving fails\n")).toBe(true);
+  expect(text).toContain("Found by Trawler in [Run 0007](https://app.trawler.test/runs/0007#finding-ana%3Af1)");
+  expect(copied.markdown).toHaveBeenCalledWith(text);
+  expect(copied.state).toHaveBeenCalledWith("copied");
+  expect(copied.copy.props!.className).toMatch(/\bbg-action\b/);
+  expect((await copyWith({ writeText: vi.fn(async () => { throw new Error("denied"); }) })).state).toHaveBeenCalledWith("failed");
+  expect((await copyWith(undefined)).state).toHaveBeenCalledWith("failed");
+  expect((await copyWith({ writeText: () => { throw new Error("not allowed"); } })).state).toHaveBeenCalledWith("failed");
+  const hanging = await copyWith({ writeText: () => new Promise(() => {}) });
+  expect(hanging.state).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(hanging.state).toHaveBeenCalledWith("failed");
+  expect((await copyWith({ writeText }, false)).copy.props!.className).not.toMatch(/\bbg-action\b/);
+});
+
+test("every address the run page ever used opens the panel that now holds what it named, and an address naming nothing opens the run's own start", () => {
+  for (const hash of ["#findings", "#finding-ana%3Af1"]) expect(panelForHash(hash, "timeline")).toBe("findings");
+  for (const hash of ["#timeline", "#goals", "#activity", "#conversation", "#trail-ana"]) expect(panelForHash(hash, "findings")).toBe("timeline");
+  for (const hash of ["#details", "#pr-plan"]) expect(panelForHash(hash, "findings")).toBe("details");
+  expect(panelForHash("", "findings")).toBe("findings");
+  expect(panelForHash("", "timeline")).toBe("timeline");
 });
