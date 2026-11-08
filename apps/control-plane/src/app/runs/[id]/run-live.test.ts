@@ -16,7 +16,7 @@ const summary = (over: Partial<RunSummary>): RunSummary => ({
   startedVia: null, stoppedVia: null,
   id: "run-1", number: 7, status: "succeeded", cancelReason: null, projectId: "project-1", planName: null, savedPlan: null, costUsd: 0.35, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash",
   provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0, createdAt: new Date("2026-09-25T19:40:00Z"), startedAt: new Date("2026-09-25T19:40:05Z"), finishedAt: new Date("2026-09-25T19:59:00Z"),
-  jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [], conversation: false, pullRequest: null, prPlan: null, conversationMessages: [], execution: "hosted", providedAccounts: [],
+  jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [], conversation: false, pullRequest: null, prPlan: null, conversationMessages: [], marks: [], execution: "hosted", providedAccounts: [],
   personas: [{ id: "ana", name: "Ana" }, { id: "lee", name: "Lee Park" }], goalTexts: [{ id: "g1", instruction: "Get an account." }, { id: "g2", instruction: "Send an invoice." }],
   ...over,
 });
@@ -129,8 +129,8 @@ test("a refuted defect is ruled out, tagged Refuted, and carries no reproduced m
 test("in Timeline, each person is listed with a mark, one line on how far they got, and every goal in view with its note", () => {
   const html = render(finished);
   const aside = text(html.slice(html.indexOf('id="run-timeline"')));
-  expect(aside).toContain("Goals ✓ Ana : Goal reached. Reached all 2 goals. ✓ Reached: Get an account. ✓ Reached: Send an invoice.");
-  expect(aside).toContain("× Lee Park : Goal not reached. The invoice form never saved. ✓ Reached: Get an account. ✕ Not reached: Send an invoice. — The invoice form never saved.");
+  expect(aside).toContain("Goals 1 of 2 people reached every goal. A Ana Goal reached 2 of 2 goals Reached all 2 goals. ✓ Reached: Get an account. ✓ Reached: Send an invoice.");
+  expect(aside).toContain("L Lee Park Goal not reached 1 of 2 goals The invoice form never saved. ✓ Reached: Get an account. ✕ Not reached: Send an invoice. — The invoice form never saved.");
   expect(aside).not.toContain("Each goal");
 });
 
@@ -139,8 +139,8 @@ test("a live run shows its cost against the cap, the four stages, each person an
   expect(text(head(html))).toContain("app.acme.test · 2026-09-25 19:40 UTC");
   expect(text(html)).toContain("Live cost $0.84 of $2.00 cap");
   expect(text(html)).toContain("Use : In progress Replay : Waiting Judge : Waiting Report : Waiting");
-  expect(text(html)).toContain("AN Ana Goal reached Reached all 2 goals. 2 of 2 goals");
-  expect(text(html)).toContain("LP Lee Park Exploring Working on: Get an account. 0 of 2 goals");
+  expect(text(html)).toContain("Right now A Ana Goal reached 2 of 2 goals Reached all 2 goals.");
+  expect(text(html)).toContain("L Lee Park Exploring 0 of 2 goals Working on: Get an account.");
   expect(text(html)).toContain("Safe to leave. The run keeps going in the background.");
   expect(html).toMatch(/<button type="button"[^>]*>Stop run<\/button>/);
   expect(html).not.toContain("Run again");
@@ -266,7 +266,7 @@ test("a person on standby shows as on standby while their job is leased, and not
   const standing = job("role_session", "leased", { persona_key: "ana", on_standby: true });
   const goals = live.goals;
   const onStandby = render({ ...live, jobs: [standing, job("role_session", "leased", { persona_key: "lee" })], goals, activity: [{ id: "1", at: new Date(), personaKey: "ana", kind: "role_session", text: "Is on standby for the others" }] });
-  expect(text(onStandby)).toContain("Ana On standby Goals done; on standby for the others.");
+  expect(text(onStandby)).toMatch(/Ana On standby \d+ of 2 goals Goals done; on standby for the others\./);
   expect(text(onStandby)).toContain("Ana: Is on standby for the others");
   const after = render({ ...live, jobs: [{ ...standing, status: "succeeded", on_standby: false }, job("role_session", "leased", { persona_key: "lee" })], goals });
   expect(text(after)).not.toContain("On standby");
@@ -370,11 +370,12 @@ test("a finding marked not a bug leaves its section and the counts for its own, 
   expect(first).toMatch(/<span class="min-w-0 wrap-anywhere text-muted">Marked by ana@acme.test/);
 });
 
-test("each person beside a finished run's findings links to what they did", () => {
+test("each person beside a finished run's findings leads to what they did, and the story can be narrowed to them by its own address", () => {
   const html = render(finished);
-  expect(html).toMatch(/<a href="#trail-ana"[^>]*>What they did<span class="sr-only">: Ana<\/span><\/a>/);
-  expect(html).toMatch(/<a href="#trail-lee"[^>]*>What they did<span class="sr-only">: Lee Park<\/span><\/a>/);
-  expect(html).toMatch(/<li id="trail-ana"/);
+  expect(html).toMatch(/<button type="button"[^>]*>What Ana did<\/button>/);
+  expect(html).toMatch(/<button type="button"[^>]*>What Lee Park did<\/button>/);
+  expect(html).toMatch(/<button id="trail-ana" type="button" aria-pressed="false"/);
+  expect(html).toMatch(/<button type="button" aria-pressed="true"[^>]*>Everyone<\/button>/);
 });
 
 test("the bot protection notice shows a masked page readably, and no page when there is none", () => {

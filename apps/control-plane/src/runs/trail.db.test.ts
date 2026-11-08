@@ -71,7 +71,7 @@ test("a person's trail lists their turns and what they did, each step with its p
     { turn: ana, kind: "note", text: "The Send button is greyed out." },
     { turn: ana, kind: "blocked", address: "tracker.example" },
     { turn: ana, kind: "bot_protection", vendor: "Cloudflare", page: "/login" },
-    { turn: ana, kind: "finding", findingKind: "defect", title: "Send does nothing" },
+    { turn: ana, kind: "finding", findingKind: "defect", title: "Send does nothing", findingKey: "ana:f1" },
     { turn: ana, kind: "goal", status: "failed", goal: "Send an invoice.", note: "Send never worked." },
     { turn: ana, kind: "goal", status: "not_attempted", goal: "gone", note: "" },
     { turn: second, kind: "step", step: 1, tool: "browser_click", page: "elsewhere.test/x" },
