@@ -354,10 +354,11 @@ test("dashboard runs lead to their exact plan snapshot and its history", async (
     await expect.poll(() => row.innerText()).toContain("Filter invoices by cycle");
     expect(await row.innerText()).toContain("PR #24 v5");
     await row.click();
-    await expect.poll(() => page.getByRole("heading", { level: 1 }).innerText()).toBe(pr.title);
-    await expect.poll(() => page.getByText("Confirmed findings", { exact: true }).isVisible()).toBe(true);
-    await hydrated(page.getByRole("button", { name: "Activity", exact: true }));
-    await page.getByRole("button", { name: "Activity", exact: true }).click();
+    await expect.poll(() => page.getByRole("heading", { level: 1 }).innerText()).toBe("1 defect confirmed by replay.");
+    await expect.poll(() => page.getByText(pr.title, { exact: true }).isVisible()).toBe(true);
+    await expect.poll(() => page.locator("p[data-run-meta]").innerText()).toContain("reported confirmed");
+    await hydrated(page.getByRole("button", { name: "Timeline", exact: true }));
+    await page.getByRole("button", { name: "Timeline", exact: true }).click();
     await expect.poll(() => page.getByText("What each person did").isVisible()).toBe(true);
     await page.goto(`${stack.origin}${report}#finding-ana%3Af0`);
     await expect.poll(() => page.locator('li[id="finding-ana%3Af0"] details').getAttribute("open")).not.toBeNull();
