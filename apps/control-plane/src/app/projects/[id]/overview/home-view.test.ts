@@ -11,7 +11,7 @@ const run = (number: number, patch: Partial<RunLine> = {}): RunLine => ({
 });
 const finding = (key: string, patch: Partial<OpenFinding> = {}): OpenFinding => ({ key, title: `Title ${key}`, severity: "high", person: "Maya", source: "PR #21", runNumber: 292, reportedAt: new Date("2026-11-07T10:00:00Z"), ...patch });
 const pr = (number: number, r: RunLine, patch: Partial<PullRequestLine> = {}): PullRequestLine => ({ number, title: `feat: change ${number}`, url: null, plan: { id: "pp", label: "v16", ofPullRequest: true }, run: r, ...patch });
-const render = (props: Partial<Parameters<typeof ProjectHomeView>[0]> = {}) => renderToStaticMarkup(createElement(ProjectHomeView, { projectId: "p1", runs: 12, findings: [], going: [], pullRequests: [], pullRequestCount: 0, ...props }));
+const render = (props: Partial<Parameters<typeof ProjectHomeView>[0]> = {}) => renderToStaticMarkup(createElement(ProjectHomeView, { projectId: "p1", runs: 12, finished: 10, findings: [], going: [], pullRequests: [], pullRequestCount: 0, ...props }));
 
 test("the home leads with how many confirmed defects are open, then lists each, linked to the finding in its run", () => {
   const html = render({ findings: [finding("maya:f1"), finding("devon:f2", { severity: "low", person: null, source: "Plan 1", runNumber: 293 })] });
@@ -33,7 +33,8 @@ test("with nothing open the home says so, and a project without runs points at i
 
 test("a run that is going shows on one line with a way to watch it", () => {
   const html = render({ going: [run(300, { status: "running", savedPlan: { name: "PR #24 v16", title: null } }), run(301, { status: "queued" })] });
-  expect(html).toMatch(/>Run 0300 is running<\/span><span[^>]*>PR #24 v16<\/span><span[^>]*>and 1 more<\/span><a href="\/runs\/0300"[^>]*>Watch<span class="sr-only"> Run 0300<\/span><\/a>/);
+  expect(html).toMatch(/>Run 0300 is running<\/span><span[^>]*>PR #24 v16<\/span><a href="\/runs\/0300"[^>]*>Watch<span class="sr-only"> Run 0300<\/span><\/a>/);
+  expect(html).toMatch(/>Run 0301 is queued<\/span><a href="\/runs\/0301"[^>]*>Watch<span class="sr-only"> Run 0301<\/span><\/a>/);
   expect(render()).not.toContain("Watch");
 });
 

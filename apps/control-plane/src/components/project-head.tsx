@@ -40,13 +40,13 @@ export function ProjectHead({ project, address, tab, counts, runState, planId }:
         }
       />
       <nav aria-label="Project">
-        <ul className="-mt-4 flex gap-x-6 overflow-x-auto border-b border-line">
+        <ul className="-mt-4 flex gap-x-6 overflow-x-auto overflow-y-hidden border-b border-line pb-px">
           {tabs.map((t) => (
             <li key={t.key} className="shrink-0">
               <a
                 href={t.href}
                 aria-current={tab === t.key ? "page" : undefined}
-                className={`-mb-px flex items-center gap-2 border-b-2 pt-1 pb-3 ${tab === t.key ? "border-ink font-medium text-ink" : "border-transparent text-muted hover:text-ink"}`}
+                className={`-mb-0.5 flex items-center gap-2 border-b-2 pt-1 pb-3 ${tab === t.key ? "border-ink font-medium text-ink" : "border-transparent text-muted hover:text-ink"}`}
               >
                 {t.label}
                 {t.count !== undefined && <span className="text-xs font-normal text-muted tabular-nums">{t.count}</span>}

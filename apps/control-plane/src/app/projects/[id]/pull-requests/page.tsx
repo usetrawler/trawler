@@ -34,7 +34,7 @@ export default async function PullRequestsPage({ params }: { params: Promise<{ i
     if (!project) return null;
     const [runState, counts, lines, prPlans] = await Promise.all([projectRunState(tx, orgId, id), projectCounts(tx, orgId, id), projectPullRequests(tx, orgId, id), listPullRequestPlans(tx, orgId, id)]);
     const shown = new Set(lines.map((l) => l.plan.id));
-    return runState && { project, runState, counts, lines, earlier: prPlans.filter((p) => !shown.has(p.id)).map((p) => ({ id: p.id, label: `${p.name} · v${p.version}` })) };
+    return runState && { project, runState, counts, lines, earlier: prPlans.filter((p) => !shown.has(p.id)).map((p) => ({ id: p.id, label: `${p.name}${prPlans.some((o) => o.number === p.number && o.repo !== p.repo) ? ` (${p.repo})` : ""} · v${p.version}` })) };
   });
   if (!result) notFound();
   const { project, runState, counts, lines, earlier } = result;

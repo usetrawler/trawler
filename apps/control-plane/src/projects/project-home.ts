@@ -79,7 +79,7 @@ export function runResult(run: RunLine): string {
   return run.status === "stopped_budget" ? `Stopped at cap · ${confirmed}` : confirmed;
 }
 
-export async function projectCounts(tx: Tx, orgId: string, projectId: string): Promise<{ runs: number; pullRequests: number }> {
-  const { rows } = await sql<{ runs: string; prs: string }>`SELECT count(*) AS runs, count(DISTINCT ${prSource}) AS prs FROM runs r WHERE r.org_id = ${orgId} AND r.project_id = ${projectId}`.execute(tx);
-  return { runs: Number(rows[0]?.runs ?? 0), pullRequests: Number(rows[0]?.prs ?? 0) };
+export async function projectCounts(tx: Tx, orgId: string, projectId: string): Promise<{ runs: number; finished: number; pullRequests: number }> {
+  const { rows } = await sql<{ runs: string; finished: string; prs: string }>`SELECT count(*) AS runs, count(*) FILTER (WHERE r.status IN ('succeeded', 'stopped_budget')) AS finished, count(DISTINCT ${prSource}) AS prs FROM runs r WHERE r.org_id = ${orgId} AND r.project_id = ${projectId}`.execute(tx);
+  return { runs: Number(rows[0]?.runs ?? 0), finished: Number(rows[0]?.finished ?? 0), pullRequests: Number(rows[0]?.prs ?? 0) };
 }

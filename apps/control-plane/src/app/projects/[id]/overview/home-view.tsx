@@ -11,17 +11,21 @@ const SHOWN_PULL_REQUESTS = 3;
 const sourceOf = (run: RunLine) => run.savedPlan?.name ?? run.planName;
 
 function Going({ runs }: { runs: RunLine[] }) {
-  const [first, ...rest] = runs;
-  if (!first) return null;
-  const source = sourceOf(first);
+  if (runs.length === 0) return null;
   return (
-    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-soft px-4 py-3 text-sm">
-      <span aria-hidden className="size-2 rounded-full bg-ok" />
-      <span className="font-medium">{runTitle(first.number)} is {first.status === "queued" ? "queued" : "running"}</span>
-      {source && <span className="text-muted">{source}</span>}
-      {rest.length > 0 && <span className="text-muted">and {rest.length} more</span>}
-      <a href={runPath(first.number)} className="ml-auto underline underline-offset-4">Watch<span className="sr-only"> {runTitle(first.number)}</span></a>
-    </p>
+    <ul className="flex flex-col gap-1">
+      {runs.map((run) => {
+        const source = sourceOf(run);
+        return (
+          <li key={run.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-soft px-4 py-3 text-sm">
+            <span aria-hidden className="size-2 rounded-full bg-ok" />
+            <span className="font-medium">{runTitle(run.number)} is {run.status === "queued" ? "queued" : "running"}</span>
+            {source && <span className="text-muted">{source}</span>}
+            <a href={runPath(run.number)} className="ml-auto underline underline-offset-4">Watch<span className="sr-only"> {runTitle(run.number)}</span></a>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -89,11 +93,11 @@ function Latest({ run }: { run: RunLine | undefined }) {
   );
 }
 
-export function ProjectHomeView({ projectId, runs, findings, going, latest, pullRequests, pullRequestCount }: { projectId: string; runs: number; findings: OpenFinding[]; going: RunLine[]; latest?: RunLine; pullRequests: PullRequestLine[]; pullRequestCount: number }) {
+export function ProjectHomeView({ projectId, runs, finished, findings, going, latest, pullRequests, pullRequestCount }: { projectId: string; runs: number; finished: number; findings: OpenFinding[]; going: RunLine[]; latest?: RunLine; pullRequests: PullRequestLine[]; pullRequestCount: number }) {
   return (
     <div className="flex max-w-3xl flex-col gap-10">
       <div className="flex flex-col gap-4">
-        <p className="text-2xl leading-tight font-medium tracking-tight wrap-anywhere md:text-[28px]">{homeHeadline(findings, runs)}</p>
+        <p className="text-2xl leading-tight font-medium tracking-tight wrap-anywhere md:text-[28px]">{homeHeadline(findings, runs, finished)}</p>
         {runs === 0 && <p className="text-muted">Check the <a href={`/projects/${projectId}`} className="text-ink underline underline-offset-4">plan</a>, then start a run to see what people find.</p>}
         {going.length > 0 ? <Going runs={going} /> : <Latest run={latest} />}
       </div>

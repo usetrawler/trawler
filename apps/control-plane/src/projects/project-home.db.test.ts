@@ -96,9 +96,9 @@ test("each pull request is listed once, newest run first, with its title, the pl
   expect(runResult(prs[3]!.run)).toBe("Skipped: nothing to test in the UI");
   expect(runResult(prs[0]!.run)).toBe("Running");
   expect((await withOrg(t.db, "org-a", (tx) => projectPullRequests(tx, "org-a", acme, 2))).map((p) => p.run.number)).toEqual(prs.slice(0, 2).map((p) => p.run.number));
-  expect(await withOrg(t.db, "org-a", (tx) => projectCounts(tx, "org-a", acme))).toEqual({ runs: 10, pullRequests: 4 });
+  expect(await withOrg(t.db, "org-a", (tx) => projectCounts(tx, "org-a", acme))).toEqual({ runs: 10, finished: 7, pullRequests: 4 });
   expect((await withOrg(t.db, "org-a", (tx) => openFindings(tx, "org-a", acme))).find((f) => f.source === "PR #22")?.key).toBe("ana:pr22");
-  expect(await withOrg(t.db, "org-a", (tx) => projectCounts(tx, "org-a", other))).toEqual({ runs: 1, pullRequests: 0 });
+  expect(await withOrg(t.db, "org-a", (tx) => projectCounts(tx, "org-a", other))).toEqual({ runs: 1, finished: 1, pullRequests: 0 });
 });
 
 test("a run's result reads the way the pull request list shows it", () => {
