@@ -26,7 +26,7 @@ vi.mock("next/navigation", () => ({
   notFound: () => { throw Object.assign(new Error("not found"), { notFound: true }); },
 }));
 vi.mock("../../../server/auth.ts", () => ({ signedInMember: async (headers: Headers) => (headers.get("cookie") === "session=ana" ? state.member : null), canManageBilling: () => false }));
-vi.mock("../../../server/shell.ts", () => ({ shellFor: async (member: Member) => ({ user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: state.projects, runs: 4 } }) }));
+vi.mock("../../../server/shell.ts", () => ({ shellFor: async (member: Member) => ({ user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: state.projects } }) }));
 vi.mock("../../../server/db.ts", () => ({ getDb: () => ({}) }));
 vi.mock("../../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, _orgId: string, work: (tx: unknown) => unknown) => work({}) }));
 vi.mock("../../../credentials/credentials.ts", () => ({ modelKeyHint: async () => null }));

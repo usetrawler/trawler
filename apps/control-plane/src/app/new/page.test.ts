@@ -12,7 +12,7 @@ vi.mock("../../server/auth.ts", () => ({
 vi.mock("../../server/shell.ts", () => ({
   shellFor: async (member: Member) => {
     state.shells.push(member.orgId);
-    return { user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [], runs: 0 } };
+    return { user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [] } };
   },
 }));
 vi.mock("../../server/db.ts", () => ({ getDb: () => ({}) }));

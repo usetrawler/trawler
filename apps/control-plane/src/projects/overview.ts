@@ -163,26 +163,22 @@ export async function runCounts(tx: Tx, orgId: string, projectId?: string, planI
   return { all: Number(counts.all), completed: Number(counts.completed), attention: Number(counts.attention) };
 }
 
-export async function workspaceNav(tx: Tx, orgId: string): Promise<{ projects: NavProject[]; runs: number }> {
-  const [projects, runs] = await Promise.all([
-    tx
-      .selectFrom("projects as p")
-      .where("p.org_id", "=", orgId)
-      .select((eb) => [
-        "p.id", "p.name", "p.target_url", "p.created_at",
-        eb.selectFrom("runs as r").select((r) => r.fn.max("r.created_at").as("at")).whereRef("r.project_id", "=", "p.id").as("last_run_at"),
-        eb.exists(eb.selectFrom("runs as r").select("r.id").whereRef("r.project_id", "=", "p.id").where("r.status", "in", ["queued", "running"])).as("live"),
-      ])
-      .execute(),
-    tx.selectFrom("runs").select((eb) => eb.fn.countAll<string>().as("n")).where("org_id", "=", orgId).executeTakeFirstOrThrow(),
-  ]);
+export async function workspaceNav(tx: Tx, orgId: string): Promise<{ projects: NavProject[] }> {
+  const projects = await tx
+    .selectFrom("projects as p")
+    .where("p.org_id", "=", orgId)
+    .select((eb) => [
+      "p.id", "p.name", "p.target_url", "p.created_at",
+      eb.selectFrom("runs as r").select((r) => r.fn.max("r.created_at").as("at")).whereRef("r.project_id", "=", "p.id").as("last_run_at"),
+      eb.exists(eb.selectFrom("runs as r").select("r.id").whereRef("r.project_id", "=", "p.id").where("r.status", "in", ["queued", "running"])).as("live"),
+    ])
+    .execute();
   const active = (p: (typeof projects)[number]) => (p.last_run_at ? new Date(p.last_run_at) : p.created_at).getTime();
   const named = namesUsed(projects);
   return {
     projects: projects
       .sort((a, b) => active(b) - active(a) || a.id.localeCompare(b.id))
       .map((p) => ({ id: p.id, name: p.name, address: named.get(p.name)! > 1 ? siteOf(p.target_url) : hostOf(p.target_url), ...(p.live ? { live: true } : {}) })),
-    runs: Number(runs.n),
   };
 }
 

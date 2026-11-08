@@ -18,7 +18,7 @@ vi.mock("../../server/db.ts", () => ({ getDb: () => ({}) }));
 vi.mock("../../server/shell.ts", () => ({
   shellFor: async (member: { name: string; email: string; orgId: string; orgName: string }) => {
     state.shells.push(member.orgId);
-    return { user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: state.projects, runs: 60 } };
+    return { user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: state.projects } };
   },
 }));
 vi.mock("../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string, work: (tx: unknown) => unknown) => { state.tenants.push(orgId); return work({}); } }));

@@ -7,7 +7,7 @@ import { initials } from "./initials.ts";
 
 const shell: Shell = {
   user: { name: "Ben Ortiz", email: "ben@acme.test" },
-  workspace: { name: "Acme Labs", projects: [{ id: "p1", name: "Acme Invoices", address: "app.acme.test" }, { id: "p2", name: "Globex Store", address: "shop.globex.test" }], runs: 17 },
+  workspace: { name: "Acme Labs", projects: [{ id: "p1", name: "Acme Invoices", address: "app.acme.test" }, { id: "p2", name: "Globex Store", address: "shop.globex.test" }] },
 };
 
 const render = (options: { current?: ShellPage; parent?: boolean; shell?: Shell } = {}) =>
@@ -26,8 +26,9 @@ describe("AppShell", () => {
     expect(nav(html)).not.toContain("aria-current");
   });
 
-  it("counts the workspace's runs next to All runs", () => {
-    expect(link(nav(render()), "All runs")).toMatch(/>17<\/span><\/a>$/);
+  it("leaves All runs without a count and pins Settings to the foot of the sidebar", () => {
+    expect(link(nav(render()), "All runs")).not.toMatch(/tabular-nums/);
+    expect(nav(render())).toMatch(/<ul class="[^"]*\bmd:mt-auto\b[^"]*"><li[^>]*><a href="\/settings"/);
   });
 
   it("groups the projects under a Projects heading with their number, each with its product's address under its name", () => {
@@ -94,7 +95,7 @@ describe("AppShell", () => {
 
   it("puts the whole nav in one sideways row on a phone, without the Projects heading", () => {
     const html = render();
-    expect(html).toMatch(/<nav aria-label="Workspace" class="flex [^"]*\boverflow-x-auto\b[^"]*\bmd:block\b/);
+    expect(html).toMatch(/<nav aria-label="Workspace" class="flex [^"]*\boverflow-x-auto\b[^"]*\bmd:flex-col\b/);
     expect(html).toMatch(/<p id="nav-projects" class="hidden [^"]*\bmd:block\b/);
   });
 

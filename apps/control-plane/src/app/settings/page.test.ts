@@ -45,7 +45,7 @@ vi.mock("../../server/auth.ts", () => ({
   }),
 }));
 vi.mock("../../server/shell.ts", () => ({
-  shellFor: async (member: { name: string; email: string; orgName: string }) => ({ user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [], runs: 0 } }),
+  shellFor: async (member: { name: string; email: string; orgName: string }) => ({ user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [] } }),
 }));
 vi.mock("../../server/db.ts", () => ({ getDb: () => ({}) }));
 vi.mock("../../server/env.ts", () => ({ readEnv: () => ({ baseURL: "https://app.usetrawler.test" }) }));

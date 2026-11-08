@@ -29,7 +29,7 @@ vi.mock("../../../server/auth.ts", () => ({
 vi.mock("../../../server/shell.ts", () => ({
   shellFor: async (member: Member) => {
     state.shells.push(member.orgId);
-    return { user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [{ id: ID, name: "Acme", address: "app.acme.test" }, { id: "other", name: "Globex", address: "shop.globex.test" }], runs: 60 } };
+    return { user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [{ id: ID, name: "Acme", address: "app.acme.test" }, { id: "other", name: "Globex", address: "shop.globex.test" }] } };
   },
 }));
 vi.mock("../../../server/db.ts", () => ({ getDb: () => ({}) }));
