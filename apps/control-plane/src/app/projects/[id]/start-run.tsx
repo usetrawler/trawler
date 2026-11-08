@@ -198,7 +198,7 @@ export function StartRun({ projectId, planId, planLabel, projectName, personas, 
 
   if (closedBeta) {
     return (
-      <form id="start" onSubmit={(e) => e.preventDefault()} className="flex flex-col gap-5 border border-line bg-panel p-5">
+      <form id="start" onSubmit={(e) => e.preventDefault()} className="flex flex-col gap-5 rounded-lg border border-line bg-panel p-5">
         <p className="text-xs text-muted">Start · <span className="text-ink">{projectName}</span>{planLabel && <> · <span className="text-ink">{planLabel}</span></>}</p>
         <p id="start-blocked" className="border-l-2 border-warn pl-3 text-sm">{closedBeta}</p>
         <div className="flex justify-end">
@@ -217,7 +217,7 @@ export function StartRun({ projectId, planId, planLabel, projectName, personas, 
         startTransition(() => action(data));
       }}
       id="start"
-      className="flex flex-col gap-5 border border-line bg-panel p-5">
+      className="flex flex-col gap-5 rounded-lg border border-line bg-panel p-5">
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="planId" value={planId} />
       <p className="text-xs text-muted">Start · <span className="text-ink">{projectName}</span>{planLabel && <> · <span className="text-ink">{planLabel}</span></>}</p>

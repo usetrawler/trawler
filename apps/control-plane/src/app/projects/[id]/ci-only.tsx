@@ -8,7 +8,7 @@ export function CiOnlyPanel({ projectId, projectName, host, confirmedAt }: { pro
   const [state, action, pending] = useActionState(confirmTestingAction.bind(null, projectId), {});
   const confirmed = confirmedAt !== null || state.done === true;
   return (
-    <form action={action} id="start" className="flex flex-col gap-4 border border-line bg-panel p-5">
+    <form action={action} id="start" className="flex flex-col gap-4 rounded-lg border border-line bg-panel p-5">
       <p className="text-xs text-muted">Runs · <span className="text-ink">{projectName}</span></p>
       <p className="text-sm">
         {host} is on a private network, so Trawler&apos;s hosted runners cannot reach it. Its runs start from your CI job, with a runner in that job (<a href={CI_DOCS} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:text-muted">Trawler in CI</a>).
