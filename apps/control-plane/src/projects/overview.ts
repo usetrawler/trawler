@@ -202,3 +202,9 @@ export async function projectRunCount(tx: Tx, orgId: string, projectId: string):
   const { n } = await tx.selectFrom("runs").select((eb) => eb.fn.countAll<string>().as("n")).where("org_id", "=", orgId).where("project_id", "=", projectId).executeTakeFirstOrThrow();
   return Number(n);
 }
+
+export async function runLinesByIds(tx: Tx, orgId: string, ids: string[]): Promise<Map<string, RunLine>> {
+  if (ids.length === 0) return new Map();
+  const rows = await runLines(tx, orgId).where("r.id", "in", ids).execute();
+  return new Map(rows.map((r) => [r.id, toLine(r)]));
+}
