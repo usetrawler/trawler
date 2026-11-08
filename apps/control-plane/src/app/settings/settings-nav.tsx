@@ -14,7 +14,7 @@ export const settingsHref = (section: Section) => (section === "general" ? "/set
 
 export function SettingsNav({ current }: { current: Section }) {
   return (
-    <nav aria-label="Settings">
+    <nav aria-label="Settings" className="min-w-0">
       <ul className="flex gap-1 overflow-x-auto md:flex-col">
         {SECTIONS.map((s) => (
           <li key={s.key} className="shrink-0">

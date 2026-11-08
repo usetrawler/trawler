@@ -95,7 +95,7 @@ test("settings name who added the key among this workspace's members, and mark S
 test("the page is headed with the workspace, and a side menu leads to each part of the settings, marking the one open", async () => {
   const html = renderToStaticMarkup(await open());
   expect(text(html)).toContain(" Acme Settings ");
-  const items = [...(html.match(/<nav aria-label="Settings">.*?<\/nav>/)?.[0] ?? "").matchAll(/<a href="([^"]*)"( aria-current="page")?[^>]*>([^<]*)<\/a>/g)].map((m) => [m[3], m[1], Boolean(m[2])]);
+  const items = [...(html.match(/<nav aria-label="Settings"[^>]*>.*?<\/nav>/)?.[0] ?? "").matchAll(/<a href="([^"]*)"( aria-current="page")?[^>]*>([^<]*)<\/a>/g)].map((m) => [m[3], m[1], Boolean(m[2])]);
   expect(items).toEqual([
     ["General", "/settings", true], ["Members", "/settings?section=members", false], ["Model &amp; budget", "/settings?section=model", false], ["API tokens &amp; MCP", "/settings?section=tokens", false], ["Billing", "/settings?section=billing", false],
   ]);
