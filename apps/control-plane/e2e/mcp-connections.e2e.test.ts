@@ -83,7 +83,7 @@ async function saveAccess(on: Page) {
 }
 
 async function openSettings(on: Page) {
-  await on.goto(`${stack.origin}/settings`);
+  await on.goto(`${stack.origin}/settings?section=tokens`);
   await expect.poll(() => access(on).isVisible()).toBe(true);
 }
 
@@ -151,7 +151,7 @@ describe("connecting an assistant, seeing it in Settings and disconnecting it", 
   });
 
   test("Settings lists the connection with what it reaches, and disconnecting it asks first", async () => {
-    await page.goto(`${stack.origin}/settings`);
+    await page.goto(`${stack.origin}/settings?section=tokens`);
     const section = connections(page);
     const row = section.getByRole("listitem").filter({ hasText: "E2E assistant" });
     await expect.poll(() => row.textContent()).toContain("read and run control · only Checkout");
@@ -190,7 +190,7 @@ describe("what the consent page offers and what a decision does", () => {
     await afterRedirect(page);
     const tokens = await redeem(clientId, verifier, await callback.next());
     expect((await connectionStatus(tokens.access_token!)).access.project).toBeNull();
-    await page.goto(`${stack.origin}/settings`);
+    await page.goto(`${stack.origin}/settings?section=tokens`);
     await expect.poll(() => connections(page).getByRole("listitem").filter({ hasText: "Careful assistant" }).textContent()).toContain("read only");
   });
 
@@ -237,7 +237,7 @@ describe("what the consent page offers and what a decision does", () => {
       await connect(page, clientId, READ);
       await expect.poll(() => page.getByText("MCP connections are switched off for this workspace").isVisible()).toBe(true);
       expect(await page.getByRole("button", { name: /Allow/ }).count()).toBe(0);
-      expect(await page.getByRole("link", { name: "Settings", exact: true }).getAttribute("href")).toBe("/settings");
+      expect(await page.getByRole("link", { name: "Settings", exact: true }).getAttribute("href")).toBe("/settings?section=tokens");
       const cancel = page.getByRole("button", { name: "Cancel the connection" });
       await hydrated(cancel);
       await cancel.click();
