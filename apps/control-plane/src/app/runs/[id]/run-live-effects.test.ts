@@ -605,9 +605,9 @@ test("Copy as issue copies the finding as Markdown with a link back to it, says 
     await vi.advanceTimersByTimeAsync(0);
     return { copy, state: react.setters[0]!, markdown: react.setters[1]! };
   };
-  const writeText = vi.fn(async () => {});
+  const writeText = vi.fn(async (_text: string) => {});
   const copied = await copyWith({ writeText });
-  const text = writeText.mock.calls[0]![0] as string;
+  const text = writeText.mock.calls[0]![0];
   expect(text.startsWith("## Saving fails\n")).toBe(true);
   expect(text).toContain("Found by Trawler in [Run 0007](https://app.trawler.test/runs/0007#finding-ana%3Af1)");
   expect(copied.markdown).toHaveBeenCalledWith(text);

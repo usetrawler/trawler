@@ -577,10 +577,11 @@ function PeopleOutcomes({ view }: { view: View }) {
 const PANELS = [["findings", "Findings"], ["timeline", "Timeline"], ["details", "Details"]] as const;
 type Panel = (typeof PANELS)[number][0];
 
-function panelForHash(hash: string): Panel {
+function panelForHash(hash: string, unaddressed: Panel): Panel {
+  if (hash === "#findings" || hash.startsWith("#finding-")) return "findings";
   if (hash === "#timeline" || hash === "#goals" || hash.startsWith("#trail-")) return "timeline";
   if (hash === "#details" || hash === "#activity" || hash === "#conversation" || hash === "#pr-plan") return "details";
-  return "findings";
+  return unaddressed;
 }
 
 export function RunLive({ initial, closedBeta, project }: { initial: Data; closedBeta?: string; project?: { id: string; name: string } }) {
@@ -626,7 +627,8 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
   const [announcement, setAnnouncement] = useState({ text: "", n: 0 });
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const [reveal, setReveal] = useState(false);
-  const [panel, setPanel] = useState<Panel>("findings");
+  const startPanel: Panel = initial.view.live ? "timeline" : "findings";
+  const [panel, setPanel] = useState<Panel>(startPanel);
   const focused = useCallback(() => setFocusKey(null), []);
   const again = useRunAgain();
   const moved = useCallback<Moved>(async (key, text) => {
@@ -648,7 +650,7 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
   useEffect(() => {
     const syncPanel = () => {
       const hash = window.location.hash;
-      const next = panelForHash(hash);
+      const next = panelForHash(hash, startPanel);
       if (next !== panel) return setPanel(next);
       if (!/^#(?:finding-|trail-|pr-plan$|conversation$)/.test(hash)) return;
       const addressed = document.getElementById(hash.slice(1));

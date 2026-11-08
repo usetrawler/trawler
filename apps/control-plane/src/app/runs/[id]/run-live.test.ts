@@ -142,6 +142,8 @@ test("a live run shows its cost against the cap, the four stages, each person an
   expect(html).toMatch(/<button type="button"[^>]*>Stop run<\/button>/);
   expect(html).not.toContain("Run again");
   expect(text(band(html))).toBe("Live · 2 of 4 goals reached · app.acme.test · 2026-09-25 19:40 UTC");
+  expect(html).toContain('id="run-timeline" class="pt-6"');
+  expect(html).toContain('id="run-findings" hidden=""');
   expect(text(html)).toContain("Confirmed · 0 Reproduced independently: a fresh agent followed the steps without seeing the report, and the judge agreed. Fix these. Nothing confirmed yet.");
 });
 
