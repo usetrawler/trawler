@@ -125,7 +125,7 @@ test("the plan is the page marked in the nav, under its project, and the nav is 
   const marked = (html.match(/<nav aria-label="Workspace".*?<\/nav>/)?.[0] ?? "").match(/<a [^>]*aria-current="[^"]*"[^>]*>/g) ?? [];
   expect(marked).toEqual([expect.stringMatching(new RegExp(`^<a href="/projects/${ID}/overview" aria-current="page"`))]);
   expect(state.shells).toEqual(["org-1"]);
-  expect(html).toContain(">Acme workspace</p>");
+  expect(html).toContain(">Acme workspace</span>");
 });
 
 test("the plan is the project's Plan tab, next to its Runs with their number, without the setup steps", async () => {

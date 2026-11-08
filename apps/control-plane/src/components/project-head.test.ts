@@ -32,7 +32,7 @@ test("a project that shares its name shows the address the panel gives it, under
 });
 
 test("a new run starts at the plan's Start section", () => {
-  expect(render("runs")).toMatch(/<a href="\/projects\/p1#start"[^>]*>New run<span aria-hidden="true">→<\/span><\/a>/);
+  expect(render("runs")).toMatch(/<a href="\/projects\/p1#start"[^>]*>New run<\/a>/);
 });
 
 test("runs can be paused from the head, and a paused project offers Resume runs instead of a new run", () => {

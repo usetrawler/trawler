@@ -36,20 +36,20 @@ test("a visitor who is not signed in, or no longer belongs to any workspace, is 
 
 test("the new project page is marked as the one the person is on, with the nav of the signed-in workspace", async () => {
   const html = renderToStaticMarkup(await NewProjectPage());
-  expect(html).toContain(">Acme workspace</p>");
+  expect(html).toContain(">Acme workspace</span>");
   expect(html).toMatch(/<a href="\/new" aria-current="page"[^>]*>(?:(?!<\/a>).)*New project<\/span><\/span><\/a>/);
   expect(state.shells).toEqual(["org-1"]);
   expect(html).toMatch(/<main[^>]*>.*>New project<\/p><h1[^>]*>What should Trawler use\?<\/h1>/);
   expect(html).not.toContain('aria-label="Progress"');
 });
 
-test("Sign out sits in the header on a phone and under the nav on wider screens, once each", async () => {
+test("Sign out sits in the account menu: at the top on a phone and under the nav on wider screens, once each", async () => {
   const html = renderToStaticMarkup(await NewProjectPage());
-  const header = html.match(/<header.*<\/header>/)?.[0] ?? "";
-  expect(header.match(/>Sign out</g)).toHaveLength(1);
-  expect(header).toMatch(/class="[^"]*\bmd:hidden\b[^"]*">Sign out</);
-  const panel = html.slice(html.indexOf("</nav>"), html.indexOf("<main"));
-  expect(panel.match(/>Sign out</g)).toHaveLength(1);
+  const [phone, wide] = html.match(/<details class="[^"]*">.*?<\/details>/g) ?? [];
+  expect(phone).toMatch(/^<details class="[^"]*\bmd:hidden\b/);
+  expect(wide).toMatch(/^<details class="[^"]*\bhidden\b[^"]*\bmd:block\b/);
+  expect(html.indexOf(wide!)).toBeGreaterThan(html.indexOf("</nav>"));
+  for (const menu of [phone!, wide!]) expect(menu.match(/>Sign out</g)).toHaveLength(1);
   expect(html.match(/>Sign out</g)).toHaveLength(2);
 });
 

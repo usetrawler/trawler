@@ -110,7 +110,7 @@ test("an owner or admin edits the workspace name; a member reads it as text, wit
   expect(owner).toMatch(/<button type="submit"[^>]*>Save name<\/button>/);
   const member = render(createElement(WorkspaceName, { name: "Acme", canManage: false }));
   expect(member).not.toMatch(/<form|<input|<button/);
-  expect(member).toMatch(/<p class="text-lg font-bold wrap-anywhere">Acme<\/p><p class="text-sm text-muted">Only an owner or admin of this workspace can rename it\.<\/p>/);
+  expect(member).toMatch(/<p class="text-lg font-semibold wrap-anywhere">Acme<\/p><p class="text-sm text-muted">Only an owner or admin of this workspace can rename it\.<\/p>/);
 });
 
 test("starting a step, or sending one, clears what the last one said, so an old error never comes back", () => {

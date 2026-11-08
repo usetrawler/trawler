@@ -55,7 +55,7 @@ test("a workspace with projects lands on its overview, greeted by first name, re
   const html = renderToStaticMarkup(await Home());
   expect(html).toContain(">Welcome back, Ana</p>");
   expect(html).toContain('<ul aria-label="Projects"');
-  expect(html).toContain(">Acme workspace</p>");
+  expect(html).toContain(">Acme workspace</span>");
   expect(html).toMatch(/<a href="\/"[^>]*aria-current="page"[^>]*>(?:(?!<\/a>).)*Overview/);
   expect(state.askedFor).toEqual(["withOrg:org-1", "projects:org-1", "runs:org-1:3", "shell:org-1"]);
 });
