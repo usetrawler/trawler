@@ -94,7 +94,7 @@ test("each pull request is listed once, newest run first, with its title, the pl
   expect(prs[1]!.plan).toEqual({ id: null, label: "v1", ofPullRequest: true });
   expect(prs[3]).toMatchObject({ title: "chore: store amounts as grosze", plan: { id: plan1, label: "Plan 1", ofPullRequest: false } });
   expect(runResult(prs[3]!.run)).toBe("Skipped: nothing to test in the UI");
-  expect(runResult(prs[0]!.run)).toBe("Running");
+  expect(runResult(prs[0]!.run)).toBe("Live");
   expect((await withOrg(t.db, "org-a", (tx) => projectPullRequests(tx, "org-a", acme, 2))).map((p) => p.run.number)).toEqual(prs.slice(0, 2).map((p) => p.run.number));
   expect(await withOrg(t.db, "org-a", (tx) => projectCounts(tx, "org-a", acme))).toEqual({ runs: 10, finished: 7, pullRequests: 4 });
   expect((await withOrg(t.db, "org-a", (tx) => openFindings(tx, "org-a", acme))).find((f) => f.source === "PR #22")?.key).toBe("ana:pr22");

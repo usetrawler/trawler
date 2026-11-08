@@ -49,7 +49,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           {project.focus && <Row label="Focus">{project.focus}</Row>}
           {project.docs_url && <Row label="Docs"><a href={project.docs_url} target="_blank" rel="noreferrer" className="font-mono text-sm underline underline-offset-4">{project.docs_url}<span className="sr-only"> (opens in a new tab)</span></a></Row>}
         </dl>
-        <p className="text-sm text-muted">The people and goals of each plan are proposed from this description. To change it, open <a href={`/projects/${id}/features?plan=${project.plan.id}`} className="text-ink underline underline-offset-4">Change features and propose people again</a> on the plan.</p>
+        <p className="text-sm text-muted">The people and goals of each plan are proposed from this description. To change it, open the <a href={`/projects/${id}`} className="text-ink underline underline-offset-4">plan</a> and choose Change features and propose people again.</p>
       </div>
     </AppShell>
   );

@@ -47,7 +47,7 @@ test("with nothing going, the latest run shows how it ended, so a failed or canc
 test("the latest three pull requests follow, each with its plan, its run and the result, and All leads to the rest", () => {
   const html = render({ pullRequests: [pr(24, run(300, { status: "running" })), pr(23, run(294, { status: "stopped_budget" })), pr(22, run(293, { confirmed: 1 }), { plan: { id: "pl1", label: "Plan 1", ofPullRequest: false } }), pr(21, run(292))], pullRequestCount: 12 });
   expect(html.match(/<li><a href="\/runs\/\d+" class="grid/g)).toHaveLength(3);
-  expect(html).toMatch(/#24<\/span><span[^>]*><span[^>]*>feat: change 24<\/span><span[^>]*>plan v16 · Run 0300<\/span><\/span><span[^>]*text-muted[^>]*>Running<\/span>/);
+  expect(html).toMatch(/#24<\/span><span[^>]*><span[^>]*>feat: change 24<\/span><span[^>]*>plan v16 · Run 0300<\/span><\/span><span[^>]*text-muted[^>]*>Live<\/span>/);
   expect(html).toMatch(/>Plan 1 · Run 0293<\/span><\/span><span class="[^"]*font-medium text-ink[^"]*">1 confirmed<\/span>/);
   expect(html).toContain(">Stopped at cap · No defect confirmed<");
   expect(html).toMatch(/<a href="\/projects\/p1\/pull-requests"[^>]*>All 12<span class="sr-only"> pull requests<\/span><\/a>/);

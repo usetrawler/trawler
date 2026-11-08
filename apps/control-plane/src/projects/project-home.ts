@@ -71,7 +71,7 @@ export async function projectPullRequests(tx: Tx, orgId: string, projectId: stri
 
 export function runResult(run: RunLine): string {
   if (run.status === "queued") return "Queued";
-  if (run.status === "running") return "Running";
+  if (run.status === "running") return "Live";
   if (run.status === "skipped") return "Skipped: nothing to test in the UI";
   if (run.status === "failed") return "Failed";
   if (run.status === "cancelled") return "Cancelled";
