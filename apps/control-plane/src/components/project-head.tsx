@@ -6,7 +6,7 @@ import { PauseRuns } from "./pause-runs.tsx";
 
 export type ProjectTab = "home" | "plan" | "pull-requests" | "runs" | "product";
 
-export function ProjectHead({ project, address, tab, counts, runState, planId }: { project: { id: string; name: string; targetUrl: string }; address?: string; tab: ProjectTab; counts: { runs: number; pullRequests: number }; runState: ProjectRunState; planId?: string }) {
+export function ProjectHead({ project, address, tab, counts, runState, planId, editing = false }: { project: { id: string; name: string; targetUrl: string }; address?: string; tab: ProjectTab; counts: { runs: number; pullRequests: number }; runState: ProjectRunState; planId?: string; editing?: boolean }) {
   const base = `/projects/${project.id}`;
   const tabs: Array<{ key: ProjectTab; href: string; label: string; count?: number }> = [
     { key: "home", href: `${base}/overview`, label: "Home" },
@@ -24,7 +24,6 @@ export function ProjectHead({ project, address, tab, counts, runState, planId }:
         </p>
       )}
       <PageHead
-        compact
         eyebrow={
           <>
             <a href={project.targetUrl} target="_blank" rel="noreferrer" className="font-mono underline underline-offset-2 hover:text-ink">{address ?? hostOf(project.targetUrl)}<span aria-hidden> ↗</span><span className="sr-only normal-case"> (opens in a new tab)</span></a>
@@ -32,15 +31,15 @@ export function ProjectHead({ project, address, tab, counts, runState, planId }:
           </>
         }
         title={project.name}
-        action={
+        action={editing ? undefined : (
           <div className="flex flex-wrap items-end gap-3 md:justify-end">
             <PauseRuns projectId={project.id} paused={runState.paused} liveRun={runState.liveRun} />
             {!runState.paused && <PrimaryLink href={`/runs/new?project=${project.id}${planId ? `&plan=${planId}` : ""}`}>New run</PrimaryLink>}
           </div>
-        }
+        )}
       />
       <nav aria-label="Project">
-        <ul className="-mt-4 flex gap-x-6 overflow-x-auto overflow-y-hidden border-b border-line pb-0.5">
+        <ul className="-mt-4 flex gap-x-4 overflow-x-auto overflow-y-hidden border-b border-line pb-0.5 text-sm sm:gap-x-6 sm:text-[15px]">
           {tabs.map((t) => (
             <li key={t.key} className="shrink-0">
               <a

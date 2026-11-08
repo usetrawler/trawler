@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { chipOff, chipOn } from "../../../components/controls.ts";
 import { ClockTime } from "../../../components/local-time.tsx";
 import { findingAnchor } from "../../../runs/finding-anchor.ts";
 import type { RunSummary } from "../../../runs/runs.ts";
@@ -219,7 +220,7 @@ export function Story({ run, live, pulse, active, filter, onFilter }: { run: Run
   const groups = storyGroups(filtered(storyEntries(trails, run.conversationMessages), filter), turns);
   const loaded = Object.keys(trails).length > 0;
   const earlier = Object.values(trails).some((t) => t.olderThan !== null);
-  const chip = (on: boolean) => `inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] ${on ? "bg-ink text-panel" : "text-muted shadow-[0_0_0_1px_var(--line)] hover:text-ink"}`;
+  const chip = (on: boolean) => (on ? chipOn : chipOff);
   const personFilter = typeof filter === "object" ? filter.person : null;
   return (
     <section aria-labelledby="story" className="flex flex-col gap-3">

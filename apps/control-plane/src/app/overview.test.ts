@@ -2,7 +2,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { ProjectLine, RunLine } from "../projects/overview.ts";
-import { firstName, Overview, overviewSubtitle } from "./overview.tsx";
+import type { OpenFinding } from "../projects/project-home.ts";
+import { Overview, workspaceHeadline } from "./overview.tsx";
 
 const run = (over: Partial<RunLine> = {}): RunLine => ({
   startedVia: null, origin: "app",
@@ -11,71 +12,55 @@ const run = (over: Partial<RunLine> = {}): RunLine => ({
 });
 const acme: ProjectLine = { id: "p1", name: "Acme Invoices", targetUrl: "https://app.acme.test/billing", site: null, lastRun: run() };
 const fresh: ProjectLine = { id: "p2", name: "Globex", targetUrl: "https://shop.globex.test/", site: null, lastRun: null };
+const finding = (projectId: string, key = "f1"): OpenFinding => ({ projectId, key, title: "Totals are wrong", severity: "high", person: "Maya", source: "Plan 1", runNumber: 9, reportedAt: new Date("2026-09-25T12:40:00Z") });
 
-const render = (projects: ProjectLine[], recent: RunLine[] = []) => renderToStaticMarkup(createElement(Overview, { firstName: "Ana", projects, recent }));
+const render = (projects: ProjectLine[], recent: RunLine[] = [], findings: OpenFinding[] = [], going: RunLine[] = []) =>
+  renderToStaticMarkup(createElement(Overview, { workspace: "acme-org", projects, recent, findings, going }));
+
 describe("Overview", () => {
-  it("lists projects with their latest activity and opens the project overview", () => {
-    const html = render([acme, fresh]);
-    expect(html).toContain(">Welcome back, Ana</p>");
-    expect(html).toContain(">Projects</h1>");
+  it("names the workspace, says what is open and lists projects with their latest result", () => {
+    const html = render([acme, fresh], [], [finding("p1")]);
+    expect(html).toContain(">acme-org</p>");
+    expect(html).toContain(">1 confirmed defect is open, in Acme Invoices.</h1>");
+    expect(html).toMatch(/<a href="\/findings"[^>]*>Open Findings<\/a>/);
     expect(html).toContain('<ul aria-label="Projects"');
     expect(html).toContain('href="/projects/p1/overview"');
     expect(html).toContain('href="/projects/p2/overview"');
     expect(html).toContain('href="/runs/new"');
-    expect(html).toContain(">Acme Invoices</strong>");
-    expect(html).toContain(">app.acme.test</small>");
+    expect(html).toContain(">app.acme.test</span>");
     expect(html).toContain('href="/runs/0009"');
-    expect(html).toContain("2 confirmed · 4/6 goals");
+    expect(html).toContain(">2 confirmed</span>");
     expect(html).toContain(">No runs yet</span>");
+    expect(html).not.toMatch(/Good (morning|afternoon|evening)|Welcome back/);
   });
 
   it("shows when the latest run failed or its findings could not be checked", () => {
     const html = render([{ ...acme, lastRun: run({ status: "failed", unchecked: true }) }]);
-    expect(html).toContain(">Failed</span>");
-    expect(html).toContain("Findings not checked · 4/6 goals");
-    expect(html).not.toContain("2 confirmed");
+    expect(html).toContain("text-bad\">Failed</span>");
+    expect(render([{ ...acme, lastRun: run({ unchecked: true }) }])).toContain(">Not checked: every replay failed</span>");
   });
 
   it("lists recent runs with a link to all runs, and leaves the section out before the first run", () => {
     const html = render([acme], [run(), run({ id: "r8", number: 8 })]);
     expect(html).toContain('<h2 id="recent-runs"');
-    expect(html).toMatch(/<a href="\/runs"[^>]*>View all/);
-    expect(html.match(/href="\/runs\/\d{4}"/g)).toEqual(['/runs/0009', '/runs/0009', '/runs/0008'].map((href) => `href="${href}"`));
+    expect(html).toMatch(/<a href="\/runs"[^>]*>All runs<\/a>/);
+    expect(html.match(/href="\/runs\/\d{4}"/g)).toEqual(["/runs/0009", "/runs/0009", "/runs/0008"].map((href) => `href="${href}"`));
     expect(render([fresh])).not.toContain("recent-runs");
   });
-});
 
-describe("overviewSubtitle", () => {
-  it("says what the latest run found", () => {
-    expect(overviewSubtitle([])).toBe("No runs yet. Start one from a project's plan.");
-    expect(overviewSubtitle([run({ confirmed: 1 })])).toBe("1 defect was confirmed by replay in the latest run.");
-    expect(overviewSubtitle([run({ confirmed: 3 })])).toBe("3 defects were confirmed by replay in the latest run.");
-    expect(overviewSubtitle([run({ confirmed: 0 })])).toBe("No defect was confirmed in the latest run.");
-    expect(overviewSubtitle([run({ confirmed: 0 }), run({ confirmed: 4 })])).toBe("No defect was confirmed in the latest run.");
-    expect(overviewSubtitle([run({ confirmed: 0, unchecked: true })])).toBe("None of the defects in the latest run could be checked: every replay failed.");
-    expect(overviewSubtitle([run({ status: "stopped_budget", confirmed: 0, unchecked: true })])).toBe("The latest run stopped at its cap; none of its defects could be checked: every replay failed.");
-  });
-
-  it("says when the latest run ended early, and what it confirmed before it stopped", () => {
-    expect(overviewSubtitle([run({ status: "failed", confirmed: 0 })])).toBe("The latest run failed.");
-    expect(overviewSubtitle([run({ status: "failed", confirmed: 1 })])).toBe("The latest run failed; 1 defect was confirmed by replay before it stopped.");
-    expect(overviewSubtitle([run({ status: "stopped_budget", confirmed: 0 })])).toBe("The latest run stopped at its cap before any defect was confirmed.");
-    expect(overviewSubtitle([run({ status: "stopped_budget", confirmed: 2 })])).toBe("The latest run stopped at its cap; 2 defects were confirmed by replay before it stopped.");
-    expect(overviewSubtitle([run({ status: "cancelled", confirmed: 0 })])).toBe("The latest run was cancelled.");
-    expect(overviewSubtitle([run({ status: "cancelled", confirmed: 2 })])).toBe("The latest run was cancelled; 2 defects were confirmed by replay before it stopped.");
-  });
-
-  it("says a run is going or waiting while one of the newest runs has not ended", () => {
-    expect(overviewSubtitle([run(), run({ status: "running" })])).toBe("A run is going now.");
-    expect(overviewSubtitle([run({ status: "queued" }), run({ status: "running" })])).toBe("A run is going now.");
-    expect(overviewSubtitle([run({ status: "queued" })])).toBe("A run is waiting to start.");
-    expect(overviewSubtitle([run({ status: "cancelled" }), run({ status: "queued" })])).toBe("A run is waiting to start.");
+  it("shows the runs that are going now, with their project", () => {
+    const html = render([acme], [], [], [run({ id: "r10", number: 10, status: "running" })]);
+    expect(html).toContain("Acme · Run 0010 is running");
   });
 });
 
-describe("firstName", () => {
-  it("uses the first word of the name, or of the email without a name", () => {
-    expect(firstName({ name: "Ana Lopez", email: "ana@acme.test" })).toBe("Ana");
-    expect(firstName({ name: "  ", email: "lee@acme.test" })).toBe("lee");
+describe("workspaceHeadline", () => {
+  it("follows what is open across projects", () => {
+    expect(workspaceHeadline([], [fresh])).toBe("No runs yet.");
+    expect(workspaceHeadline([], [acme, fresh])).toBe("No confirmed defects are open.");
+    expect(workspaceHeadline([finding("p1"), finding("p1", "f2")], [acme])).toBe("2 confirmed defects are open, in Acme Invoices.");
+    const many = ["a", "b", "c", "d"].map((id): ProjectLine => ({ ...acme, id, name: id.toUpperCase() }));
+    expect(workspaceHeadline(many.map((p) => finding(p.id)), many)).toBe("4 confirmed defects are open, across 4 projects.");
+    expect(workspaceHeadline(many.slice(0, 3).map((p) => finding(p.id)), many)).toBe("3 confirmed defects are open, in A, B and C.");
   });
 });

@@ -82,7 +82,7 @@ export default async function StartPage({ searchParams }: { searchParams: Promis
   const goalsPerTurn = turnsOf({ personas: project.personas.map((p) => ({ id: p.key })), goals }).map((t) => t.goalIds.length);
   return (
     <AppShell shell={shell} current={{ project: id }}>
-      <PageHead compact eyebrow={project.name} title={ciOnly ? "Run from CI" : "Start a run"} subtitle={ciOnly ? "This product is on a private network, so its runs start from your CI job." : "Pick the plan, check who signs in, then choose the model and the cap."} />
+      <PageHead eyebrow={project.name} title={ciOnly ? "Run from CI" : "Start a run"} subtitle={ciOnly ? "This product is on a private network, so its runs start from your CI job." : "Pick the plan, check who signs in, then choose the model and the cap."} />
       <div className="flex flex-col gap-8">
         <StartPicker key={`${id}:${planId}`} projects={projects} project={id} plans={plans.map((p) => ({ id: p.id, name: p.name, people: p.people }))} plan={planId} />
         <WhoSignsIn people={project.personas} accounts={accounts} planHref={planHref} fromCi={ciOnly} />

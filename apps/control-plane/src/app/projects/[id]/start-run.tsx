@@ -2,7 +2,8 @@
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { startTransition, useActionState, useEffect, useRef, useState } from "react";
 import type { KeyHint } from "../../../credentials/credentials.ts";
-import { field, KeyFields } from "../../../components/key-fields.tsx";
+import { field } from "../../../components/controls.ts";
+import { KeyFields } from "../../../components/key-fields.tsx";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { detectProvider, PROVIDER_LABEL, type Provider } from "../../../llm/provider-kinds.ts";
 import type { KeyInput } from "../../../llm/key-input.ts";

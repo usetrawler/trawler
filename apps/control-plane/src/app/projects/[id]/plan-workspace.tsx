@@ -7,7 +7,8 @@ import { updatedSinceOpened } from "../../../components/updated-since-opened.ts"
 import { addAccountAction, removeAccountAction, savePlanAction, type AccountView } from "./plan-actions.ts";
 import { peopleLimitMessage, type WorkspacePlan } from "../../../runs/plan-limits.ts";
 import { Icon } from "../../../components/icon.tsx";
-import { initials } from "../../../components/initials.ts";
+import { field as controlField, secondaryButton } from "../../../components/controls.ts";
+import { letterOf, toneOf } from "../../runs/[id]/person-tones.ts";
 
 const field = "w-full min-w-0 rounded-md border border-line bg-panel px-2.5 py-1.5 outline-none hover:border-muted/60 focus:border-ink";
 
@@ -22,7 +23,7 @@ function AddButton({ onClick, children }: { onClick: () => void; children: React
 }
 
 function RemoveButton({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) {
-  return <button type="button" aria-label={label} title={label} onClick={onClick} disabled={disabled} className="h-9 w-9 shrink-0 text-muted hover:text-bad disabled:opacity-40">×</button>;
+  return <button type="button" aria-label={label} title={label} onClick={onClick} disabled={disabled} className="h-9 shrink-0 px-1 text-sm text-muted underline-offset-4 hover:text-bad hover:underline disabled:opacity-40">Remove</button>;
 }
 
 const outdated = (then: string) => (err: unknown) => {
@@ -73,7 +74,7 @@ export function SignIn({ projectId, planId, person, accounts, onPick, onAccounts
         aria-describedby={missing ? noteId : undefined}
         value={chosen?.ref ?? (missing ? "" : SIGNS_UP)}
         onChange={(e) => onPick(e.target.value === SIGNS_UP ? { signsIn: false } : { accountRef: e.target.value || undefined, signsIn: true })}
-        className={`h-9 min-w-0 border bg-soft px-2 text-sm text-ink ${missing ? "border-bad" : "border-line"}`}
+        className={controlField}
       >
         {missing && <option value="">Choose a test account</option>}
         {accounts.map((a) => <option key={a.ref} value={a.ref}>Signs in as {a.username}</option>)}
@@ -89,13 +90,13 @@ export function SignIn({ projectId, planId, person, accounts, onPick, onAccounts
       )}
       {adding ? (
         <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); add(); }}>
-          <input aria-label={`Username or email for ${who}`} placeholder="Username or email" autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} className="h-9 min-w-0 border border-line bg-soft px-2 text-sm outline-none focus:border-ink" />
-          <input aria-label={`Password for ${who}`} placeholder="Password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} className="h-9 min-w-0 border border-line bg-soft px-2 text-sm outline-none focus:border-ink" />
+          <input aria-label={`Username or email for ${who}`} placeholder="Username or email" autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} className={controlField} />
+          <input aria-label={`Password for ${who}`} placeholder="Password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} className={controlField} />
           {password !== password.trim() && <p className="text-xs text-bad">This password starts or ends with a space, and it is kept exactly as typed. Remove the space if the account&apos;s password has none.</p>}
           <p className="text-xs text-muted">Encrypted, never shown again, typed without the model seeing it. Anyone on the plan can use it. A password shorter than 8 characters cannot be masked if your product shows it on a page.</p>
           <div className="flex gap-2">
-            <button type="submit" disabled={pending} className="h-9 border border-ink px-3 text-sm disabled:opacity-60">{pending ? "Saving…" : "Add account"}</button>
-            <button type="button" onClick={() => { setAdding(false); setError(null); }} className="h-9 px-3 text-sm text-muted hover:text-ink">Cancel</button>
+            <button type="submit" disabled={pending} className={secondaryButton}>{pending ? "Saving…" : "Add account"}</button>
+            <button type="button" onClick={() => { setAdding(false); setError(null); }} className="h-10 px-3 text-sm text-muted hover:text-ink">Cancel</button>
           </div>
         </form>
       ) : (
@@ -172,15 +173,15 @@ function planProblem(personas: PlanPerson[], goals: Goal[]): string | null {
   return null;
 }
 
-const startLink = "flex h-10 shrink-0 items-center justify-center rounded-md border border-line bg-panel px-4 text-sm font-medium";
+const startLink = secondaryButton;
 
 function StartLink({ href, ciOnly, blocked, held, closedBeta }: { href: string; ciOnly: boolean; blocked?: string; held: boolean; closedBeta?: string }) {
   const label = ciOnly ? "Set up runs from CI" : "Start a run";
   const said = closedBeta ?? blocked;
   return (
-    <section id="start" aria-labelledby="start-heading" className="flex flex-col gap-4 rounded-lg border border-line p-5 sm:flex-row sm:items-center sm:justify-between">
+    <section id="start" aria-labelledby="start-heading" className="flex flex-col gap-4 border-t border-line pt-6 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 flex-col gap-1" aria-live="polite">
-        <h2 id="start-heading" className="text-base font-medium">{ciOnly ? "Run from CI" : "Start a run"}</h2>
+        <h2 id="start-heading" className="sr-only">{ciOnly ? "Run from CI" : "Start a run"}</h2>
         {closedBeta ? <p id="start-blocked" className="border-l-2 border-warn pl-3 text-sm">{closedBeta}</p>
           : blocked ? <p id="start-blocked" className="text-sm text-warn">{blocked}</p>
           : <p className="text-sm text-muted">{ciOnly ? "This product is on a private network, so its runs start from your CI job." : "Choose the model and the cap, then start this plan."}</p>}
@@ -188,7 +189,7 @@ function StartLink({ href, ciOnly, blocked, held, closedBeta }: { href: string; 
       {held ? (
         <span role="link" aria-disabled="true" aria-describedby="start-blocked" className={`${startLink} cursor-not-allowed text-muted opacity-60`}>{label}</span>
       ) : (
-        <a href={href} aria-describedby={said ? "start-blocked" : undefined} className={`${startLink} hover:border-muted`}>{label}</a>
+        <a href={href} aria-describedby={said ? "start-blocked" : undefined} className={startLink}>{label}</a>
       )}
     </section>
   );
@@ -328,7 +329,7 @@ export function PlanWorkspace({ projectId, planId, initialPersonas, initialGoals
                 <li key={p.id}>
                   <h3>
                     <button type="button" aria-expanded={isOpen} aria-controls={`person-${p.id}`} onClick={() => setOpen(isOpen ? null : p.id)} className="flex min-h-14 w-full items-center gap-3 py-2 text-left hover:bg-soft">
-                      <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full bg-soft text-xs text-muted">{initials(shown)}</span>
+                      <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full text-xs font-semibold" style={{ background: toneOf(i).bar, color: toneOf(i).onBar }}>{letterOf(shown)}</span>
                       <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3">
                         <span className="font-medium break-words">{shown}</span>
                         <span className="text-sm text-muted">

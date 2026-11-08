@@ -2,7 +2,7 @@
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { startTransition, useActionState, useEffect, useReducer, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { field } from "../../components/key-fields.tsx";
+import { field } from "../../components/controls.ts";
 import { LocalTime } from "../../components/local-time.tsx";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { changeRoleAction, inviteMemberAction, removeMemberAction, revokeInvitationAction, type MembersState } from "./actions.ts";

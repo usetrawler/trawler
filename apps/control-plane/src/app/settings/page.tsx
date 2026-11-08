@@ -111,7 +111,7 @@ export default async function SettingsPage({ searchParams }: { searchParams?: Pr
   const content = await CONTENT[section]({ member });
   return (
     <AppShell shell={await shellFor(member)} current="settings" wide>
-      <PageHead compact eyebrow={member.orgName} title="Settings" />
+      <PageHead eyebrow={member.orgName} title="Settings" />
       <div className="grid gap-8 md:grid-cols-[13rem_minmax(0,1fr)] md:gap-12">
         <SettingsNav current={section} />
         <div className="flex max-w-3xl min-w-0 flex-col gap-8">

@@ -1,7 +1,7 @@
 "use client";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { useActionState, useEffect, useState } from "react";
-import { field } from "../../components/key-fields.tsx";
+import { field } from "../../components/controls.ts";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { renameWorkspaceAction, type SettingsState } from "./actions.ts";
 import { button, heading, panel } from "./styles.ts";

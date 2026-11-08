@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { authClient } from "../../auth-client.ts";
-import { field } from "../../../components/key-fields.tsx";
+import { field } from "../../../components/controls.ts";
 import { DEFAULT_SPEND_LIMIT, SPEND_LIMIT_BOUNDS, spendLimitFrom } from "../../../mcp/limits.ts";
 
 export interface ConsentFormProps {
