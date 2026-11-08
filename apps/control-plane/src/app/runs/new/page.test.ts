@@ -170,3 +170,16 @@ test("a paused product on a private network still offers the CI authorisation, w
   expect(state.ci).toHaveLength(1);
   expect(html).not.toContain("Runs on this project are paused");
 });
+
+test("each project's start panel is its own, so nothing confirmed or typed for one carries over when the picker switches to another", async () => {
+  const keyed = (tree: unknown, name: string): unknown[] => {
+    if (Array.isArray(tree)) return tree.flatMap((t) => keyed(t, name));
+    if (!tree || typeof tree !== "object") return [];
+    const node = tree as { type?: { name?: string }; key?: unknown; props?: { children?: unknown } };
+    return [...(node.type?.name === name ? [node.key] : []), ...keyed(node.props?.children, name)];
+  };
+  state.target = "http://localhost:8080/";
+  expect(keyed(await StartPage({ searchParams: Promise.resolve({ project: GLOBEX }) }), "CiOnlyPanel")).toEqual([GLOBEX]);
+  state.target = "https://app.acme.test/";
+  expect(keyed(await StartPage({ searchParams: Promise.resolve({ project: ACME, plan: PLANS[1]!.id }) }), "StartRun")).toEqual([PLANS[1]!.id]);
+});

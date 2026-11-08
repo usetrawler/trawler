@@ -87,7 +87,7 @@ export default async function StartPage({ searchParams }: { searchParams: Promis
         <StartPicker key={`${id}:${planId}`} projects={projects} project={id} plans={plans.map((p) => ({ id: p.id, name: p.name, people: p.people }))} plan={planId} />
         <WhoSignsIn people={project.personas} accounts={accounts} planHref={planHref} fromCi={ciOnly} />
         {ciOnly ? (
-          <CiOnlyPanel projectId={id} projectName={project.name} host={new URL(project.target_url).host} confirmedAt={confirmedAt?.toISOString() ?? null} />
+          <CiOnlyPanel key={id} projectId={id} projectName={project.name} host={new URL(project.target_url).host} confirmedAt={confirmedAt?.toISOString() ?? null} />
         ) : runState.paused ? (
           <p role="status" className="rounded-lg border border-line border-l-4 border-l-warn p-4 text-sm">
             Runs on this project are paused{runState.liveRun ? <>, and <a href={runPath(runState.liveRun.number)} className="underline underline-offset-4">{runTitle(runState.liveRun.number)}</a> is still stopping</> : null}. Resume them from the <a href={`/projects/${id}/overview`} className="underline underline-offset-4">project</a> to start one.
