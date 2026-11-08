@@ -102,4 +102,10 @@ describe("the beta list", () => {
     const html = renderToStaticMarkup(createElement(PlanWorkspace, { projectId: "p1", planId: "pl1", initialPersonas: [{ id: "ana", name: "Ana", brief: "b", signsIn: false }], initialGoals: [{ id: "g", instruction: "Get in.", personaId: "ana" }], initialAccounts: [], closedBeta: message }));
     expect(html).toContain(`<p id="start-blocked" class="border-l-2 border-warn pl-3 text-sm">${message}</p>`);
   });
+
+  it("leaves it out on a private network, where runs start from the CI job and not on Trawler", () => {
+    const message = "Hosted runs are in private beta. Write to contact@usetrawler.com to get access.";
+    const html = renderToStaticMarkup(createElement(PlanWorkspace, { projectId: "p1", planId: "pl1", initialPersonas: [{ id: "ana", name: "Ana", brief: "b", signsIn: false }], initialGoals: [{ id: "g", instruction: "Get in.", personaId: "ana" }], initialAccounts: [], closedBeta: message, ciOnly: true }));
+    expect(html).not.toContain(message);
+  });
 });

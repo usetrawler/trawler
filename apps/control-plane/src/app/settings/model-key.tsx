@@ -126,7 +126,7 @@ export function ModelKey({ saved, addedBy, canManage }: { saved: SavedKey | null
           <p className="text-muted">Added by {addedBy ?? "someone no longer in this workspace"} on <LocalTime iso={saved.addedAt} /></p>
         </div>
       ) : canManage ? (
-        <p className="text-sm">No model key yet. Runs are paid with it: add one here, or in the Start panel of a plan.</p>
+        <p className="text-sm">No model key yet. Runs are paid with it: add one here, or when you start a run.</p>
       ) : (
         <p className="text-sm">No model key yet. Runs are paid with it, and an owner or admin of this workspace adds it.</p>
       )}
