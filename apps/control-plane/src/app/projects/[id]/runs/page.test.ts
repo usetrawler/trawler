@@ -6,7 +6,7 @@ type Asked = { orgId: string; projectId?: string; planId?: string; show?: string
 const state = vi.hoisted(() => ({
   signedIn: true, found: true, runs: [] as RunLine[], olderThan: null as number | null,
   tenants: [] as string[], heads: [] as Array<[string, string]>, asked: [] as Array<{ orgId: string; projectId?: string; planId?: string; show?: string; before?: number }>, plans: [{ id: "11111111-1111-4111-8111-111111111111", name: "Plan 1", features: [], people: 2 }, { id: "22222222-2222-4222-8222-222222222222", name: "Invitations", features: [], people: 1 }], planCounted: [] as Array<string | undefined>, prPlans: [] as Array<{ id: string; name: string; version: number }>,
-  counted: [] as Array<[string, string | undefined]>, shells: [] as Array<string | null | undefined>,
+  counted: [] as Array<[string, string | undefined]>, tabsCounted: [] as Array<[string, string]>, shells: [] as Array<string | null | undefined>,
 }));
 const ID = vi.hoisted(() => "0f8fad5b-d9cb-469f-a165-70867728950e");
 
@@ -44,6 +44,9 @@ vi.mock("../../../../projects/overview.ts", async (original) => ({
     return planId ? { all: 1, completed: 1, attention: 0 } : { all: 3, completed: 1, attention: 2 };
   },
 }));
+vi.mock("../../../../projects/project-home.ts", () => ({
+  projectCounts: async (_tx: unknown, orgId: string, projectId: string) => { state.tabsCounted.push([orgId, projectId]); return { runs: 3, pullRequests: 2 }; },
+}));
 
 const { default: ProjectRunsPage } = await import("./page.tsx");
 const open = (id: string, search: { show?: string | string[]; before?: string | string[]; plan?: string | string[] } = {}) => ProjectRunsPage({ params: Promise.resolve({ id }), searchParams: Promise.resolve(search) });
@@ -63,6 +66,7 @@ beforeEach(() => {
   state.asked = [];
   state.planCounted = [];
   state.counted = [];
+  state.tabsCounted = [];
   state.shells = [];
   state.prPlans = [];
 });
@@ -73,8 +77,9 @@ test("the project's runs are the workspace's history narrowed to it, read in the
   expect(state.heads).toEqual([["org-1", ID]]);
   expect(state.asked).toEqual([{ orgId: "org-1", projectId: ID, show: "completed", before: 40 }]);
   expect(state.counted).toEqual([["org-1", ID]]);
+  expect(state.tabsCounted).toEqual([["org-1", ID]]);
   expect(state.shells).toEqual(["org-1"]);
-  expect(html).toMatch(/>Project · <a href="https:\/\/app\.acme\.test\/" target="_blank"[^>]*>app\.acme\.test</);
+  expect(html).toMatch(/<a href="https:\/\/app\.acme\.test\/" target="_blank"[^>]*>app\.acme\.test</);
   expect(html).not.toContain("Back to the plan");
   expect(html).toContain(">Acme</h1>");
   expect(html).toContain(">Acme workspace</span>");
@@ -96,7 +101,8 @@ test("the project is marked in the nav as the section the page belongs to, the R
   const html = renderToStaticMarkup(await open(ID));
   expect(html).toMatch(new RegExp(`<nav aria-label="Workspace".*<a href="/projects/${ID}/overview" aria-current="true"`));
   const tabs = html.match(/<nav aria-label="Project">.*?<\/nav>/)?.[0] ?? "";
-  expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}" class="[^"]*">Plans</a>`));
+  expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}" class="[^"]*">Plan</a>`));
+  expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}/pull-requests" class="[^"]*">Pull requests<span[^>]*>2</span></a>`));
   expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}/runs" aria-current="page"[^>]*>Runs<span[^>]*>3</span></a>`));
   expect(html).toMatch(new RegExp(`<a href="/runs/new\\?project=${ID}"[^>]*>New run<`));
   expect(html).not.toContain("Back to the plan");
@@ -130,7 +136,7 @@ test("a plan of the project narrows the runs and their counts, a plan it does no
   const second = "22222222-2222-4222-8222-222222222222";
   const html = renderToStaticMarkup(await open(ID, { plan: second }));
   expect(state.asked).toEqual([{ orgId: "org-1", projectId: ID, planId: second, show: "all", before: undefined }]);
-  expect(state.planCounted).toEqual([second, undefined]);
+  expect(state.planCounted).toEqual([second]);
   expect(html).toContain("Runs of a plan");
   expect(html).toMatch(/>Runs<span[^>]*>3<\/span>/);
   expect(html).toMatch(new RegExp(`href="/runs/new\\?project=${ID}&amp;plan=${second}"`));

@@ -6,6 +6,8 @@ import type { KeyHint } from "../../../credentials/credentials.ts";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { addAccountAction, removeAccountAction, savePlanAction, type AccountView } from "./plan-actions.ts";
 import { peopleLimitMessage, type WorkspacePlan } from "../../../runs/plan-limits.ts";
+import { Icon } from "../../../components/icon.tsx";
+import { initials } from "../../../components/initials.ts";
 
 const field = "w-full min-w-0 rounded-md border border-line bg-panel px-2.5 py-1.5 outline-none hover:border-muted/60 focus:border-ink";
 
@@ -13,10 +15,6 @@ function nextKey(prefix: string, taken: Set<string>): string {
   let n = taken.size + 1;
   while (taken.has(`${prefix}-${n}`)) n++;
   return `${prefix}-${n}`;
-}
-
-function Heading({ children }: { children: React.ReactNode }) {
-  return <h2 className="text-xs text-muted">{children}</h2>;
 }
 
 function AddButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
@@ -133,7 +131,7 @@ function OrderOfPlay({ personas, goals, onMove }: { personas: PlanPerson[]; goal
   return (
     <section className="flex flex-col gap-3" aria-labelledby="order-of-play">
       <div className="flex flex-col gap-1">
-        <h2 id="order-of-play" className="text-xs text-muted">Order of play</h2>
+        <h2 id="order-of-play" className="font-medium">Order of play</h2>
         <p className="text-sm text-muted">People take turns in this order, one at a time, and each turn knows what happened before it. Put a step that needs someone else&apos;s work after it: submit, then review, then see the decision.{turns > personas.length ? ` ${turns} turns.` : ""}</p>
       </div>
       <p aria-live="polite" className="sr-only">{moved ? `Moved to step ${moved.to + 1}.` : ""}</p>
@@ -196,6 +194,19 @@ function StartLink({ href, ciOnly, blocked, held, closedBeta }: { href: string; 
   );
 }
 
+function personIssue(person: PlanPerson, own: Goal[], accounts: AccountView[]): string | null {
+  if (!person.name.trim()) return "needs a name";
+  if (own.length === 0) return "needs a goal";
+  if (own.some((g) => !g.instruction.trim())) return "a goal needs text";
+  if ((person.signsIn || person.accountRef) && !accounts.some((a) => a.ref === person.accountRef)) return "needs a test account";
+  return null;
+}
+
+function signInText(person: PlanPerson, accounts: AccountView[]): string {
+  const chosen = accounts.find((a) => a.ref === person.accountRef);
+  return chosen ? `signs in as ${chosen.username}` : "signs up as a new user";
+}
+
 export function PlanWorkspace({ projectId, planId, initialPersonas, initialGoals, initialAccounts, closedBeta, workspacePlan, ciOnly = false }: {
   projectId: string; planId: string; initialPersonas: PlanPerson[]; initialGoals: Goal[]; initialAccounts: AccountView[]; closedBeta?: string; workspacePlan?: WorkspacePlan; ciOnly?: boolean;
 }) {
@@ -204,6 +215,7 @@ export function PlanWorkspace({ projectId, planId, initialPersonas, initialGoals
   const [goals, setGoals] = useState(initialGoals);
   const [accounts, setAccounts] = useState(initialAccounts);
   const [error, setError] = useState<{ message: string; retry: boolean } | null>(null);
+  const [open, setOpen] = useState<string | null>(() => (initialPersonas.find((p) => personIssue(p, initialGoals.filter((g) => g.personaId === p.id), initialAccounts)) ?? initialPersonas[0])?.id ?? null);
   const [saving, startSaving] = useTransition();
   const status = useRef<HTMLParagraphElement>(null);
   const dirty = JSON.stringify({ personas, goals }) !== JSON.stringify(saved);
@@ -242,6 +254,7 @@ export function PlanWorkspace({ projectId, planId, initialPersonas, initialGoals
     const id = nextKey("person", new Set(personas.map((p) => p.id)));
     setPersonas((list) => [...list, { id, name: "", brief: "" }]);
     setGoals((list) => [...list, newGoal(id, list)]);
+    setOpen(id);
   };
   const removePerson = (id: string) => {
     setPersonas((list) => list.filter((p) => p.id !== id));
@@ -279,60 +292,85 @@ export function PlanWorkspace({ projectId, planId, initialPersonas, initialGoals
     setSaved(plan);
   });
 
+  const steps = goals.length;
   return (
     <div className="flex flex-col gap-10">
-      <section className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <Heading>These people will try it</Heading>
-          <p ref={status} tabIndex={-1} aria-live="polite" className={`text-xs outline-none ${error ? "text-bad" : "text-muted"}`}>
-            {error ? (
-              <>
-                {error.message}
-                {error.retry && <>{" "}<button type="button" onClick={() => { setError(null); status.current?.focus(); }} className="underline underline-offset-4 hover:text-ink">Try again</button></>}
-              </>
-            ) : problem ? "" : dirty || saving ? "Saving…" : "All changes saved"}
-          </p>
-          {!error && problem && <p className="text-xs text-bad">{problem}</p>}
-        </div>
-        <p className="text-sm text-muted">Each person has their own goals, so give an administrator what only an administrator can do.</p>
-        <ul className="grid gap-3 sm:grid-cols-2">
-          {personas.map((p, i) => {
-            const own = goals.filter((g) => g.personaId === p.id);
-            const who = p.name || "this person";
-            return (
-              <li key={p.id} className="flex flex-col gap-2 border border-line bg-panel p-4">
-                <div className="flex items-start gap-2">
-                  <input aria-label={`Name of person ${i + 1}`} value={p.name} maxLength={100} onChange={(e) => updatePersona(i, { name: e.target.value })} className={`${field} font-semibold`} />
-                  {personas.length > 1 && <RemoveButton label={`Remove ${who}`} onClick={() => removePerson(p.id)} />}
-                </div>
-                <textarea aria-label={`What ${who} is like`} value={p.brief} maxLength={2000} rows={3} onChange={(e) => updatePersona(i, { brief: e.target.value })} className={`${field} resize-y text-sm text-muted`} />
-                <p className="mt-2 text-xs text-muted">Goals</p>
-                <ol aria-label={`Goals of ${who}`} className="flex flex-col gap-1">
-                  {own.map((g, n) => (
-                    <li key={g.id} className="flex items-start gap-2">
-                      <span className="pt-1 font-mono text-xs text-muted">{String(n + 1).padStart(2, "0")}</span>
-                      <textarea aria-label={`Goal ${n + 1} of ${who}`} value={g.instruction} maxLength={1000} rows={1} onChange={(e) => updateGoal(g.id, e.target.value)} className={`${field} field-sizing-content resize-none text-sm`} />
-                      {own.length > 1 && <RemoveButton label={`Remove goal ${n + 1} of ${who}`} onClick={() => setGoals((list) => list.filter((x) => x.id !== g.id))} />}
-                    </li>
-                  ))}
-                </ol>
-                {own.length < MAX_GOALS_PER_PERSONA && <AddButton onClick={() => setGoals((list) => afterLastOf(list, p.id, newGoal(p.id, list)))}>Add a goal</AddButton>}
-                <SignIn
-                  projectId={projectId}
-                  planId={planId}
-                  person={p}
-                  accounts={accounts}
-                  onPick={({ accountRef, signsIn }) => updatePersona(i, { accountRef, signsIn })}
-                  onAccounts={onAccounts}
-                />
-              </li>
-            );
-          })}
-        </ul>
-        {personas.length < MAX_PERSONAS && <AddButton onClick={addPerson}>Add a person</AddButton>}
-      </section>
+      <div className="grid items-start gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
+        <section className="flex flex-col gap-3" aria-labelledby="plan-people">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 id="plan-people" className="font-medium">People</h2>
+            <p ref={status} tabIndex={-1} aria-live="polite" className={`text-sm outline-none ${error ? "text-bad" : "text-muted"}`}>
+              {error ? (
+                <>
+                  {error.message}
+                  {error.retry && <>{" "}<button type="button" onClick={() => { setError(null); status.current?.focus(); }} className="underline underline-offset-4 hover:text-ink">Try again</button></>}
+                </>
+              ) : (
+                <>
+                  {personas.length} {personas.length === 1 ? "person" : "people"} · {steps} {steps === 1 ? "step" : "steps"}
+                  {problem ? "" : dirty || saving ? " · Saving…" : " · All changes saved"}
+                </>
+              )}
+            </p>
+            {!error && problem && <p className="basis-full text-sm text-bad">{problem}</p>}
+          </div>
+          <p className="text-sm text-muted">Each person has their own goals, so give an administrator what only an administrator can do.</p>
+          <ul className="divide-y divide-line border-y border-line">
+            {personas.map((p, i) => {
+              const own = goals.filter((g) => g.personaId === p.id);
+              const who = p.name || "this person";
+              const shown = p.name.trim() || `Person ${i + 1}`;
+              const isOpen = open === p.id;
+              const issue = personIssue(p, own, accounts);
+              return (
+                <li key={p.id}>
+                  <h3>
+                    <button type="button" aria-expanded={isOpen} aria-controls={`person-${p.id}`} onClick={() => setOpen(isOpen ? null : p.id)} className="flex min-h-14 w-full items-center gap-3 py-2 text-left hover:bg-soft">
+                      <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full bg-soft text-xs text-muted">{initials(shown)}</span>
+                      <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3">
+                        <span className="font-medium break-words">{shown}</span>
+                        <span className="text-sm text-muted">
+                          {own.length} {own.length === 1 ? "goal" : "goals"} · <span className={issue ? "text-bad" : undefined}>{issue ?? signInText(p, accounts)}</span>
+                        </span>
+                      </span>
+                      <Icon name="chevron" className={`size-4 text-muted ${isOpen ? "rotate-180" : ""}`} />
+                    </button>
+                  </h3>
+                  <div id={`person-${p.id}`} hidden={!isOpen} className="flex flex-col gap-2 pb-5">
+                    <div className="flex items-start gap-2">
+                      <input aria-label={`Name of person ${i + 1}`} value={p.name} maxLength={100} onChange={(e) => updatePersona(i, { name: e.target.value })} className={`${field} font-medium`} />
+                      {personas.length > 1 && <RemoveButton label={`Remove ${who}`} onClick={() => removePerson(p.id)} />}
+                    </div>
+                    <textarea aria-label={`What ${who} is like`} value={p.brief} maxLength={2000} rows={3} onChange={(e) => updatePersona(i, { brief: e.target.value })} className={`${field} resize-y text-sm text-muted`} />
+                    <p className="mt-2 text-sm text-muted">Goals</p>
+                    <ol aria-label={`Goals of ${who}`} className="flex flex-col gap-1">
+                      {own.map((g, n) => (
+                        <li key={g.id} className="flex items-start gap-2">
+                          <span className="pt-1.5 font-mono text-xs text-muted">{String(n + 1).padStart(2, "0")}</span>
+                          <textarea aria-label={`Goal ${n + 1} of ${who}`} value={g.instruction} maxLength={1000} rows={1} onChange={(e) => updateGoal(g.id, e.target.value)} className={`${field} field-sizing-content resize-none text-sm`} />
+                          {own.length > 1 && <RemoveButton label={`Remove goal ${n + 1} of ${who}`} onClick={() => setGoals((list) => list.filter((x) => x.id !== g.id))} />}
+                        </li>
+                      ))}
+                    </ol>
+                    {own.length < MAX_GOALS_PER_PERSONA && <AddButton onClick={() => setGoals((list) => afterLastOf(list, p.id, newGoal(p.id, list)))}>Add a goal</AddButton>}
+                    <SignIn
+                      projectId={projectId}
+                      planId={planId}
+                      person={p}
+                      accounts={accounts}
+                      onPick={({ accountRef, signsIn }) => updatePersona(i, { accountRef, signsIn })}
+                      onAccounts={onAccounts}
+                    />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          {personas.length < MAX_PERSONAS && <AddButton onClick={addPerson}>Add a person</AddButton>}
+        </section>
 
-      {personas.length > 1 && <OrderOfPlay personas={personas} goals={goals} onMove={moveGoal} />}
+        {personas.length > 1 && <aside className="lg:sticky lg:top-6"><OrderOfPlay personas={personas} goals={goals} onMove={moveGoal} /></aside>}
+      </div>
 
       <StartLink href={`/runs/new?project=${projectId}&plan=${planId}`} ciOnly={ciOnly} closedBeta={ciOnly ? undefined : closedBeta} held={Boolean(error || problem || dirty || saving)} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount && !ciOnly ? `${withoutAccount.name} needs a test account to sign in.` : overPlan)} />
     </div>

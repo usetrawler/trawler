@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { AppShell } from "../../../../components/app-shell.tsx";
 import { ProjectHead } from "../../../../components/project-head.tsx";
 import { withOrg } from "../../../../db/tenancy.ts";
-import { projectRunCount } from "../../../../projects/overview.ts";
+import { projectCounts } from "../../../../projects/project-home.ts";
 import { projectRunState } from "../../../../runs/runs.ts";
 import { listPlans, projectForEditing } from "../../../../projects/projects.ts";
 import { signedInMember } from "../../../../server/auth.ts";
@@ -29,16 +29,16 @@ export default async function FeaturesPage({ params, searchParams }: { params: P
   if (!member) redirect("/sign-in");
   const { orgId } = member;
   if (!UUID.test(id)) notFound();
-  const [project, runs, runState] = await withOrg(getDb(), orgId, async (tx) => {
+  const [project, counts, runState] = await withOrg(getDb(), orgId, async (tx) => {
     const plans = await listPlans(tx, orgId, id);
     const planId = plans.find((p) => p.id === requestedPlan)?.id ?? plans[0]?.id;
-    return Promise.all([projectForEditing(tx, orgId, id, planId), projectRunCount(tx, orgId, id), projectRunState(tx, orgId, id)]);
+    return Promise.all([projectForEditing(tx, orgId, id, planId), projectCounts(tx, orgId, id), projectRunState(tx, orgId, id)]);
   });
   if (!project || !runState) notFound();
   const shell = await shellFor(member);
   return (
     <AppShell shell={shell} current={{ project: id }} wide>
-      <ProjectHead project={{ id: project.id, name: project.name, targetUrl: project.target_url }} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="plan" runs={runs} runState={runState} />
+      <ProjectHead project={{ id: project.id, name: project.name, targetUrl: project.target_url }} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="plan" counts={counts} runState={runState} />
       <div className="flex max-w-3xl flex-col gap-8">
         <SetupWizard intro={<h1 className="text-3xl font-semibold tracking-tight">Change features of {project.plan.name}</h1>} projectId={project.id} planId={project.plan.id} projectHost={new URL(project.target_url).host} chosenBefore={project.features} initialDescription={project.description} />
       </div>

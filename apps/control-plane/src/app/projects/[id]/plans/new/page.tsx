@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { AppShell } from "../../../../../components/app-shell.tsx";
 import { ProjectHead } from "../../../../../components/project-head.tsx";
 import { withOrg } from "../../../../../db/tenancy.ts";
-import { projectRunCount } from "../../../../../projects/overview.ts";
+import { projectCounts } from "../../../../../projects/project-home.ts";
 import { listPlans, MAX_PLANS, nextPlanName, projectForEditing } from "../../../../../projects/projects.ts";
 import { projectRunState } from "../../../../../runs/runs.ts";
 import { signedInMember } from "../../../../../server/auth.ts";
@@ -28,14 +28,14 @@ export default async function NewPlanPage({ params }: { params: Promise<{ id: st
   if (!member) redirect("/sign-in");
   const { orgId } = member;
   if (!UUID.test(id)) notFound();
-  const [project, runs, runState, plans, name] = await withOrg(getDb(), orgId, (tx) =>
-    Promise.all([projectForEditing(tx, orgId, id), projectRunCount(tx, orgId, id), projectRunState(tx, orgId, id), listPlans(tx, orgId, id), nextPlanName(tx, orgId, id)]),
+  const [project, counts, runState, plans, name] = await withOrg(getDb(), orgId, (tx) =>
+    Promise.all([projectForEditing(tx, orgId, id), projectCounts(tx, orgId, id), projectRunState(tx, orgId, id), listPlans(tx, orgId, id), nextPlanName(tx, orgId, id)]),
   );
   if (!project || !runState) notFound();
   const shell = await shellFor(member);
   return (
     <AppShell shell={shell} current={{ project: id }} wide>
-      <ProjectHead project={{ id: project.id, name: project.name, targetUrl: project.target_url }} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="plan" runs={runs} runState={runState} />
+      <ProjectHead project={{ id: project.id, name: project.name, targetUrl: project.target_url }} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="plan" counts={counts} runState={runState} />
       <div className="flex max-w-3xl flex-col gap-8">
         {plans.length >= MAX_PLANS ? (
           <p role="alert" className="border-l-2 border-bad pl-3 text-bad">A project holds at most {MAX_PLANS} plans. Remove one to add another.</p>

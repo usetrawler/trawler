@@ -15,7 +15,8 @@ vi.mock("../../../../../server/auth.ts", () => ({ signedInMember: async () => me
 vi.mock("../../../../../server/shell.ts", () => ({ shellFor: async () => ({ user: { name: "Ana", email: member.email }, workspace: { name: "Acme workspace", projects: [{ id: ID, name: "Acme", address: "app.acme.test" }], runs: 0 } }) }));
 vi.mock("../../../../../server/db.ts", () => ({ getDb: () => ({}) }));
 vi.mock("../../../../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, _org: string, work: (tx: unknown) => unknown) => work({}) }));
-vi.mock("../../../../../projects/overview.ts", () => ({ hostOf: (u: string) => new URL(u).host, projectRunCount: async () => 0 }));
+vi.mock("../../../../../projects/overview.ts", () => ({ hostOf: (u: string) => new URL(u).host }));
+vi.mock("../../../../../projects/project-home.ts", () => ({ projectCounts: async () => ({ runs: 0, pullRequests: 0 }) }));
 vi.mock("../../../../../runs/runs.ts", () => ({ projectRunState: async () => ({ paused: false, liveRun: null }) }));
 vi.mock("../../../../../projects/projects.ts", () => ({
   MAX_PLANS: 10,

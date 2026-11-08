@@ -9,7 +9,7 @@ const app = fileURLToPath(new URL(".", import.meta.url));
 const pages = readdirSync(app, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith("page.tsx")).sort();
 const source = (page: string) => readFileSync(`${app}/${page}`, "utf8");
 const staticTitle = (page: string) => /export const metadata: Metadata = \{\s*title:\s*("[^"]+"|\{\s*absolute:\s*"[^"]+"\s*\})\s*\};/.exec(source(page))?.[1]?.replace(/\s+/g, " ");
-const dynamicTitle = (page: string) => /export async function generateMetadata\b[\s\S]*?return\s+(\w+)\(\s*await headers\(\),\s*id\s*(?:,\s*"(\w+)"\s*)?\)/.exec(source(page))?.slice(1);
+const dynamicTitle = (page: string) => /export async function generateMetadata\b[\s\S]*?return\s+(\w+)\(\s*await headers\(\),\s*id\s*(?:,\s*"([^"]+)"\s*)?\)/.exec(source(page))?.slice(1);
 
 test("every page is named in its tab as the page, then Trawler; the overview spells it out, as the layout's template skips the layout's own segment", async () => {
   const { generateMetadata } = await import("./layout.tsx");
@@ -19,8 +19,11 @@ test("every page is named in its tab as the page, then Trawler; the overview spe
     "new/page.tsx": '"New project"',
     "page.tsx": '{ absolute: "Overview · Trawler" }',
     "projects/[id]/features/page.tsx": ["projectPageTitle", "Features"],
-    "projects/[id]/overview/page.tsx": ["projectPageTitle", "Overview"],
+    "projects/[id]/overview/page.tsx": ["projectPageTitle", "Home"],
     "projects/[id]/page.tsx": ["projectPageTitle", "Plan"],
+    "projects/[id]/plans/new/page.tsx": ["projectPageTitle", "New plan"],
+    "projects/[id]/product/page.tsx": ["projectPageTitle", "Product"],
+    "projects/[id]/pull-requests/page.tsx": ["projectPageTitle", "Pull requests"],
     "projects/[id]/runs/page.tsx": ["projectPageTitle", "Runs"],
     "runs/[id]/page.tsx": ["runPageTitle", undefined],
     "runs/[id]/plan/page.tsx": '"Plan used in run"',

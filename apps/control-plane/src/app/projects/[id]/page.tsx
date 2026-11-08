@@ -8,7 +8,8 @@ import { ProjectHead } from "../../../components/project-head.tsx";
 import { PlanWorkspace } from "./plan-workspace.tsx";
 import { PrPlanView } from "./pr-plan-view.tsx";
 import { withOrg } from "../../../db/tenancy.ts";
-import { projectRunCount, workspaceRuns } from "../../../projects/overview.ts";
+import { workspaceRuns } from "../../../projects/overview.ts";
+import { projectCounts } from "../../../projects/project-home.ts";
 import { onPrivateNetwork } from "../../../projects/private-target.ts";
 import { projectRunState } from "../../../runs/runs.ts";
 import { workspacePlan } from "../../../runs/plans.ts";
@@ -41,19 +42,18 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   const prPlan = prPlans.find((p) => p.id === requestedPlan);
   const planId = prPlan?.id ?? plans.find((p) => p.id === requestedPlan)?.id ?? plans[0]?.id;
   if (!planId) notFound();
-  const [project, runs, runState, plan, history] = await withOrg(getDb(), orgId, (tx) =>
-    Promise.all([projectForEditing(tx, orgId, id, planId), projectRunCount(tx, orgId, id), projectRunState(tx, orgId, id), workspacePlan(tx, orgId), workspaceRuns(tx, orgId, { projectId: id, planId, archivedPlan: Boolean(prPlan), size: 5 })]),
+  const [project, counts, runState, plan, history] = await withOrg(getDb(), orgId, (tx) =>
+    Promise.all([projectForEditing(tx, orgId, id, planId), projectCounts(tx, orgId, id), projectRunState(tx, orgId, id), workspacePlan(tx, orgId), workspaceRuns(tx, orgId, { projectId: id, planId, archivedPlan: Boolean(prPlan), size: 5 })]),
   );
   if (!project || !runState) notFound();
   const historySection = <PlanRunHistory runs={history.runs} more={history.olderThan !== null ? `/projects/${id}/runs?plan=${planId}` : undefined} />;
-  const pullRequests = prPlans.map((p) => ({ id: p.id, number: p.number, version: p.version, lastUsedAt: p.lastUsedAt }));
   if (prPlan) {
     const shell = await shellFor(member);
     return (
       <AppShell shell={shell} current={{ project: id }} wide>
-        <ProjectHead project={{ id: project.id, name: project.name, targetUrl: project.target_url }} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="plan" runs={runs} runState={runState} />
+        <ProjectHead project={{ id: project.id, name: project.name, targetUrl: project.target_url }} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="pull-requests" counts={counts} runState={runState} />
         <div className="flex max-w-3xl flex-col gap-10">
-          <PlansBar projectId={project.id} plans={plans} current={planId} canAdd={plans.length < MAX_PLANS} pullRequests={pullRequests} />
+          <a href={`/projects/${id}/pull-requests`} className="w-fit text-sm text-muted underline-offset-4 hover:text-ink hover:underline"><span aria-hidden>← </span>Pull requests</a>
           <PrPlanView
             title={`${prPlan.name} · v${prPlan.version}`}
             people={project.personas.map((p) => ({ id: p.key, name: p.name }))}
@@ -67,18 +67,17 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   const shell = await shellFor(member);
   return (
     <AppShell shell={shell} current={{ project: id }} wide>
-      <ProjectHead project={{ id: project.id, name: project.name, targetUrl: project.target_url }} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="plan" runs={runs} runState={runState} planId={planId} />
-      <div className="flex max-w-3xl flex-col gap-10">
+      <ProjectHead project={{ id: project.id, name: project.name, targetUrl: project.target_url }} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="plan" counts={counts} runState={runState} planId={planId} />
+      <div className="flex max-w-6xl flex-col gap-10">
         <div className="flex flex-col gap-3">
-          <p className="text-lg text-muted">{project.description}</p>
-          {project.focus && <p className="text-sm">Focus: <span className="text-muted">{project.focus}</span></p>}
-          <p className="text-sm">
-            {project.features.length > 0 && <>Features: <span className="text-muted">{project.features.join(" · ")}</span> · </>}
-            <Link href={`/projects/${project.id}/features?plan=${planId}`} className="underline underline-offset-4 hover:text-action-ink">{project.features.length > 0 ? "Change features" : "Choose features and propose people"}</Link>
-          </p>
-        </div>
-        <div className="flex flex-col gap-4">
-          <PlansBar projectId={project.id} plans={plans} current={planId} canAdd={plans.length < MAX_PLANS} pullRequests={pullRequests} />
+          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+            <PlansBar projectId={project.id} plans={plans} current={planId} canAdd={plans.length < MAX_PLANS} />
+            <p className="flex flex-wrap items-baseline gap-x-3 text-sm">
+              {project.features.length > 0 && <span className="text-muted">Built from {project.features.length} {project.features.length === 1 ? "feature" : "features"}</span>}
+              <Link href={`/projects/${project.id}/features?plan=${planId}`} className="underline underline-offset-4 hover:text-action-ink">{project.features.length > 0 ? "Change features and propose people again" : "Choose features and propose people"}</Link>
+            </p>
+          </div>
+          {prPlans.length > 0 && <p className="text-sm text-muted">Pull request plans are written by the lead for each pull request and are read-only. Find them under <a href={`/projects/${id}/pull-requests`} className="text-ink underline underline-offset-4">Pull requests</a>.</p>}
           <PlanTitle key={planId} projectId={project.id} planId={planId} name={project.plan.name} canRemove={plans.length > 1} />
         </div>
         <PlanWorkspace

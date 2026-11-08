@@ -7,7 +7,7 @@ import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { startRun } from "../runs/runs.ts";
 import { createProject, listPlans } from "./projects.ts";
-import { openFindings, projectPullRequestCount, projectPullRequests, runResult } from "./project-home.ts";
+import { openFindings, projectCounts, projectPullRequests, runResult } from "./project-home.ts";
 import type { RunLine } from "./overview.ts";
 
 const t = await testDb();
@@ -88,16 +88,16 @@ test("each pull request is listed once, newest run first, with its title, the pl
 
   const prs = await withOrg(t.db, "org-a", (tx) => projectPullRequests(tx, "org-a", acme));
   expect(prs.map((p) => [p.number, p.run.number])).toEqual([[22, expect.any(Number)], [21, expect.any(Number)], [21, latest21.number], [23, skipped.number]]);
-  expect(prs[2]).toMatchObject({ title: "feat: filter by cycle", url: "https://github.com/acme/app/pull/21", plan: { id: prPlan, label: "v3" } });
+  expect(prs[2]).toMatchObject({ title: "feat: filter by cycle", url: "https://github.com/acme/app/pull/21", plan: { id: prPlan, label: "v3", ofPullRequest: true } });
   expect(runResult(prs[2]!.run)).toBe("1 confirmed");
-  expect(prs[1]!.plan).toEqual({ id: null, label: "v1" });
-  expect(prs[3]).toMatchObject({ title: "chore: store amounts as grosze", plan: { id: plan1, label: "Plan 1" } });
+  expect(prs[1]!.plan).toEqual({ id: null, label: "v1", ofPullRequest: true });
+  expect(prs[3]).toMatchObject({ title: "chore: store amounts as grosze", plan: { id: plan1, label: "Plan 1", ofPullRequest: false } });
   expect(runResult(prs[3]!.run)).toBe("Skipped: nothing to test in the UI");
   expect(runResult(prs[0]!.run)).toBe("Running");
   expect((await withOrg(t.db, "org-a", (tx) => projectPullRequests(tx, "org-a", acme, 2))).map((p) => p.run.number)).toEqual(prs.slice(0, 2).map((p) => p.run.number));
-  expect(await withOrg(t.db, "org-a", (tx) => projectPullRequestCount(tx, "org-a", acme))).toBe(4);
+  expect(await withOrg(t.db, "org-a", (tx) => projectCounts(tx, "org-a", acme))).toEqual({ runs: 10, pullRequests: 4 });
   expect((await withOrg(t.db, "org-a", (tx) => openFindings(tx, "org-a", acme))).find((f) => f.source === "PR #22")?.key).toBe("ana:pr22");
-  expect(await withOrg(t.db, "org-a", (tx) => projectPullRequestCount(tx, "org-a", other))).toBe(0);
+  expect(await withOrg(t.db, "org-a", (tx) => projectCounts(tx, "org-a", other))).toEqual({ runs: 1, pullRequests: 0 });
 });
 
 test("a run's result reads the way the pull request list shows it", () => {
