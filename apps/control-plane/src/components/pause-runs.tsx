@@ -5,7 +5,7 @@ import { pauseRunsAction, resumeRunsAction, type PauseState } from "../app/proje
 import { runPath, runTitle } from "../runs/status.ts";
 import { updatedSinceOpened } from "./updated-since-opened.ts";
 
-const secondary = "flex h-[50px] shrink-0 items-center border border-line px-[18px] text-xs hover:border-ink aria-disabled:cursor-wait aria-disabled:opacity-60";
+const secondary = "flex h-10 shrink-0 items-center rounded-md border border-line bg-panel px-4 text-sm font-medium hover:border-muted aria-disabled:cursor-wait aria-disabled:opacity-60";
 const alert = "max-w-md border-l-2 border-bad pl-3 text-sm text-bad";
 
 type Run = { id: string; number: number; more?: number };

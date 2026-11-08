@@ -23,8 +23,8 @@ export function CiOnlyPanel({ projectId, projectName, host, confirmedAt }: { pro
           </label>
           {state.error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{state.error}</p>}
           <div className="flex justify-end">
-            <button type="submit" disabled={pending} className="flex h-12 items-center justify-between gap-6 bg-action px-5 text-sm text-[#17191c] transition hover:brightness-110 disabled:opacity-70">
-              Allow runs from CI <span aria-hidden>→</span>
+            <button type="submit" disabled={pending} className="flex h-10 items-center justify-center gap-2 rounded-md bg-action px-4 text-sm font-medium text-[#171717] transition-[filter] hover:brightness-105 disabled:opacity-70">
+              Allow runs from CI
             </button>
           </div>
         </>

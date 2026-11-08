@@ -128,7 +128,7 @@ export function Progress({ step, host, checking = false, byHand = false }: { ste
     <div role="status" className="flex flex-col gap-6">
       <Working />
       <div className="flex flex-col gap-3">
-        <p className="text-xs text-action-ink">Building your test plan</p>
+        <p className="text-sm text-muted">Building your test plan</p>
         <h2 className="text-3xl leading-tight font-semibold tracking-tight break-words md:text-5xl">Understanding {host}</h2>
         <p className="max-w-xl text-muted">{byHand ? "Trawler chooses people with different roles and goals from your description." : "Trawler reads the product's page, works out what it does, and then chooses people with different roles and goals."}{` This usually takes ${minutes} minutes; keep this page open.`}</p>
         {checking && <p className="max-w-xl text-sm text-muted">Trawler did not answer. Checking whether setup finished…</p>}
@@ -224,8 +224,8 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
           <p className="max-w-xl text-muted">Trawler reads {projectHost} again, lists what the product does, and proposes people for the features you choose. Proposing replaces the people and goals on the plan. Test accounts stay; check who signs in with them afterwards.</p>
         )}
         {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
-        <button type="button" onClick={analyse} disabled={pending} className="flex h-12 items-center justify-between gap-6 self-start bg-action px-5 text-sm text-[#17191c] transition hover:brightness-110 disabled:opacity-70">
-          {newPlanName !== undefined ? "Read the product" : "Read the product again"} <span aria-hidden>→</span>
+        <button type="button" onClick={analyse} disabled={pending} className="flex h-10 items-center justify-center gap-2 rounded-md bg-action px-4 text-sm font-medium text-[#171717] transition-[filter] hover:brightness-105 self-start disabled:opacity-70">
+          {newPlanName !== undefined ? "Read the product" : "Read the product again"}
         </button>
       </div>
     );
@@ -246,8 +246,8 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
         {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
         <div className="flex flex-col-reverse items-stretch justify-between gap-4 border-t border-line pt-6 sm:flex-row sm:items-center">
           <p className="text-sm text-muted">Next: confirm what the product does and which features to try.</p>
-          <button type="submit" disabled={pending} className="flex h-12 items-center justify-between gap-6 bg-action px-5 text-sm text-[#17191c] transition hover:brightness-110 disabled:opacity-70">
-            Analyse product <span aria-hidden>→</span>
+          <button type="submit" disabled={pending} className="flex h-10 items-center justify-center gap-2 rounded-md bg-action px-4 text-sm font-medium text-[#171717] transition-[filter] hover:brightness-105 disabled:opacity-70">
+            Analyse product
           </button>
         </div>
       </form>
@@ -268,7 +268,7 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
     return (
       <form className="flex flex-col gap-6" onSubmit={(e) => { e.preventDefault(); describeByHand(); }}>
         <div className="flex flex-col gap-3">
-          <p className="text-xs text-action-ink">{typed.host} is on a private network</p>
+          <p className="text-sm text-muted">{typed.host} is on a private network</p>
           <h2 className="text-4xl leading-[0.95] font-semibold tracking-tight md:text-6xl">Describe it yourself.</h2>
           <p className="max-w-xl text-lg text-muted">Trawler cannot read a page that only your network or a CI job can reach, so tell it what the product is. The people still use it at {typed.host}, through a runner that can reach it.</p>
         </div>
@@ -283,8 +283,8 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
         {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
         <div className="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
           <button type="button" onClick={() => { setError(null); setStage({ kind: "address" }); }} className="text-sm text-muted hover:text-ink">← Back</button>
-          <button type="submit" disabled={pending} className="flex h-12 items-center justify-between gap-6 bg-action px-5 text-sm text-[#17191c] transition hover:brightness-110 disabled:opacity-70">
-            Choose the features <span aria-hidden>→</span>
+          <button type="submit" disabled={pending} className="flex h-10 items-center justify-center gap-2 rounded-md bg-action px-4 text-sm font-medium text-[#171717] transition-[filter] hover:brightness-105 disabled:opacity-70">
+            Choose the features
           </button>
         </div>
       </form>
@@ -327,7 +327,7 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-3">
-        <p className="text-xs text-action-ink">{stage.byHand ? "Your description" : "Trawler understood the product"}</p>
+        <p className="text-sm text-muted">{stage.byHand ? "Your description" : "Trawler understood the product"}</p>
         <h2 className="text-4xl leading-[0.95] font-semibold tracking-tight md:text-6xl">Confirm the context.</h2>
         <p className="max-w-xl text-lg text-muted">{stage.byHand ? "We use this only to choose the people and their goals." : "We use this only to choose the people and their goals. Edit it if we misunderstood anything."}</p>
       </div>
@@ -380,8 +380,8 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
       <div className="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
         <button type="button" onClick={() => { setError(null); setStage({ kind: "address" }); }} className="text-sm text-muted hover:text-ink">← Back</button>
         <span className="text-sm text-muted">{chosen.length === 1 ? "1 feature selected" : `${chosen.length} features selected`}</span>
-        <button type="button" onClick={propose} disabled={pending || chosen.length === 0} className="flex h-12 items-center justify-between gap-6 bg-action px-5 text-sm text-[#17191c] transition hover:brightness-110 disabled:opacity-60">
-          Meet the test users <span aria-hidden>→</span>
+        <button type="button" onClick={propose} disabled={pending || chosen.length === 0} className="flex h-10 items-center justify-center gap-2 rounded-md bg-action px-4 text-sm font-medium text-[#171717] transition-[filter] hover:brightness-105 disabled:opacity-60">
+          Meet the test users
         </button>
       </div>
     </div>

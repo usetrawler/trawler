@@ -36,7 +36,7 @@ const PERSONA_LABEL: Record<PersonaState, [string, string]> = {
 };
 const SEVERITY_TONE: Record<string, string> = { high: "bg-action", medium: "bg-[#d5a557]", low: "bg-[#93b89e]" };
 const label = "text-xs";
-const secondary = "flex h-[50px] items-center justify-center border border-line bg-panel px-4 text-base hover:border-ink";
+const secondary = "flex h-10 items-center justify-center rounded-md border border-line bg-panel px-4 text-sm font-medium hover:border-muted";
 
 type Person = View["personas"][number];
 
@@ -366,7 +366,7 @@ function Section<T extends ReportFinding & { reason?: string }>({ title, hint, i
   return (
     <section aria-labelledby={id} className="flex flex-col">
       <div className="pb-3">
-        <h2 id={id} className={`${label} text-action-ink`}>{title} · {items.length}</h2>
+        <h2 id={id} className="text-base font-medium">{title} · {items.length}</h2>
         <p className="mt-[3px] text-xs text-muted">{hint}</p>
       </div>
       {items.length === 0 ? <p className="border border-line bg-panel p-[17px] text-sm text-muted">{empty}</p> : <ol className="border border-line">{items.map((f, i) => <FindingRow key={f.key} f={f} n={i + 1} mark={mark} note={note ? f.reason : undefined} detail={detail?.(f)} action={action?.(f)} dismiss={dismiss?.(f)} focus={f.key === focusKey} reveal={reveal} onFocused={onFocused} />)}</ol>}
@@ -486,7 +486,7 @@ function PeopleOutcomes({ view }: { view: View }) {
   const id = useId();
   return (
     <section aria-labelledby={id} className="border border-line bg-panel p-[17px]">
-      <h2 id={id} className={`${label} text-action-ink`}>People</h2>
+      <h2 id={id} className="text-base font-medium">People</h2>
       <ul>
         {view.personas.map((p) => {
           const good = p.state === "reached";

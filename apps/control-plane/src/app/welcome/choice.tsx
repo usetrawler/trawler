@@ -63,7 +63,7 @@ export function WorkspaceChoice({ invitations }: { invitations: InvitationRow[] 
               <form action={join} onSubmit={() => setSentFor(i.id)} className="sm:shrink-0">
                 <input type="hidden" name="invitationId" value={i.id} />
                 <button type="submit" aria-disabled={busy || undefined} onClick={hold} className={primary}>
-                  {joining && sentFor === i.id ? "Joining…" : "Join"}<span className="sr-only"> {i.orgName}</span><span aria-hidden>→</span>
+                  {joining && sentFor === i.id ? "Joining…" : "Join"}<span className="sr-only"> {i.orgName}</span>
                 </button>
               </form>
             </li>
@@ -77,7 +77,7 @@ export function WorkspaceChoice({ invitations }: { invitations: InvitationRow[] 
         </p>
         <form action={startOwn} className="sm:shrink-0">
           <button type="submit" aria-disabled={busy || undefined} onClick={hold} className={invitations.length > 0 ? secondary : primary}>
-            {starting ? "Starting…" : "Start my own workspace"}<span aria-hidden>→</span>
+            {starting ? "Starting…" : "Start my own workspace"}
           </button>
         </form>
       </div>

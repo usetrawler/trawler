@@ -25,7 +25,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
           <button
             type="button"
             onClick={updated ? () => window.location.reload() : reset}
-            className="flex h-12 items-center justify-between gap-6 bg-action px-5 text-sm text-[#17191c] transition hover:brightness-110"
+            className="flex h-10 items-center justify-center gap-2 rounded-md bg-action px-4 text-sm font-medium text-[#171717] transition-[filter] hover:brightness-105"
           >
             {updated ? "Reload the page" : "Try again"} <span aria-hidden="true">→</span>
           </button>

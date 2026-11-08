@@ -26,9 +26,9 @@ export function RunAgainButton({ runId, again }: { runId: string; again: RunAgai
   return (
     <form action={again.action} className="contents">
       <input type="hidden" name="runId" value={runId} />
-      <button type="submit" aria-disabled={again.pending || undefined} onClick={(e) => { if (again.pending) e.preventDefault(); }} className="flex h-[50px] w-full shrink-0 items-center justify-between gap-[38px] bg-action px-[18px] text-xs text-[#17191c] hover:brightness-110 aria-disabled:cursor-wait aria-disabled:opacity-60 md:w-auto">
+      <button type="submit" aria-disabled={again.pending || undefined} onClick={(e) => { if (again.pending) e.preventDefault(); }} className="flex h-10 w-full shrink-0 items-center justify-center gap-2 rounded-md bg-action px-4 text-sm font-medium text-[#171717] transition-[filter] hover:brightness-105 aria-disabled:cursor-wait aria-disabled:opacity-60 md:w-auto">
         {again.pending ? "Starting…" : "Run again"}
-        <span aria-hidden>→</span>
+       
       </button>
     </form>
   );

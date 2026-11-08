@@ -213,7 +213,7 @@ export function Trails({ runId, people, live, pulse }: { runId: string; people: 
   return (
     <section aria-labelledby={id} className="flex flex-col">
       <div className="pb-3">
-        <h2 id={id} className={`${label} text-action-ink`}>What each person did</h2>
+        <h2 id={id} className="text-base font-medium">What each person did</h2>
         <p className="mt-[3px] text-xs text-muted">Every step and the page it ended on, with notes, goals and findings, in order</p>
       </div>
       <ul className="border border-line bg-panel">{people.map((p) => <PersonTrail key={p.id} runId={runId} person={p} live={live} pulse={pulse} />)}</ul>

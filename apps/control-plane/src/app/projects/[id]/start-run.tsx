@@ -73,9 +73,9 @@ function OpenRun({ run }: { run?: { id: string; number: number } }) {
 export function Submit({ blocked, pending, noticed, checksKey }: { blocked?: string; pending: boolean; noticed: boolean; checksKey: boolean }) {
   const describedBy = [blocked ? "start-blocked" : null, noticed ? "start-notice" : null].filter(Boolean).join(" ");
   return (
-    <button type="submit" disabled={pending || Boolean(blocked)} aria-describedby={describedBy || undefined} className="flex h-12 items-center justify-between gap-6 bg-action px-5 text-sm text-[#17191c] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50">
+    <button type="submit" disabled={pending || Boolean(blocked)} aria-describedby={describedBy || undefined} className="flex h-10 items-center justify-center gap-2 rounded-md bg-action px-4 text-sm font-medium text-[#171717] transition-[filter] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50">
       {pending ? (checksKey ? "Checking the key…" : "Starting…") : "Start run"}
-      <span aria-hidden>→</span>
+     
     </button>
   );
 }
