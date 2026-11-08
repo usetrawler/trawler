@@ -17,7 +17,7 @@ export const plain = (text: string) =>
   text
     .replace(/[\\`*_[\]<>|~#]/g, "\\$&")
     .replace(/!/g, "\\!")
-    .replace(/@(?=\w)/g, "@​");
+    .replace(/@(?=\w)/g, "@\u200b");
 
 const line = (text: string) => plain(text.replace(/\s+/g, " ").trim());
 
