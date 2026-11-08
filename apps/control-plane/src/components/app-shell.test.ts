@@ -141,7 +141,7 @@ describe("initials", () => {
   });
 });
 
-test("a project with a run going carries a dot, told to screen readers, and the others carry none", () => {
+it("a project with a run going carries a dot, told to screen readers, and the others carry none", () => {
   const html = render({ shell: { ...shell, workspace: { ...shell.workspace, projects: shell.workspace.projects.map((p, i) => (i === 0 ? { ...p, live: true } : p)) } } });
   const first = link(nav(html), shell.workspace.projects[0]!.name);
   expect(first).toMatch(/<span aria-hidden="true" class="size-2 rounded-full bg-ok"><\/span><span class="sr-only">, a run is going<\/span>/);
