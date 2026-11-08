@@ -154,7 +154,7 @@ export async function startRunFor(principal: RunPrincipal, body: ParsedStartRun,
         provider: payer.provider, providerBaseUrl: payer.providerBaseUrl, price, tokenCap: price ? null : DEFAULT_RUN.tokenCap, paidBy: payer.paidBy,
         planId: plan.id, execution: body.execution, targetUrl: body.url, extraOrigins: body.allowedOrigins, pullRequest: body.pullRequest, planMode: body.planMode, replan: body.replan, conversation: body.conversation, providedAccounts: body.accounts, usesFirstRunOnUs: payer.usesFirstRunOnUs,
       });
-      await tx.updateTable("runs").set({ client_seen_at: sql<Date>`now()` }).where("id", "=", started.id).execute();
+      if (!principal.via) await tx.updateTable("runs").set({ client_seen_at: sql<Date>`now()` }).where("id", "=", started.id).execute();
       const response: StartedRun = { id: started.id, number: started.number, reportUrl: `${deps.baseUrl.replace(/\/+$/, "")}${runPath(started.number)}`, people: started.people };
       if (keyHash) await recordStart(tx, orgId, body.project, keyHash, started.id, response);
       return { started, response };

@@ -8,6 +8,7 @@ import { asSystem, withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { createProject } from "../projects/projects.ts";
+import { stopRunsOfGoneClients } from "../runs/queue.ts";
 import { cancelLiveRuns, startRun } from "../runs/runs.ts";
 import type { RunApiDeps } from "../run-api/service.ts";
 import { createMcpEndpoint } from "./server.ts";
@@ -101,6 +102,18 @@ test("a start records the client and the person, returns at once, and reports wh
   expect(row).toMatchObject({ created_by: `mcp:${id}:user-r`, status: "queued", started_via: { kind: "mcp", client: "Claude Code", person: "Ana Lopez", grant: id } });
   expect(Number(row.budget_usd)).toBe(2);
   expect(started.text).toContain("get_run");
+  await quiet("org-r");
+});
+
+test("a run an assistant started is not waiting on a CI job, so the gone-client sweep leaves it", async () => {
+  const id = await grantFor("org-r", ["trawler:read", "trawler:runs:write"]);
+  const started = await call(caller("org-r", id), "start_run", { project: projects.r1, cap: 1 });
+  expect(started.isError).toBe(false);
+  const seen = await asSystem(t.db, (tx) => tx.selectFrom("runs").select("client_seen_at").where("id", "=", started.structured.id).executeTakeFirstOrThrow());
+  expect(seen.client_seen_at).toBeNull();
+  await asSystem(t.db, (tx) => tx.updateTable("runs").set({ created_at: sql<Date>`now() - interval '1 hour'` }).where("id", "=", started.structured.id).execute());
+  await stopRunsOfGoneClients(t.db);
+  expect((await runRow(started.structured.id)).status).toBe("queued");
   await quiet("org-r");
 });
 
