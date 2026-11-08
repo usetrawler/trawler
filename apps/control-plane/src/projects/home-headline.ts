@@ -4,7 +4,7 @@ const listed = (items: string[]) => (items.length <= 2 ? items.join(" and ") : `
 
 export function homeHeadline(findings: OpenFinding[], runs: number, finished: number): string {
   if (runs === 0) return "No runs yet.";
-  if (finished === 0) return "No run has finished yet.";
+  if (finished === 0) return "No run has completed yet.";
   if (findings.length === 0) return "No confirmed defects are open.";
   const count = findings.length === 1 ? "1 confirmed defect is open" : `${findings.length} confirmed defects are open`;
   const sources = [...new Set(findings.map((f) => f.source))];

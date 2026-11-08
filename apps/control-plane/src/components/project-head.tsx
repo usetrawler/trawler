@@ -40,7 +40,7 @@ export function ProjectHead({ project, address, tab, counts, runState, planId }:
         }
       />
       <nav aria-label="Project">
-        <ul className="-mt-4 flex gap-x-6 overflow-x-auto overflow-y-hidden border-b border-line pb-px">
+        <ul className="-mt-4 flex gap-x-6 overflow-x-auto overflow-y-hidden border-b border-line pb-0.5">
           {tabs.map((t) => (
             <li key={t.key} className="shrink-0">
               <a

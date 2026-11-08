@@ -34,7 +34,7 @@ export default async function ProjectHome({ params }: { params: Promise<{ id: st
     const [runState, counts, going, latest, findings, pullRequests] = await Promise.all([
       projectRunState(tx, orgId, id),
       projectCounts(tx, orgId, id),
-      workspaceRuns(tx, orgId, { projectId: id, active: true, size: 3 }),
+      workspaceRuns(tx, orgId, { projectId: id, active: true, size: 10 }),
       workspaceRuns(tx, orgId, { projectId: id, size: 1 }),
       openFindings(tx, orgId, id),
       projectPullRequests(tx, orgId, id, 3),
