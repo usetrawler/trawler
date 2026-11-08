@@ -1,5 +1,5 @@
 import type { RunLine } from "../projects/overview.ts";
-import { runResult } from "../projects/project-home.ts";
+import { runResult } from "../runs/run-result.ts";
 import { runPath, runTitle } from "../runs/status.ts";
 import { viaLabel } from "../runs/via.ts";
 import { LocalTime } from "./local-time.tsx";

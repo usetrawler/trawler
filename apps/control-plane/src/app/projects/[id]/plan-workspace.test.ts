@@ -20,8 +20,8 @@ describe("PlanWorkspace", () => {
     const html = render([kwame, { ...ama, signsIn: true }], accounts);
     const rows = [...html.matchAll(/<button type="button" aria-expanded="(true|false)" aria-controls="person-(\w+)"[^>]*>([\s\S]*?)<\/button>/g)].map((m) => [m[2], m[1], m[3]!.replace(/<[^>]+>/g, "")]);
     expect(rows).toEqual([
-      ["kwame", "false", "KWKwame1 goal · signs in as kwame@acme.test"],
-      ["ama", "true", "AMAma1 goal · needs a test account"],
+      ["kwame", "false", "KKwame1 goal · signs in as kwame@acme.test"],
+      ["ama", "true", "AAma1 goal · needs a test account"],
     ]);
     expect(html).toMatch(/<div id="person-kwame" hidden=""/);
     expect(html).toMatch(/<div id="person-ama" class=/);

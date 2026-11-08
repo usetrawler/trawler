@@ -1,4 +1,5 @@
 "use client";
+import { area, field, keyField, primaryButton, secondaryButton } from "../../components/controls.ts";
 import { unstable_isUnrecognizedActionError, unstable_rethrow, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import type { ProductSummary, SignUp } from "@usetrawler/core/setup";
@@ -129,7 +130,7 @@ export function Progress({ step, host, checking = false, byHand = false }: { ste
       <Working />
       <div className="flex flex-col gap-3">
         <p className="text-sm text-muted">Building your test plan</p>
-        <h2 className="text-3xl leading-tight font-semibold tracking-tight break-words md:text-5xl">Understanding {host}</h2>
+        <h2 className="text-xl font-medium tracking-tight break-words">Understanding {host}</h2>
         <p className="max-w-xl text-muted">{byHand ? "Trawler chooses people with different roles and goals from your description." : "Trawler reads the product's page, works out what it does, and then chooses people with different roles and goals."}{` This usually takes ${minutes} minutes; keep this page open.`}</p>
         {checking && <p className="max-w-xl text-sm text-muted">Trawler did not answer. Checking whether setup finished…</p>}
       </div>
@@ -140,8 +141,8 @@ export function Progress({ step, host, checking = false, byHand = false }: { ste
               {i < at ? <span className="text-ok">✓</span> : i === at ? <span className="h-3.5 w-3.5 rounded-full border-2 border-action border-t-transparent motion-safe:animate-spin" /> : <span className="text-muted">·</span>}
             </span>
             <span className="flex flex-col">
-              <strong className="text-sm">{s.title}</strong>
-              <span className="text-xs text-muted">{i < at ? s.done : i === at ? s.working : "Waiting"}</span>
+              <span className="text-sm font-medium">{s.title}</span>
+              <span className="text-sm text-muted">{i < at ? s.done : i === at ? s.working : "Waiting"}</span>
             </span>
           </li>
         ))}
@@ -215,7 +216,7 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
               <input
                 name="planName" type="text" maxLength={100} value={planName} onChange={(e) => setPlanName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); analyse(); } }}
-                className="h-12 border border-line bg-soft px-4 text-base outline-none focus:border-ink"
+                className={field}
               />
             </label>
             <p className="max-w-xl text-muted">Trawler reads {projectHost} again, lists what the product does, and proposes people for the features you choose. They go into a new plan with no test accounts; your other plans stay as they are.</p>
@@ -224,7 +225,7 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
           <p className="max-w-xl text-muted">Trawler reads {projectHost} again, lists what the product does, and proposes people for the features you choose. Proposing replaces the people and goals on the plan. Test accounts stay; check who signs in with them afterwards.</p>
         )}
         {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
-        <button type="button" onClick={analyse} disabled={pending} className="flex h-10 items-center justify-center gap-2 rounded-md bg-action px-4 text-sm font-medium text-[#171717] transition-[filter] hover:brightness-105 self-start disabled:opacity-70">
+        <button type="button" onClick={analyse} disabled={pending} className={`${primaryButton} self-start`}>
           {newPlanName !== undefined ? "Read the product" : "Read the product again"}
         </button>
       </div>
@@ -240,13 +241,13 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
           <input
             name="url" type="text" inputMode="url" autoComplete="url" required value={url} onChange={(e) => setUrl(e.target.value)}
             placeholder="https://app.example.com"
-            className="h-14 border border-line bg-soft px-4 font-mono text-base outline-none focus:border-ink"
+            className={keyField}
           />
         </label>
         {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
         <div className="flex flex-col-reverse items-stretch justify-between gap-4 border-t border-line pt-6 sm:flex-row sm:items-center">
           <p className="text-sm text-muted">Next: confirm what the product does and which features to try.</p>
-          <button type="submit" disabled={pending} className="flex h-10 items-center justify-center gap-2 rounded-md bg-action px-4 text-sm font-medium text-[#171717] transition-[filter] hover:brightness-105 disabled:opacity-70">
+          <button type="submit" disabled={pending} className={primaryButton}>
             Analyse product
           </button>
         </div>
@@ -269,21 +270,21 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
       <form className="flex flex-col gap-6" onSubmit={(e) => { e.preventDefault(); describeByHand(); }}>
         <div className="flex flex-col gap-3">
           <p className="text-sm text-muted">{typed.host} is on a private network</p>
-          <h2 className="text-4xl leading-[0.95] font-semibold tracking-tight md:text-6xl">Describe it yourself.</h2>
-          <p className="max-w-xl text-lg text-muted">Trawler cannot read a page that only your network or a CI job can reach, so tell it what the product is. The people still use it at {typed.host}, through a runner that can reach it.</p>
+          <h2 className="text-xl font-medium tracking-tight break-words">Describe it yourself.</h2>
+          <p className="max-w-xl text-muted">Trawler cannot read a page that only your network or a CI job can reach, so tell it what the product is. The people still use it at {typed.host}, through a runner that can reach it.</p>
         </div>
         <label className="flex flex-col gap-2">
           <span className="text-sm text-muted">Product name</span>
-          <input name="name" type="text" required maxLength={200} value={typed.name} onChange={(e) => setStage({ ...typed, name: e.target.value })} className="h-12 border border-line bg-soft px-4 text-base outline-none focus:border-ink" />
+          <input name="name" type="text" required maxLength={200} value={typed.name} onChange={(e) => setStage({ ...typed, name: e.target.value })} className={field} />
         </label>
         <label className="flex flex-col gap-2">
           <span className="text-sm text-muted">What it does and who it is for</span>
-          <textarea name="description" required maxLength={2000} rows={4} value={typed.description} onChange={(e) => setStage({ ...typed, description: e.target.value })} className="resize-y border border-line bg-soft p-4 text-base outline-none focus:border-ink" />
+          <textarea name="description" required maxLength={2000} rows={4} value={typed.description} onChange={(e) => setStage({ ...typed, description: e.target.value })} className={`${area} resize-y`} />
         </label>
         {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
         <div className="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
           <button type="button" onClick={() => { setError(null); setStage({ kind: "address" }); }} className="text-sm text-muted hover:text-ink">← Back</button>
-          <button type="submit" disabled={pending} className="flex h-10 items-center justify-center gap-2 rounded-md bg-action px-4 text-sm font-medium text-[#171717] transition-[filter] hover:brightness-105 disabled:opacity-70">
+          <button type="submit" disabled={pending} className={primaryButton}>
             Choose the features
           </button>
         </div>
@@ -328,51 +329,50 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-3">
         <p className="text-sm text-muted">{stage.byHand ? "Your description" : "Trawler understood the product"}</p>
-        <h2 className="text-4xl leading-[0.95] font-semibold tracking-tight md:text-6xl">Confirm the context.</h2>
-        <p className="max-w-xl text-lg text-muted">{stage.byHand ? "We use this only to choose the people and their goals." : "We use this only to choose the people and their goals. Edit it if we misunderstood anything."}</p>
+        <h2 className="text-xl font-medium tracking-tight break-words">Confirm the context.</h2>
+        <p className="max-w-xl text-muted">{stage.byHand ? "We use this only to choose the people and their goals." : "We use this only to choose the people and their goals. Edit it if we misunderstood anything."}</p>
       </div>
-      <label className="flex flex-col border border-line bg-panel">
-        <span className="flex items-center justify-between border-b border-line px-4 py-2 text-xs">
-          <span>Product context</span><span className="text-ok">{stage.byHand ? "Written by you · editable" : "AI draft · editable"}</span>
+      <label className="flex flex-col gap-2">
+        <span className="flex flex-wrap items-baseline justify-between gap-x-4 text-sm">
+          <span>Product context</span><span className="text-muted">{stage.byHand ? "Written by you · editable" : "Trawler's draft · editable"}</span>
         </span>
-        <textarea aria-label="What the product does" value={stage.description} maxLength={2000} rows={4} onChange={(e) => update({ description: e.target.value })} className="resize-y bg-transparent p-4 text-lg outline-none focus:bg-paper" />
+        <textarea aria-label="What the product does" value={stage.description} maxLength={2000} rows={4} onChange={(e) => update({ description: e.target.value })} className={`${area} resize-y`} />
       </label>
       <div className="flex flex-col gap-2">
         <label className="flex flex-col gap-2">
           <span className="text-sm">Can new people create an account themselves?</span>
-          <select aria-describedby="sign-up-note" value={stage.signUp} onChange={(e) => update({ signUp: e.target.value as SignUp })} className="h-11 border border-line bg-soft px-3 outline-none focus:border-ink">
+          <select aria-describedby="sign-up-note" value={stage.signUp} onChange={(e) => update({ signUp: e.target.value as SignUp })} className={field}>
             <option value="open">Yes, anyone can sign up</option>
             <option value="closed">No, accounts come from an invitation or an admin</option>
             <option value="unclear">Not sure</option>
           </select>
         </label>
-        <p id="sign-up-note" className="text-xs text-muted">{stage.byHand && stage.signUp === "unclear" ? "Setup decides per person; you can change it on the plan." : SIGN_UP_NOTE[stage.signUp]}</p>
+        <p id="sign-up-note" className="text-sm text-muted">{stage.byHand && stage.signUp === "unclear" ? "Setup decides per person; you can change it on the plan." : SIGN_UP_NOTE[stage.signUp]}</p>
       </div>
       <section className="flex flex-col gap-3" aria-labelledby="features-heading">
         <div className="flex items-end justify-between gap-4">
           <div>
-            <h3 id="features-heading" className="text-xl font-semibold">What should the people try?</h3>
+            <h3 id="features-heading" className="text-lg font-medium">What should the people try?</h3>
             <p className="text-sm text-muted">{stage.byHand ? "Add each feature the people should try." : "We preselected the best match."}</p>
           </div>
-          <p className="text-xs text-muted">Select one or more</p>
+          <p className="text-sm text-muted">Select one or more</p>
         </div>
         <ul className="flex flex-col gap-2">
           {stage.features.map((f, i) => (
             <li key={`${i}-${f.title}`}>
-              <button type="button" aria-pressed={f.chosen} onClick={() => toggle(i)} disabled={!f.chosen && chosen.length >= MAX_CHOSEN} className={`flex w-full items-center gap-4 border px-4 py-3 text-left transition ${f.chosen ? "border-action bg-action/10" : "border-line bg-panel hover:border-ink"}`}>
-                <span className="font-mono text-xs text-muted">{String(i + 1).padStart(2, "0")}</span>
+              <button type="button" aria-pressed={f.chosen} onClick={() => toggle(i)} disabled={!f.chosen && chosen.length >= MAX_CHOSEN} className={`flex w-full items-center gap-4 rounded-md border px-4 py-3 text-left transition-colors ${f.chosen ? "border-ink bg-soft" : "border-line bg-panel hover:border-muted"}`}>
                 <span className="flex flex-1 flex-col">
-                  <strong>{f.title}</strong>
+                  <span className="font-medium">{f.title}</span>
                   {f.summary && <span className="text-sm text-muted">{f.summary}</span>}
                 </span>
-                <span aria-hidden className={f.chosen ? "text-action-ink" : "text-muted"}>{f.chosen ? "✓" : "+"}</span>
+                <span aria-hidden className={f.chosen ? "text-ink" : "text-muted"}>{f.chosen ? "✓" : "+"}</span>
               </button>
             </li>
           ))}
         </ul>
         <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); addExtra(); }}>
-          <input aria-label="Describe another feature" placeholder="Or describe another feature" value={extra} maxLength={300} onChange={(e) => setExtra(e.target.value)} className="h-11 flex-1 border border-line bg-soft px-3 outline-none focus:border-ink" />
-          <button type="submit" className="h-11 border border-ink px-4 text-xs">Add</button>
+          <input aria-label="Describe another feature" placeholder="Or describe another feature" value={extra} maxLength={300} onChange={(e) => setExtra(e.target.value)} className={`${field} flex-1`} />
+          <button type="submit" className={secondaryButton}>Add</button>
         </form>
       </section>
       {projectId && <p className="text-sm text-muted">{newPlanName !== undefined ? `This creates the plan ${planName.trim()} with these people and goals. Your other plans stay as they are.` : "Proposing replaces the people and goals on the plan. Test accounts stay; check who signs in with them afterwards."}</p>}
@@ -380,7 +380,7 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
       <div className="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
         <button type="button" onClick={() => { setError(null); setStage({ kind: "address" }); }} className="text-sm text-muted hover:text-ink">← Back</button>
         <span className="text-sm text-muted">{chosen.length === 1 ? "1 feature selected" : `${chosen.length} features selected`}</span>
-        <button type="button" onClick={propose} disabled={pending || chosen.length === 0} className="flex h-10 items-center justify-center gap-2 rounded-md bg-action px-4 text-sm font-medium text-[#171717] transition-[filter] hover:brightness-105 disabled:opacity-60">
+        <button type="button" onClick={propose} disabled={pending || chosen.length === 0} className={primaryButton}>
           Meet the test users
         </button>
       </div>

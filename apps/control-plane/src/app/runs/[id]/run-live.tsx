@@ -1,4 +1,5 @@
 "use client";
+import { pageTitle } from "../../../components/page-head.tsx";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState, useTransition } from "react";
 import type { runView, StageState, PersonaState } from "../../../runs/report.ts";
@@ -678,7 +679,7 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
       <RunBreadcrumb project={project} number={run.number} plan={run.savedPlan?.name ?? run.planName} fromPullRequest={Boolean(run.pullRequest?.number)} />
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl leading-tight font-semibold tracking-tight wrap-anywhere md:text-[28px]">{view.headline}</h1>
+          <h1 className={pageTitle}>{view.headline}</h1>
           {subject && <p className="mt-1 break-words text-ink">{subject}</p>}
           <RunMeta run={run} view={view} host={host} when={new Date(when)} />
           <p role="status" aria-live="polite" className="text-sm text-warn">

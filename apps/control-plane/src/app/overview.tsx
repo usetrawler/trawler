@@ -3,7 +3,8 @@ import { LocalTime } from "../components/local-time.tsx";
 import { PageHead, PrimaryLink } from "../components/page-head.tsx";
 import { resultTone, RunTable } from "../components/run-table.tsx";
 import { hostOf, type ProjectLine, type RunLine } from "../projects/overview.ts";
-import { runResult, type OpenFinding } from "../projects/project-home.ts";
+import type { OpenFinding } from "../projects/project-home.ts";
+import { runResult } from "../runs/run-result.ts";
 import { runPath, runTitle } from "../runs/status.ts";
 
 const listed = (items: string[]) => (items.length <= 2 ? items.join(" and ") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);

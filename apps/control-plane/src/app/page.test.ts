@@ -19,7 +19,14 @@ vi.mock("../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, orgId: string
 vi.mock("../projects/overview.ts", async (original) => ({
   hostOf: (await original<typeof import("../projects/overview.ts")>()).hostOf,
   workspaceProjects: async (_tx: unknown, orgId: string) => { state.askedFor.push(`projects:${orgId}`); return state.projects; },
-  workspaceRuns: async (_tx: unknown, orgId: string, options: { size?: number }) => { state.askedFor.push(`runs:${orgId}:${options.size}`); return { runs: state.recent, olderThan: null }; },
+  workspaceRuns: async (_tx: unknown, orgId: string, options: { size?: number; active?: boolean }) => {
+    state.askedFor.push(`runs:${orgId}:${options.active ? "active" : options.size}`);
+    return { runs: options.active ? [] : state.recent, olderThan: null };
+  },
+}));
+vi.mock("../projects/project-home.ts", async (original) => ({
+  ...(await original<typeof import("../projects/project-home.ts")>()),
+  openFindings: async (_tx: unknown, orgId: string) => { state.askedFor.push(`findings:${orgId}`); return []; },
 }));
 
 const { default: Home } = await import("./page.tsx");
@@ -46,25 +53,26 @@ test("a visitor who is not signed in, or no longer belongs to any workspace, is 
 test("a workspace without a project goes straight to a new project", async () => {
   state.member = memberOf("org-1");
   await expect(Home()).rejects.toMatchObject({ to: "/new" });
-  expect(state.askedFor).toEqual(["withOrg:org-1", "projects:org-1", "runs:org-1:3"]);
+  expect(state.askedFor).toEqual(["withOrg:org-1", "projects:org-1", "runs:org-1:5", "findings:org-1", "runs:org-1:active"]);
 });
 
-test("a workspace with projects lands on its overview, greeted by first name, read in its own organisation", async () => {
+test("a workspace with projects lands on its overview, named after the workspace, read in its own organisation", async () => {
   state.member = memberOf("org-1");
   state.projects = [project];
   const html = renderToStaticMarkup(await Home());
-  expect(html).toContain(">Welcome back, Ana</p>");
+  expect(html).toContain(">Acme workspace</p>");
+  expect(html).toContain(">No runs yet.</h1>");
   expect(html).toContain('<ul aria-label="Projects"');
   expect(html).toContain(">Acme workspace</span>");
   expect(html).toMatch(/<a href="\/"[^>]*aria-current="page"[^>]*>(?:(?!<\/a>).)*Overview/);
-  expect(state.askedFor).toEqual(["withOrg:org-1", "projects:org-1", "runs:org-1:3", "shell:org-1"]);
+  expect(state.askedFor).toEqual(["withOrg:org-1", "projects:org-1", "runs:org-1:5", "findings:org-1", "runs:org-1:active", "shell:org-1"]);
 });
 
-test("the workspace's newest runs reach the overview's line and its recent runs", async () => {
+test("the workspace's newest runs reach the overview's recent runs", async () => {
   state.member = memberOf("org-1");
   state.projects = [project];
   state.recent = [recent];
   const html = renderToStaticMarkup(await Home());
-  expect(html).toContain(">The latest run failed.</p>");
+  expect(html).toContain(">Failed</span>");
   expect(html).toMatch(/<section aria-labelledby="recent-runs".*href="\/runs\/0007"/);
 });

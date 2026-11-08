@@ -1,4 +1,4 @@
-const fieldBase = "min-w-0 rounded-md border border-line bg-panel text-ink outline-none transition-colors placeholder:text-muted hover:border-muted focus:border-ink aria-invalid:border-bad";
+const fieldBase = "min-w-0 rounded-md border border-line bg-panel text-ink outline-none transition-colors placeholder:text-muted hover:border-muted focus:border-ink";
 
 export const field = `h-10 px-3 text-sm ${fieldBase}`;
 export const keyField = `${field} font-mono`;

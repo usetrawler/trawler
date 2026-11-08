@@ -1,5 +1,6 @@
 "use client";
 
+import { pageTitle } from "../components/page-head.tsx";
 import * as Sentry from "@sentry/nextjs";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { useEffect } from "react";
@@ -20,7 +21,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
       </head>
       <body className="min-h-dvh bg-paper font-sans text-ink antialiased">
         <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center gap-5 px-4">
-          <h1 className="text-3xl font-semibold tracking-tight">{updated ? UPDATED_SINCE_OPENED : "Something went wrong."}</h1>
+          <h1 className={pageTitle}>{updated ? UPDATED_SINCE_OPENED : "Something went wrong."}</h1>
           <p className="text-muted">{updated ? "Reload the page to carry on." : "Try again, or come back in a minute."}</p>
           <button
             type="button"

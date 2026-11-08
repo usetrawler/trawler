@@ -2,7 +2,8 @@ import { FindingRows, GoingRuns } from "../../../../components/findings-list.tsx
 import { LocalTime } from "../../../../components/local-time.tsx";
 import { homeHeadline } from "../../../../projects/home-headline.ts";
 import type { RunLine } from "../../../../projects/overview.ts";
-import { runResult, type OpenFinding, type PullRequestLine } from "../../../../projects/project-home.ts";
+import type { OpenFinding, PullRequestLine } from "../../../../projects/project-home.ts";
+import { runResult } from "../../../../runs/run-result.ts";
 import { runPath, runTitle } from "../../../../runs/status.ts";
 
 const SHOWN_PULL_REQUESTS = 3;

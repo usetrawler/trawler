@@ -1,4 +1,5 @@
-import { runResult, type PullRequestLine } from "../../../../projects/project-home.ts";
+import type { PullRequestLine } from "../../../../projects/project-home.ts";
+import { runResult } from "../../../../runs/run-result.ts";
 import { webLink } from "../../../../lib/web-link.ts";
 import { runPath, runTitle } from "../../../../runs/status.ts";
 
