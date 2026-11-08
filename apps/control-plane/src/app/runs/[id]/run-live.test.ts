@@ -48,7 +48,7 @@ test("a finished run names its result, when it ended, and the actions to run aga
   const top = head(html);
   expect(top).toMatch(/<h1[^>]*>1 defect confirmed by replay\.<\/h1>/);
   expect(text(top)).toContain("app.acme.test · 2026-09-25 19:59 UTC");
-  expect(top).toContain('href="/projects/project-1#start"');
+  expect(top).toContain('href="/runs/new?project=project-1"');
   expect(top).toContain(">Run again");
   expect(top).not.toContain("Stop run");
 });
