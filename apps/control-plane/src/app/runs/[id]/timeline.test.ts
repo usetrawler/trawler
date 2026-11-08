@@ -113,3 +113,14 @@ test("a long quiet stretch folds into a narrow break, so the busy parts keep the
   expect(timeScale({ start: T(0).getTime(), end: T(12).getTime() }, [T(1).getTime(), T(11).getTime()]).breaks).toHaveLength(1);
   expect(timeScale({ start: T(0).getTime(), end: T(4).getTime() }, [T(0.5).getTime(), T(3.5).getTime()]).breaks).toEqual([]);
 });
+
+test("when every stretch would fold, the scale stays even and never yields a position that is not a number", () => {
+  const two = timeScale({ start: T(0).getTime(), end: T(20).getTime() }, [T(0).getTime(), T(10).getTime(), T(20).getTime()]);
+  expect(two.breaks).toEqual([]);
+  expect(two.at(T(10).getTime())).toBeCloseTo(50, 5);
+  const live = timeScale({ start: T(0).getTime(), end: T(8).getTime() }, [T(0).getTime()]);
+  expect(live.breaks).toEqual([]);
+  expect([live.at(T(0).getTime()), live.at(T(4).getTime()), live.at(T(8).getTime())].every(Number.isFinite)).toBe(true);
+  expect(live.ticks.every(Number.isFinite)).toBe(true);
+});
+

@@ -49,6 +49,8 @@ export function timeScale(span: Span, moments: number[]): TimeScale {
     const gap = points[i]! - points[i - 1]!;
     if (gap > BREAK_MIN_MS && gap > total * BREAK_SHARE) gaps.push({ from: points[i - 1]!, to: points[i]! });
   }
+  const folded = gaps.reduce((n, g) => n + (g.to - g.from), 0);
+  if (total - folded <= 0) gaps.length = 0;
   const shown = total - gaps.reduce((n, g) => n + (g.to - g.from), 0);
   const room = 100 - gaps.length * BREAK_WIDTH;
   const at = (t: number) => {
@@ -224,9 +226,9 @@ export function TimelineLanes({ run, live, now }: { run: RunSummary; live: boole
               return <span key={i} className="absolute w-px bg-[repeating-linear-gradient(180deg,var(--muted)_0_3px,transparent_3px_6px)] opacity-60" style={{ left: `${at(h.at)}%`, top: Math.min(a, b) * ROW + ROW / 2, height: Math.abs(a - b) * ROW }} />;
             })}
             {scale.breaks.map((b) => (
-              <span key={b.from} className="absolute inset-y-0 bg-panel" style={{ left: `${b.left}%`, width: `${BREAK_WIDTH}%` }}>
-                <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-[repeating-linear-gradient(180deg,var(--line)_0_4px,transparent_4px_8px)]" />
-                <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded bg-panel px-0.5 text-xs whitespace-nowrap text-muted [writing-mode:vertical-rl]">{lasted(b.to - b.from)} later</span>
+              <span key={b.from} className="absolute inset-y-0" style={{ left: `${b.left}%`, width: `${BREAK_WIDTH}%` }}>
+                <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-[repeating-linear-gradient(180deg,var(--muted)_0_4px,transparent_4px_8px)] opacity-50" />
+                <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded bg-panel px-0.5 py-1 text-xs whitespace-nowrap text-muted shadow-[0_0_0_1px_var(--line)] [writing-mode:vertical-rl]">{lasted(b.to - b.from)} later</span>
               </span>
             ))}
             {live && <span className="absolute -top-2 -bottom-2 w-0.5 rounded bg-ok" style={{ left: `${at(now)}%` }}><span className={`absolute -top-5 text-xs font-medium text-ok ${at(now) > 92 ? "right-1" : "-left-3"}`}>now</span></span>}

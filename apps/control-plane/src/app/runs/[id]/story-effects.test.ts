@@ -129,3 +129,20 @@ test("Show earlier asks for the page before each person's cursor, and a failure 
   const joined = react.setters[STATE.trails]!.mock.calls.at(-1)![0] as (had: typeof loaded) => Record<string, { entries: unknown[] }>;
   expect(joined(loaded)["ana b"]!.entries).toHaveLength(1);
 });
+
+test("an update that arrives while a load is going is not lost once the run has ended: the steps load once more", async () => {
+  react.refs.length = 0;
+  const releases: Array<() => void> = [];
+  fetched.mockImplementation(() => new Promise((resolve) => { releases.push(() => resolve(new Response(JSON.stringify(page)))); }));
+  draw([], { live: true, pulse: 1 });
+  react.effects[0]!.run();
+  draw([], { live: false, pulse: 2 });
+  react.effects[0]!.run();
+  expect(fetched).toHaveBeenCalledTimes(2);
+  fetched.mockImplementation(async () => new Response(JSON.stringify(page)));
+  for (const release of releases) release();
+  await flush();
+  await flush();
+  expect(fetched).toHaveBeenCalledTimes(4);
+});
+

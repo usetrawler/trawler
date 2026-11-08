@@ -76,6 +76,7 @@ function useTrails(runId: string, people: Array<{ id: string; name: string }>, a
   const settled = useRef(false);
   const latest = useRef(0);
   const inFlight = useRef(false);
+  const again = useRef(false);
   const ids = people.map((p) => p.id).join("\n");
   const address = useCallback((id: string) => `/api/runs/${runId}/people/${encodeURIComponent(id)}/trail`, [runId]);
   const fetchTrail = useCallback(async (url: string): Promise<Trail | null> => {
@@ -97,10 +98,18 @@ function useTrails(runId: string, people: Array<{ id: string; name: string }>, a
       setFailed(results.filter(([, got]) => !got).map(([id]) => id));
     } finally {
       if (request === latest.current) inFlight.current = false;
+      if (again.current) {
+        again.current = false;
+        void load();
+      }
     }
   }, [ids, address, fetchTrail]);
   useEffect(() => {
-    if (!active || settled.current || inFlight.current || (live && document.hidden)) return;
+    if (!active || settled.current || (live && document.hidden)) return;
+    if (inFlight.current) {
+      if (!live) again.current = true;
+      return;
+    }
     settled.current = !live;
     void load();
   }, [active, live, pulse, load]);

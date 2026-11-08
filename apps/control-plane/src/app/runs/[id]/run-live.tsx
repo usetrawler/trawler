@@ -8,7 +8,6 @@ import { SEVERITY_TONE } from "../../../runs/severity.ts";
 import { webLink } from "../../../lib/web-link.ts";
 import { runPath, runStatusLabel, runStatusTone, runTitle } from "../../../runs/status.ts";
 import { RunBreadcrumb } from "../../../components/run-breadcrumb.tsx";
-import { initials } from "../../../components/initials.ts";
 import { DocsLink } from "../../../components/docs-link.tsx";
 import { LocalTime } from "../../../components/local-time.tsx";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
@@ -641,7 +640,13 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
       const hash = window.location.hash;
       const next = panelForHash(hash, startPanel);
       if (next !== panel) return setPanel(next);
-      if (hash.startsWith("#trail-")) setStoryFilter({ person: decodeURIComponent(hash.slice("#trail-".length)) });
+      if (hash.startsWith("#trail-")) {
+        try {
+          setStoryFilter({ person: decodeURIComponent(hash.slice("#trail-".length)) });
+        } catch {
+          return;
+        }
+      }
       if (!/^#(?:finding-|trail-|message-|pr-plan$|conversation$)/.test(hash)) return;
       const addressed = document.getElementById(hash.slice(1));
       if (!addressed) return;
