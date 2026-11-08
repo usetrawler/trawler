@@ -2,7 +2,7 @@
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { startTransition, useActionState, useEffect, useReducer, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { field } from "../../components/controls.ts";
+import { field, primaryButton } from "../../components/controls.ts";
 import { LocalTime } from "../../components/local-time.tsx";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { changeRoleAction, inviteMemberAction, removeMemberAction, revokeInvitationAction, type MembersState } from "./actions.ts";
@@ -159,7 +159,7 @@ export function Members({ members, invitations, canManage, signInAt }: { members
           <li key={m.id} className="flex flex-col gap-3 border-t border-line py-3 first:border-t-0 first:pt-0">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="font-semibold wrap-anywhere">{nameOf(m)}{m.you && <span className="font-normal text-muted"> (you)</span>}</p>
+                <p className="font-medium wrap-anywhere">{nameOf(m)}{m.you && <span className="font-normal text-muted"> (you)</span>}</p>
                 {m.name.trim() && <p className="text-sm wrap-anywhere text-muted">{m.email}</p>}
               </div>
               <div className="ml-auto flex flex-col items-end gap-1 text-right">
@@ -284,7 +284,7 @@ export function InviteForm({ state, shown, action, held, inviting, onSent, signI
         startTransition(() => action(data));
       }}
       className="flex flex-col gap-3 border-t border-line pt-4">
-      <h3 className="text-sm font-semibold">Invite someone</h3>
+      <h3 className="font-medium">Invite someone</h3>
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex min-w-0 flex-1 basis-64 flex-col gap-2">
           <span className="text-sm text-muted">The email address they sign in with, on GitHub or Google.</span>
@@ -298,9 +298,9 @@ export function InviteForm({ state, shown, action, held, inviting, onSent, signI
           </select>
         </label>
       </div>
-      <p className="text-xs text-muted">An admin can also rename the workspace, manage its model key and change who is in it.</p>
+      <p className="text-sm text-muted">An admin can also rename the workspace, manage its model key and change who is in it.</p>
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" {...hold(held)} className={button}>{inviting ? "Inviting…" : "Invite"}</button>
+        <button type="submit" {...hold(held)} className={primaryButton}>{inviting ? "Inviting…" : "Invite"}</button>
         <span role="status" className="min-w-0 text-sm wrap-anywhere text-ok">{shown.invited ? invitedStatus(shown.invited, signInAt) : ""}</span>
       </div>
       {shown.error && <p id="invite-error" role="alert" className={alert}>{shown.error}</p>}

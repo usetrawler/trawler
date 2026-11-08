@@ -44,7 +44,7 @@ function RenameForm({ name }: { name: string }) {
     <form action={action} className="flex flex-col gap-3">
       <label className="flex flex-col gap-2">
         <span className="text-sm text-muted">The name everyone in this workspace sees.</span>
-        <input name="name" value={value} onChange={(e) => { setValue(e.target.value); setEdited(true); }} autoComplete="off" aria-invalid={failed || undefined} aria-describedby={failed ? "workspace-error" : undefined} className={`${field} font-sans`} />
+        <input name="name" value={value} onChange={(e) => { setValue(e.target.value); setEdited(true); }} autoComplete="off" aria-invalid={failed || undefined} aria-describedby={failed ? "workspace-error" : undefined} className={field} />
       </label>
       <div className="flex flex-wrap items-center gap-3">
         <button type="submit" aria-disabled={pending || undefined} onClick={(e) => { if (pending) e.preventDefault(); }} className={button}>{pending ? "Saving…" : "Save name"}</button>

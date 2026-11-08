@@ -32,16 +32,16 @@ export function MonthlyBudget({ limitUsd, spentUsd, month, canManage }: { limitU
       <h2 id="budget-heading" className={heading}>Monthly budget</h2>
       <p className="text-sm">
         <span className="text-muted">Spent on runs since {month} 1 (UTC): </span>
-        <span className="font-mono">{usd(spentUsd)}</span>
-        {limitUsd !== null && <span className="text-muted"> of <span className="font-mono text-ink">{usd(limitUsd)}</span></span>}
+        <span className="font-medium tabular-nums">{usd(spentUsd)}</span>
+        {limitUsd !== null && <span className="text-muted"> of <span className="text-ink tabular-nums">{usd(limitUsd)}</span></span>}
       </p>
       <p className="text-sm text-muted">
         {limitUsd === null
           ? "No budget is set, so only each run's own cap limits what runs spend."
           : "When the workspace reaches it, the runs that are going stop and new runs are refused until the next month or a higher budget. What a stopped run found is kept."}
-        {" "}Outside OpenRouter, calls to a model with no known price cannot be priced, so they do not count toward the budget; such runs stop at their token cap instead.
       </p>
       {canManage ? <BudgetForm limitUsd={limitUsd} /> : <p className="text-sm text-muted">Only an owner or admin of this workspace can change the budget.</p>}
+      <p className="text-sm text-muted">Outside OpenRouter, calls to a model with no known price cannot be priced, so they do not count toward the budget; such runs stop at their token cap instead.</p>
     </section>
   );
 }

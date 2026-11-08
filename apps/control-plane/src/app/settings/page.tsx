@@ -25,12 +25,40 @@ import { MonthlyBudget } from "./monthly-budget.tsx";
 import { sectionOf, SettingsNav, type Section } from "./settings-nav.tsx";
 import { WorkspaceName } from "./workspace-name.tsx";
 import { WorkspacePlan } from "./workspace-plan.tsx";
+import { heading, panel } from "./styles.ts";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Settings" };
 
+const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" };
+
+export function roleText(role: string): string {
+  return role.split(",").map((r) => ROLE_LABEL[r.trim()] ?? r.trim()).filter(Boolean).join(", ");
+}
+
+function You({ member }: { member: Member }) {
+  const manages = canManageBilling(member);
+  return (
+    <section aria-labelledby="you-heading" className={panel}>
+      <h2 id="you-heading" className={heading}>You</h2>
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-[8rem_minmax(0,1fr)]">
+        <dt className="text-muted">Signed in as</dt>
+        <dd className="wrap-anywhere">{member.name.trim() ? `${member.name} · ${member.email}` : member.email}</dd>
+        <dt className="mt-2 text-muted sm:mt-0">Role</dt>
+        <dd>{roleText(member.role)}</dd>
+      </dl>
+      <p className="text-sm text-muted">{manages ? "You can rename the workspace and manage its members, model key, budget and API tokens." : "An owner or admin manages the members, the model key, the budget and the API tokens. You can run every project's plans."}</p>
+    </section>
+  );
+}
+
 async function general({ member }: { member: Member }) {
-  return <WorkspaceName name={member.orgName} canManage={canManageBilling(member)} />;
+  return (
+    <>
+      <WorkspaceName name={member.orgName} canManage={canManageBilling(member)} />
+      <You member={member} />
+    </>
+  );
 }
 
 async function membersSection({ member }: { member: Member }) {

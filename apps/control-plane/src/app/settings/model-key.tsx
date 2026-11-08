@@ -7,6 +7,7 @@ import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { detectProvider, PROVIDER_LABEL, type Provider } from "../../llm/provider-kinds.ts";
 import { removeModelKeyAction, replaceModelKeyAction, type SettingsState } from "./actions.ts";
 import { button, heading, panel } from "./styles.ts";
+import { primaryButton } from "../../components/controls.ts";
 
 export interface SavedKey {
   provider: Provider;
@@ -164,7 +165,7 @@ export function ReplaceForm({ saved, action, pending, refusal, onSent, onKeep }:
         aside={saved && <button type="button" aria-disabled={pending || undefined} onClick={() => { if (!pending) onKeep(); }} className="h-12 px-3 text-sm text-muted hover:text-ink aria-disabled:cursor-wait aria-disabled:opacity-60">Keep {saved.hint}</button>}
       />
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" aria-disabled={pending || undefined} onClick={(e) => { if (pending) e.preventDefault(); }} className={button}>{pending ? "Checking the key…" : "Save key"}</button>
+        <button type="submit" aria-disabled={pending || undefined} onClick={(e) => { if (pending) e.preventDefault(); }} className={primaryButton}>{pending ? "Checking the key…" : "Save key"}</button>
         <span className="text-sm text-muted">Saved once the provider accepts it.</span>
       </div>
       {refusal && <p id="key-error" role="alert" className={alert}>{refusal.error}</p>}
