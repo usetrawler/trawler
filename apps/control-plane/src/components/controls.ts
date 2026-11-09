@@ -1,12 +1,12 @@
-const fieldShape = "min-w-0 rounded-md border bg-panel text-ink outline-none transition-colors placeholder:text-muted hover:border-muted focus:border-ink";
-const fieldBase = `${fieldShape} border-line`;
+const fieldShape = "min-w-0 rounded-md border bg-panel text-ink outline-none transition-colors placeholder:text-muted";
+const fieldBase = `${fieldShape} border-line hover:border-muted focus:border-ink`;
 
 export const field = `h-10 px-3 text-base sm:text-sm ${fieldBase}`;
 export const invalidField = `h-10 px-3 text-base sm:text-sm ${fieldShape} border-bad`;
 export const keyField = `${field} font-mono`;
 export const area = `px-3 py-2 text-base sm:text-sm ${fieldBase}`;
 
-const buttonBase = "inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium disabled:opacity-60 aria-disabled:cursor-wait aria-disabled:opacity-60";
+const buttonBase = "inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium disabled:opacity-60 aria-disabled:opacity-60";
 
 export const primaryButton = `${buttonBase} bg-action text-[#171717] transition-[filter] hover:brightness-105`;
 export const secondaryButton = `${buttonBase} border border-line bg-panel transition-colors hover:border-muted aria-disabled:hover:border-line`;

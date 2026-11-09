@@ -507,8 +507,10 @@ test("the details list the cost, models, times, who started the run and how long
   expect(text(activity(render(live)))).not.toContain("Finished");
 });
 
-test("the details name an API token as the starter, and a run that never started gives no duration", () => {
+test("the details name an API token as the starter, and a run that never started says when it was created and gives no duration", () => {
   expect(text(activity(render(summary({ ...finished, origin: "api" }))))).toContain("Started by An API token");
   const queuedThenStopped = text(activity(render(summary({ ...finished, status: "cancelled", startedAt: null }))));
   expect(queuedThenStopped).not.toContain("Took");
+  expect(queuedThenStopped).toContain("Created 2026-09-25 19:40 UTC");
+  expect(queuedThenStopped).not.toContain("Started 2026");
 });

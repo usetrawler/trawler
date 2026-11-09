@@ -16,7 +16,7 @@ beforeEach(() => {
   state.navFor = [];
 });
 
-test("the shell names the person and the workspace the membership check found, with its projects and runs read in that workspace", async () => {
+test("the shell names the person and the workspace the membership check found, with its projects read in that workspace", async () => {
   expect(await shellFor(member)).toEqual({
     user: { name: "Ana Lopez", email: "ana@acme.test" },
     workspace: { name: "Acme Labs", projects: [{ id: "p1", name: "Acme", address: "app.acme.test" }] },
