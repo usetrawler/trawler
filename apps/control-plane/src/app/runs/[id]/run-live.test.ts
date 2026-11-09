@@ -447,6 +447,8 @@ test("a run planned for a pull request says on top of its timeline what it check
   expect(text(render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: "Nothing in this pull request points at a feature, so the project's plan ran as it is.", version: null, reused: false, createdByRun: null, goals: [] } })))).toContain("What this run checked Nothing in this pull request points at a feature");
   expect(text(render(summary({ ...live, prPlan: { number: 482, mode: "change", note: null, version: null, reused: false, createdByRun: null, goals: [] } })))).toContain("What this run checks Trawler is reading PR #482 to choose who tries what.");
   expect(text(render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: null, version: 2, reused: true, createdByRun: 31, goals } })))).toContain("PR #482 v2 · reused from Run 0031");
+  expect(text(render(summary({ ...finished, status: "cancelled", prPlan: { number: 482, mode: "change", note: null, version: null, reused: false, createdByRun: null, goals: [] } })))).toContain("What this run checked The run ended before Trawler chose goals for PR #482.");
+  expect(text(render(summary({ ...finished, prPlan: { number: null, mode: "both", note: null, version: 1, reused: false, createdByRun: 7, goals } })))).toContain("Pull request plan v1 · written in this run");
   const written = render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: null, version: 1, reused: false, createdByRun: 7, goals } }));
   expect(text(written)).toContain("PR #482 v1 · written in this run");
   expect(written).toContain('href="/runs/0007/plan"');

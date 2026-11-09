@@ -86,7 +86,7 @@ export function PullRequestPlan({ run, live }: { run: RunSummary; live: boolean 
     return (
       <section id="pr-plan" aria-labelledby="pr-plan-heading" className="mb-10 flex max-w-3xl flex-col gap-1">
         <h2 id="pr-plan-heading" className="font-medium">{heading}</h2>
-        <p className="text-sm text-muted">{plan.note ?? `Trawler is reading ${pr} to choose who tries what.`}</p>
+        <p className="text-sm text-muted">{plan.note ?? (live ? `Trawler is reading ${pr} to choose who tries what.` : `The run ended before Trawler chose goals for ${pr}.`)}</p>
       </section>
     );
   }
@@ -128,7 +128,7 @@ export function PullRequestPlan({ run, live }: { run: RunSummary; live: boolean 
       </ul>
       {plan.version !== null && (
         <p className="text-sm text-muted">
-          <a href={`${runPath(run.number)}/plan`} className="underline underline-offset-4 hover:text-ink">{`${pr} v${plan.version}`}</a> · {origin}
+          <a href={`${runPath(run.number)}/plan`} className="underline underline-offset-4 hover:text-ink">{`${plan.number ? `PR #${plan.number}` : "Pull request plan"} v${plan.version}`}</a> · {origin}
         </p>
       )}
     </section>
