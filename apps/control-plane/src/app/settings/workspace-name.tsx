@@ -4,7 +4,7 @@ import { useActionState, useEffect, useState } from "react";
 import { field } from "../../components/controls.ts";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { renameWorkspaceAction, type SettingsState } from "./actions.ts";
-import { button, heading, panel } from "./styles.ts";
+import { alert, button, heading, panel } from "./styles.ts";
 
 export async function renameWorkspace(previous: SettingsState, form: FormData): Promise<SettingsState> {
   try {
@@ -23,7 +23,7 @@ export function WorkspaceName({ name, canManage }: { name: string; canManage: bo
         <RenameForm name={name} />
       ) : (
         <>
-          <p className="text-lg font-semibold wrap-anywhere">{name}</p>
+          <p className="font-medium wrap-anywhere">{name}</p>
           <p className="text-sm text-muted">Only an owner or admin of this workspace can rename it.</p>
         </>
       )}
@@ -50,7 +50,7 @@ function RenameForm({ name }: { name: string }) {
         <button type="submit" aria-disabled={pending || undefined} onClick={(e) => { if (pending) e.preventDefault(); }} className={button}>{pending ? "Saving…" : "Save name"}</button>
         <span role="status" className="text-sm text-ok">{state.saved && !pending && !edited ? "Saved." : ""}</span>
       </div>
-      {failed && <p id="workspace-error" role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{state.error}</p>}
+      {failed && <p id="workspace-error" role="alert" className={alert}>{state.error}</p>}
     </form>
   );
 }

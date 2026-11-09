@@ -1,4 +1,4 @@
-import { pageTitle } from "../../components/page-head.tsx";
+import { PageHead } from "../../components/page-head.tsx";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -23,26 +23,20 @@ export default async function NewProjectPage() {
   if (limit) {
     return (
       <AppShell shell={shell} current="new">
-        <div className="flex max-w-2xl flex-col gap-4">
-          <p className="text-sm text-muted">New project</p>
-          <h1 className={pageTitle}>This workspace has reached its project limit.</h1>
-          <p className="text-muted">{projectLimitMessage(limit.plan, limit.projects)}</p>
-          <p><Link href="/" className="underline underline-offset-4 hover:text-action-ink">Go to your projects</Link></p>
+        <div className="flex max-w-3xl flex-col gap-4">
+          <PageHead flush eyebrow={shell.workspace.name} title="New project" subtitle={<>This workspace has reached its project limit. {projectLimitMessage(limit.plan, limit.projects)}</>} />
+          <p><Link href="/" className="underline underline-offset-4 hover:text-ink">Go to Overview</Link></p>
         </div>
       </AppShell>
     );
   }
   return (
     <AppShell shell={shell} current="new">
-      <SetupWizard
-        intro={
-          <div className="flex flex-col gap-4">
-            <p className="text-sm text-muted">New project</p>
-            <h1 className={pageTitle}>What should Trawler use?</h1>
-            <p className="max-w-xl text-muted">Paste a real product that runs in a browser: production, staging or a preview. We read the public page, tell you what we think the product does, and propose people to try the features you choose.</p>
-          </div>
-        }
-      />
+      <div className="max-w-3xl">
+        <SetupWizard
+          intro={<PageHead flush eyebrow={shell.workspace.name} title="New project" subtitle="Paste a real product that runs in a browser: production, staging or a preview. We read the public page, tell you what we think the product does, and propose people to try the features you choose." />}
+        />
+      </div>
     </AppShell>
   );
 }

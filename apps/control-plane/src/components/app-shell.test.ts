@@ -28,7 +28,7 @@ describe("AppShell", () => {
 
   it("leaves All runs without a count and pins Settings to the foot of the sidebar", () => {
     expect(link(nav(render()), "All runs")).not.toMatch(/tabular-nums/);
-    expect(nav(render())).toMatch(/<ul class="[^"]*\bmd:mt-auto\b[^"]*"><li[^>]*><a href="\/settings"/);
+    expect(nav(render())).toMatch(/<ul class="[^"]*\blg:mt-auto\b[^"]*"><li[^>]*><a href="\/settings"/);
   });
 
   it("groups the projects under a Projects heading with their number, each with its product's address under its name", () => {
@@ -67,8 +67,8 @@ describe("AppShell", () => {
     const html = render();
     expect(html).not.toContain("<header");
     const [phone, desktop] = menus(html);
-    expect(phone).toMatch(/^<details class="[^"]*\bmd:hidden\b/);
-    expect(desktop).toMatch(/^<details class="[^"]*\bhidden\b[^"]*\bmd:block\b/);
+    expect(phone).toMatch(/^<details class="[^"]*\blg:hidden\b/);
+    expect(desktop).toMatch(/^<details class="[^"]*\bhidden\b[^"]*\blg:block\b/);
     for (const menu of [phone!, desktop!]) {
       expect(menu).toContain('aria-label="Account: Ben Ortiz"');
       expect(menu).toMatch(/>BO<\/span>/);
@@ -95,14 +95,14 @@ describe("AppShell", () => {
 
   it("puts the whole nav in one sideways row on a phone, without the Projects heading", () => {
     const html = render();
-    expect(html).toMatch(/<nav aria-label="Workspace" class="flex [^"]*\boverflow-x-auto\b[^"]*\bmd:flex-col\b/);
-    expect(html).toMatch(/<p id="nav-projects" class="hidden [^"]*\bmd:block\b/);
+    expect(html).toMatch(/<nav aria-label="Workspace" class="flex [^"]*\boverflow-x-auto\b[^"]*\blg:flex-col\b/);
+    expect(html).toMatch(/<p id="nav-projects" class="hidden [^"]*\blg:block\b/);
   });
 
   it("keeps the panel in view on a wide screen and lets its nav scroll on its own", () => {
     const html = render();
-    expect(html).toMatch(/<div class="[^"]*\bmd:sticky\b[^"]*\bmd:top-0\b[^"]*\bmd:h-dvh\b/);
-    expect(html).toMatch(/<nav aria-label="Workspace" class="[^"]*\bmd:overflow-y-auto\b/);
+    expect(html).toMatch(/<div class="[^"]*\blg:sticky\b[^"]*\blg:top-0\b[^"]*\blg:h-dvh\b/);
+    expect(html).toMatch(/<nav aria-label="Workspace" class="[^"]*\blg:overflow-y-auto\b/);
   });
 
   it("hides the wordmark below 360 px, for screen readers only", () => {

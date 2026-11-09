@@ -108,22 +108,22 @@ test("the plan is the project's Plan tab, next to its Runs with their number, wi
   expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}/runs" class="[^"]*">Runs<span[^>]*>3</span></a>`));
   expect(state.counted).toEqual([["org-1", ID]]);
   expect(html).not.toContain('aria-label="Progress"');
-  expect(html).toMatch(new RegExp(`<a href="/runs/new\\?project=${ID}&amp;plan=[0-9a-f-]+"[^>]*>New run<`));
+  expect(html).toMatch(new RegExp(`<a href="/runs/new\\?project=${ID}&amp;plan=[0-9a-f-]+"[^>]*>Start run<`));
   expect(html).toMatch(/<a href="https:\/\/app\.acme\.test\/"[^>]*>app\.acme\.test</);
   expect(html).not.toContain("Invoices.");
 });
 
-test("the plan says how many features it was built from, with a way to change them and propose people again", async () => {
+test("the plan says how many features it was built from, with a way to change them", async () => {
   const html = await render();
   expect(html).toMatch(/<summary[^>]*>Built from (<!-- -->)?1(<!-- -->)? (<!-- -->)?feature<\/summary><ul[^>]*><li>Send an invoice<\/li><\/ul><\/details>/);
   expect(html).not.toMatch(/<p[\s>](?:(?!<\/p>).)*<details/);
-  expect(html).toMatch(new RegExp(`<a [^>]*href="/projects/${ID}/features\\?plan=[0-9a-f-]+"[^>]*>Change features and propose people again</a>`));
+  expect(html).toMatch(new RegExp(`<a [^>]*href="/projects/${ID}/features\\?plan=[0-9a-f-]+"[^>]*>Change features</a>`));
 });
 
-test("a project without runs still offers its Runs tab, counted as none", async () => {
+test("a project without runs still offers its Runs tab, without a zero count", async () => {
   const html = await render();
   expect(html).toContain(">Acme</h1>");
-  expect(html).toMatch(new RegExp(`<a href="/projects/${ID}/runs" class="[^"]*">Runs<span[^>]*>0</span></a>`));
+  expect(html).toMatch(new RegExp(`<a href="/projects/${ID}/runs" class="[^"]*">Runs</a>`));
 });
 
 test("a project whose run state cannot be read is not found", async () => {

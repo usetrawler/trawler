@@ -154,7 +154,8 @@ export async function revokeMcpConnectionAction(_previous: McpConnectionState, f
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const NOT_AN_ADDRESS = "Enter the email address they sign in with.";
+const NO_ADDRESS = "Enter the email address they sign in with.";
+const NOT_AN_ADDRESS = "That does not look like an email address. Check it and try again.";
 const MEMBERS_OWNERS_AND_ADMINS = "Only an owner or admin of this workspace can invite people or change who is in it.";
 const roleFrom = (value: FormDataEntryValue | null) => (value === "admin" ? "admin" : "member");
 const nameOf = (person: { name: string; email: string }) => person.name.trim() || person.email;
@@ -207,6 +208,7 @@ export async function inviteMemberAction(_previous: MembersState, form: FormData
   const member = await membersManager();
   if ("error" in member) return member;
   const email = String(form.get("email") ?? "").trim().toLowerCase();
+  if (!email) return { error: NO_ADDRESS, field: "email" };
   if (email.length > 254 || !EMAIL.test(email)) return { error: NOT_AN_ADDRESS, field: "email" };
   if (!withinListingLimit(`invite:${member.userId}`)) return { error: "Too many invitations. Wait a few minutes and try again." };
   const auth = getAuth();

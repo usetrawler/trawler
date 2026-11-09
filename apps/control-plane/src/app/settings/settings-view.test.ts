@@ -22,7 +22,7 @@ test("the key shows its provider, last characters, who added it and when, with R
 
 test("a key added by someone who has left says so, and an OpenAI-compatible key shows its base URL", () => {
   const html = text(render(createElement(ModelKey, { saved: { ...saved, provider: "custom", baseUrl: "https://llm.example.com/v1" }, addedBy: null, canManage: true })));
-  expect(html).toContain("Added by someone no longer in this workspace on");
+  expect(html).toContain("Added by a former member on");
   expect(html).toContain("OpenAI-compatible key …a1b2");
   expect(html).toContain("Base URL https://llm.example.com/v1");
 });
@@ -110,7 +110,7 @@ test("an owner or admin edits the workspace name; a member reads it as text, wit
   expect(owner).toMatch(/<button type="submit"[^>]*>Save name<\/button>/);
   const member = render(createElement(WorkspaceName, { name: "Acme", canManage: false }));
   expect(member).not.toMatch(/<form|<input|<button/);
-  expect(member).toMatch(/<p class="text-lg font-semibold wrap-anywhere">Acme<\/p><p class="text-sm text-muted">Only an owner or admin of this workspace can rename it\.<\/p>/);
+  expect(member).toMatch(/<p class="font-medium wrap-anywhere">Acme<\/p><p class="text-sm text-muted">Only an owner or admin of this workspace can rename it\.<\/p>/);
 });
 
 test("starting a step, or sending one, clears what the last one said, so an old error never comes back", () => {

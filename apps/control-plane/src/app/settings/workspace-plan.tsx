@@ -7,6 +7,7 @@ export function WorkspacePlan({ plan, projects, runsToday }: { plan: Plan; proje
     { label: "Hosted runs today (UTC)", used: runsToday, limit: plan.limits.runsPerDay, note: "Counted when a run starts, including Run again." },
     { label: "People in a run", used: null, limit: plan.limits.people, note: null },
   ];
+  const mail = <a href="mailto:contact@usetrawler.com" className="text-ink underline underline-offset-4">contact@usetrawler.com</a>;
   return (
     <section aria-labelledby="plan-heading" className={panel}>
       <h2 id="plan-heading" className={heading}>Billing</h2>
@@ -19,16 +20,16 @@ export function WorkspacePlan({ plan, projects, runsToday }: { plan: Plan; proje
           <div key={row.label} className="flex flex-col gap-1 py-3 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
             <dt>{row.label}</dt>
             <dd className="flex flex-col gap-1 sm:items-end">
-              <span className="font-mono">{row.used === null ? row.limit : Number.isFinite(row.limit) ? `${row.used} of ${row.limit}` : `${row.used}, no limit`}</span>
-              {row.note && <span className="text-xs text-muted">{row.note}</span>}
+              <span className="tabular-nums">{row.used === null ? row.limit : Number.isFinite(row.limit) ? `${row.used} of ${row.limit}` : `${row.used}, no limit`}</span>
+              {row.note && <span className="text-sm text-muted">{row.note}</span>}
             </dd>
           </div>
         ))}
       </dl>
       <p className="text-sm text-muted">
         {plan.plan === "free"
-          ? "Past these limits, run the product on your own machine with the local runner, or write to contact@usetrawler.com about the Team plan."
-          : "Trawler sets the plan. Write to contact@usetrawler.com to change it or raise a limit."}
+          ? <>Past these limits, run the product on your own machine with the local runner, or write to {mail} about the Team plan.</>
+          : <>Trawler sets the plan. Write to {mail} to change it or raise a limit.</>}
       </p>
     </section>
   );

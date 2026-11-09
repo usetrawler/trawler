@@ -5,7 +5,7 @@ import { field, keyField } from "../../components/controls.ts";
 import { LocalTime } from "../../components/local-time.tsx";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { createApiTokenAction, revokeApiTokenAction, type ApiTokenState } from "./actions.ts";
-import { button, heading, panel } from "./styles.ts";
+import { alert, button, danger, heading, keepButton, panel } from "./styles.ts";
 
 export interface TokenView {
   id: string;
@@ -78,7 +78,7 @@ function TokenManager({ tokens, projects }: { tokens: TokenView[]; projects: Arr
   return (
     <div className="flex flex-col gap-4">
       {shown && (
-        <div role="status" className="flex flex-col gap-2 border border-ok p-4">
+        <div role="status" className="flex flex-col gap-2 border-l-2 border-ok pl-3">
           <p className="text-sm"><strong className="font-semibold">{shown.name}</strong> was created. Copy the token now: it is not shown again.</p>
           <div className="flex flex-wrap gap-2">
             <input ref={tokenBox} readOnly aria-label={`Token ${shown.name}`} value={shown.token} className={`${keyField} flex-1`} onFocus={(e) => e.currentTarget.select()} />
@@ -102,7 +102,7 @@ function TokenManager({ tokens, projects }: { tokens: TokenView[]; projects: Arr
         </label>
         <button type="submit" aria-disabled={creating || undefined} onClick={(e) => { if (creating) e.preventDefault(); }} className={button}>{creating ? "Creating…" : "Create token"}</button>
       </form>
-      {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
+      {error && <p role="alert" className={alert}>{error}</p>}
       {tokens.length === 0 ? (
         <p className="text-sm text-muted">No API tokens yet.</p>
       ) : (
@@ -119,11 +119,11 @@ function TokenManager({ tokens, projects }: { tokens: TokenView[]; projects: Arr
                 <form action={revoke} className="flex flex-wrap items-center gap-3 text-sm">
                   <input type="hidden" name="id" value={t.id} />
                   <span>Revoke {t.name}? Jobs that use it stop working.</span>
-                  <button type="submit" aria-disabled={revoking || undefined} onClick={(e) => { if (revoking) e.preventDefault(); }} className="text-bad underline underline-offset-4">{revoking ? "Revoking…" : "Revoke"}</button>
-                  <button type="button" onClick={() => setAsking(null)} className="text-muted underline underline-offset-4">Keep it</button>
+                  <button type="submit" aria-disabled={revoking || undefined} onClick={(e) => { if (revoking) e.preventDefault(); }} className={danger}>{revoking ? "Revoking…" : "Revoke"}</button>
+                  <button type="button" onClick={() => setAsking(null)} className={keepButton}>Keep it</button>
                 </form>
               ) : (
-                <button type="button" onClick={() => setAsking(t.id)} aria-label={`Revoke ${t.name}`} className="text-sm text-muted underline-offset-4 hover:text-bad hover:underline">Revoke</button>
+                <button type="button" onClick={() => setAsking(t.id)} aria-label={`Revoke ${t.name}`} className={button}>Revoke</button>
               )}
             </li>
           ))}

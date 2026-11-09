@@ -7,7 +7,7 @@ import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { runView } from "../runs/report.ts";
 import { runIdByNumber, runSummary, startRun } from "../runs/runs.ts";
-import { projectHead, projectRunCount, runCounts, runHead, workspaceNav, workspaceProjects, workspaceRuns } from "./overview.ts";
+import { mostRecentProject, projectHead, projectRunCount, runCounts, runHead, workspaceNav, workspaceProjects, workspaceRuns } from "./overview.ts";
 import { createPlan, createProject, listPlans, removePlan, renamePlan, replacePlan } from "./projects.ts";
 
 const t = await testDb();
@@ -64,7 +64,7 @@ async function seedRun(orgId: string, projectId: string, at: Date, set: { status
 const project = (orgId: string, name: string, targetUrl: string) => withOrg(t.db, orgId, (tx) => createProject(tx, orgId, { ...config, name, targetUrl }, keys));
 
 beforeAll(async () => {
-  for (const org of ["org-a", "org-b", "org-c", "org-d"]) await sql`insert into organization (id, name, slug, "createdAt") values (${org}, ${org}, ${org}, now())`.execute(t.db);
+  for (const org of ["org-a", "org-b", "org-c", "org-d", "org-e"]) await sql`insert into organization (id, name, slug, "createdAt") values (${org}, ${org}, ${org}, now())`.execute(t.db);
   acme = await project("org-a", "Acme", "https://app.acme.test/");
   empty = await project("org-a", "Empty", "https://empty.acme.test/");
   fresh = await project("org-a", "Fresh", "https://fresh.acme.test/");
@@ -152,10 +152,20 @@ test("a project's runs are the same history narrowed to that project, with the p
   expect(await withOrg(t.db, "org-a", (tx) => projectHead(tx, "org-a", beta))).toEqual({ id: beta, name: "Beta", targetUrl: "https://beta.acme.test/" });
 });
 
-test("the navigation lists the workspace's projects, the most recently active first, marks those with a run queued or live", async () => {
+test("the navigation lists the workspace's projects by name, so they keep their place when a run starts, and marks those with a run queued or live", async () => {
   expect(await withOrg(t.db, "org-a", (tx) => workspaceNav(tx, "org-a"))).toEqual({
-    projects: [{ id: fresh, name: "Fresh", address: "fresh.acme.test" }, { id: beta, name: "Beta", address: "beta.acme.test", live: true }, { id: acme, name: "Acme", address: "app.acme.test", live: true }, { id: empty, name: "Empty", address: "empty.acme.test" }],
+    projects: [{ id: acme, name: "Acme", address: "app.acme.test", live: true }, { id: beta, name: "Beta", address: "beta.acme.test", live: true }, { id: empty, name: "Empty", address: "empty.acme.test" }, { id: fresh, name: "Fresh", address: "fresh.acme.test" }],
   });
+});
+
+test("the most recently active project is the one with the latest run, or the newest project without runs", async () => {
+  expect(await withOrg(t.db, "org-a", (tx) => mostRecentProject(tx, "org-a"))).toBe(fresh);
+  expect(await withOrg(t.db, "org-none", (tx) => mostRecentProject(tx, "org-none"))).toBeNull();
+  const older = await project("org-e", "Older", "https://older.test/");
+  const newer = await project("org-e", "Newer", "https://newer.test/");
+  expect(await withOrg(t.db, "org-e", (tx) => mostRecentProject(tx, "org-e"))).toBe(newer);
+  await seedRun("org-e", older, new Date(Date.now() + 60_000), { status: "succeeded", cost: 0.1 }, [], 0, 0);
+  expect(await withOrg(t.db, "org-e", (tx) => mostRecentProject(tx, "org-e"))).toBe(older);
 });
 
 test("projects that share a name are told apart by their product's host, in the navigation and in the runs", async () => {

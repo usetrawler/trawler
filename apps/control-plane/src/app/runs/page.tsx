@@ -20,11 +20,10 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
   const { orgId } = member;
   const [history, counts] = await withOrg(getDb(), orgId, (tx) => Promise.all([workspaceRuns(tx, orgId, { show, before, ...(origin === "any" ? {} : { origin }) }), runCounts(tx, orgId, undefined, undefined, origin === "any" ? undefined : origin)]));
   const shell = await shellFor(member);
-  const newest = shell.workspace.projects[0];
   return (
-    <AppShell shell={shell} current="runs" wide>
+    <AppShell shell={shell} current="runs">
       <RunsView
-        head={<PageHead eyebrow="Workspace" title="All runs" action={<PrimaryLink href={newest ? `/runs/new?project=${newest.id}` : "/new"}>New run</PrimaryLink>} />}
+        head={<PageHead eyebrow={shell.workspace.name} title="All runs" action={<PrimaryLink href={shell.workspace.projects.length > 0 ? "/runs/new" : "/new"}>Start run</PrimaryLink>} />}
         basePath="/runs"
         show={show} origin={origin} counts={counts} runs={history.runs} olderThan={history.olderThan} paged={before !== undefined}
       />

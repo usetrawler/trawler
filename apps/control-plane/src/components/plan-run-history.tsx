@@ -9,7 +9,7 @@ export function PlanRunHistory({ runs, more, newest }: { runs: RunLine[]; more?:
       {(more || newest) && (
         <div className="flex flex-wrap gap-4 text-sm">
           {newest && <a href={newest} className="underline underline-offset-4">Newest runs</a>}
-          {more && <a href={more} className="underline underline-offset-4">{newest ? "Older runs" : "More runs"}</a>}
+          {more && <a href={more} className="-my-2 inline-block py-2.5 underline underline-offset-4">{newest ? "Older runs" : "More runs"}</a>}
         </div>
       )}
     </section>

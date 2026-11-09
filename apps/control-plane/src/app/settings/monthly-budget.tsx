@@ -4,7 +4,7 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { field } from "../../components/controls.ts";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { removeMonthlyBudgetAction, setMonthlyBudgetAction, type BudgetState } from "./actions.ts";
-import { button, heading, panel } from "./styles.ts";
+import { alert, button, heading, panel } from "./styles.ts";
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
 
@@ -86,7 +86,7 @@ function BudgetForm({ limitUsd }: { limitUsd: number | null }) {
           <span role="status" className="text-sm text-ok">{busy ? "" : said}</span>
         </div>
       </form>
-      {failed && <p id="budget-error" role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error?.text}</p>}
+      {failed && <p id="budget-error" role="alert" className={alert}>{error?.text}</p>}
     </div>
   );
 }

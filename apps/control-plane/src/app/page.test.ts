@@ -60,7 +60,7 @@ test("a workspace with projects lands on its overview, named after the workspace
   state.member = memberOf("org-1");
   state.projects = [project];
   const html = renderToStaticMarkup(await Home());
-  expect(html).toContain(">Acme workspace</p>");
+  expect(html).toContain(">Acme workspace</div>");
   expect(html).toContain(">No runs yet.</h1>");
   expect(html).toContain('<ul aria-label="Projects"');
   expect(html).toContain(">Acme workspace</span>");

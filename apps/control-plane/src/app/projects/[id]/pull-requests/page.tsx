@@ -40,7 +40,7 @@ export default async function PullRequestsPage({ params }: { params: Promise<{ i
   const { project, runState, counts, lines, earlier } = result;
   const shell = await shellFor(member);
   return (
-    <AppShell shell={shell} current={{ project: id }} wide>
+    <AppShell shell={shell} current={{ project: id }}>
       <ProjectHead project={project} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="pull-requests" counts={counts} runState={runState} />
       <div className="flex flex-col gap-6">
         <p className="max-w-3xl text-muted">
@@ -49,7 +49,7 @@ export default async function PullRequestsPage({ params }: { params: Promise<{ i
         <PullRequestTable projectId={id} lines={lines} />
         {earlier.length > 0 && (
           <section aria-labelledby="earlier-plans" className="flex flex-col gap-2">
-            <h2 id="earlier-plans" className="text-sm text-muted">Earlier pull request plans</h2>
+            <h2 id="earlier-plans" className="font-medium">Earlier pull request plans</h2>
             <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
               {earlier.map((p) => <li key={p.id}><a href={`/projects/${id}?plan=${p.id}`} className="underline underline-offset-4">{p.label}</a></li>)}
             </ul>

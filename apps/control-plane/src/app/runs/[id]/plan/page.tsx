@@ -43,9 +43,9 @@ export default async function RunPlanPage({ params, searchParams }: { params: Pr
   const goalCount = people.reduce((total, person) => total + person.goals.length, 0);
   const runs = run.savedPlan?.id ? history.runs : history.runs.filter((r) => r.number === run.number);
   return (
-    <AppShell shell={shell} current={{ project: run.projectId }} parent wide>
+    <AppShell shell={shell} current={{ project: run.projectId }} parent>
       <RunBreadcrumb project={project} number={run.number} plan={planName} onPlan fromPullRequest={Boolean(run.pullRequest?.number)} />
-      <PageHead eyebrow={<>Plan used in <a href={report} className="text-ink underline underline-offset-4">{runTitle(run.number)}</a></>} title={planName} subtitle={people.length ? `${people.length} ${people.length === 1 ? "person" : "people"} · ${goalCount} ${goalCount === 1 ? "goal" : "goals"}` : undefined} />
+      <PageHead title={planName} subtitle={<>Used in <a href={report} className="text-ink underline underline-offset-4">{runTitle(run.number)}</a>{people.length ? ` · ${people.length} ${people.length === 1 ? "person" : "people"} · ${goalCount} ${goalCount === 1 ? "goal" : "goals"}` : ""}</>} />
       <div className="flex max-w-3xl flex-col gap-10">
         <section aria-label="Test scope" className="flex flex-col gap-2">
           <h2 className="font-medium">People and goals</h2>

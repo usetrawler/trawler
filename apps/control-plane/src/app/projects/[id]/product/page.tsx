@@ -40,7 +40,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   if (!project || !runState) notFound();
   const shell = await shellFor(member);
   return (
-    <AppShell shell={shell} current={{ project: id }} wide>
+    <AppShell shell={shell} current={{ project: id }}>
       <ProjectHead project={{ id: project.id, name: project.name, targetUrl: project.target_url }} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="product" counts={counts} runState={runState} />
       <div className="flex max-w-3xl flex-col gap-6">
         <dl className="divide-y divide-line border-y border-line">
@@ -49,7 +49,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           {project.focus && <Row label="Focus">{project.focus}</Row>}
           {project.docs_url && <Row label="Docs"><a href={project.docs_url} target="_blank" rel="noreferrer" className="font-mono text-sm underline underline-offset-4">{project.docs_url}<span className="sr-only"> (opens in a new tab)</span></a></Row>}
         </dl>
-        <p className="text-sm text-muted">The people and goals of each plan are proposed from this description. To change it, open the <a href={`/projects/${id}`} className="text-ink underline underline-offset-4">plan</a> and choose Change features and propose people again.</p>
+        <p className="text-sm text-muted">The people and goals of each plan are proposed from this description. To change it, open the <a href={`/projects/${id}`} className="text-ink underline underline-offset-4">plan</a> and choose Change features.</p>
       </div>
     </AppShell>
   );

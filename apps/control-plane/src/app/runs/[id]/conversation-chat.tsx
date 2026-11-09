@@ -79,7 +79,7 @@ export function ConversationChat({ run, live, now }: { run: RunSummary; live: bo
     <section aria-labelledby="conversation" className="flex min-w-0 flex-col gap-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 id="conversation" className="text-lg font-medium">Conversation</h2>
+          <h2 id="conversation" className="font-medium">Conversation</h2>
           <p className="text-sm text-muted">
             {messages.length === 0 ? "No one has said anything yet." : `${messages.length} ${messages.length === 1 ? "message" : "messages"}${minutes ? ` in ${minutes} ${minutes === 1 ? "minute" : "minutes"}` : ""}${live ? " so far · new ones appear as they are said" : ""}`}
           </p>

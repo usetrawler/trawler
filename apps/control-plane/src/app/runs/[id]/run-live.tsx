@@ -1,7 +1,7 @@
 "use client";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { Fragment, useCallback, useEffect, useId, useRef, useState, useTransition } from "react";
-import { area, dangerButton, secondaryButton } from "../../../components/controls.ts";
+import { area, dangerButton, secondaryButton, tab, tabCount, tabRow } from "../../../components/controls.ts";
 import { Icon } from "../../../components/icon.tsx";
 import { pageTitle } from "../../../components/page-head.tsx";
 import type { runView, StageState, PersonaState } from "../../../runs/report.ts";
@@ -9,6 +9,7 @@ import type { RunSummary } from "../../../runs/runs.ts";
 import { findingAnchor } from "../../../runs/finding-anchor.ts";
 import { SEVERITY_TONE } from "../../../runs/severity.ts";
 import { webLink } from "../../../lib/web-link.ts";
+import { UNCLAIMED_RUN_MINUTES } from "../../../runs/run-clock.ts";
 import { NOTHING_TO_TEST, runPath, runStatusLabel, runStatusTone, runTitle } from "../../../runs/status.ts";
 import { RunBreadcrumb } from "../../../components/run-breadcrumb.tsx";
 import { DocsLink } from "../../../components/docs-link.tsx";
@@ -86,7 +87,7 @@ export function PullRequestPlan({ run, live }: { run: RunSummary; live: boolean 
     return (
       <section id="pr-plan" aria-labelledby="pr-plan-heading" className="mb-10 flex max-w-3xl flex-col gap-1">
         <h2 id="pr-plan-heading" className="font-medium">{heading}</h2>
-        <p className="text-sm text-muted">{plan.note ?? (live ? `Trawler is reading ${pr} to choose who tries what.` : `The run ended before Trawler chose goals for ${pr}.`)}</p>
+        <p className="text-sm text-muted">{plan.note ?? (live ? `Trawler is reading ${pr} to choose who tries what.` : plan.mode === "both" ? `No goals were written for ${pr}, so the project's plan ran as it is.` : `The run ended before Trawler chose goals for ${pr}.`)}</p>
       </section>
     );
   }
@@ -208,6 +209,7 @@ export function NotABugButton({ runId, findingKey, title, working, onDone, onRef
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (pending) return;
+    if (!reason.trim()) return setError({ error: "Say why it is not a bug.", why: "reason" });
     setError(null);
     start(async () => {
       const result: Outcome = await dismissFindingAction(runId, findingKey, reason).catch((err) => ({ error: unstable_isUnrecognizedActionError(err) ? updatedSinceOpened("Reload the page to mark it not a bug.") : "It could not be marked not a bug. Try again." }));
@@ -220,9 +222,9 @@ export function NotABugButton({ runId, findingKey, title, working, onDone, onRef
     });
   };
   return (
-    <form onSubmit={submit} className="flex flex-col gap-2 text-sm">
+    <form onSubmit={submit} noValidate className="flex max-w-xl flex-col gap-2 text-sm">
       <label htmlFor={field}>Why is it not a bug?</label>
-      <textarea id={field} required autoFocus maxLength={500} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} aria-describedby={error ? `${hint} ${problem}` : hint} aria-invalid={error?.why === "reason" ? true : undefined} className={`${area} w-full resize-y`} />
+      <textarea id={field} autoFocus maxLength={500} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} aria-describedby={error ? `${hint} ${problem}` : hint} aria-invalid={error?.why === "reason" ? true : undefined} className={`${area} w-full resize-y`} />
       <p id={hint} className="text-muted">The people in later runs of this project are told, with your reason, and asked not to report it again.</p>
       <div className="flex flex-wrap items-center gap-3">
         <button type="submit" aria-disabled={pending || undefined} className={secondaryButton}>{pending ? "Saving…" : "Mark as not a bug"}</button>
@@ -256,7 +258,7 @@ export function UndoNotABug({ runId, f, onDone, onRefused }: { runId: string; f:
         {f.dismissal.matched ? (
           <span className="min-w-0 wrap-anywhere text-muted">Marked by Trawler: it matches a finding marked not a bug in <a href={`${runPath(f.dismissal.matched.runNumber)}#${findingAnchor(f.dismissal.matched.findingKey)}`} className="underline underline-offset-4 hover:text-ink">{runTitle(f.dismissal.matched.runNumber)}</a>.</span>
         ) : (
-          <span className="min-w-0 wrap-anywhere text-muted">Marked by {f.dismissal.by ?? "someone no longer in this workspace"} on <LocalTime iso={new Date(f.dismissal.at).toISOString()} />.</span>
+          <span className="min-w-0 wrap-anywhere text-muted">Marked by {f.dismissal.by ?? "a former member"} on <LocalTime iso={new Date(f.dismissal.at).toISOString()} />.</span>
         )}
         <button type="button" aria-disabled={pending || undefined} onClick={undo} className={secondaryButton}>{pending ? "Undoing…" : "Undo"}<span className="sr-only">: {f.title}</span></button>
         {error && <span role="alert" className="text-bad">{error}</span>}
@@ -376,7 +378,7 @@ export function FindingRow({ f, n, mark, tag, note, detail, action, dismiss, cop
           <span aria-hidden className="pt-1.5 text-muted transition-transform group-open:rotate-180 max-md:hidden"><Icon name="chevron" /></span>
         </summary>
         <div className="flex flex-col gap-4 pt-1 pb-5 text-[15px] wrap-anywhere md:pl-[100px]">
-          {(copy || dismiss) && <div className="flex flex-wrap items-start gap-3">{copy}{dismiss && <div className="min-w-0 flex-1">{dismiss}</div>}</div>}
+          {(copy || dismiss) && <div className="flex flex-wrap items-start gap-3">{copy}{dismiss && <div className="min-w-0 has-[form]:basis-full">{dismiss}</div>}</div>}
           <p className="text-sm">{f.sameReports.length > 0 ? <><strong>{f.personaName}</strong><span className="text-muted">, while trying to: </span></> : <span className="text-muted">While trying to: </span>}{f.goalText}</p>
           {f.replayedAsDefect && <p className="text-sm text-muted">{f.personaName} filed this as friction on a goal they did not reach, so Trawler replayed it too.</p>}
           <p><span className="text-muted">What happened: </span>{f.observed}</p>
@@ -430,7 +432,7 @@ function Group({ title, hint, parts, empty, issueStatus, runNumber, numbers, ope
     <section aria-labelledby={id} className="flex flex-col">
       <div className="pb-3">
         <h2 id={id} className="flex items-baseline gap-2 font-medium">{title} <span className="text-sm font-normal text-muted tabular-nums">{count}</span></h2>
-        <p className="mt-1 text-sm text-muted">{hint}</p>
+        {count > 0 && <p className="mt-1 text-sm text-muted">{hint}</p>}
       </div>
       {count === 0 ? <p className="text-sm text-muted">{empty}</p> : (
         <ol className="divide-y divide-line border-y border-line">
@@ -465,7 +467,7 @@ function BotProtectionNotice({ met }: { met: NonNullable<RunSummary["botProtecti
   const where = URL.canParse(met.url) ? readablePath(new URL(met.url).pathname) : null;
   return (
     <section aria-labelledby="bot-protection" className="mt-6 flex max-w-[760px] flex-col gap-2 border border-line border-l-4 border-l-warn bg-panel p-4">
-      <h2 id="bot-protection" className="text-base font-semibold">Bot protection stopped Trawler</h2>
+      <h2 id="bot-protection" className="font-medium">Bot protection stopped Trawler</h2>
       <p className="text-sm">{met.vendor}&apos;s bot protection blocked Trawler&apos;s browser{where && <> at <span className="font-mono break-all">{where}</span></>}. It stops automated browsers, so what lies behind it could not be tried, and it is not reported as a defect.</p>
       <p className="text-sm">To let Trawler through, turn the check off for this staging copy, or run the project with the local runner, which can send a header that a rule in {met.vendor} lets past.</p>
       <DocsLink page="docs/reference/troubleshooting/#bot-protection-stopped-trawler" className="text-sm underline">How to let Trawler through</DocsLink>
@@ -494,7 +496,7 @@ function RunMeta({ run, view, host, when }: { run: RunSummary; view: View; host:
     <p data-run-meta className="mt-2 text-sm break-words text-muted">
       <strong className={`font-medium ${status === "succeeded" ? "text-ink" : runStatusTone(status)}`}>{runStatusLabel(status)}</strong>
       {parts.map((part) => <span key={String(part)}> · {part}</span>)}
-      <span> · <LocalTime iso={when.toISOString()} /></span>
+      <span> · {view.live || !run.finishedAt ? "started" : "finished"} <LocalTime iso={when.toISOString()} /></span>
     </p>
   );
 }
@@ -578,7 +580,7 @@ function Stages({ stages }: { stages: View["stages"] }) {
 function PeopleColumn({ view, steps, onShow }: { view: View; steps: Map<string, number>; onShow: (personId: string) => void }) {
   return (
     <section aria-labelledby="people-goals" className="flex min-w-0 flex-col">
-      <h2 id="people-goals" className="text-lg font-medium">{view.live ? "Right now" : "Goals"}</h2>
+      <h2 id="people-goals" className="font-medium">{view.live ? "Right now" : "Goals"}</h2>
       {!view.live && <p className="text-sm text-muted">{outcome(view).people}</p>}
       <ul aria-label="People" className="mt-3">
         {view.personas.map((p, i) => {
@@ -607,8 +609,8 @@ function PeopleColumn({ view, steps, onShow }: { view: View; steps: Map<string, 
                     </li>
                   ))}
                 </ul>
-                {(p.defects > 0 || p.friction > 0) && <span className="mt-1 block">{plural(p.defects, "defect report", "defect reports")} · {plural(p.friction, "friction", "frictions")}</span>}
-                <button type="button" onClick={() => onShow(p.id)} className="mt-1.5 underline underline-offset-4 hover:text-ink">What {p.name} did{steps.get(p.id) ? ` · ${plural(steps.get(p.id)!, "step", "steps")}` : ""}</button>
+                {(p.defects > 0 || p.friction > 0) && <span className="mt-1 block">{plural(p.defects, "defect report", "defect reports")} · {plural(p.friction, "rough edge", "rough edges")}</span>}
+                <button type="button" onClick={() => onShow(p.id)} className="mt-1.5 -mb-2 py-2.5 text-left underline underline-offset-4 hover:text-ink">What {p.name} did{steps.get(p.id) ? ` · ${plural(steps.get(p.id)!, "step", "steps")}` : ""}</button>
               </div>
             </li>
           );
@@ -639,7 +641,7 @@ export function panelForHash(hash: string, unaddressed: Panel): Panel {
   return unaddressed;
 }
 
-export function RunLive({ initial, closedBeta, project }: { initial: Data; closedBeta?: string; project?: { id: string; name: string } }) {
+export function RunLive({ initial, closedBeta, project, ciOnly = false }: { initial: Data; closedBeta?: string; project?: { id: string; name: string }; ciOnly?: boolean }) {
   const [data, setData] = useState(initial);
   const [stale, setStale] = useState(false);
   const [gone, setGone] = useState(false);
@@ -753,9 +755,17 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
   return (
     <div className="flex flex-col">
       <RunBreadcrumb project={project} number={run.number} plan={run.savedPlan?.name ?? run.planName} fromPullRequest={Boolean(run.pullRequest?.number)} />
-      <header className="flex flex-wrap items-start justify-between gap-4">
+      <header>
+        <div className="flex flex-col items-start gap-4 md:flex-row md:justify-between md:gap-6">
+          <h1 className={`min-w-0 ${pageTitle}`}>{view.headline}</h1>
+          {!view.live && (
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <a href={`/runs/new?project=${run.projectId}${run.savedPlan && !run.prPlan ? `&plan=${run.savedPlan.id}` : ""}`} className={secondaryButton}>{ciOnly ? "Run from CI" : "Start run"}</a>
+              {!closedBeta && run.execution !== "own" && <RunAgainButton runId={run.id} again={again} />}
+            </div>
+          )}
+        </div>
         <div className="min-w-0">
-          <h1 className={pageTitle}>{view.headline}</h1>
           {subject && <p className="mt-1 break-words text-ink">{subject}</p>}
           {skipped && <p className="mt-2 max-w-2xl text-muted">{run.prPlan?.note ?? NOTHING_TO_TEST}</p>}
           <RunMeta run={run} view={view} host={host} when={new Date(when)} />
@@ -764,15 +774,10 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
             <span className="sr-only">{runStatusLabel(run.status)}. {view.headline} <span key={announcement.n}>{announcement.text}</span></span>
           </p>
         </div>
-        {!view.live && (
-          <div className="flex flex-wrap gap-2">
-            <a href={`/runs/new?project=${run.projectId}${run.savedPlan && !run.prPlan ? `&plan=${run.savedPlan.id}` : ""}`} className={secondaryButton}>Start another run</a>
-            {!closedBeta && run.execution !== "own" && <RunAgainButton runId={run.id} again={again} />}
-          </div>
-        )}
       </header>
       {!view.live && again.error && <div className="mt-3 flex wide:justify-end"><RunAgainError again={again} /></div>}
       {!view.live && closedBeta && run.execution !== "own" && <p className="mt-3 max-w-md self-end border-l-2 border-warn pl-3 text-sm max-wide:self-start">{closedBeta}</p>}
+      {run.status === "queued" && <p className="mt-2 text-sm text-muted">Most runs start within a minute. If no runner picks this one up within {UNCLAIMED_RUN_MINUTES} minutes, Trawler stops it and says so here.</p>}
       {view.live && (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <RunCost run={run} live />
@@ -780,11 +785,11 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
         </div>
       )}
       {run.botProtection && <BotProtectionNotice met={run.botProtection} />}
-      <nav aria-label="Run report" hidden={skipped} className="mt-6 flex flex-wrap gap-x-6 border-b border-line">
+      <nav aria-label="Run report" hidden={skipped} className={`mt-6 ${tabRow}`}>
         {PANELS.map(([key, name]) => (
           <button key={key} type="button" aria-pressed={panel === key} aria-controls={`run-${key}`} onClick={() => openPanel(key)}
-            className={`-mb-px flex min-h-11 items-center gap-1.5 border-b-2 text-[15px] ${panel === key ? "border-ink font-medium text-ink" : "border-transparent text-muted hover:text-ink"}`}>
-            {name}{key === "findings" && totalFindings > 0 && <span className="text-sm font-normal text-muted tabular-nums">{totalFindings}</span>}
+            className={tab(panel === key)}>
+            {name}{key === "findings" && totalFindings > 0 && <span className={tabCount}>{totalFindings}</span>}
           </button>
         ))}
       </nav>
@@ -825,7 +830,7 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
             <PeopleColumn view={view} steps={stepsOf(run)} onShow={(id) => { setStoryFilter({ person: id }); document.getElementById("story")?.scrollIntoView({ block: "start" }); }} />
             {view.live && run.activity.length > 0 && (
               <section className="flex flex-col gap-2">
-                <h2 className="text-base font-medium">Latest activity</h2>
+                <h2 className="font-medium">Latest activity</h2>
                 <ul className="grid gap-1 text-sm">
                   {run.activity.map((a) => (
                     <li key={a.id} className="wrap-anywhere"><span className="text-muted">{run.personas.find((p) => p.id === a.personaKey)?.name ?? (a.kind === "judge" ? "Judge" : "Replay")}: </span>{a.text}</li>

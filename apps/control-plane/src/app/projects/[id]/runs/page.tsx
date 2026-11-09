@@ -47,7 +47,7 @@ export default async function ProjectRunsPage({ params, searchParams }: { params
   const { project, runState, history, counts, tabs, plans, plan } = found;
   const shell = await shellFor(member);
   return (
-    <AppShell shell={shell} current={{ project: id }} parent wide>
+    <AppShell shell={shell} current={{ project: id }} parent>
       <RunsView
         head={<ProjectHead project={project} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="runs" counts={tabs} runState={runState} {...(plan ? { planId: plan } : {})} />}
         basePath={`/projects/${id}/runs`}

@@ -34,7 +34,9 @@ const MESSAGES: Record<RefusalReason, string> = {
 
 function friendly(err: unknown): string {
   if (err instanceof FetchRefused) return err.reason === "status" ? `The page answered with an error (${err.message}).` : MESSAGES[err.reason];
-  if (err instanceof SetupLimited) return "You have started many new projects recently. Try again in a few minutes.";
+  if (err instanceof SetupLimited) return err.window === "day"
+    ? "This workspace has run as many setups as it can today. Try again tomorrow."
+    : "This workspace has run many setups in the last 10 minutes. Try again in 10 minutes.";
   if (err instanceof SetupModelFailed) return "Trawler's setup model could not write a plan this time. Try again in a moment.";
   if (err instanceof DraftGone) return "This setup has expired. Start again from the product's address.";
   if (err instanceof SetupStillRunning) return "Trawler is still choosing the people for this setup. Wait a moment.";

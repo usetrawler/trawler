@@ -84,7 +84,8 @@ test("an invitation goes to the lowercased address, as member unless admin is as
 });
 
 test("an address that is not one is refused before Better Auth is asked, and so is one Better Auth does not take", async () => {
-  const notAnAddress = { error: "Enter the email address they sign in with.", field: "email" };
+  const notAnAddress = { error: "That does not look like an email address. Check it and try again.", field: "email" };
+  expect(await inviteMemberAction({}, form({ email: " " }))).toEqual({ error: "Enter the email address they sign in with.", field: "email" });
   expect(await inviteMemberAction({}, form({ email: "not an address" }))).toEqual(notAnAddress);
   expect(await inviteMemberAction({}, form({ email: `${"a".repeat(250)}@b.cd` }))).toEqual(notAnAddress);
   expect(state.calls).toEqual([]);

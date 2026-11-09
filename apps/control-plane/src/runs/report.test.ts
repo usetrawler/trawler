@@ -99,7 +99,7 @@ test("a finished run keeps refreshing while a session or judge is still out, or 
 
 test("a stopped run says why it stopped, and never that the person reading it stopped it", () => {
   const headline = (cancelReason: RunSummary["cancelReason"]) => runView(summary({ status: "cancelled", cancelReason })).headline;
-  expect([headline("stopped"), headline("key_removed"), headline(null)]).toEqual(["This run was stopped.", "Stopped when the model key was removed.", "This run was stopped."]);
+  expect([headline("stopped"), headline("key_removed"), headline(null)]).toEqual(["Someone stopped this run.", "Stopped when the model key was removed.", "Someone stopped this run."]);
 });
 
 test("replays that were all cancelled by the cap count as skipped, not done", () => {

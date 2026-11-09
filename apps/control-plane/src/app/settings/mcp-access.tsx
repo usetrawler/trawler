@@ -3,7 +3,7 @@ import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { startTransition, useActionState, useEffect, useState } from "react";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { setMcpAccessAction, type McpAccessState } from "./actions.ts";
-import { button, heading, panel } from "./styles.ts";
+import { alert, button, heading, panel } from "./styles.ts";
 
 export async function setMcpAccess(previous: McpAccessState, form: FormData): Promise<McpAccessState> {
   try {
@@ -76,13 +76,13 @@ function McpAccessForm({ orgId, connectionsAllowed, runControlAllowed }: { orgId
         <input type="checkbox" name="runControl" checked={runControl} disabled={!connections} onChange={(e) => setRunControl(e.target.checked)} className="mt-1" />
         <span><strong>Allow assistants to start and stop runs.</strong> <span className="text-muted">Turning this off removes that right from existing connections; turning it on again does not bring it back, so each person has to connect again and agree.</span></span>
       </label>
-      {disconnecting && <p className="border-l-2 border-bad pl-3 text-sm">Saving disconnects every AI assistant connection of this workspace, for everyone, at once. They have to connect again and agree again once you allow it.</p>}
+      {disconnecting && <p className={alert}>Saving disconnects every AI assistant connection of this workspace, for everyone, at once. They have to connect again and agree again once you allow it.</p>}
       {takingControl && <p className="border-l-2 border-line pl-3 text-sm">Saving removes the right to start and stop runs from every existing connection. Turning it on again later does not bring it back.</p>}
       <div className="flex flex-wrap items-center gap-3">
         <button type="submit" aria-disabled={pending || undefined} className={button}>{pending ? "Saving…" : disconnecting ? "Disconnect everyone and save" : "Save"}</button>
         <span role="status" className="text-sm text-ok">{said}</span>
       </div>
-      {state.error && !pending && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{state.error}</p>}
+      {state.error && !pending && <p role="alert" className={alert}>{state.error}</p>}
     </form>
   );
 }

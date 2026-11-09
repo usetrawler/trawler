@@ -111,6 +111,6 @@ test("a run's result reads the way the pull request list shows it", () => {
   expect(runResult(run({ unchecked: true }))).toBe("Not checked: every replay failed");
   expect(runResult(run({ status: "stopped_budget", confirmed: 1 }))).toBe("Stopped at cap · 1 confirmed");
   expect(runResult(run({ status: "failed" }))).toBe("Failed");
-  expect(runResult(run({ status: "cancelled" }))).toBe("Cancelled");
+  expect(runResult(run({ status: "cancelled" }))).toBe("Stopped");
   expect(runResult(run({ status: "queued" }))).toBe("Queued");
 });

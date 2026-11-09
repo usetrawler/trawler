@@ -21,7 +21,7 @@ export default async function Home() {
   if (projects.length === 0) redirect("/new");
   const shell = await shellFor(member);
   return (
-    <AppShell shell={shell} current="overview" wide>
+    <AppShell shell={shell} current="overview">
       <Overview workspace={member.orgName} projects={projects} recent={recent.runs} findings={findings} going={going.runs} />
     </AppShell>
   );

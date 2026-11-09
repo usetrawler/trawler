@@ -57,7 +57,7 @@ export function WorkspaceChoice({ invitations }: { invitations: InvitationRow[] 
           {invitations.map((i) => (
             <li key={i.id} className="flex flex-col gap-4 border border-line bg-panel p-5 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
-                <h2 className="text-xl font-semibold wrap-anywhere">{i.orgName}</h2>
+                <h2 className="text-lg font-medium wrap-anywhere">{i.orgName}</h2>
                 <p className="mt-1 text-sm text-muted wrap-anywhere">{invitedBy(i)}</p>
               </div>
               <form action={join} onSubmit={() => setSentFor(i.id)} className="sm:shrink-0">

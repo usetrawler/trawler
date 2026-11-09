@@ -9,6 +9,7 @@ const FREE = vi.hoisted(() => ({ plan: "free" as const, limits: { projects: 1, r
 const state = vi.hoisted(() => ({
   member: null as Member | null,
   projects: [] as Array<{ id: string; name: string; address: string | null }>,
+  recent: null as string | null,
   plans: [] as Array<{ id: string; name: string; features: string[]; people: number }>,
   target: "https://app.acme.test/",
   people: [] as Array<{ key: string; name: string; brief: string; signs_in: boolean; account_ref: string | null }>,
@@ -37,7 +38,7 @@ vi.mock("../../../projects/projects.ts", () => ({
     return { id, plan: { id: planId, name: state.plans.find((p) => p.id === planId)?.name }, name: id === ACME ? "Acme" : "Globex", target_url: state.target, personas: state.people, goals: state.people.map((p, i) => ({ key: `g${i}`, instruction: "Look.", persona_key: p.key })), accounts: state.accounts };
   },
 }));
-vi.mock("../../../projects/overview.ts", () => ({ projectRunCount: async () => state.runs, testingConfirmedAt: async () => state.confirmedAt }));
+vi.mock("../../../projects/overview.ts", () => ({ projectRunCount: async () => state.runs, testingConfirmedAt: async () => state.confirmedAt, mostRecentProject: async () => state.recent }));
 vi.mock("../../../server/env.ts", () => ({ readEnv: () => ({ ...(state.platformKey ? { setup: { apiKey: "sk", model: "m" } } : {}), ...(state.beta ? { betaEmails: state.beta } : {}) }) }));
 vi.mock("../../../runs/runs.ts", async (original) => ({
   RunInProgress: (await original<typeof import("../../../runs/runs.ts")>()).RunInProgress,
@@ -60,13 +61,13 @@ beforeEach(() => {
     projects: [{ id: ACME, name: "Acme", address: "app.acme.test" }, { id: GLOBEX, name: "Globex", address: "shop.globex.test" }],
     plans: [...PLANS], target: "https://app.acme.test/", people: [person("ama", "Ama"), person("kwame", "Kwame")], accounts: [],
     runs: 0, onUsLeft: true, platformKey: true, refusal: null, refusalFor: [], beta: undefined, runState: { paused: false, liveRun: null }, confirmedAt: null,
-    started: [], ci: [], edited: [],
+    started: [], ci: [], edited: [], recent: null,
   });
 });
 
 test("New run opens one page that picks the project and plan, the first of each unless the address names others", async () => {
   const html = await render();
-  expect(html).toContain(">Start a run</h1>");
+  expect(html).toContain(">Start run</h1>");
   expect(state.edited).toEqual([[ACME, PLANS[0]!.id]]);
   expect(html).toMatch(/<form [^>]*action="\/runs\/new" method="get">/);
   expect(html).toMatch(new RegExp(`<option value="${ACME}" selected="">Acme · app\\.acme\\.test</option><option value="${GLOBEX}">Globex · shop\\.globex\\.test</option>`));
@@ -76,6 +77,19 @@ test("New run opens one page that picks the project and plan, the first of each 
   await render({ project: "unknown", plan: "unknown" });
   expect(state.edited.at(-1)).toEqual([ACME, PLANS[0]!.id]);
   expect(state.started.at(-1)).toMatchObject({ projectId: ACME, planId: PLANS[0]!.id, personas: 2, goalsPerTurn: [1, 1] });
+});
+
+test("without a project in the address, the start page opens the most recently active project", async () => {
+  state.recent = GLOBEX;
+  await render();
+  expect(state.edited.at(-1)).toEqual([GLOBEX, PLANS[0]!.id]);
+  await render({ project: ACME });
+  expect(state.edited.at(-1)).toEqual([ACME, PLANS[0]!.id]);
+  await render({ project: "unknown" });
+  expect(state.edited.at(-1)).toEqual([GLOBEX, PLANS[0]!.id]);
+  state.recent = "gone";
+  await render();
+  expect(state.edited.at(-1)).toEqual([ACME, PLANS[0]!.id]);
 });
 
 test("before a workspace has a project, New run sends it to add one, and a visitor who is not signed in to sign in", async () => {

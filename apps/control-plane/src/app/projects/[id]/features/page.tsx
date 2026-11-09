@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { formTitle } from "../../../../components/controls.ts";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { AppShell } from "../../../../components/app-shell.tsx";
@@ -37,10 +38,10 @@ export default async function FeaturesPage({ params, searchParams }: { params: P
   if (!project || !runState) notFound();
   const shell = await shellFor(member);
   return (
-    <AppShell shell={shell} current={{ project: id }} wide>
+    <AppShell shell={shell} current={{ project: id }}>
       <ProjectHead project={{ id: project.id, name: project.name, targetUrl: project.target_url }} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="plan" counts={counts} runState={runState} editing />
       <div className="flex max-w-3xl flex-col gap-8">
-        <SetupWizard intro={<h2 className="text-lg font-medium">Change features of {project.plan.name}</h2>} projectId={project.id} planId={project.plan.id} projectHost={new URL(project.target_url).host} chosenBefore={project.features} initialDescription={project.description} />
+        <SetupWizard intro={<h2 className={formTitle}>Change features of {project.plan.name}</h2>} projectId={project.id} planId={project.plan.id} projectHost={new URL(project.target_url).host} chosenBefore={project.features} initialDescription={project.description} />
       </div>
     </AppShell>
   );

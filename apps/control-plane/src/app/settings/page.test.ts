@@ -118,7 +118,7 @@ test("each part reads only what it shows, and an unknown part opens General", as
 
 test("a key added by someone who is no longer in this workspace says so, and a workspace without a key looks nobody up", async () => {
   state.key = { provider: "openrouter", hint: "…a1b2", baseUrl: null, addedBy: "user-gone", addedAt };
-  expect(text(renderToStaticMarkup(await open("model")))).toContain("Added by someone no longer in this workspace on");
+  expect(text(renderToStaticMarkup(await open("model")))).toContain("Added by a former member on");
   state.key = null;
   state.lookedUp = [];
   renderToStaticMarkup(await open("model"));

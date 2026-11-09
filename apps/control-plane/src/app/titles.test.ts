@@ -28,7 +28,7 @@ test("every page is named in its tab as the page, then Trawler; the overview spe
     "projects/[id]/runs/page.tsx": ["projectPageTitle", "Runs"],
     "runs/[id]/page.tsx": ["runPageTitle", undefined],
     "runs/[id]/plan/page.tsx": '"Plan used in run"',
-    "runs/new/page.tsx": '"Start a run"',
+    "runs/new/page.tsx": '"Start run"',
     "runs/page.tsx": '"Runs"',
     "settings/page.tsx": '"Settings"',
     "sign-in/page.tsx": '"Sign in"',

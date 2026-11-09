@@ -6,7 +6,7 @@ import { AppShell } from "../../../components/app-shell.tsx";
 import { PageHead } from "../../../components/page-head.tsx";
 import { modelKeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
-import { projectRunCount, testingConfirmedAt } from "../../../projects/overview.ts";
+import { mostRecentProject, projectRunCount, testingConfirmedAt } from "../../../projects/overview.ts";
 import { onPrivateNetwork } from "../../../projects/private-target.ts";
 import { listPlans, projectForEditing } from "../../../projects/projects.ts";
 import { FIRST_RUN_ON_US } from "../../../runs/models.ts";
@@ -25,15 +25,15 @@ import { signInLine, type Person } from "./sign-in-line.ts";
 import { StartPicker } from "./start-picker.tsx";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Start a run" };
+export const metadata: Metadata = { title: "Start run" };
 
 
 function WhoSignsIn({ people, accounts, planHref, fromCi }: { people: Person[]; accounts: Array<{ ref: string; username: string }>; planHref: string; fromCi: boolean }) {
   return (
     <section aria-labelledby="who-signs-in" className="flex flex-col gap-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 id="who-signs-in" className="text-base font-medium">Who signs in</h2>
-        <a href={planHref} className="text-sm text-muted underline underline-offset-4 hover:text-ink">Edit people and accounts</a>
+        <h2 id="who-signs-in" className="font-medium">Who signs in</h2>
+        <a href={planHref} className="-my-2 inline-block py-2.5 text-sm text-muted underline underline-offset-4 hover:text-ink">Edit people and accounts</a>
       </div>
       {fromCi ? (
         <p className="text-sm text-muted">In CI the job can give the people their accounts; anyone it gives none signs in as the plan says.</p>
@@ -61,7 +61,8 @@ export default async function StartPage({ searchParams }: { searchParams: Promis
   const shell = await shellFor(member);
   const projects = shell.workspace.projects;
   if (projects.length === 0) redirect("/new");
-  const id = projects.find((p) => p.id === requestedProject)?.id ?? projects[0]!.id;
+  const recent = projects.some((p) => p.id === requestedProject) ? null : await withOrg(getDb(), orgId, (tx) => mostRecentProject(tx, orgId));
+  const id = projects.find((p) => p.id === requestedProject)?.id ?? projects.find((p) => p.id === recent)?.id ?? projects[0]!.id;
   const env = readEnv();
   const plans = await withOrg(getDb(), orgId, (tx) => listPlans(tx, orgId, id));
   const planId = plans.find((p) => p.id === requestedPlan)?.id ?? plans[0]?.id;
@@ -82,7 +83,7 @@ export default async function StartPage({ searchParams }: { searchParams: Promis
   const goalsPerTurn = turnsOf({ personas: project.personas.map((p) => ({ id: p.key })), goals }).map((t) => t.goalIds.length);
   return (
     <AppShell shell={shell} current={{ project: id }}>
-      <PageHead eyebrow={project.name} title={ciOnly ? "Run from CI" : "Start a run"} subtitle={ciOnly ? "This product is on a private network, so its runs start from your CI job." : "Pick the plan, check who signs in, then choose the model and the cap."} />
+      <PageHead eyebrow={project.name} title={ciOnly ? "Run from CI" : "Start run"} subtitle={ciOnly ? "This product is on a private network, so its runs start from your CI job." : "Pick the plan, check who signs in, then choose the model and the cap."} />
       <div className="flex flex-col gap-8">
         <StartPicker key={`${id}:${planId}`} projects={projects} project={id} plans={plans.map((p) => ({ id: p.id, name: p.name, people: p.people }))} plan={planId} />
         <WhoSignsIn people={project.personas} accounts={accounts} planHref={planHref} fromCi={ciOnly} />

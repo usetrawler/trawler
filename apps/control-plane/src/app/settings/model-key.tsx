@@ -6,8 +6,7 @@ import { LocalTime } from "../../components/local-time.tsx";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { detectProvider, PROVIDER_LABEL, type Provider } from "../../llm/provider-kinds.ts";
 import { removeModelKeyAction, replaceModelKeyAction, type SettingsState } from "./actions.ts";
-import { button, heading, panel } from "./styles.ts";
-import { primaryButton } from "../../components/controls.ts";
+import { alert, button, danger, heading, keepButton, panel } from "./styles.ts";
 
 export interface SavedKey {
   provider: Provider;
@@ -19,7 +18,6 @@ export interface SavedKey {
 type Step = "view" | "replacing" | "confirming";
 type Target = "heading" | "replace" | "remove";
 
-const alert = "border-l-2 border-bad pl-3 text-sm text-bad";
 const runs = (n: number) => (n === 1 ? "The run that was going is stopped." : `The ${n} runs that were going are stopped.`);
 
 export async function saveKey(previous: SettingsState, form: FormData): Promise<SettingsState> {
@@ -124,12 +122,12 @@ export function ModelKey({ saved, addedBy, canManage }: { saved: SavedKey | null
         <div className="flex flex-col gap-1 text-sm">
           <p><span className="text-muted">{PROVIDER_LABEL[saved.provider]} key </span><span className="font-mono">{saved.hint}</span></p>
           {saved.baseUrl && <p className="break-all"><span className="text-muted">Base URL </span><span className="font-mono">{saved.baseUrl}</span></p>}
-          <p className="text-muted">Added by {addedBy ?? "someone no longer in this workspace"} on <LocalTime iso={saved.addedAt} /></p>
+          <p className="text-muted">Added by {addedBy ?? "a former member"} on <LocalTime iso={saved.addedAt} /></p>
         </div>
       ) : canManage ? (
-        <p className="text-sm">No model key yet. Runs are paid with it: add one here, or when you start a run.</p>
+        <p className="text-sm text-muted">No model key yet. Runs are paid with it: add one here, or when you start a run.</p>
       ) : (
-        <p className="text-sm">No model key yet. Runs are paid with it, and an owner or admin of this workspace adds it.</p>
+        <p className="text-sm text-muted">No model key yet. Runs are paid with it, and an owner or admin of this workspace adds it.</p>
       )}
 
       {!canManage ? (
@@ -157,7 +155,7 @@ export function ReplaceForm({ saved, action, pending, refusal, onSent, onKeep }:
   const detected = apiKey.trim() ? detectProvider(apiKey) : null;
   const provider: Provider | null = apiKey.trim().length >= 20 ? chosen ?? detected ?? "custom" : null;
   return (
-    <form action={action} onSubmit={onSent} className="flex flex-col gap-3">
+    <form action={action} onSubmit={onSent} noValidate className="flex flex-col gap-3">
       <KeyFields
         apiKey={apiKey} onKey={setApiKey} detected={detected} chosen={chosen} onChoose={setChosen}
         provider={provider} baseUrl={baseUrl} onBaseUrl={setBaseUrl} required autoFocus={Boolean(saved)} readOnly={pending}
@@ -165,8 +163,8 @@ export function ReplaceForm({ saved, action, pending, refusal, onSent, onKeep }:
         aside={saved && <button type="button" aria-disabled={pending || undefined} onClick={() => { if (!pending) onKeep(); }} className="h-12 px-3 text-sm text-muted hover:text-ink aria-disabled:cursor-wait aria-disabled:opacity-60">Keep {saved.hint}</button>}
       />
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" aria-disabled={pending || undefined} onClick={(e) => { if (pending) e.preventDefault(); }} className={primaryButton}>{pending ? "Checking the key…" : "Save key"}</button>
-        <span className="text-sm text-muted">Saved once the provider accepts it.</span>
+        <button type="submit" aria-disabled={pending || undefined} onClick={(e) => { if (pending) e.preventDefault(); }} className={button}>{pending ? "Checking the key…" : "Save key"}</button>
+        {!refusal && <span className="text-sm text-muted">Saved once the provider accepts it.</span>}
       </div>
       {refusal && <p id="key-error" role="alert" className={alert}>{refusal.error}</p>}
     </form>
@@ -185,8 +183,8 @@ export function RemoveForm({ addedAt, action, pending, error, onSent, onKeep }: 
       <input type="hidden" name="addedAt" value={addedAt} />
       <p id="remove-warning">Remove the key? The workspace's runs that are going now stop, and Start asks for a new key.</p>
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" aria-describedby="remove-warning" aria-disabled={pending || undefined} onClick={(e) => { if (pending) e.preventDefault(); }} className="h-10 border border-bad px-4 text-bad aria-disabled:cursor-wait aria-disabled:opacity-60">{pending ? "Removing…" : "Remove the key"}</button>
-        <button type="button" ref={keep} aria-describedby="remove-warning" aria-disabled={pending || undefined} onClick={() => { if (!pending) onKeep(); }} className="h-10 px-2 text-muted hover:text-ink aria-disabled:cursor-wait aria-disabled:opacity-60">Keep the key</button>
+        <button type="submit" aria-describedby="remove-warning" aria-disabled={pending || undefined} onClick={(e) => { if (pending) e.preventDefault(); }} className={danger}>{pending ? "Removing…" : "Remove the key"}</button>
+        <button type="button" ref={keep} aria-describedby="remove-warning" aria-disabled={pending || undefined} onClick={() => { if (!pending) onKeep(); }} className={keepButton}>Keep the key</button>
       </div>
       {error && <p role="alert" className={alert}>{error}</p>}
     </form>

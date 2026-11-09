@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { errorNote, formTitle } from "../../../../../components/controls.ts";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { AppShell } from "../../../../../components/app-shell.tsx";
@@ -34,13 +35,13 @@ export default async function NewPlanPage({ params }: { params: Promise<{ id: st
   if (!project || !runState) notFound();
   const shell = await shellFor(member);
   return (
-    <AppShell shell={shell} current={{ project: id }} wide>
+    <AppShell shell={shell} current={{ project: id }}>
       <ProjectHead project={{ id: project.id, name: project.name, targetUrl: project.target_url }} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="plan" counts={counts} runState={runState} editing />
       <div className="flex max-w-3xl flex-col gap-8">
         {plans.length >= MAX_PLANS ? (
-          <p role="alert" className="border-l-2 border-bad pl-3 text-bad">A project holds at most {MAX_PLANS} plans. Remove one to add another.</p>
+          <p role="alert" className={errorNote}>A project holds at most {MAX_PLANS} plans. Remove one to add another.</p>
         ) : (
-          <SetupWizard intro={<h2 className="text-lg font-medium">Add a plan</h2>} projectId={project.id} newPlanName={name} projectHost={new URL(project.target_url).host} initialDescription={project.description} />
+          <SetupWizard intro={<h2 className={formTitle}>Add a plan</h2>} projectId={project.id} newPlanName={name} projectHost={new URL(project.target_url).host} initialDescription={project.description} />
         )}
       </div>
     </AppShell>

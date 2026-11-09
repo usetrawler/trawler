@@ -45,7 +45,7 @@ export default async function ProjectHome({ params }: { params: Promise<{ id: st
   const { project, runState, counts, going, latest, findings, pullRequests } = result;
   const shell = await shellFor(member);
   return (
-    <AppShell shell={shell} current={{ project: id }} wide>
+    <AppShell shell={shell} current={{ project: id }}>
       <ProjectHead project={project} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="home" counts={counts} runState={runState} />
       <ProjectHomeView projectId={id} runs={counts.runs} finished={counts.finished} findings={findings} going={going} {...(latest ? { latest } : {})} pullRequests={pullRequests} pullRequestCount={counts.pullRequests} />
     </AppShell>

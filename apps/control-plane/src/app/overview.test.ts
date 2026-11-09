@@ -20,7 +20,7 @@ const render = (projects: ProjectLine[], recent: RunLine[] = [], findings: OpenF
 describe("Overview", () => {
   it("names the workspace, says what is open and lists projects with their latest result", () => {
     const html = render([acme, fresh], [], [finding("p1")]);
-    expect(html).toContain(">acme-org</p>");
+    expect(html).toContain(">acme-org</div>");
     expect(html).toContain(">1 confirmed defect is open, in Acme Invoices.</h1>");
     expect(html).toMatch(/<a href="\/findings"[^>]*>Open Findings<\/a>/);
     expect(html).toContain('<ul aria-label="Projects"');

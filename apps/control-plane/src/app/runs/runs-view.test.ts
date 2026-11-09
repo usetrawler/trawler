@@ -108,9 +108,9 @@ describe("RunsView, how a run started", () => {
   const origins = (markup: string) => [...(markup.match(/<nav aria-label="Filter runs by how they started".*?<\/nav>/)?.[0] ?? "").matchAll(/<a href="([^"]*)"( aria-current="page")?[^>]*>([^<]*)<\/a>/g)].map((m) => [m[3], m[1], Boolean(m[2])]);
 
   it("offers every way a run starts, marks the open one, and keeps the status filter", () => {
-    expect(origins(html("any"))).toEqual([["Any", "/runs", true], ["In the app", "/runs?via=app", false], ["API token", "/runs?via=api", false], ["Assistant", "/runs?via=mcp", false]]);
+    expect(origins(html("any"))).toEqual([["Any", "/runs", true], ["In the app", "/runs?via=app", false], ["API token", "/runs?via=api", false], ["MCP", "/runs?via=mcp", false]]);
     expect(origins(html("mcp", "attention")).map((o) => o[1])).toEqual(["/runs?show=attention", "/runs?show=attention&amp;via=app", "/runs?show=attention&amp;via=api", "/runs?show=attention&amp;via=mcp"]);
-    expect(origins(html("mcp")).filter((o) => o[2]).map((o) => o[0])).toEqual(["Assistant"]);
+    expect(origins(html("mcp")).filter((o) => o[2]).map((o) => o[0])).toEqual(["MCP"]);
   });
 
   it("keeps the way a run started in the status filters and the paging", () => {

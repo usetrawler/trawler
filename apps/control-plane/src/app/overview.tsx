@@ -45,8 +45,8 @@ export function Overview({ workspace, projects, recent, findings, going }: { wor
         <PageHead
           eyebrow={workspace}
           title={workspaceHeadline(findings, projects)}
-          subtitle={findings.length > 0 ? <a href="/findings" className="text-ink underline underline-offset-4">Open Findings</a> : recent.length === 0 ? "Start a run from a project's plan to see what people find." : undefined}
-          action={<PrimaryLink href="/runs/new">New run</PrimaryLink>}
+          subtitle={findings.length > 0 ? <a href="/findings" className="-my-2 inline-block py-2.5 text-ink underline underline-offset-4">Open Findings</a> : recent.length === 0 ? "Start a run from a project's plan to see what people find." : undefined}
+          action={<PrimaryLink href="/runs/new">Start run</PrimaryLink>}
           flush
         />
         <GoingRuns runs={going} withProject />
@@ -61,7 +61,7 @@ export function Overview({ workspace, projects, recent, findings, going }: { wor
         <section aria-labelledby="recent-runs" className="flex flex-col gap-2">
           <div className="flex items-baseline justify-between gap-4">
             <h2 id="recent-runs" className="font-medium">Recent runs</h2>
-            <a href="/runs" className="text-sm underline underline-offset-4">All runs</a>
+            <a href="/runs" className="-my-2 inline-block py-2.5 text-sm underline underline-offset-4">All runs</a>
           </div>
           <RunTable runs={recent} />
         </section>
