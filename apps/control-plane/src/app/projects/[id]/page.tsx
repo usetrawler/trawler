@@ -76,11 +76,11 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
             <div className="flex flex-wrap items-baseline gap-x-3 text-sm">
               {project.features.length > 0 && (
                 <details className="group relative text-muted">
-                  <summary className="cursor-pointer list-none underline-offset-4 hover:text-ink hover:underline [&::-webkit-details-marker]:hidden">Built from {project.features.length} {project.features.length === 1 ? "feature" : "features"}</summary>
+                  <summary className="-my-2 cursor-pointer list-none py-2.5 underline-offset-4 hover:text-ink hover:underline [&::-webkit-details-marker]:hidden">Built from {project.features.length} {project.features.length === 1 ? "feature" : "features"}</summary>
                   <ul className="absolute left-0 z-10 mt-2 flex w-max max-w-xs flex-col gap-1 rounded-md border border-line bg-panel p-3 text-ink shadow-sm">{project.features.map((f) => <li key={f}>{f}</li>)}</ul>
                 </details>
               )}
-              <Link href={`/projects/${project.id}/features?plan=${planId}`} className="underline underline-offset-4 hover:text-muted">Change features</Link>
+              <Link href={`/projects/${project.id}/features?plan=${planId}`} className="-my-2 inline-block py-2.5 underline underline-offset-4 hover:text-muted">Change features</Link>
             </div>
           </div>
           {prPlans.length > 0 && <p className="text-sm text-muted">Pull request plans are written by the lead for each pull request and are read-only. Find them under <a href={`/projects/${id}/pull-requests`} className="text-ink underline underline-offset-4">Pull requests</a>.</p>}

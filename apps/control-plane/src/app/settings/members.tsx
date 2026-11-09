@@ -202,7 +202,7 @@ export function Members({ members, invitations, canManage, signInAt }: { members
 
       {invitations.length > 0 && (
         <div className="flex flex-col gap-2 border-t border-line pt-4">
-          <h3 className="text-sm font-semibold">Invited</h3>
+          <h3 className="font-medium">Invited</h3>
           <ul className="flex flex-col gap-2">
             {invitations.map((i) => (
               <li key={i.id} className="flex flex-wrap items-center justify-between gap-3 text-sm">

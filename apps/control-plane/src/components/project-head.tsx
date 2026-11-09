@@ -27,7 +27,7 @@ export function ProjectHead({ project, address, tab, counts, runState, planId, e
       <PageHead
         eyebrow={
           <>
-            <a href={project.targetUrl} target="_blank" rel="noreferrer" className="font-mono underline underline-offset-2 hover:text-ink">{address ?? hostOf(project.targetUrl)}<span aria-hidden> ↗</span><span className="sr-only normal-case"> (opens in a new tab)</span></a>
+            <a href={project.targetUrl} target="_blank" rel="noreferrer" className="-my-2 inline-block py-2 font-mono underline underline-offset-2 hover:text-ink">{address ?? hostOf(project.targetUrl)}<span aria-hidden> ↗</span><span className="sr-only normal-case"> (opens in a new tab)</span></a>
             {onPrivateNetwork(project.targetUrl) && <span> · Runs only from CI (private network)</span>}
           </>
         }

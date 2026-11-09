@@ -339,14 +339,15 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
     });
   };
 
+  const blank = !stage.byHand && !stage.description.trim() && stage.features.length === 0;
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-3">
-        <p className="text-sm text-muted">{stage.byHand ? "Your description" : "Trawler understood the product"}</p>
+        <p className="text-sm text-muted">{stage.byHand || blank ? "Your description" : "Trawler understood the product"}</p>
         <h2 className={`${formTitle} break-words`}>Confirm the context.</h2>
-        <p className="max-w-xl text-muted">{stage.byHand ? "We use this only to choose the people and their goals." : "We use this only to choose the people and their goals. Edit it if we misunderstood anything."}</p>
+        <p className="max-w-xl text-muted">{stage.byHand || blank ? "We use this only to choose the people and their goals." : "We use this only to choose the people and their goals. Edit it if we misunderstood anything."}</p>
       </div>
-      {!stage.byHand && !stage.description.trim() && stage.features.length === 0 && (
+      {blank && (
         <p className={infoNote}>Trawler could not tell from the page what the product does. Describe it below, then add the features the people should try.</p>
       )}
       <label className="flex flex-col gap-2">

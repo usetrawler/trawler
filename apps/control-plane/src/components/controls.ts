@@ -27,4 +27,4 @@ export const infoNote = "border-l-2 border-line pl-3 text-sm text-muted";
 export const tabRow = "flex gap-x-5 border-b border-line sm:gap-x-6";
 export const tab = (on: boolean) => `-mb-px flex min-h-11 shrink-0 items-center gap-1.5 border-b-2 text-[15px] font-medium ${on ? "border-ink text-ink" : "border-transparent text-muted hover:text-ink"}`;
 export const tabCount = "text-sm font-normal text-muted tabular-nums";
-export const phoneEdgeFade = "max-sm:[mask-image:linear-gradient(to_right,transparent,black_12px,black_calc(100%-28px),transparent)]";
+export const phoneEdgeFade = "max-sm:[mask-image:linear-gradient(to_right,black_calc(100%-28px),transparent)]";

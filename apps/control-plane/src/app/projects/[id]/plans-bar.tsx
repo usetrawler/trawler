@@ -24,7 +24,7 @@ export function PlansBar({ projectId, plans, current, canAdd }: { projectId: str
           </li>
         ))}
       </ul>
-      {canAdd && <Link href={`/projects/${projectId}/plans/new`} className="text-sm text-muted underline-offset-4 hover:text-ink hover:underline">+ Add plan</Link>}
+      {canAdd && <Link href={`/projects/${projectId}/plans/new`} className="-my-2 inline-block py-2.5 text-sm text-muted underline-offset-4 hover:text-ink hover:underline">+ Add plan</Link>}
     </nav>
   );
 }

@@ -33,7 +33,7 @@ function WhoSignsIn({ people, accounts, planHref, fromCi }: { people: Person[]; 
     <section aria-labelledby="who-signs-in" className="flex flex-col gap-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 id="who-signs-in" className="font-medium">Who signs in</h2>
-        <a href={planHref} className="text-sm text-muted underline underline-offset-4 hover:text-ink">Edit people and accounts</a>
+        <a href={planHref} className="-my-2 inline-block py-2.5 text-sm text-muted underline underline-offset-4 hover:text-ink">Edit people and accounts</a>
       </div>
       {fromCi ? (
         <p className="text-sm text-muted">In CI the job can give the people their accounts; anyone it gives none signs in as the plan says.</p>

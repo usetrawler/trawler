@@ -610,7 +610,7 @@ function PeopleColumn({ view, steps, onShow }: { view: View; steps: Map<string, 
                   ))}
                 </ul>
                 {(p.defects > 0 || p.friction > 0) && <span className="mt-1 block">{plural(p.defects, "defect report", "defect reports")} · {plural(p.friction, "rough edge", "rough edges")}</span>}
-                <button type="button" onClick={() => onShow(p.id)} className="mt-1.5 underline underline-offset-4 hover:text-ink">What {p.name} did{steps.get(p.id) ? ` · ${plural(steps.get(p.id)!, "step", "steps")}` : ""}</button>
+                <button type="button" onClick={() => onShow(p.id)} className="mt-1.5 -mb-2 py-2.5 text-left underline underline-offset-4 hover:text-ink">What {p.name} did{steps.get(p.id) ? ` · ${plural(steps.get(p.id)!, "step", "steps")}` : ""}</button>
               </div>
             </li>
           );

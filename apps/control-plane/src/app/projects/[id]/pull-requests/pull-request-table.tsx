@@ -28,7 +28,7 @@ export function PullRequestTable({ projectId, lines }: { projectId: string; line
               {href ? <a href={href} target="_blank" rel="noreferrer" className="hover:underline hover:underline-offset-4">{pr.title ?? `Pull request #${pr.number}`}<span className="sr-only"> (opens in a new tab)</span></a> : (pr.title ?? `Pull request #${pr.number}`)}
             </td>
             <td className="hidden py-3.5 pr-4 text-sm text-muted sm:table-cell">
-              {pr.plan.id ? <a href={`/projects/${projectId}?plan=${pr.plan.id}`} className="underline underline-offset-4 hover:text-ink">{pr.plan.label}<span className="sr-only">{pr.plan.ofPullRequest ? `, the plan for pull request #${pr.number}` : ""}</span></a> : pr.plan.label}
+              {pr.plan.id ? <a href={`/projects/${projectId}?plan=${pr.plan.id}`} className="-my-2 inline-block py-2.5 underline underline-offset-4 hover:text-ink">{pr.plan.label}<span className="sr-only">{pr.plan.ofPullRequest ? `, the plan for pull request #${pr.number}` : ""}</span></a> : pr.plan.label}
             </td>
             <td className={`py-3.5 pr-4 text-sm ${pr.run.confirmed > 0 && !pr.run.unchecked ? "font-medium text-ink" : "text-muted"}`}>
               {runResult(pr.run)}
