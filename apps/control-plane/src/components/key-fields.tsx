@@ -19,7 +19,7 @@ export function KeyFields({ apiKey, onKey, detected, chosen, onChoose, provider,
         An API key from your model provider: OpenAI, Anthropic, Google, OpenRouter or any OpenAI-compatible service. Runs are billed to it directly; Trawler adds nothing. It is stored encrypted and only its last characters are shown.
       </label>
       <div className="flex gap-2">
-        <input id={keyId} name="apiKey" type="password" autoComplete="off" spellCheck={false} aria-required={required || undefined} autoFocus={autoFocus} readOnly={readOnly} aria-invalid={errorId ? true : undefined} aria-describedby={errorId} placeholder="sk-…, sk-ant-…, AIza…, sk-or-…" value={apiKey} onChange={(e) => onKey(e.target.value)} className={`${keyField} flex-1`} />
+        <input id={keyId} name="apiKey" type="password" autoComplete="off" spellCheck={false} required={required} autoFocus={autoFocus} readOnly={readOnly} aria-invalid={errorId ? true : undefined} aria-describedby={errorId} placeholder="sk-…, sk-ant-…, AIza…, sk-or-…" value={apiKey} onChange={(e) => onKey(e.target.value)} className={`${keyField} flex-1`} />
         {aside}
       </div>
       {detected && !chosen && apiKey.trim().length >= 20 && <Recognised provider={detected} />}

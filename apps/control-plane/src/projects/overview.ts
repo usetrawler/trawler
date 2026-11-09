@@ -180,6 +180,16 @@ export async function workspaceNav(tx: Tx, orgId: string): Promise<{ projects: N
   };
 }
 
+export async function mostRecentProject(tx: Tx, orgId: string): Promise<string | null> {
+  const projects = await tx
+    .selectFrom("projects as p")
+    .where("p.org_id", "=", orgId)
+    .select((eb) => ["p.id", "p.created_at", eb.selectFrom("runs as r").select((r) => r.fn.max("r.created_at").as("at")).whereRef("r.project_id", "=", "p.id").as("last_run_at")])
+    .execute();
+  const active = (p: (typeof projects)[number]) => (p.last_run_at ? new Date(p.last_run_at) : p.created_at).getTime();
+  return projects.sort((a, b) => active(b) - active(a) || a.id.localeCompare(b.id))[0]?.id ?? null;
+}
+
 export async function testingConfirmedAt(tx: Tx, orgId: string, projectId: string): Promise<Date | null> {
   const row = await tx.selectFrom("projects").select("testing_confirmed_at").where("org_id", "=", orgId).where("id", "=", projectId).executeTakeFirst();
   return row?.testing_confirmed_at ?? null;

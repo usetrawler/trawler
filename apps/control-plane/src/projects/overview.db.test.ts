@@ -7,7 +7,7 @@ import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { runView } from "../runs/report.ts";
 import { runIdByNumber, runSummary, startRun } from "../runs/runs.ts";
-import { projectHead, projectRunCount, runCounts, runHead, workspaceNav, workspaceProjects, workspaceRuns } from "./overview.ts";
+import { mostRecentProject, projectHead, projectRunCount, runCounts, runHead, workspaceNav, workspaceProjects, workspaceRuns } from "./overview.ts";
 import { createPlan, createProject, listPlans, removePlan, renamePlan, replacePlan } from "./projects.ts";
 
 const t = await testDb();
@@ -156,6 +156,11 @@ test("the navigation lists the workspace's projects by name, so they keep their 
   expect(await withOrg(t.db, "org-a", (tx) => workspaceNav(tx, "org-a"))).toEqual({
     projects: [{ id: acme, name: "Acme", address: "app.acme.test", live: true }, { id: beta, name: "Beta", address: "beta.acme.test", live: true }, { id: empty, name: "Empty", address: "empty.acme.test" }, { id: fresh, name: "Fresh", address: "fresh.acme.test" }],
   });
+});
+
+test("the most recently active project is the one with the latest run, or the newest project without runs", async () => {
+  expect(await withOrg(t.db, "org-a", (tx) => mostRecentProject(tx, "org-a"))).toBe(fresh);
+  expect(await withOrg(t.db, "org-none", (tx) => mostRecentProject(tx, "org-none"))).toBeNull();
 });
 
 test("projects that share a name are told apart by their product's host, in the navigation and in the runs", async () => {

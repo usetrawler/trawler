@@ -8,7 +8,7 @@ import { getDb, getKeyring } from "../../server/db.ts";
 import { readEnv } from "../../server/env.ts";
 import { logError, writeLog } from "../../server/log.ts";
 import { FetchRefused, safeFetchText, type RefusalReason } from "../../setup/safe-fetch.ts";
-import { describeDraft, DraftGone, proposeFromDraft, SETUP_LIMITS, SetupLimited, type Proposed, SetupStillRunning, setupProgress, startDraft, type SetupDeps } from "../../setup/propose.ts";
+import { describeDraft, DraftGone, proposeFromDraft, SetupLimited, type Proposed, SetupStillRunning, setupProgress, startDraft, type SetupDeps } from "../../setup/propose.ts";
 import type { SetupProgress } from "../../setup/progress.ts";
 import { PlanLimit, PlanNameTaken, PlanNotFound, ProjectNotFound } from "../../projects/projects.ts";
 import { ProjectLimitReached } from "../../runs/plans.ts";
@@ -35,8 +35,8 @@ const MESSAGES: Record<RefusalReason, string> = {
 function friendly(err: unknown): string {
   if (err instanceof FetchRefused) return err.reason === "status" ? `The page answered with an error (${err.message}).` : MESSAGES[err.reason];
   if (err instanceof SetupLimited) return err.window === "day"
-    ? `A workspace can read ${SETUP_LIMITS.perDay} product pages a day. Try again tomorrow.`
-    : `A workspace can read ${SETUP_LIMITS.perTenMinutes} product pages every 10 minutes. Try again in 10 minutes.`;
+    ? "This workspace has run as many setups as it can today. Try again tomorrow."
+    : "This workspace has run many setups in the last 10 minutes. Try again in 10 minutes.";
   if (err instanceof SetupModelFailed) return "Trawler's setup model could not write a plan this time. Try again in a moment.";
   if (err instanceof DraftGone) return "This setup has expired. Start again from the product's address.";
   if (err instanceof SetupStillRunning) return "Trawler is still choosing the people for this setup. Wait a moment.";

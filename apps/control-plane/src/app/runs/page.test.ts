@@ -84,8 +84,8 @@ test("an address without a usable filter or page shows all runs from the newest"
   expect(state.asked).toEqual([{ orgId: "org-1", show: "all", before: undefined }]);
 });
 
-test("a new run opens the start page on the most recently active project, or a new project when there is none", async () => {
-  expect(renderToStaticMarkup(await open())).toMatch(/<a href="\/runs\/new\?project=p1"[^>]*>Start run</);
+test("Start run opens the start page, which picks the most recently active project, or a new project when there is none", async () => {
+  expect(renderToStaticMarkup(await open())).toMatch(/<a href="\/runs\/new"[^>]*>Start run</);
   state.projects = [];
   expect(renderToStaticMarkup(await open())).toMatch(/<a href="\/new"[^>]*>Start run</);
 });

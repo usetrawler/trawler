@@ -1,4 +1,4 @@
-import { tab, tabRow } from "../../components/controls.ts";
+import { phoneEdgeFade, tab, tabRow } from "../../components/controls.ts";
 
 export const SECTIONS = [
   { key: "general", label: "General" },
@@ -17,7 +17,7 @@ export const settingsHref = (section: Section) => (section === "general" ? "/set
 export function SettingsNav({ current }: { current: Section }) {
   return (
     <nav aria-label="Settings" className="mt-6 mb-8 min-w-0">
-      <ul className={`${tabRow} flex-wrap`}>
+      <ul className={`${tabRow} overflow-x-auto overflow-y-hidden ${phoneEdgeFade}`}>
         {SECTIONS.map((s) => (
           <li key={s.key} className="shrink-0">
             <a href={settingsHref(s.key)} aria-current={s.key === current ? "page" : undefined} className={tab(s.key === current)}>

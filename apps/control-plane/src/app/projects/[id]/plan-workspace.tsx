@@ -373,7 +373,7 @@ export function PlanWorkspace({ projectId, planId, initialPersonas, initialGoals
         {personas.length > 1 && <aside className="lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto"><OrderOfPlay personas={personas} goals={goals} onMove={moveGoal} /></aside>}
       </div>
 
-      <StartLink href={`/runs/new?project=${projectId}&plan=${planId}`} ciOnly={ciOnly} closedBeta={ciOnly ? undefined : closedBeta} held={Boolean(error || problem || dirty || saving)} blocked={error || problem ? "Fix the plan above to start a run." : (dirty || saving ? "Saving your changes to the plan…" : withoutAccount && !ciOnly ? `${withoutAccount.name} needs a test account to sign in.` : overPlan)} />
+      <StartLink href={`/runs/new?project=${projectId}&plan=${planId}`} ciOnly={ciOnly} closedBeta={ciOnly ? undefined : closedBeta} held={Boolean(error || problem || dirty || saving)} blocked={error ? "Your last change is not saved yet. See above." : problem ? "Fix the plan above to start a run." : (dirty || saving ? "Saving your changes to the plan…" : withoutAccount && !ciOnly ? `${withoutAccount.name} needs a test account to sign in.` : overPlan)} />
     </div>
   );
 }

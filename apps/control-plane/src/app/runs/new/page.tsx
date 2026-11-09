@@ -6,7 +6,7 @@ import { AppShell } from "../../../components/app-shell.tsx";
 import { PageHead } from "../../../components/page-head.tsx";
 import { modelKeyHint } from "../../../credentials/credentials.ts";
 import { withOrg } from "../../../db/tenancy.ts";
-import { projectRunCount, testingConfirmedAt } from "../../../projects/overview.ts";
+import { mostRecentProject, projectRunCount, testingConfirmedAt } from "../../../projects/overview.ts";
 import { onPrivateNetwork } from "../../../projects/private-target.ts";
 import { listPlans, projectForEditing } from "../../../projects/projects.ts";
 import { FIRST_RUN_ON_US } from "../../../runs/models.ts";
@@ -61,7 +61,8 @@ export default async function StartPage({ searchParams }: { searchParams: Promis
   const shell = await shellFor(member);
   const projects = shell.workspace.projects;
   if (projects.length === 0) redirect("/new");
-  const id = projects.find((p) => p.id === requestedProject)?.id ?? projects[0]!.id;
+  const recent = projects.some((p) => p.id === requestedProject) ? null : await withOrg(getDb(), orgId, (tx) => mostRecentProject(tx, orgId));
+  const id = projects.find((p) => p.id === requestedProject)?.id ?? projects.find((p) => p.id === recent)?.id ?? projects[0]!.id;
   const env = readEnv();
   const plans = await withOrg(getDb(), orgId, (tx) => listPlans(tx, orgId, id));
   const planId = plans.find((p) => p.id === requestedPlan)?.id ?? plans[0]?.id;
