@@ -341,7 +341,7 @@ export function FindingRow({ f, n, mark, tag, note, detail, action, dismiss, cop
           <span className="min-w-0">
             <strong className="block text-base leading-snug font-medium break-words">{f.title}</strong>
             <small className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm break-words text-muted">
-              <span className="inline-flex items-center gap-2"><span aria-label={`Finding ${n}`} className="grid h-5 min-w-5 place-items-center rounded border border-line px-1 text-xs text-ink tabular-nums">{n}</span>{[...new Set([f.personaName, ...f.sameReports.map((other) => other.personaName)])].join(", ")}</span>
+              <span className="inline-flex items-center gap-2"><span aria-hidden className="grid h-5 min-w-5 place-items-center rounded border border-line px-1 text-xs text-ink tabular-nums">{n}</span><span className="sr-only">Finding {n}, by </span>{[...new Set([f.personaName, ...f.sameReports.map((other) => other.personaName)])].join(", ")}</span>
               {tag && <span className="rounded border border-line px-1.5 text-xs text-ink">{tag}</span>}
             </small>
             <span className="mt-1 line-clamp-2 text-sm break-words text-muted group-open:hidden">{note ?? f.observed}</span>
@@ -375,7 +375,7 @@ export function FindingRow({ f, n, mark, tag, note, detail, action, dismiss, cop
                 <div key={other.key} className="flex flex-col gap-1">
                   <p><strong>{other.personaName}</strong><span className="text-muted">, while trying to: </span>{other.goalText}</p>
                   <p className="break-words"><span className="text-muted">Reported as: </span>{other.title}</p>
-                  {other.page && <p className="break-words"><span className="text-muted">Page: </span><span className="font-mono text-[13px]">{other.page}</span></p>}
+                  {other.page && other.page !== "/" && <p className="break-words"><span className="text-muted">Page: </span><span className="font-mono text-[13px]">{other.page}</span></p>}
                   <p className="break-words"><span className="text-muted">What they saw: </span>{other.observed}</p>
                   {other.quote && <p className="break-words italic"><span className="not-italic text-muted">In {other.personaName}&apos;s words: </span>“{other.quote}”</p>}
                   <p className="text-muted">Steps</p>
@@ -473,6 +473,8 @@ function RunMeta({ run, view, host, when }: { run: RunSummary; view: View; host:
   );
 }
 
+const STARTED_BY: Record<RunSummary["origin"], string> = { app: "Someone in this workspace, in the app", api: "An API token", mcp: "An assistant, over MCP" };
+
 function took(from: string | Date, to: string | Date): string | null {
   const minutes = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60_000);
   if (!Number.isFinite(minutes) || minutes < 0) return null;
@@ -491,7 +493,7 @@ function costLine(run: RunSummary): string {
 
 export function RunDetails({ run, live }: { run: RunSummary; live: boolean }) {
   const started = run.startedAt ?? run.createdAt;
-  const duration = run.finishedAt ? took(started, run.finishedAt) : null;
+  const duration = run.startedAt && run.finishedAt ? took(run.startedAt, run.finishedAt) : null;
   const rows: Array<[string, React.ReactNode]> = [
     ["Cost", costLine(run)],
     ["Model", <span key="model" className="font-mono text-sm">{run.agentModel}</span>],
@@ -500,7 +502,7 @@ export function RunDetails({ run, live }: { run: RunSummary; live: boolean }) {
   ];
   if (run.finishedAt) rows.push(["Finished", <LocalTime key="finished" iso={new Date(run.finishedAt).toISOString()} />]);
   if (duration) rows.push(["Took", duration]);
-  rows.push(["Started by", run.startedVia ? <>{viaClient(run.startedVia)} for {run.startedVia.person}, over MCP</> : run.execution === "own" ? "Your CI job" : "Someone in this workspace"]);
+  rows.push(["Started by", run.startedVia ? <>{viaClient(run.startedVia)} for {run.startedVia.person}, over MCP</> : run.execution === "own" ? "Your CI job" : STARTED_BY[run.origin]]);
   if (run.pullRequest) rows.push(["Pull request", <PullRequestSubject key="pr" pr={run.pullRequest} />]);
   if (run.providedAccounts.length > 0) rows.push(["Accounts", `${run.providedAccounts.join(", ")} ${run.providedAccounts.length === 1 ? "signs" : "sign"} in with ${run.providedAccounts.length === 1 ? "an account" : "accounts"} provided by the CI job.`]);
   if (run.prPlan?.signUps?.length) rows.push(["Sign-up", <span key="signup" title={run.prPlan.accountReason}>This pull request touches how people get accounts, so {run.prPlan.signUps.join(", ")} {run.prPlan.signUps.length === 1 ? "goes" : "go"} through the real sign-up instead of using the CI account.</span>]);

@@ -70,7 +70,7 @@ export function PlanTitle({ projectId, planId, name, canRemove }: { projectId: s
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? errorId : undefined}
             title="Rename this plan"
-            className="-ml-2 h-10 min-w-0 rounded-md border border-transparent bg-transparent px-2 text-lg font-medium outline-none hover:border-line focus:border-ink"
+            className="-ml-2 h-10 min-w-0 rounded-md border border-line/60 bg-transparent px-2 text-lg font-medium outline-none hover:border-muted focus:border-ink"
           />
         </label>
         {canRemove && !confirming && (

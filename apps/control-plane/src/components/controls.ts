@@ -1,6 +1,8 @@
-const fieldBase = "min-w-0 rounded-md border border-line bg-panel text-ink outline-none transition-colors placeholder:text-muted hover:border-muted focus:border-ink";
+const fieldShape = "min-w-0 rounded-md border bg-panel text-ink outline-none transition-colors placeholder:text-muted hover:border-muted focus:border-ink";
+const fieldBase = `${fieldShape} border-line`;
 
 export const field = `h-10 px-3 text-sm ${fieldBase}`;
+export const invalidField = `h-10 px-3 text-sm ${fieldShape} border-bad`;
 export const keyField = `${field} font-mono`;
 export const area = `px-3 py-2 text-sm ${fieldBase}`;
 

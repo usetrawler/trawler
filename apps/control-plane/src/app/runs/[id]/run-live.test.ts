@@ -13,7 +13,7 @@ const job = (kind: string, status: string, extra: Partial<RunSummary["jobs"][num
 const finding = (key: string, persona: string, extra: Partial<RunSummary["findings"][number]> = {}) =>
   ({ key, personaKey: persona, kind: "defect", filedAs: null, goal: "g1", title: key, observed: "o", reproduction: ["Open Invoices.", "Save."], severity: "high", replay: null, verdict: null, sameAs: null, url: null, quote: null, stepPeople: null, screenshots: { reported: null, replayed: null }, dismissal: null, ...extra }) as RunSummary["findings"][number];
 const summary = (over: Partial<RunSummary>): RunSummary => ({
-  startedVia: null, stoppedVia: null,
+  startedVia: null, stoppedVia: null, origin: "app",
   id: "run-1", number: 7, status: "succeeded", cancelReason: null, projectId: "project-1", planName: null, savedPlan: null, costUsd: 0.35, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash",
   provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0, createdAt: new Date("2026-09-25T19:40:00Z"), startedAt: new Date("2026-09-25T19:40:05Z"), finishedAt: new Date("2026-09-25T19:59:00Z"),
   jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [], conversation: false, pullRequest: null, prPlan: null, conversationMessages: [], marks: [], execution: "hosted", providedAccounts: [],
@@ -94,7 +94,7 @@ test("a run whose pull request touches how people get accounts says who goes thr
 test("a confirmed defect is a row with its severity, number, person, title and what happened, marked as replayed, that opens to its steps and the replay", () => {
   const [row] = rows(render(finished), "Confirmed");
   const [summaryPart, details] = row!.split("</summary>");
-  expect(text(summaryPart!)).toBe("high severity Saving an invoice fails 1 Ana A 500 page. ✓ Reproduced");
+  expect(text(summaryPart!)).toBe("high severity Saving an invoice fails 1 Finding 1, by Ana A 500 page. ✓ Reproduced");
   expect(text(details!)).toContain("Steps Open Invoices. Save.");
   expect(text(details!)).toContain("What the replay saw: The same 500 page.");
 });
@@ -110,7 +110,7 @@ test("a defect several people found is one row naming each of them once, that op
     ],
   }));
   const [row] = rows(html, "Confirmed");
-  expect(text(row!)).toContain("Saving an invoice fails 1 Ana, Lee Park");
+  expect(text(row!)).toContain("Saving an invoice fails 1 Finding 1, by Ana, Lee Park");
   expect(text(row!)).toContain("Ana , while trying to: Get an account.");
   expect(text(row!)).toContain("Also reported by Lee Park, Ana again");
   expect(text(row!)).toContain("Lee Park , while trying to: Send an invoice. Reported as: Invoice will not save What they saw: o Steps Open Invoices. Press Save twice.");
@@ -123,7 +123,7 @@ test("a defect several people found is one row naming each of them once, that op
 
 test("a refuted defect is ruled out, tagged Refuted, and carries no reproduced mark", () => {
   const [row] = rows(render(finished), "Ruled out");
-  expect(text(row!.split("</summary>")[0]!)).toBe("low severity A typo on the button 1 Lee Park Refuted It reads Sav.");
+  expect(text(row!.split("</summary>")[0]!)).toBe("low severity A typo on the button 1 Finding 1, by Lee Park Refuted It reads Sav.");
 });
 
 test("in Timeline, each person is listed with a mark, one line on how far they got, and every goal in view with its note", () => {
@@ -210,7 +210,7 @@ test("every defect counts as reported whatever the replay made of it, friction d
   expect(text(band(html))).toContain("1 of 5 reported confirmed");
   expect(rows(html, "Ruled out")).toHaveLength(1);
   const [unjudged] = rows(html, "Unverified");
-  expect(text(unjudged!.split("</summary>")[0]!)).toBe("high severity Export is empty 1 Ana Could not be judged Failed: the judge timed out");
+  expect(text(unjudged!.split("</summary>")[0]!)).toBe("high severity Export is empty 1 Finding 1, by Ana Could not be judged Failed: the judge timed out");
   expect(rows(html, "Unverified").map((row) => text(row.split("</summary>")[0]!).split(" 01 ")[0])).toHaveLength(3);
   expect(unjudged).toMatch(/<button type="button"[^>]*>Judge again<\/button>/);
 });
@@ -276,7 +276,7 @@ test("a defect whose replay failed is not judged, its row gives the reason, and 
   const error = `the browser failed 3 times in a row; last error: ${"x".repeat(300)}`;
   const html = render(summary({ ...finished, jobs: [...finished.jobs, job("replay", "failed", { finding_key: "x:d1", error })], findings: [finding("x:d1", "ana", { title: "Export is empty" })] }));
   const [row] = rows(html, "Unverified");
-  expect(text(row!.split("</summary>")[0]!)).toBe(`high severity Export is empty 1 Ana Not judged The replay failed: ${error}`);
+  expect(text(row!.split("</summary>")[0]!)).toBe(`high severity Export is empty 1 Finding 1, by Ana Not judged The replay failed: ${error}`);
   expect(text(row!.split("</summary>")[1]!)).toContain(`Why it was not judged: The replay failed: ${error}`);
 });
 
@@ -359,10 +359,10 @@ test("a finding marked not a bug leaves its section and the counts for its own, 
   }));
   expect(head(html)).toMatch(/<h1[^>]*>1 defect confirmed by replay\.<\/h1>/);
   expect(text(band(html))).toContain("1 of 1 reported confirmed");
-  expect(rows(html, "Confirmed").map((row) => text(row.split("</summary>")[0]!))).toEqual(["high severity Export is empty 1 Ana o ✓ Reproduced"]);
+  expect(rows(html, "Confirmed").map((row) => text(row.split("</summary>")[0]!))).toEqual(["high severity Export is empty 1 Finding 1, by Ana o ✓ Reproduced"]);
   expect(html).not.toMatch(/>Rough edges </);
   const [first, second] = rows(html, "Ruled out");
-  expect(text(first!.split("</summary>")[0]!)).toBe("high severity Saving an invoice fails 1 Ana, Lee Park Not a bug o");
+  expect(text(first!.split("</summary>")[0]!)).toBe("high severity Saving an invoice fails 1 Finding 1, by Ana, Lee Park Not a bug o");
   expect(text(first!.split("</details>")[1]!)).toBe("Not a bug, because: Saving twice is on purpose. Marked by ana@acme.test on 2026-10-02 10:00 UTC . Undo : Saving an invoice fails");
   expect(first).not.toContain(">Not a bug</button>");
   expect(text(second!.split("</details>")[1]!)).toContain("Marked by someone no longer in this workspace on");
@@ -391,10 +391,10 @@ test("friction replayed as a possible defect whose judge gave no verdict can be 
     findings: [finished.findings[0]!, finding("ana:fr", "ana", { kind: "friction", filedAs: "friction", title: "Balance has no history", replay: { completed: true, observed: "No transactions.", blockedAt: null } }), finding("lee:fr", "lee", { kind: "friction", title: "Menu is hard to find" })],
   }));
   const [row] = rows(html, "Unverified");
-  expect(text(row!.split("</summary>")[0]!)).toBe("high severity Balance has no history 1 Ana Could not be judged Failed: No output generated.");
+  expect(text(row!.split("</summary>")[0]!)).toBe("high severity Balance has no history 1 Finding 1, by Ana Could not be judged Failed: No output generated.");
   expect(row).toContain("Ana filed this as friction on a goal they did not reach, so Trawler replayed it too.");
   expect(row).toMatch(/<button type="button"[^>]*>Judge again<\/button>/);
-  expect(rows(html, "Rough edges").map((r) => text(r.split("</summary>")[0]!))).toEqual(["high severity Menu is hard to find 1 Lee Park o"]);
+  expect(rows(html, "Rough edges").map((r) => text(r.split("</summary>")[0]!))).toEqual(["high severity Menu is hard to find 1 Finding 1, by Lee Park o"]);
   expect(text(band(html))).toContain("1 of 1 reported confirmed");
 });
 
@@ -504,4 +504,10 @@ test("the details list the cost, models, times, who started the run and how long
   const html = text(activity(render(summary({ ...finished, judgeModel: "anthropic/claude-sonnet-5.5", execution: "own" }))));
   expect(html).toContain("Cost $0.35 of $2.00 cap Model deepseek/deepseek-v4.1-flash Judge model anthropic/claude-sonnet-5.5 Started 2026-09-25 19:40 UTC Finished 2026-09-25 19:59 UTC Took 19 minutes Started by Your CI job");
   expect(text(activity(render(live)))).not.toContain("Finished");
+});
+
+test("the details name an API token as the starter, and a run that never started gives no duration", () => {
+  expect(text(activity(render(summary({ ...finished, origin: "api" }))))).toContain("Started by An API token");
+  const queuedThenStopped = text(activity(render(summary({ ...finished, status: "cancelled", startedAt: null }))));
+  expect(queuedThenStopped).not.toContain("Took");
 });

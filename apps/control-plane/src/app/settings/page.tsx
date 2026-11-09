@@ -32,7 +32,7 @@ export const metadata: Metadata = { title: "Settings" };
 
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" };
 
-export function roleText(role: string): string {
+function roleText(role: string): string {
   return role.split(",").map((r) => ROLE_LABEL[r.trim()] ?? r.trim()).filter(Boolean).join(", ");
 }
 

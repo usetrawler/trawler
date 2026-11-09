@@ -7,7 +7,7 @@ import { updatedSinceOpened } from "../../../components/updated-since-opened.ts"
 import { addAccountAction, removeAccountAction, savePlanAction, type AccountView } from "./plan-actions.ts";
 import { peopleLimitMessage, type WorkspacePlan } from "../../../runs/plan-limits.ts";
 import { Icon } from "../../../components/icon.tsx";
-import { field as controlField, secondaryButton } from "../../../components/controls.ts";
+import { field as controlField, invalidField, secondaryButton } from "../../../components/controls.ts";
 import { letterOf, toneOf } from "../../runs/[id]/person-tones.ts";
 
 const field = "w-full min-w-0 rounded-md border border-line bg-panel px-2.5 py-1.5 outline-none hover:border-muted/60 focus:border-ink";
@@ -74,7 +74,7 @@ export function SignIn({ projectId, planId, person, accounts, onPick, onAccounts
         aria-describedby={missing ? noteId : undefined}
         value={chosen?.ref ?? (missing ? "" : SIGNS_UP)}
         onChange={(e) => onPick(e.target.value === SIGNS_UP ? { signsIn: false } : { accountRef: e.target.value || undefined, signsIn: true })}
-        className={controlField}
+        className={missing ? invalidField : controlField}
       >
         {missing && <option value="">Choose a test account</option>}
         {accounts.map((a) => <option key={a.ref} value={a.ref}>Signs in as {a.username}</option>)}
