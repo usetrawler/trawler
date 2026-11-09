@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import type { RunLine } from "../projects/overview.ts";
 import { runResult } from "../runs/run-result.ts";
 import { runPath, runTitle } from "../runs/status.ts";
@@ -18,7 +19,7 @@ function Meta({ parts }: { parts: Array<string | null | undefined | false> }) {
   const shown = parts.filter((p): p is string => Boolean(p));
   return (
     <span className="mt-1 flex flex-wrap gap-x-1.5 text-sm text-muted">
-      {shown.map((p, i) => <span key={i} className="break-words">{i > 0 && <span aria-hidden>· </span>}{p}</span>)}
+      {shown.map((p, i) => <Fragment key={i}>{i > 0 && <span aria-hidden>·</span>}<span className="break-words">{p}</span></Fragment>)}
     </span>
   );
 }
