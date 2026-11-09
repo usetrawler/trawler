@@ -175,7 +175,7 @@ function Lane({ name, detail, tone, initialsText, children }: { name: string; de
           <span className="block truncate text-xs text-muted">{detail}</span>
         </span>
       </span>
-      <span className="relative block h-[52px] before:absolute before:inset-x-0 before:top-1/2 before:h-px before:bg-line">{children}</span>
+      <span className="relative mx-5 block h-[52px] before:absolute before:-inset-x-5 before:top-1/2 before:h-px before:bg-line">{children}</span>
     </li>
   );
 }
@@ -204,7 +204,7 @@ export function TimelineLanes({ run, live, now }: { run: RunSummary; live: boole
       <div className="min-w-[44rem]">
         <div aria-hidden className="grid grid-cols-[10rem_minmax(0,1fr)] font-mono text-xs text-muted">
           <span />
-          <span className="relative block h-5">{ticks.map((t, i) => <span key={i} className={`absolute ${i === 0 ? "" : i === ticks.length - 1 ? "-translate-x-full" : "-translate-x-1/2"}`} style={{ left: `${at(t)}%` }}><ClockTime iso={new Date(t).toISOString()} /></span>)}</span>
+          <span className="relative mx-5 block h-5">{ticks.map((t, i) => <span key={i} className={`absolute ${i === 0 ? "" : i === ticks.length - 1 ? "-translate-x-full" : "-translate-x-1/2"}`} style={{ left: `${at(t)}%` }}><ClockTime iso={new Date(t).toISOString()} /></span>)}</span>
         </div>
         <div className="relative">
           <ul aria-label="People">
@@ -233,7 +233,7 @@ export function TimelineLanes({ run, live, now }: { run: RunSummary; live: boole
               </Lane>
             )}
           </ul>
-          <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 left-40">
+          <div aria-hidden className="pointer-events-none absolute inset-y-0 right-5 left-[11.25rem]">
             {passes.map((h, i) => {
               const a = row.get(h.from);
               const b = row.get(h.to);
