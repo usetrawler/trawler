@@ -435,19 +435,25 @@ test("the breadcrumb links to the plan used by this run", () => {
   expect(render(summary({ ...finished, planName: null }))).not.toContain("Invitations");
 });
 
-test("a run planned for a pull request shows the PR and the goals the lead chose, or why it did not plan", () => {
-  const planned = text(render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: null, version: null, reused: false, createdByRun: null, goals: [{ id: "pr-export", instruction: "all invoices of last month come out as one spreadsheet", personaId: "lee" }] } })));
-  expect(planned).toContain("Planned for PR #482");
-  expect(planned).toContain("The project's plan runs as it is, with these goals added for the change.");
-  expect(planned).toContain("Lee Park wants all invoices of last month come out as one spreadsheet");
-  const fellBack = text(render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: "Nothing in this pull request points at a feature, so the project's plan ran as it is.", version: null, reused: false, createdByRun: null, goals: [] } })));
-  expect(fellBack).toContain("Pull request #482");
-  expect(fellBack).toContain("Nothing in this pull request points at a feature");
-  expect(text(render(summary({ ...finished, prPlan: { number: 482, mode: "change", note: null, version: null, reused: false, createdByRun: null, goals: [] } })))).toContain("Planning for PR #482");
+test("a run planned for a pull request says on top of its timeline what it checked: the goals Trawler wrote, per person, or why it did not plan", () => {
   const goals = [{ id: "pr-export", instruction: "all invoices of last month come out as one spreadsheet", personaId: "lee" }];
-  expect(planned).not.toContain("Plan v");
-  expect(text(render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: null, version: 2, reused: true, createdByRun: 31, goals } })))).toContain("Plan v2 of this pull request, reused from run #31.");
-  expect(text(render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: null, version: 1, reused: false, createdByRun: 7, goals } })))).toContain("Plan v1 of this pull request, created in this run.");
+  const html = render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: null, version: null, reused: false, createdByRun: null, goals } }));
+  const timeline = html.slice(html.indexOf('id="run-timeline"'), html.indexOf('id="run-details"'));
+  const section = text(timeline.slice(0, timeline.indexOf("</section>")));
+  expect(section).toContain("What this run checked Goals Trawler wrote for PR #482, added to the project's plan, which runs as it is.");
+  expect(section).toContain("Lee Park all invoices of last month come out as one spreadsheet");
+  expect(section).not.toMatch(/wants|lead|Plan v/);
+  expect(text(render(summary({ ...finished, prPlan: { number: 482, mode: "change", note: null, version: null, reused: false, createdByRun: null, goals } })))).toContain("Goals Trawler wrote for PR #482 from its title, description and changed files. Only these run; the project's own plan does not.");
+  expect(text(render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: "Nothing in this pull request points at a feature, so the project's plan ran as it is.", version: null, reused: false, createdByRun: null, goals: [] } })))).toContain("What this run checked Nothing in this pull request points at a feature");
+  expect(text(render(summary({ ...live, prPlan: { number: 482, mode: "change", note: null, version: null, reused: false, createdByRun: null, goals: [] } })))).toContain("What this run checks Trawler is reading PR #482 to choose who tries what.");
+  expect(text(render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: null, version: 2, reused: true, createdByRun: 31, goals } })))).toContain("PR #482 v2 · reused from Run 0031");
+  expect(text(render(summary({ ...finished, status: "cancelled", prPlan: { number: 482, mode: "change", note: null, version: null, reused: false, createdByRun: null, goals: [] } })))).toContain("What this run checked The run ended before Trawler chose goals for PR #482.");
+  expect(text(render(summary({ ...finished, prPlan: { number: null, mode: "both", note: null, version: 1, reused: false, createdByRun: 7, goals } })))).toContain("Pull request plan v1 · written in this run");
+  const written = render(summary({ ...finished, prPlan: { number: 482, mode: "both", note: null, version: 1, reused: false, createdByRun: 7, goals } }));
+  expect(text(written)).toContain("PR #482 v1 · written in this run");
+  expect(written).toContain('href="/runs/0007/plan"');
+  expect(text(activity(written))).toContain("Pull request plan 1 goal Trawler wrote for PR #482");
+  expect(activity(written)).toContain('href="#pr-plan"');
   expect(text(render(finished))).not.toContain("PR #");
 });
 
@@ -469,11 +475,11 @@ test("the pull request subject links only to web addresses and is absent for oth
   expect(text(head(render(finished)))).not.toContain("PR #");
 });
 
-test("a pull request plan shows what the lead told the team", () => {
+test("a pull request plan quotes the brief Trawler wrote for the people, credited to the pull request", () => {
   const prPlan = { number: 12, mode: "change" as const, note: null, version: 1, reused: false, createdByRun: 7, brief: "A member can now ask to cancel a charge.", goals: [{ id: "pr-goal-1", instruction: "Your request reaches Ola.", personaId: "ana" }] };
   const html = text(render(summary({ ...finished, prPlan })));
-  expect(html).toContain("What the lead told the team A member can now ask to cancel a charge.");
-  expect(text(render(summary({ ...finished, prPlan: { ...prPlan, brief: undefined } })))).not.toContain("What the lead told the team");
+  expect(html).toContain("A member can now ask to cancel a charge. From PR #12, written by Trawler for the people");
+  expect(text(render(summary({ ...finished, prPlan: { ...prPlan, brief: undefined } })))).not.toContain("written by Trawler for the people");
 });
 
 test("a run started over MCP says which assistant started it, for whom, and a run started any other way says nothing of it", () => {

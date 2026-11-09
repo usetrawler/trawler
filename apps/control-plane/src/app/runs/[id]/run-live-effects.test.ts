@@ -631,8 +631,8 @@ test("Copy as issue copies the finding as Markdown with a link back to it, says 
 
 test("every address the run page ever used opens the panel that now holds what it named, and an address naming nothing opens the run's own start", () => {
   for (const hash of ["#findings", "#finding-ana%3Af1"]) expect(panelForHash(hash, "timeline")).toBe("findings");
-  for (const hash of ["#timeline", "#goals", "#activity", "#conversation", "#trail-ana"]) expect(panelForHash(hash, "findings")).toBe("timeline");
-  for (const hash of ["#details", "#pr-plan"]) expect(panelForHash(hash, "findings")).toBe("details");
+  for (const hash of ["#timeline", "#pr-plan", "#goals", "#activity", "#conversation", "#trail-ana"]) expect(panelForHash(hash, "findings")).toBe("timeline");
+  expect(panelForHash("#details", "findings")).toBe("details");
   expect(panelForHash("", "findings")).toBe("findings");
   expect(panelForHash("", "timeline")).toBe("timeline");
 });

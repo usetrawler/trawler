@@ -75,35 +75,61 @@ export function outcome(view: View): { people: string; goals: string } {
   };
 }
 
-export function PullRequestPlan({ run }: { run: RunSummary }) {
+const prLabel = (number: number | null) => (number ? `PR #${number}` : "the pull request");
+
+export function PullRequestPlan({ run, live }: { run: RunSummary; live: boolean }) {
   const plan = run.prPlan;
   if (!plan) return null;
-  const pr = plan.number ? `PR #${plan.number}` : "the pull request";
-  const name = (personaId: string | null) => run.personas.find((p) => p.id === personaId)?.name ?? "Someone";
-  const title = plan.goals.length > 0 ? `Planned for ${pr}` : plan.note ? `Pull request${plan.number ? ` #${plan.number}` : ""}` : `Planning for ${pr}`;
+  const pr = prLabel(plan.number);
+  const heading = live ? "What this run checks" : "What this run checked";
+  if (plan.goals.length === 0) {
+    return (
+      <section id="pr-plan" aria-labelledby="pr-plan-heading" className="mb-10 flex max-w-3xl flex-col gap-1">
+        <h2 id="pr-plan-heading" className="font-medium">{heading}</h2>
+        <p className="text-sm text-muted">{plan.note ?? (live ? `Trawler is reading ${pr} to choose who tries what.` : `The run ended before Trawler chose goals for ${pr}.`)}</p>
+      </section>
+    );
+  }
+  const people = run.personas.map((p, i) => ({ ...p, tone: toneOf(i), goals: plan.goals.filter((g) => g.personaId === p.id) })).filter((p) => p.goals.length > 0);
+  const unassigned = plan.goals.filter((g) => !run.personas.some((p) => p.id === g.personaId));
+  const origin = plan.reused ? (plan.createdByRun ? <>reused from <a href={runPath(plan.createdByRun)} className="underline underline-offset-4 hover:text-ink">{runTitle(plan.createdByRun)}</a></> : "reused") : "written in this run";
   return (
-    <section aria-labelledby="pr-plan" className="mt-6 flex flex-col gap-2">
-      <h2 id="pr-plan" className="font-medium">{title}</h2>
-      {plan.goals.length > 0 ? (
-        <>
-          {plan.version !== null && (
-            <p className="text-sm text-muted">{`Plan v${plan.version} of this pull request, ${plan.reused ? `reused${plan.createdByRun ? ` from run #${plan.createdByRun}` : ""}` : "created in this run"}.`}</p>
-          )}
-          <p className="text-sm text-muted">{plan.mode === "both" ? "The project's plan runs as it is, with these goals added for the change." : "Only these goals run, aimed at the change."}</p>
-          {plan.brief && (
-            <div className="flex flex-col gap-1">
-              <p className="text-sm font-medium">What the lead told the team</p>
-              <p className="border-l-2 border-line pl-3 text-sm break-words whitespace-pre-line">{plan.brief}</p>
+    <section id="pr-plan" aria-labelledby="pr-plan-heading" className="mb-10 flex max-w-3xl flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <h2 id="pr-plan-heading" className="font-medium">{heading}</h2>
+        <p className="text-sm text-muted">{plan.mode === "both" ? `Goals Trawler wrote for ${pr}, added to the project's plan, which runs as it is.` : `Goals Trawler wrote for ${pr} from its title, description and changed files. Only these run; the project's own plan does not.`}</p>
+      </div>
+      {plan.brief && (
+        <figure className="flex flex-col gap-1 border-l-2 border-line pl-4">
+          <blockquote className="break-words whitespace-pre-line">{plan.brief}</blockquote>
+          <figcaption className="text-sm text-muted">From {pr}, written by Trawler for the people</figcaption>
+        </figure>
+      )}
+      <ul aria-label="People and their goals" className="divide-y divide-line border-y border-line">
+        {people.map((p) => (
+          <li key={p.id} className="flex gap-3 py-3">
+            <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full text-xs font-semibold" style={{ background: p.tone.bar, color: p.tone.onBar }}>{letterOf(p.name)}</span>
+            <div className="min-w-0 flex-1">
+              <h3 className="font-medium">{p.name}</h3>
+              <ol className="mt-1 flex list-decimal flex-col gap-1 pl-5 text-sm marker:text-muted">
+                {p.goals.map((g) => <li key={g.id} className="break-words">{g.instruction}</li>)}
+              </ol>
             </div>
-          )}
-          <ul className="flex flex-col gap-1.5 border-l-2 border-line pl-3 text-sm">
-            {plan.goals.map((g) => (
-              <li key={g.id}><span className="font-medium">{name(g.personaId)}</span> <span className="text-muted">wants</span> {g.instruction}</li>
-            ))}
-          </ul>
-        </>
-      ) : (
-        <p className="text-sm text-muted">{plan.note ?? "Reading the pull request to choose the people and goals."}</p>
+          </li>
+        ))}
+        {unassigned.length > 0 && (
+          <li className="py-3 pl-10">
+            <h3 className="font-medium">Anyone</h3>
+            <ol className="mt-1 flex list-decimal flex-col gap-1 pl-5 text-sm marker:text-muted">
+              {unassigned.map((g) => <li key={g.id} className="break-words">{g.instruction}</li>)}
+            </ol>
+          </li>
+        )}
+      </ul>
+      {plan.version !== null && (
+        <p className="text-sm text-muted">
+          <a href={`${runPath(run.number)}/plan`} className="underline underline-offset-4 hover:text-ink">{`${plan.number ? `PR #${plan.number}` : "Pull request plan"} v${plan.version}`}</a> · {origin}
+        </p>
       )}
     </section>
   );
@@ -504,6 +530,7 @@ export function RunDetails({ run, live }: { run: RunSummary; live: boolean }) {
   if (duration) rows.push(["Took", duration]);
   rows.push(["Started by", run.startedVia ? <>{viaClient(run.startedVia)} for {run.startedVia.person}, over MCP</> : run.execution === "own" ? "Your CI job" : STARTED_BY[run.origin]]);
   if (run.pullRequest) rows.push(["Pull request", <PullRequestSubject key="pr" pr={run.pullRequest} />]);
+  if (run.prPlan && run.prPlan.goals.length > 0) rows.push(["Pull request plan", <a key="checked" href="#pr-plan" className="underline underline-offset-4">{run.prPlan.goals.length} {run.prPlan.goals.length === 1 ? "goal" : "goals"} Trawler wrote for {prLabel(run.prPlan.number)}</a>]);
   if (run.providedAccounts.length > 0) rows.push(["Accounts", `${run.providedAccounts.join(", ")} ${run.providedAccounts.length === 1 ? "signs" : "sign"} in with ${run.providedAccounts.length === 1 ? "an account" : "accounts"} provided by the CI job.`]);
   if (run.prPlan?.signUps?.length) rows.push(["Sign-up", <span key="signup" title={run.prPlan.accountReason}>This pull request touches how people get accounts, so {run.prPlan.signUps.join(", ")} {run.prPlan.signUps.length === 1 ? "goes" : "go"} through the real sign-up instead of using the CI account.</span>]);
   return (
@@ -607,8 +634,8 @@ type Panel = (typeof PANELS)[number][0];
 
 export function panelForHash(hash: string, unaddressed: Panel): Panel {
   if (hash === "#findings" || hash.startsWith("#finding-")) return "findings";
-  if (hash === "#timeline" || hash === "#goals" || hash === "#activity" || hash === "#conversation" || hash.startsWith("#trail-") || hash.startsWith("#message-")) return "timeline";
-  if (hash === "#details" || hash === "#pr-plan") return "details";
+  if (hash === "#timeline" || hash === "#pr-plan" || hash === "#goals" || hash === "#activity" || hash === "#conversation" || hash.startsWith("#trail-") || hash.startsWith("#message-")) return "timeline";
+  if (hash === "#details") return "details";
   return unaddressed;
 }
 
@@ -789,6 +816,7 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
         </div>
       </div>
       <div id="run-timeline" hidden={skipped || panel !== "timeline"} className="pt-6">
+        {!skipped && <PullRequestPlan run={run} live={view.live} />}
         {view.live && <Stages stages={view.stages} />}
         <TimelineLanes run={run} live={view.live} now={now} />
         <div className={`mt-10 grid gap-12 ${run.conversation ? "lg:grid-cols-[minmax(0,1fr)_22rem]" : ""}`}>
@@ -812,7 +840,6 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
       </div>
       <div id="run-details" hidden={!skipped && panel !== "details"} className={skipped ? "pt-8" : "pt-6"}>
         <RunDetails run={run} live={view.live} />
-        {!skipped && <PullRequestPlan run={run} />}
       </div>
     </div>
   );
