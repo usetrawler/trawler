@@ -131,3 +131,11 @@ test("a person's turns separated by a sliver of time draw as one bar, and a real
   expect(joinTurns(turns, at)).toEqual([{ jobId: "a", personaKey: "ana", start: 0, end: 200 }, { jobId: "c", personaKey: "ana", start: 400, end: 410 }]);
   expect(turns[0]!.end).toBe(100);
 });
+
+test("the axis, every lane and the overlay share one inset, so a mark on the run's first or last moment stays inside and no scrollbar appears", () => {
+  const html = renderToStaticMarkup(createElement(TimelineLanes, { run, live: true, now: T(9).getTime() }));
+  const tracks = html.match(/<span class="relative mx-5 block h-\[52px\]/g) ?? [];
+  expect(tracks).toHaveLength(html.match(/<li class="grid/g)!.length);
+  expect(html).toContain('<span class="relative mx-5 block h-5">');
+  expect(html).toMatch(/<div aria-hidden="true" class="pointer-events-none absolute inset-y-0 right-5 left-\[11\.25rem\]">/);
+});
