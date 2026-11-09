@@ -64,7 +64,7 @@ async function seedRun(orgId: string, projectId: string, at: Date, set: { status
 const project = (orgId: string, name: string, targetUrl: string) => withOrg(t.db, orgId, (tx) => createProject(tx, orgId, { ...config, name, targetUrl }, keys));
 
 beforeAll(async () => {
-  for (const org of ["org-a", "org-b", "org-c", "org-d"]) await sql`insert into organization (id, name, slug, "createdAt") values (${org}, ${org}, ${org}, now())`.execute(t.db);
+  for (const org of ["org-a", "org-b", "org-c", "org-d", "org-e"]) await sql`insert into organization (id, name, slug, "createdAt") values (${org}, ${org}, ${org}, now())`.execute(t.db);
   acme = await project("org-a", "Acme", "https://app.acme.test/");
   empty = await project("org-a", "Empty", "https://empty.acme.test/");
   fresh = await project("org-a", "Fresh", "https://fresh.acme.test/");
@@ -161,6 +161,11 @@ test("the navigation lists the workspace's projects by name, so they keep their 
 test("the most recently active project is the one with the latest run, or the newest project without runs", async () => {
   expect(await withOrg(t.db, "org-a", (tx) => mostRecentProject(tx, "org-a"))).toBe(fresh);
   expect(await withOrg(t.db, "org-none", (tx) => mostRecentProject(tx, "org-none"))).toBeNull();
+  const older = await project("org-e", "Older", "https://older.test/");
+  const newer = await project("org-e", "Newer", "https://newer.test/");
+  expect(await withOrg(t.db, "org-e", (tx) => mostRecentProject(tx, "org-e"))).toBe(newer);
+  await seedRun("org-e", older, new Date(Date.now() + 60_000), { status: "succeeded", cost: 0.1 }, [], 0, 0);
+  expect(await withOrg(t.db, "org-e", (tx) => mostRecentProject(tx, "org-e"))).toBe(older);
 });
 
 test("projects that share a name are told apart by their product's host, in the navigation and in the runs", async () => {

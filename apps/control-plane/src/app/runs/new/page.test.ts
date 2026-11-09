@@ -85,6 +85,11 @@ test("without a project in the address, the start page opens the most recently a
   expect(state.edited.at(-1)).toEqual([GLOBEX, PLANS[0]!.id]);
   await render({ project: ACME });
   expect(state.edited.at(-1)).toEqual([ACME, PLANS[0]!.id]);
+  await render({ project: "unknown" });
+  expect(state.edited.at(-1)).toEqual([GLOBEX, PLANS[0]!.id]);
+  state.recent = "gone";
+  await render();
+  expect(state.edited.at(-1)).toEqual([ACME, PLANS[0]!.id]);
 });
 
 test("before a workspace has a project, New run sends it to add one, and a visitor who is not signed in to sign in", async () => {
