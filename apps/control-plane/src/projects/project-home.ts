@@ -70,16 +70,6 @@ export async function projectPullRequests(tx: Tx, orgId: string, projectId: stri
   }));
 }
 
-export function runResult(run: RunLine): string {
-  if (run.status === "queued") return "Queued";
-  if (run.status === "running") return "Live";
-  if (run.status === "skipped") return "Skipped: nothing to test in the UI";
-  if (run.status === "failed") return "Failed";
-  if (run.status === "cancelled") return "Cancelled";
-  const confirmed = run.unchecked ? "Not checked: every replay failed" : run.confirmed ? `${run.confirmed} confirmed` : "No defect confirmed";
-  return run.status === "stopped_budget" ? `Stopped at cap · ${confirmed}` : confirmed;
-}
-
 export async function projectCounts(tx: Tx, orgId: string, projectId: string): Promise<{ runs: number; finished: number; pullRequests: number }> {
   const { rows } = await sql<{ runs: string; finished: string; prs: string }>`SELECT count(*) AS runs, count(*) FILTER (WHERE r.status IN ('succeeded', 'stopped_budget')) AS finished, count(DISTINCT ${prSource}) AS prs FROM runs r WHERE r.org_id = ${orgId} AND r.project_id = ${projectId}`.execute(tx);
   return { runs: Number(rows[0]?.runs ?? 0), finished: Number(rows[0]?.finished ?? 0), pullRequests: Number(rows[0]?.prs ?? 0) };

@@ -5,7 +5,7 @@ import { getDb } from "./db.ts";
 
 export interface Shell {
   user: { name: string; email: string };
-  workspace: { name: string; projects: NavProject[]; runs: number };
+  workspace: { name: string; projects: NavProject[] };
 }
 
 export async function shellFor(member: Member): Promise<Shell> {

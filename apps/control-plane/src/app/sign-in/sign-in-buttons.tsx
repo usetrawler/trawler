@@ -25,10 +25,9 @@ export function SignInButtons({ providers }: { providers: Array<keyof typeof LAB
           type="button"
           onClick={() => go(p)}
           disabled={pending !== null}
-          className="flex min-h-12 items-center justify-between gap-3 border border-line bg-soft px-4 py-3 text-left font-medium transition hover:border-ink disabled:opacity-60"
+          className="flex min-h-11 items-center justify-center gap-3 rounded-md border border-line bg-panel px-4 py-2.5 font-medium transition-colors hover:border-muted disabled:opacity-60"
         >
-          <span>{LABELS[p]}</span>
-          <span aria-hidden className="font-mono text-action">{pending === p ? "…" : "→"}</span>
+          <span>{pending === p ? "Signing in…" : LABELS[p]}</span>
         </button>
       ))}
       {error && <p role="alert" className="text-sm text-bad">{error}</p>}

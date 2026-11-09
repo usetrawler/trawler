@@ -61,7 +61,7 @@ test("the controls are real, keyboard-reachable elements, and none is disabled a
   expect(html).toContain("<select");
   expect(html.match(/<input[^>]*type="radio"/g)).toHaveLength(2);
   expect(html.match(/<button[^>]*type="button"/g)!.length).toBeGreaterThanOrEqual(3);
-  expect(html).not.toMatch(/<(button|fieldset|select|input)[^>]*\sdisabled/);
+  expect(html).not.toMatch(/<(button|fieldset|select|input)[^>]*\sdisabled(=|\s|>)/);
 });
 
 test("the page tells how long a connection lasts and where to disconnect it, with a working link", () => {

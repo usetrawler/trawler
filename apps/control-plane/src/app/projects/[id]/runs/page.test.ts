@@ -22,7 +22,7 @@ vi.mock("../../../../server/db.ts", () => ({ getDb: () => ({}) }));
 vi.mock("../../../../server/shell.ts", () => ({
   shellFor: async (member: { name: string; email: string; orgId: string; orgName: string }) => {
     state.shells.push(member.orgId);
-    return { user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [{ id: ID, name: "Acme", address: "app.acme.test" }], runs: 60 } };
+    return { user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [{ id: ID, name: "Acme", address: "app.acme.test" }] } };
   },
 }));
 vi.mock("../../../../runs/runs.ts", () => ({ projectRunState: async () => (state.found ? { paused: false, liveRun: null } : null) }));

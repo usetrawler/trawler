@@ -28,10 +28,10 @@ describe("RunsView", () => {
     expect(filters(render({ show: "attention" })).map((f) => f.current)).toEqual([false, false, true]);
   });
 
-  it("sets the chosen filter apart by weight as well as by its border colour", () => {
+  it("fills the chosen filter with ink, like the filters on the run's story", () => {
     const chips = (render({ show: "completed" }).match(/<nav aria-label="Filter runs".*?<\/nav>/)?.[0] ?? "").match(/<a [^>]*>/g) ?? [];
-    expect(chips.map((chip) => /\bfont-semibold\b/.test(chip))).toEqual([false, true, false]);
-    expect(chips.map((chip) => /\bborder-action\b/.test(chip))).toEqual([false, true, false]);
+    expect(chips.map((chip) => /\bbg-ink\b/.test(chip))).toEqual([false, true, false]);
+    expect(chips.some((chip) => /\bborder-action\b/.test(chip))).toBe(false);
   });
 
   it("shows the page's own head above the filters, and lists the runs", () => {

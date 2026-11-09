@@ -47,7 +47,7 @@ test("the error page's root element lets the script's theme attribute differ fro
 
 test("an error in the browser is reported and offers to try again", () => {
   const reset = vi.fn();
-  expect(text(renderToStaticMarkup(createElement(GlobalError, { error: new Error("boom"), reset })))).toBe("Something went wrong. Try again, or come back in a minute. Try again →");
+  expect(text(renderToStaticMarkup(createElement(GlobalError, { error: new Error("boom"), reset })))).toBe("Something went wrong. Try again, or come back in a minute. Try again");
   report();
   expect(sentry.captureException).toHaveBeenCalledOnce();
   press(new Error("boom"), reset);
@@ -65,7 +65,7 @@ test("a page left open across an update says so and reloads, since trying again 
   const reset = vi.fn();
   const html = renderToStaticMarkup(createElement(GlobalError, { error: outdated, reset }));
   expect(title(html)).toBe("Page updated · Trawler");
-  expect(text(html)).toBe("Trawler has been updated since this page opened. Reload the page to carry on. Reload the page →");
+  expect(text(html)).toBe("Trawler has been updated since this page opened. Reload the page to carry on. Reload the page");
   report();
   expect(sentry.captureException).not.toHaveBeenCalled();
   const reload = vi.fn();

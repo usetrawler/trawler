@@ -69,9 +69,10 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
     <AppShell shell={shell} current={{ project: id }} wide>
       <ProjectHead project={{ id: project.id, name: project.name, targetUrl: project.target_url }} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="plan" counts={counts} runState={runState} planId={planId} />
       <div className="flex max-w-6xl flex-col gap-10">
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
-            <PlansBar projectId={project.id} plans={plans} current={planId} canAdd={plans.length < MAX_PLANS} />
+        <div className="flex flex-col gap-4">
+          <PlansBar projectId={project.id} plans={plans} current={planId} canAdd={plans.length < MAX_PLANS} />
+          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+            <PlanTitle key={planId} projectId={project.id} planId={planId} name={project.plan.name} canRemove={plans.length > 1} />
             <div className="flex flex-wrap items-baseline gap-x-3 text-sm">
               {project.features.length > 0 && (
                 <details className="group relative text-muted">
@@ -79,11 +80,10 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
                   <ul className="absolute left-0 z-10 mt-2 flex w-max max-w-xs flex-col gap-1 rounded-md border border-line bg-panel p-3 text-ink shadow-sm">{project.features.map((f) => <li key={f}>{f}</li>)}</ul>
                 </details>
               )}
-              <Link href={`/projects/${project.id}/features?plan=${planId}`} className="underline underline-offset-4 hover:text-action-ink">{project.features.length > 0 ? "Change features and propose people again" : "Choose features and propose people"}</Link>
+              <Link href={`/projects/${project.id}/features?plan=${planId}`} className="underline underline-offset-4 hover:text-muted">{project.features.length > 0 ? "Change features and propose people again" : "Choose features and propose people"}</Link>
             </div>
           </div>
           {prPlans.length > 0 && <p className="text-sm text-muted">Pull request plans are written by the lead for each pull request and are read-only. Find them under <a href={`/projects/${id}/pull-requests`} className="text-ink underline underline-offset-4">Pull requests</a>.</p>}
-          <PlanTitle key={planId} projectId={project.id} planId={planId} name={project.plan.name} canRemove={plans.length > 1} />
         </div>
         <PlanWorkspace
           key={planId}

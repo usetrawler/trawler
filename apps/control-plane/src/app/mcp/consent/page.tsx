@@ -1,3 +1,4 @@
+import { pageTitle } from "../../../components/page-head.tsx";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { getAuth } from "../../../server/auth.ts";
@@ -40,7 +41,7 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
   return <main className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center gap-6 px-4 py-12">
     <p className="flex items-center gap-2 text-2xl font-semibold"><BrandMark className="h-8 w-8" />trawler</p>
     {consent && options ? <section className="flex flex-col gap-5 border border-line bg-panel p-6">
-      <h1 className="wrap-anywhere text-2xl font-semibold">Connect {consent.client_name}</h1>
+      <h1 className={pageTitle}>Connect {consent.client_name}</h1>
       <p className="text-sm text-muted">
         {consent.clientHost
           ? <>Published at <strong>{consent.clientHost}</strong>.</>
@@ -54,7 +55,7 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
           </>
         : <ConsentForm query={query} requestedScopes={consent.scopes} account={{ name: person!.user.name, email: person!.user.email }} workspace={consent.org_name} controlOffered={options.controlOffered} controlNote={options.controlNote} projects={projects} />}
     </section> : <section className="flex flex-col gap-3 border border-line bg-panel p-6">
-      <h1 className="text-2xl font-semibold">Connection unavailable</h1>
+      <h1 className={pageTitle}>Connection unavailable</h1>
       <p>{person && workspace === "choosing" ? UNAVAILABLE.setup : UNAVAILABLE.expired}</p>
       <ConsentEscape signedIn={Boolean(person)} />
     </section>}

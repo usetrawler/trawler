@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { authClient } from "../../auth-client.ts";
-import { field } from "../../../components/key-fields.tsx";
+import { field, primaryButton, secondaryButton } from "../../../components/controls.ts";
 import { DEFAULT_SPEND_LIMIT, SPEND_LIMIT_BOUNDS, spendLimitFrom } from "../../../mcp/limits.ts";
 
 export interface ConsentFormProps {
@@ -123,8 +123,8 @@ export function ConsentForm({ query, requestedScopes, account, workspace, contro
       You can disconnect it any time under <a href="/settings?section=tokens" className="underline underline-offset-4 hover:text-ink">Settings, API tokens &amp; MCP</a>.
     </p>
     <div className="flex flex-wrap gap-3">
-      <button type="button" aria-disabled={busy || undefined} onClick={() => decide(true)} className="min-h-12 border border-ink bg-ink px-5 py-3 font-medium text-paper aria-disabled:opacity-60">{access === "control" ? "Allow with run control" : "Allow read access"}</button>
-      <button type="button" aria-disabled={busy || undefined} onClick={() => decide(false)} className="min-h-12 border border-line px-5 py-3 font-medium hover:border-ink aria-disabled:opacity-60">Cancel</button>
+      <button type="button" aria-disabled={busy || undefined} onClick={() => decide(true)} className={primaryButton}>{access === "control" ? "Allow with run control" : "Allow read access"}</button>
+      <button type="button" aria-disabled={busy || undefined} onClick={() => decide(false)} className={secondaryButton}>Cancel</button>
     </div>
     <p role="status" className="text-sm text-muted">{state === "working" ? "Working…" : state === "done" ? "Done. Return to your assistant; you can close this tab." : ""}</p>
     {error && <p role="alert" className="text-sm text-bad">{error}</p>}

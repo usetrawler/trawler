@@ -2,7 +2,8 @@ import { FindingRows, GoingRuns } from "../../../../components/findings-list.tsx
 import { LocalTime } from "../../../../components/local-time.tsx";
 import { homeHeadline } from "../../../../projects/home-headline.ts";
 import type { RunLine } from "../../../../projects/overview.ts";
-import { runResult, type OpenFinding, type PullRequestLine } from "../../../../projects/project-home.ts";
+import type { OpenFinding, PullRequestLine } from "../../../../projects/project-home.ts";
+import { runResult } from "../../../../runs/run-result.ts";
 import { runPath, runTitle } from "../../../../runs/status.ts";
 
 const SHOWN_PULL_REQUESTS = 3;
@@ -55,12 +56,20 @@ function Latest({ run }: { run: RunLine | undefined }) {
   );
 }
 
+function NextStep({ projectId, runs, finished, open, going }: { projectId: string; runs: number; finished: number; open: number; going: boolean }) {
+  if (going || open > 0) return null;
+  const plan = <a href={`/projects/${projectId}`} className="text-ink underline underline-offset-4">plan</a>;
+  if (runs === 0) return <p className="text-muted">Check the {plan}, then start a run to see what people find.</p>;
+  if (finished === 0) return <p className="text-muted">Open the latest run to see why it stopped, then start another from the {plan}.</p>;
+  return <p className="text-muted">Nothing confirmed is waiting for you. Start a run after your next change, or let your CI job start one for each pull request.</p>;
+}
+
 export function ProjectHomeView({ projectId, runs, finished, findings, going, latest, pullRequests, pullRequestCount }: { projectId: string; runs: number; finished: number; findings: OpenFinding[]; going: RunLine[]; latest?: RunLine; pullRequests: PullRequestLine[]; pullRequestCount: number }) {
   return (
     <div className="flex max-w-3xl flex-col gap-10">
       <div className="flex flex-col gap-4">
         <p className="text-2xl leading-tight font-medium tracking-tight wrap-anywhere md:text-[28px]">{homeHeadline(findings, runs, finished)}</p>
-        {runs === 0 && <p className="text-muted">Check the <a href={`/projects/${projectId}`} className="text-ink underline underline-offset-4">plan</a>, then start a run to see what people find.</p>}
+        <NextStep projectId={projectId} runs={runs} finished={finished} open={findings.length} going={going.length > 0} />
         {going.length > 0 ? <GoingRuns runs={going} /> : <Latest run={latest} />}
       </div>
       <Findings findings={findings} />

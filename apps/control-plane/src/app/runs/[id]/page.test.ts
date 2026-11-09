@@ -16,7 +16,7 @@ vi.mock("../../../server/runs.ts", () => ({ runFor: async (headers: Headers, id:
 vi.mock("../../../server/shell.ts", () => ({
   shellFor: async (member: Member) => {
     state.shells.push(member);
-    return { user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [{ id: "p1", name: "Acme", address: "app.acme.test" }], runs: 4 } };
+    return { user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [{ id: "p1", name: "Acme", address: "app.acme.test" }] } };
   },
 }));
 vi.mock("../../../runs/report.ts", () => ({ runView: () => ({}) }));

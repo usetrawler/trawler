@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { runPath, runTitle } from "../../../runs/status.ts";
 import { runAgainAction, type RunAgainState } from "./actions.ts";
+import { secondaryButton } from "../../../components/controls.ts";
 
 export async function runAgain(previous: RunAgainState, form: FormData): Promise<RunAgainState> {
   try {
@@ -26,9 +27,8 @@ export function RunAgainButton({ runId, again }: { runId: string; again: RunAgai
   return (
     <form action={again.action} className="contents">
       <input type="hidden" name="runId" value={runId} />
-      <button type="submit" aria-disabled={again.pending || undefined} onClick={(e) => { if (again.pending) e.preventDefault(); }} className="flex h-10 w-full shrink-0 items-center justify-center gap-2 rounded-md border border-line bg-panel px-4 text-sm font-medium hover:border-muted aria-disabled:cursor-wait aria-disabled:opacity-60 md:w-auto">
+      <button type="submit" aria-disabled={again.pending || undefined} onClick={(e) => { if (again.pending) e.preventDefault(); }} className={secondaryButton}>
         {again.pending ? "Starting…" : "Run again"}
-       
       </button>
     </form>
   );

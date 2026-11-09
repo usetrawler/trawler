@@ -1,7 +1,7 @@
 "use client";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { useActionState, useEffect, useRef, useState } from "react";
-import { field } from "../../components/key-fields.tsx";
+import { field, keyField } from "../../components/controls.ts";
 import { LocalTime } from "../../components/local-time.tsx";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { createApiTokenAction, revokeApiTokenAction, type ApiTokenState } from "./actions.ts";
@@ -81,7 +81,7 @@ function TokenManager({ tokens, projects }: { tokens: TokenView[]; projects: Arr
         <div role="status" className="flex flex-col gap-2 border border-ok p-4">
           <p className="text-sm"><strong className="font-semibold">{shown.name}</strong> was created. Copy the token now: it is not shown again.</p>
           <div className="flex flex-wrap gap-2">
-            <input ref={tokenBox} readOnly aria-label={`Token ${shown.name}`} value={shown.token} className={`${field} min-w-0 flex-1 font-mono text-xs`} onFocus={(e) => e.currentTarget.select()} />
+            <input ref={tokenBox} readOnly aria-label={`Token ${shown.name}`} value={shown.token} className={`${keyField} flex-1`} onFocus={(e) => e.currentTarget.select()} />
             <button type="button" onClick={copy} className={button}>Copy</button>
             <button type="button" onClick={() => { setShown(null); nameInput.current?.focus(); }} className={button}>I have copied it</button>
           </div>

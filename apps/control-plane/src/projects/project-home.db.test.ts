@@ -7,7 +7,8 @@ import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { startRun } from "../runs/runs.ts";
 import { createProject, listPlans } from "./projects.ts";
-import { openFindings, projectCounts, projectPullRequests, runResult } from "./project-home.ts";
+import { runResult } from "../runs/run-result.ts";
+import { openFindings, projectCounts, projectPullRequests } from "./project-home.ts";
 import { runLinesByIds, type RunLine } from "./overview.ts";
 
 const t = await testDb();

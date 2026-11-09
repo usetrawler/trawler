@@ -12,7 +12,7 @@ vi.mock("next/navigation", () => ({
   notFound: () => { throw Object.assign(new Error("not found"), { notFound: true }); },
 }));
 vi.mock("../../../../../server/auth.ts", () => ({ signedInMember: async () => member }));
-vi.mock("../../../../../server/shell.ts", () => ({ shellFor: async () => ({ user: { name: "Ana", email: member.email }, workspace: { name: "Acme workspace", projects: [{ id: ID, name: "Acme", address: "app.acme.test" }], runs: 0 } }) }));
+vi.mock("../../../../../server/shell.ts", () => ({ shellFor: async () => ({ user: { name: "Ana", email: member.email }, workspace: { name: "Acme workspace", projects: [{ id: ID, name: "Acme", address: "app.acme.test" }] } }) }));
 vi.mock("../../../../../server/db.ts", () => ({ getDb: () => ({}) }));
 vi.mock("../../../../../db/tenancy.ts", () => ({ withOrg: async (_db: unknown, _org: string, work: (tx: unknown) => unknown) => work({}) }));
 vi.mock("../../../../../projects/overview.ts", () => ({ hostOf: (u: string) => new URL(u).host }));

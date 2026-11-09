@@ -1,3 +1,4 @@
+import { pageTitle } from "../../components/page-head.tsx";
 import { FindingRows, GoingRuns } from "../../components/findings-list.tsx";
 import type { NavProject, RunLine } from "../../projects/overview.ts";
 import type { OpenFinding } from "../../projects/project-home.ts";
@@ -8,7 +9,7 @@ export function FindingsView({ projects, findings, going }: { projects: NavProje
   return (
     <div className="flex max-w-3xl flex-col gap-10">
       <div className="flex flex-col gap-3">
-        <h1 className="text-2xl leading-tight font-semibold tracking-tight md:text-[28px]">Findings</h1>
+        <h1 className={pageTitle}>Findings</h1>
         <p className="text-muted">Confirmed defects from the latest run of each pull request and plan. Mark one not a bug and it leaves this list.</p>
       </div>
       <GoingRuns runs={going} withProject />

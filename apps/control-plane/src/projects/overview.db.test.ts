@@ -152,10 +152,9 @@ test("a project's runs are the same history narrowed to that project, with the p
   expect(await withOrg(t.db, "org-a", (tx) => projectHead(tx, "org-a", beta))).toEqual({ id: beta, name: "Beta", targetUrl: "https://beta.acme.test/" });
 });
 
-test("the navigation lists the workspace's projects, the most recently active first, marks those with a run queued or live, and counts its runs", async () => {
+test("the navigation lists the workspace's projects, the most recently active first, marks those with a run queued or live", async () => {
   expect(await withOrg(t.db, "org-a", (tx) => workspaceNav(tx, "org-a"))).toEqual({
     projects: [{ id: fresh, name: "Fresh", address: "fresh.acme.test" }, { id: beta, name: "Beta", address: "beta.acme.test", live: true }, { id: acme, name: "Acme", address: "app.acme.test", live: true }, { id: empty, name: "Empty", address: "empty.acme.test" }],
-    runs: 6,
   });
 });
 
@@ -226,7 +225,7 @@ test("another organisation's projects and runs never appear", async () => {
   const theirRuns = await withOrg(t.db, "org-b", (tx) => workspaceRuns(tx, "org-b"));
   expect(theirRuns.runs.map((r) => r.id)).toEqual([theirs.id]);
   expect(await withOrg(t.db, "org-b", (tx) => runCounts(tx, "org-b"))).toEqual({ all: 1, completed: 1, attention: 0 });
-  expect(await withOrg(t.db, "org-b", (tx) => workspaceNav(tx, "org-b"))).toEqual({ projects: [{ id: foreign, name: "Acme", address: "app.globex.test" }], runs: 1 });
+  expect(await withOrg(t.db, "org-b", (tx) => workspaceNav(tx, "org-b"))).toEqual({ projects: [{ id: foreign, name: "Acme", address: "app.globex.test" }] });
   expect(await withOrg(t.db, "org-b", (tx) => projectHead(tx, "org-b", acme))).toBeNull();
   expect(await withOrg(t.db, "org-b", (tx) => runHead(tx, "org-b", latest.id))).toBeNull();
   expect(await withOrg(t.db, "org-a", (tx) => runHead(tx, "org-a", latest.id))).toEqual({ number: latest.number, projectName: "Acme" });
@@ -241,7 +240,7 @@ test("row-level security hides the workspace's data even from a query that names
   expect(await withOrg(t.db, "org-b", (tx) => workspaceRuns(tx, "org-a"))).toEqual(nothing);
   expect(await withOrg(t.db, "org-b", (tx) => workspaceRuns(tx, "org-a", { projectId: acme }))).toEqual(nothing);
   expect(await withOrg(t.db, "org-b", (tx) => runCounts(tx, "org-a"))).toEqual(noCounts);
-  expect(await withOrg(t.db, "org-b", (tx) => workspaceNav(tx, "org-a"))).toEqual({ projects: [], runs: 0 });
+  expect(await withOrg(t.db, "org-b", (tx) => workspaceNav(tx, "org-a"))).toEqual({ projects: [] });
   expect(await withOrg(t.db, "org-b", (tx) => projectHead(tx, "org-a", acme))).toBeNull();
   expect(await withOrg(t.db, "org-b", (tx) => projectRunCount(tx, "org-a", acme))).toBe(0);
   expect(await withOrg(t.db, "org-b", (tx) => runHead(tx, "org-a", latest.id))).toBeNull();
@@ -253,7 +252,7 @@ test("each query keeps to the workspace it names even where row-level security w
   expect((await asSystem(t.db, (tx) => workspaceProjects(tx, "org-b"))).map((p) => p.id)).toEqual([foreign]);
   expect((await asSystem(t.db, (tx) => workspaceRuns(tx, "org-b"))).runs.map((r) => r.id)).toEqual([theirs.id]);
   expect(await asSystem(t.db, (tx) => runCounts(tx, "org-b"))).toEqual({ all: 1, completed: 1, attention: 0 });
-  expect(await asSystem(t.db, (tx) => workspaceNav(tx, "org-b"))).toEqual({ projects: [{ id: foreign, name: "Acme", address: "app.globex.test" }], runs: 1 });
+  expect(await asSystem(t.db, (tx) => workspaceNav(tx, "org-b"))).toEqual({ projects: [{ id: foreign, name: "Acme", address: "app.globex.test" }] });
   const acmeRuns = (await asSystem(t.db, (tx) => workspaceRuns(tx, "org-a", { projectId: acme }))).runs;
   expect(acmeRuns.map((r) => r.projectSite)).toEqual([null, null, null, null]);
 });

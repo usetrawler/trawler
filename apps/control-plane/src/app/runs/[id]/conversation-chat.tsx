@@ -110,7 +110,7 @@ export function ConversationChat({ run, live, now }: { run: RunSummary; live: bo
                 <EventLine key={item.id}>
                   <span aria-hidden className={item.status === "reached" ? "text-ok" : item.status === "failed" ? "text-bad" : ""}>{item.status === "reached" ? "✓" : item.status === "failed" ? "✕" : "·"}</span>
                   <span>{who?.name ?? "Someone"} {item.status === "reached" ? "reached" : item.status === "failed" ? "did not reach" : "left"}</span>
-                  <span className="rounded-full bg-soft px-2.5 py-0.5 text-ink">{item.goal}</span>
+                  <span className="text-ink">{item.goal}</span>
                 </EventLine>
               );
             }

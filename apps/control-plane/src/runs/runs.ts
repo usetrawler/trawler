@@ -15,7 +15,7 @@ import { peopleLimitMessage, runsPerDayMessage, type WorkspacePlan } from "./pla
 import { runsToday, workspacePlan } from "./plans.ts";
 import { gaveNoVerdict } from "./report.ts";
 import { runTitle } from "./status.ts";
-import { viaOf, type RunVia } from "./via.ts";
+import { originOf, viaOf, type RunVia } from "./via.ts";
 
 export interface StartRunOptions {
   budgetUsd: number;
@@ -423,7 +423,7 @@ export async function runIdByNumber(tx: Tx, orgId: string, number: number): Prom
 export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const run = await tx
     .selectFrom("runs")
-    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason", "paid_by", "conversation", "provided_accounts", "plan_id", "plan_name", "pull_request", "pr_plan", "execution", "started_via", "stopped_via", sql<string>`(select count(*) from plans p where p.project_id = runs.project_id and p.org_id = runs.org_id and p.kind = 'standard')`.as("plan_count"), sql<boolean>`exists (select 1 from plans p where p.id = runs.plan_id and p.kind = 'pull_request')`.as("on_pull_request_plan")])
+    .select(["id", "number", "status", "cost_usd", "budget_usd", "agent_model", "judge_model", "created_at", "started_at", "finished_at", "project_id", "config_snapshot", "provider", "token_cap", "tokens_used", "completion_usd_per_mtok", "cancel_reason", "paid_by", "conversation", "provided_accounts", "plan_id", "plan_name", "pull_request", "pr_plan", "execution", "started_via", "stopped_via", "created_by", sql<string>`(select count(*) from plans p where p.project_id = runs.project_id and p.org_id = runs.org_id and p.kind = 'standard')`.as("plan_count"), sql<boolean>`exists (select 1 from plans p where p.id = runs.plan_id and p.kind = 'pull_request')`.as("on_pull_request_plan")])
     .where("id", "=", runId)
     .where("org_id", "=", orgId)
     .executeTakeFirst();
@@ -514,6 +514,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
     providedAccounts: run.provided_accounts as string[],
     pullRequest: pullRequestOf(pullRequest),
     startedVia: viaOf(run.started_via),
+    origin: originOf(run.created_by, run.started_via),
     stoppedVia: viaOf(run.stopped_via),
     prPlan: run.pr_plan ? plannedFor(record!, pullRequest?.number ?? null, snapshot, record?.createdByRun ?? origin?.number ?? null) : null,
     createdAt: run.created_at, startedAt: run.started_at, finishedAt: run.finished_at,

@@ -1,3 +1,4 @@
+import { pageTitle } from "../../../components/page-head.tsx";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
@@ -37,7 +38,7 @@ export default async function CapturePage({ params }: { params: Promise<{ id: st
           <li aria-current="page" className="font-semibold text-ink">Screen capture</li>
         </ol>
       </nav>
-      <h1 className="text-2xl font-semibold break-words">{title}</h1>
+      <h1 className={pageTitle}>{title}</h1>
       <p className="mt-2 text-xs text-muted">Screen capture · {capture.replay ? "where the replay ended" : "when reported"}</p>
       <a href={`/api/artifacts/${capture.id}`} target="_blank" rel="noreferrer" tabIndex={-1} className="mt-4 block max-w-[1282px]">
         <img

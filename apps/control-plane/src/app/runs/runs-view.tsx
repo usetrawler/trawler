@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { chipOff, chipOn } from "../../components/controls.ts";
 import { RunTable } from "../../components/run-table.tsx";
 import type { RunFilter, RunLine } from "../../projects/overview.ts";
 import { RUN_ORIGINS, type RunOrigin } from "../../runs/via.ts";
@@ -20,32 +21,32 @@ export function RunsView({ head, basePath, show, origin = "any", counts, runs, o
       {head}
       {plans.length > 1 && (
         <nav aria-label="Runs of a plan" className="mb-3">
-          <ul className="-m-1 flex gap-1.5 overflow-x-auto p-1">
+          <ul className="-m-1 flex gap-2 overflow-x-auto p-1">
             {[{ id: null, name: "All plans" }, ...plans].map((p) => (
               <li key={p.id ?? "all"} className="shrink-0">
-                <a href={href(show, undefined, p.id)} aria-current={(plan ?? null) === p.id ? "page" : undefined} className={`block border px-[11px] py-[9px] leading-5 ${(plan ?? null) === p.id ? "border-action bg-panel font-semibold" : "border-line bg-panel hover:bg-paper"}`}>{p.name}</a>
+                <a href={href(show, undefined, p.id)} aria-current={(plan ?? null) === p.id ? "page" : undefined} className={(plan ?? null) === p.id ? chipOn : chipOff}>{p.name}</a>
               </li>
             ))}
           </ul>
         </nav>
       )}
       <nav aria-label="Filter runs" className="mb-3">
-        <ul className="-m-1 flex gap-1.5 overflow-x-auto p-1">
+        <ul className="-m-1 flex gap-2 overflow-x-auto p-1">
           {FILTERS.map(([filter, label]) => (
             <li key={filter} className="shrink-0">
-              <a href={href(filter)} aria-current={show === filter ? "page" : undefined} className={`block border px-[11px] py-[9px] leading-5 ${show === filter ? "border-action bg-panel font-semibold" : "border-line bg-panel hover:bg-paper"}`}>
-                {label} <span className="text-xs leading-none font-semibold text-muted">{counts[filter]}</span>
+              <a href={href(filter)} aria-current={show === filter ? "page" : undefined} className={show === filter ? chipOn : chipOff}>
+                {label} <span className="tabular-nums">{counts[filter]}</span>
               </a>
             </li>
           ))}
         </ul>
       </nav>
       <nav aria-label="Filter runs by how they started" className="mb-3">
-        <ul className="-m-1 flex gap-1.5 overflow-x-auto p-1">
-          <li className="shrink-0 self-center pr-1 text-xs text-muted">Started</li>
+        <ul className="-m-1 flex gap-2 overflow-x-auto p-1">
+          <li className="shrink-0 self-center pr-1 text-sm text-muted">Started</li>
           {RUN_ORIGINS.map(([value, label]) => (
             <li key={value} className="shrink-0">
-              <a href={href(show, undefined, undefined, value)} aria-current={origin === value ? "page" : undefined} className={`block border px-[11px] py-[9px] leading-5 ${origin === value ? "border-action bg-panel font-semibold" : "border-line bg-panel hover:bg-paper"}`}>{label}</a>
+              <a href={href(show, undefined, undefined, value)} aria-current={origin === value ? "page" : undefined} className={origin === value ? chipOn : chipOff}>{label}</a>
             </li>
           ))}
         </ul>

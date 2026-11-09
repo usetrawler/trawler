@@ -45,7 +45,7 @@ vi.mock("../../server/auth.ts", () => ({
   }),
 }));
 vi.mock("../../server/shell.ts", () => ({
-  shellFor: async (member: { name: string; email: string; orgName: string }) => ({ user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [], runs: 0 } }),
+  shellFor: async (member: { name: string; email: string; orgName: string }) => ({ user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [] } }),
 }));
 vi.mock("../../server/db.ts", () => ({ getDb: () => ({}) }));
 vi.mock("../../server/env.ts", () => ({ readEnv: () => ({ baseURL: "https://app.usetrawler.test" }) }));
@@ -241,4 +241,11 @@ test("a deployment without MCP shows neither MCP section", async () => {
   const view = text(renderToStaticMarkup(await open("tokens")));
   expect(view).not.toContain("AI assistant access (MCP)");
   expect(view).not.toContain("Your AI assistant connections");
+});
+
+test("General also says who you are signed in as and what your role lets you do", async () => {
+  const general = text(renderToStaticMarkup(await open()));
+  expect(general).toMatch(/You Signed in as .+ Role Owner You can rename the workspace/);
+  state.member = { ...owner, role: "member" };
+  expect(text(renderToStaticMarkup(await open()))).toMatch(/Role Member An owner or admin manages the members/);
 });

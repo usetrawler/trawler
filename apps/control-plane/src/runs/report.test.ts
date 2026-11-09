@@ -10,7 +10,7 @@ const finding = (key: string, persona: string, extra: Partial<RunSummary["findin
 
 function summary(over: Partial<RunSummary>): RunSummary {
   return {
-    startedVia: null, stoppedVia: null,
+    startedVia: null, stoppedVia: null, origin: "app",
     id: "r", number: 1, status: "running", cancelReason: null, projectId: "p", planName: null, savedPlan: null, costUsd: 0.1, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "m", judgeModel: "m",
     provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0,
     createdAt: new Date(), startedAt: new Date(), finishedAt: null, jobs: [], findings: [], goals: [], botProtection: null, target: "https://a.test/",

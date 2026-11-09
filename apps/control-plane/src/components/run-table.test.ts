@@ -11,38 +11,41 @@ const line = (over: Partial<RunLine> = {}): RunLine => ({
 });
 const render = (runs: RunLine[], project = true) => renderToStaticMarkup(createElement(RunTable, { runs, project }));
 const rows = (html: string) => html.match(/<li[^>]*>.*?<\/li>/g) ?? [];
-const words = (row: string) => row.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+const words = (row: string) => row.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").replace(/ · /g, " · ").trim();
 
-test("the list separates the run, plan, status and goals, with an accessible plan label on narrow layouts", () => {
+test("a row leads with what was tested, then the run, project, plan, goals and cost, and ends with the result and time", () => {
   const html = render([line({ savedPlan: { name: "PR #24 v5", title: "Filter invoices by cycle" } })]);
-  expect(html).toMatch(/>Run<\/span><span>Plan<\/span><span>Status<\/span><span>Goals<\/span>/);
+  expect(html).toContain('aria-label="Runs"');
+  expect(html).not.toContain("<table");
   const [row] = rows(html);
   expect(row).toContain('href="/runs/0017"');
   expect(row).toContain('<time dateTime="2026-09-25T12:32:00.000Z">2026-09-25 12:32 UTC</time>');
-  expect(words(row!)).toContain("#0017 Acme Invoices 2026-09-25 12:32 UTC Plan Filter invoices by cycle PR #24 v5 Complete 3 confirmed defects Goals reached 2 / 3 $3.08");
+  expect(words(row!)).toContain("Filter invoices by cycle Run 0017 · Acme Invoices · PR #24 v5 · 2 of 3 goals · $3.08 3 confirmed");
 });
 
-test("a saved plan is shown even if it is the only one, including inside the project, and an absent plan is labelled", () => {
+test("a plan without its own title is the headline, inside the project the project is left out, and an absent plan is labelled", () => {
   for (const project of [true, false]) {
     const [row] = rows(render([line({ savedPlan: { name: "Invitations", title: null } })], project));
-    expect(words(row!)).toContain("Plan Invitations");
+    expect(words(row!)).toMatch(/^Invitations Run 0017/);
+    expect(words(row!).match(/Invitations/g)).toHaveLength(1);
     expect(row!.includes("Acme Invoices")).toBe(project);
   }
-  expect(words(rows(render([line()]))[0]!)).toContain("Plan No linked plan");
+  expect(words(rows(render([line()]))[0]!)).toMatch(/^No linked plan Run 0017/);
 });
 
-test("the rows use the run page's statuses and keep their order", () => {
+test("the result follows the run's state, with its tone, and the rows keep their order", () => {
   const states = ["stopped_budget", "failed", "running", "cancelled", "queued"];
-  const html = render(states.map((status, index) => line({ id: status, number: 17 - index, status })));
+  const html = render(states.map((status, index) => line({ id: status, number: 17 - index, status, confirmed: 0 })));
   expect(rows(html).map((row) => row.match(/href="\/runs\/([^"]*)"/)?.[1])).toEqual(["0017", "0016", "0015", "0014", "0013"]);
-  expect(rows(html).map((row) => row.match(/font-semibold (text-[^"]+)">([^<]*)<\/strong>/)?.slice(1))).toEqual([
-    ["text-warn", "Stopped at cap"], ["text-bad", "Failed"], ["text-info", "Live"], ["text-muted", "Cancelled"], ["text-muted", "Queued"],
+  expect(rows(html).map((row) => row.match(/sm:block (text-[a-z]+)">([^<]*)</)?.slice(1))).toEqual([
+    ["text-warn", "Stopped at cap · No defect confirmed"], ["text-bad", "Failed"], ["text-info", "Live"], ["text-muted", "Cancelled"], ["text-muted", "Queued"],
   ]);
+  expect(rows(render([line()]))[0]).toContain("font-medium text-ink");
 });
 
 test("unchecked findings remain distinct from zero, and a token cap displays usage in tokens", () => {
   const [row] = rows(render([line({ confirmed: 0, unchecked: true, tokenCap: 2_000_000, tokensUsed: 1_234_567 })]));
-  expect(words(row!)).toContain("Not checked : every replay failed Goals reached 2 / 3 1.23M tokens");
+  expect(words(row!)).toContain("2 of 3 goals · 1.23M tokens Not checked: every replay failed");
   expect(row).not.toContain("0 confirmed");
   expect(row).not.toContain("$");
 });

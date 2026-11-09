@@ -14,6 +14,7 @@ import { getDb } from "../../../../server/db.ts";
 import { runFor } from "../../../../server/runs.ts";
 import { shellFor } from "../../../../server/shell.ts";
 import { parseRunsQuery } from "../../runs-view.tsx";
+import { letterOf, toneOf } from "../person-tones.ts";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Plan used in run" };
@@ -44,24 +45,27 @@ export default async function RunPlanPage({ params, searchParams }: { params: Pr
   return (
     <AppShell shell={shell} current={{ project: run.projectId }} parent wide>
       <RunBreadcrumb project={project} number={run.number} plan={planName} onPlan fromPullRequest={Boolean(run.pullRequest?.number)} />
-      <PageHead compact eyebrow="Test plan" title={planName} subtitle={<>Plan used in <a href={report} className="text-ink underline underline-offset-4">{runTitle(run.number)}</a></>} />
-      <div className="grid gap-6">
-        <section aria-label="Test scope" className="grid gap-2">
-          <h2 className="text-lg font-semibold">Test scope</h2>
+      <PageHead eyebrow={<>Plan used in <a href={report} className="text-ink underline underline-offset-4">{runTitle(run.number)}</a></>} title={planName} subtitle={people.length ? `${people.length} ${people.length === 1 ? "person" : "people"} · ${goalCount} ${goalCount === 1 ? "goal" : "goals"}` : undefined} />
+      <div className="flex max-w-3xl flex-col gap-10">
+        <section aria-label="Test scope" className="flex flex-col gap-2">
+          <h2 className="font-medium">People and goals</h2>
           {people.length ? (
-            <details className="rounded-lg border border-line bg-paper">
-              <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">People and goals <span className="ml-2 font-normal text-muted">{people.length} {people.length === 1 ? "person" : "people"} · {goalCount} {goalCount === 1 ? "goal" : "goals"}</span></summary>
-              <div className="grid gap-4 border-t border-line px-4 py-3 text-sm">
-                {people.map((person) => (
-                  <section key={person.id}>
-                    <h3 className="font-semibold">{person.name}</h3>
-                    <ul className="mt-1 list-disc space-y-1 pl-5">
-                      {person.goals.map((goal) => <li key={goal.id} className="wrap-anywhere">{goal.instruction}</li>)}
-                    </ul>
-                  </section>
-                ))}
-              </div>
-            </details>
+            <ul className="divide-y divide-line border-y border-line">
+              {people.map((person) => {
+                const tone = toneOf(run.personas.findIndex((p) => p.id === person.id));
+                return (
+                  <li key={person.id} className="flex gap-3 py-4">
+                    <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full text-xs font-semibold" style={{ background: tone.bar, color: tone.onBar }}>{letterOf(person.name)}</span>
+                    <section className="min-w-0 flex-1">
+                      <h3 className="font-medium">{person.name}</h3>
+                      <ol className="mt-1 flex list-decimal flex-col gap-1 pl-5 text-sm marker:text-muted">
+                        {person.goals.map((goal) => <li key={goal.id} className="wrap-anywhere">{goal.instruction}</li>)}
+                      </ol>
+                    </section>
+                  </li>
+                );
+              })}
+            </ul>
           ) : <p className="text-sm text-muted">{run.prPlan?.note ?? (pendingPlan && isLive(run.status) ? "Trawler is choosing people and goals for this change." : "This run has no recorded test goals.")}</p>}
         </section>
         <PlanRunHistory runs={runs}

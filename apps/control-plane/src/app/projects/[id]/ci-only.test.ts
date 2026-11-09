@@ -17,7 +17,7 @@ test("a project on a private network asks once to allow runs from CI instead of 
 
 test("once confirmed it says when, and that runs from CI can start", () => {
   const html = text(renderToStaticMarkup(createElement(CiOnlyPanel, { projectId: "p1", projectName: "Recurro", host: "localhost:8080", confirmedAt: "2026-10-09T06:00:00.000Z" })));
-  expect(html).toContain("Confirmed on 2026-10-09: it may be tested");
+  expect(html).toContain("Confirmed on 2026-10-09 06:00 UTC : it may be tested");
   expect(html).toContain("Runs from CI can start.");
   expect(html).not.toContain("Allow runs from CI");
 });

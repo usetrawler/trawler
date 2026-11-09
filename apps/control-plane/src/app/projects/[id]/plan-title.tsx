@@ -57,8 +57,8 @@ export function PlanTitle({ projectId, planId, name, canRemove }: { projectId: s
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-3">
-        <label className="flex items-center gap-3">
-          <span className="text-xs text-muted">Plan name</span>
+        <label className="flex min-w-0 items-center">
+          <span className="sr-only">Plan name</span>
           <input
             value={value}
             maxLength={100}
@@ -69,7 +69,8 @@ export function PlanTitle({ projectId, planId, name, canRemove }: { projectId: s
             aria-busy={pending || undefined}
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? errorId : undefined}
-            className="min-w-0 rounded-md border border-line bg-panel px-2.5 py-1.5 outline-none hover:border-muted/60 focus:border-ink"
+            title="Rename this plan"
+            className="-ml-2 h-10 min-w-0 rounded-md border border-line/60 bg-transparent px-2 text-lg font-medium outline-none hover:border-muted focus:border-ink"
           />
         </label>
         {canRemove && !confirming && (

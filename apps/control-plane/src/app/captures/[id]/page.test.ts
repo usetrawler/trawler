@@ -15,7 +15,7 @@ vi.mock("../../../artifacts/artifacts.ts", () => ({ screenCapture: async (...arg
 vi.mock("../../../server/shell.ts", () => ({
   shellFor: async (member: Member) => {
     state.shells.push(member);
-    return { user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [{ id: "p1", name: "Acme", address: "app.acme.test" }], runs: 4 } };
+    return { user: { name: member.name, email: member.email }, workspace: { name: member.orgName, projects: [{ id: "p1", name: "Acme", address: "app.acme.test" }] } };
   },
 }));
 

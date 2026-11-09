@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { chipOff, chipOn } from "../../../components/controls.ts";
 
 export interface PlanTab {
   id: string;
@@ -15,11 +16,10 @@ export function PlansBar({ projectId, plans, current, canAdd }: { projectId: str
             <Link
               href={`/projects/${projectId}?plan=${p.id}`}
               aria-current={p.id === current ? "page" : undefined}
-              className={`flex h-9 items-center gap-2 rounded-md border px-3 text-sm ${p.id === current ? "border-ink font-medium text-ink" : "border-line text-muted hover:border-ink hover:text-ink"}`}
+              className={p.id === current ? chipOn : chipOff}
             >
               {p.name}
-              <span className="font-mono text-xs font-normal">{p.people}</span>
-              <span className="sr-only">{p.people === 1 ? "person" : "people"}</span>
+              <span>· {p.people} {p.people === 1 ? "person" : "people"}</span>
             </Link>
           </li>
         ))}

@@ -2,7 +2,8 @@
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { startTransition, useActionState, useEffect, useRef, useState } from "react";
 import type { KeyHint } from "../../../credentials/credentials.ts";
-import { field, KeyFields } from "../../../components/key-fields.tsx";
+import { field } from "../../../components/controls.ts";
+import { KeyFields } from "../../../components/key-fields.tsx";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { detectProvider, PROVIDER_LABEL, type Provider } from "../../../llm/provider-kinds.ts";
 import type { KeyInput } from "../../../llm/key-input.ts";
@@ -198,7 +199,7 @@ export function StartRun({ projectId, planId, planLabel, projectName, personas, 
 
   if (closedBeta) {
     return (
-      <form id="start" onSubmit={(e) => e.preventDefault()} className="flex flex-col gap-5 rounded-lg border border-line bg-panel p-5">
+      <form id="start" onSubmit={(e) => e.preventDefault()} className="flex flex-col gap-5 border-t border-line pt-6">
         <p className="text-xs text-muted">Start · <span className="text-ink">{projectName}</span>{planLabel && <> · <span className="text-ink">{planLabel}</span></>}</p>
         <p id="start-blocked" className="border-l-2 border-warn pl-3 text-sm">{closedBeta}</p>
         <div className="flex justify-end">
@@ -217,7 +218,7 @@ export function StartRun({ projectId, planId, planLabel, projectName, personas, 
         startTransition(() => action(data));
       }}
       id="start"
-      className="flex flex-col gap-5 rounded-lg border border-line bg-panel p-5">
+      className="flex flex-col gap-5 border-t border-line pt-6">
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="planId" value={planId} />
       <p className="text-xs text-muted">Start · <span className="text-ink">{projectName}</span>{planLabel && <> · <span className="text-ink">{planLabel}</span></>}</p>

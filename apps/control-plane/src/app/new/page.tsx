@@ -1,3 +1,4 @@
+import { pageTitle } from "../../components/page-head.tsx";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -24,8 +25,8 @@ export default async function NewProjectPage() {
       <AppShell shell={shell} current="new">
         <div className="flex max-w-2xl flex-col gap-4">
           <p className="text-sm text-muted">New project</p>
-          <h1 className="text-4xl leading-[0.95] font-semibold tracking-tight md:text-6xl">This workspace has reached its project limit.</h1>
-          <p className="text-lg text-muted">{projectLimitMessage(limit.plan, limit.projects)}</p>
+          <h1 className={pageTitle}>This workspace has reached its project limit.</h1>
+          <p className="text-muted">{projectLimitMessage(limit.plan, limit.projects)}</p>
           <p><Link href="/" className="underline underline-offset-4 hover:text-action-ink">Go to your projects</Link></p>
         </div>
       </AppShell>
@@ -37,8 +38,8 @@ export default async function NewProjectPage() {
         intro={
           <div className="flex flex-col gap-4">
             <p className="text-sm text-muted">New project</p>
-            <h1 className="text-4xl leading-[0.95] font-semibold tracking-tight md:text-6xl">What should Trawler use?</h1>
-            <p className="max-w-xl text-lg text-muted">Paste a real product that runs in a browser: production, staging or a preview. We read the public page, tell you what we think the product does, and propose people to try the features you choose.</p>
+            <h1 className={pageTitle}>What should Trawler use?</h1>
+            <p className="max-w-xl text-muted">Paste a real product that runs in a browser: production, staging or a preview. We read the public page, tell you what we think the product does, and propose people to try the features you choose.</p>
           </div>
         }
       />

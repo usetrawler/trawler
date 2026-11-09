@@ -175,6 +175,7 @@ function headline(s: RunSummary, confirmed: number, defects: number, replaysAllF
     const refused = checks.findLast((j) => j.status === "failed" && j.error?.startsWith(ACCOUNT_REFUSED))?.error?.trim() ?? "The product refused a test account";
     return `${/[.!?]$/.test(refused) ? refused : `${refused}.`} Check that account on the plan and run again.`;
   }
+  if (status === "cancelled" && cancelReason === "nothing_to_test") return "Nothing to test in the UI.";
   if (status === "cancelled" && cancelReason === "stopped_over_mcp" && s.stoppedVia) return `Stopped by ${s.stoppedVia.client} for ${s.stoppedVia.person} over MCP.`;
   if (status === "cancelled") return STOPPED_BECAUSE[cancelReason ?? "stopped"];
   if (status === "failed") return "This run could not finish.";
