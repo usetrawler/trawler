@@ -22,7 +22,7 @@ test("the key shows its provider, last characters, who added it and when, with R
 
 test("a key added by someone who has left says so, and an OpenAI-compatible key shows its base URL", () => {
   const html = text(render(createElement(ModelKey, { saved: { ...saved, provider: "custom", baseUrl: "https://llm.example.com/v1" }, addedBy: null, canManage: true })));
-  expect(html).toContain("Added by someone no longer in this workspace on");
+  expect(html).toContain("Added by a former member on");
   expect(html).toContain("OpenAI-compatible key …a1b2");
   expect(html).toContain("Base URL https://llm.example.com/v1");
 });

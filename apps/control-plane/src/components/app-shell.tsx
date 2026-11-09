@@ -64,7 +64,7 @@ export function AppShell({ shell, current, parent = false, children }: { shell: 
   const { user, workspace } = shell;
   const marked = (page: ShellPage) => same(current, page);
   return (
-    <div className="min-h-dvh lg:grid lg:grid-cols-[248px_minmax(0,1fr)]">
+    <div className="flex min-h-dvh flex-col lg:grid lg:grid-cols-[248px_minmax(0,1fr)]">
       <a href="#main" className="sr-only z-30 bg-panel focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:px-4 focus:py-3">Skip to content</a>
       <div className="border-b border-line lg:sticky lg:top-0 lg:z-20 lg:flex lg:h-dvh lg:flex-col lg:border-b-0 lg:px-3 lg:py-4">
         <div className="flex h-14 items-center justify-between gap-3 px-4 lg:h-auto lg:px-1.5 lg:pb-4">
@@ -95,7 +95,7 @@ export function AppShell({ shell, current, parent = false, children }: { shell: 
         <RevealCurrentEntry current={typeof current === "object" ? current.project : (current ?? "")} />
         <AccountMenu user={user} className="mt-1 hidden shrink-0 lg:block" />
       </div>
-      <main id="main" className="min-w-0 bg-panel px-4 py-8 sm:px-8 lg:my-2 lg:mr-2 lg:rounded-xl lg:px-[clamp(28px,4.5vw,72px)] lg:py-12 lg:shadow-[0_0_0_1px_var(--line)]">
+      <main id="main" className="min-w-0 flex-1 bg-panel px-4 py-8 sm:px-8 lg:my-2 lg:mr-2 lg:rounded-xl lg:px-[clamp(28px,4.5vw,72px)] lg:py-12 lg:shadow-[0_0_0_1px_var(--line)]">
         <div className="mx-auto w-full max-w-[1100px]">{children}</div>
       </main>
     </div>

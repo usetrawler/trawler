@@ -122,7 +122,7 @@ export function ModelKey({ saved, addedBy, canManage }: { saved: SavedKey | null
         <div className="flex flex-col gap-1 text-sm">
           <p><span className="text-muted">{PROVIDER_LABEL[saved.provider]} key </span><span className="font-mono">{saved.hint}</span></p>
           {saved.baseUrl && <p className="break-all"><span className="text-muted">Base URL </span><span className="font-mono">{saved.baseUrl}</span></p>}
-          <p className="text-muted">Added by {addedBy ?? "someone no longer in this workspace"} on <LocalTime iso={saved.addedAt} /></p>
+          <p className="text-muted">Added by {addedBy ?? "a former member"} on <LocalTime iso={saved.addedAt} /></p>
         </div>
       ) : canManage ? (
         <p className="text-sm text-muted">No model key yet. Runs are paid with it: add one here, or when you start a run.</p>

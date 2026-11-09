@@ -7,7 +7,7 @@ export function PageHead({ eyebrow, title, subtitle, action, flush = false, chil
   return (
     <div className={flush ? "" : "mb-10"}>
       {eyebrow && <div className="mb-1 text-sm wrap-anywhere text-muted">{eyebrow}</div>}
-      <div className="flex flex-col items-start gap-4 md:flex-row md:justify-between md:gap-6">
+      <div className="flex flex-col items-start gap-4 md:min-h-10 md:flex-row md:justify-between md:gap-6">
         <h1 className={`min-w-0 ${pageTitle}`}>{title}</h1>
         {action && <div className="flex shrink-0 flex-wrap items-center gap-3">{action}</div>}
       </div>

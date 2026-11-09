@@ -147,7 +147,7 @@ test("a live run shows its cost against the cap, the four stages, each person an
   expect(text(band(html))).toBe("Live · 2 of 4 goals reached · app.acme.test · started 2026-09-25 19:40 UTC");
   expect(html).toContain('id="run-timeline" class="pt-6"');
   expect(html).toContain('id="run-findings" hidden=""');
-  expect(text(html)).toContain("Confirmed 0 Reproduced independently: a fresh agent followed the steps without seeing the report, and the judge agreed. Fix these. Nothing confirmed yet.");
+  expect(text(html)).toContain("Confirmed 0 Nothing confirmed yet.");
 });
 
 test("each person's line says how far they got, in every state", () => {
@@ -365,7 +365,7 @@ test("a finding marked not a bug leaves its section and the counts for its own, 
   expect(text(first!.split("</summary>")[0]!)).toBe("high severity Saving an invoice fails Ana, Lee Park Not a bug o");
   expect(text(first!.split("</details>")[1]!)).toBe("Not a bug, because: Saving twice is on purpose. Marked by ana@acme.test on 2026-10-02 10:00 UTC . Undo : Saving an invoice fails");
   expect(first).not.toContain(">Not a bug</button>");
-  expect(text(second!.split("</details>")[1]!)).toContain("Marked by someone no longer in this workspace on");
+  expect(text(second!.split("</details>")[1]!)).toContain("Marked by a former member on");
   expect(html).toMatch(/>Ruled out <span[^>]*>2<\/span><\/h2><p[^>]*>The replay did not see the problem, or your team marked it not a bug\. Later runs of this project are told, with the reason\.<\/p>/);
   expect(first).toMatch(/<span class="min-w-0 wrap-anywhere text-muted">Marked by ana@acme.test/);
 });
@@ -427,7 +427,7 @@ test("a finding Trawler marked not a bug says so and links to the earlier mark i
   expect(row).toContain('Marked by Trawler: it matches a finding marked not a bug in <a href="/runs/0003#finding-lee%3Af2" class="underline underline-offset-4 hover:text-ink">Run 0003</a>.');
   expect(row).toContain("Not a bug, because: </span>We deliver to a fixed list.");
   expect(row).toMatch(/>Undo<span class="sr-only">/);
-  expect(row).not.toContain("someone no longer in this workspace");
+  expect(row).not.toContain("a former member");
 });
 
 test("the breadcrumb links to the plan used by this run", () => {

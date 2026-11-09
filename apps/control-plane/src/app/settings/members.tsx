@@ -86,7 +86,7 @@ export const revokeInvitation = (previous: MembersState, form: FormData) => relo
 export const inviteSomeone = (previous: MembersState, form: FormData) => reloadable(inviteMemberAction, previous, form, "Reload the page to invite them.");
 
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" };
-const tag = "text-xs text-muted";
+const tag = "text-sm text-muted";
 
 export const roleLabel = (role: string) => role.split(",").map((r) => ROLE_LABEL[r.trim()] ?? r.trim()).join(", ");
 const roles = (role: string) => role.split(",").map((r) => r.trim());
@@ -163,7 +163,7 @@ export function Members({ members, invitations, canManage, signInAt }: { members
               </div>
               <div className="ml-auto flex flex-col items-end gap-1 text-right">
                 <span className={tag}>{roleLabel(m.role)}</span>
-                <span className="text-xs text-muted">Joined <LocalTime iso={m.joinedAt} /></span>
+                <span className="text-sm text-muted">Joined <LocalTime iso={m.joinedAt} /></span>
               </div>
             </div>
             {canManage && canChange(m) && (flow.confirming === m.id ? (
@@ -209,7 +209,7 @@ export function Members({ members, invitations, canManage, signInAt }: { members
                 <span className="min-w-0 wrap-anywhere">{i.email} <span className={tag}>{roleLabel(i.role)}</span></span>
                 {canManage && i.addressHasWorkspace && <span className="order-last basis-full text-xs text-muted">This address has since signed in and belongs to a workspace, so it can no longer use this invitation.</span>}
                 <span className="ml-auto flex items-center gap-3">
-                  <span className="text-xs text-muted">Expires <LocalTime iso={i.expiresAt} /></span>
+                  <span className="text-sm text-muted">Expires <LocalTime iso={i.expiresAt} /></span>
                   {canManage && (
                     <form action={revoke} onSubmit={send("revoke", revoked)}>
                       <input type="hidden" name="invitationId" value={i.id} />

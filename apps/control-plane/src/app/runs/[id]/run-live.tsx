@@ -258,7 +258,7 @@ export function UndoNotABug({ runId, f, onDone, onRefused }: { runId: string; f:
         {f.dismissal.matched ? (
           <span className="min-w-0 wrap-anywhere text-muted">Marked by Trawler: it matches a finding marked not a bug in <a href={`${runPath(f.dismissal.matched.runNumber)}#${findingAnchor(f.dismissal.matched.findingKey)}`} className="underline underline-offset-4 hover:text-ink">{runTitle(f.dismissal.matched.runNumber)}</a>.</span>
         ) : (
-          <span className="min-w-0 wrap-anywhere text-muted">Marked by {f.dismissal.by ?? "someone no longer in this workspace"} on <LocalTime iso={new Date(f.dismissal.at).toISOString()} />.</span>
+          <span className="min-w-0 wrap-anywhere text-muted">Marked by {f.dismissal.by ?? "a former member"} on <LocalTime iso={new Date(f.dismissal.at).toISOString()} />.</span>
         )}
         <button type="button" aria-disabled={pending || undefined} onClick={undo} className={secondaryButton}>{pending ? "Undoing…" : "Undo"}<span className="sr-only">: {f.title}</span></button>
         {error && <span role="alert" className="text-bad">{error}</span>}
@@ -432,7 +432,7 @@ function Group({ title, hint, parts, empty, issueStatus, runNumber, numbers, ope
     <section aria-labelledby={id} className="flex flex-col">
       <div className="pb-3">
         <h2 id={id} className="flex items-baseline gap-2 font-medium">{title} <span className="text-sm font-normal text-muted tabular-nums">{count}</span></h2>
-        <p className="mt-1 text-sm text-muted">{hint}</p>
+        {count > 0 && <p className="mt-1 text-sm text-muted">{hint}</p>}
       </div>
       {count === 0 ? <p className="text-sm text-muted">{empty}</p> : (
         <ol className="divide-y divide-line border-y border-line">

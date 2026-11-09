@@ -61,7 +61,7 @@ export function Overview({ workspace, projects, recent, findings, going }: { wor
         <section aria-labelledby="recent-runs" className="flex flex-col gap-2">
           <div className="flex items-baseline justify-between gap-4">
             <h2 id="recent-runs" className="font-medium">Recent runs</h2>
-            <a href="/runs" className="text-sm underline underline-offset-4">All runs</a>
+            <a href="/runs" className="-my-2 inline-block py-2.5 text-sm underline underline-offset-4">All runs</a>
           </div>
           <RunTable runs={recent} />
         </section>
