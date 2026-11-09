@@ -241,6 +241,8 @@ npm test
 | `npm run db:down` | Stop the local database |
 | `npm run control-plane` | Start the app in development; it reads its configuration from the environment, in [`env.ts`](apps/control-plane/src/server/env.ts) |
 
+The app's look, layout, controls and words follow [`apps/control-plane/DESIGN.md`](apps/control-plane/DESIGN.md); a UI change that breaks one of its rules changes the file in the same pull request.
+
 ## Reporting a vulnerability
 
 Report vulnerabilities privately to [contact@usetrawler.com](mailto:contact@usetrawler.com?subject=Security%20report), not in a public issue.
