@@ -43,7 +43,7 @@ describe("PlanWorkspace", () => {
       { id: "decision", instruction: "See the decision.", personaId: "ama" },
     ]);
     const order = html.slice(html.indexOf('id="order-of-play"'));
-    expect(order).toMatch(/01<\/span><span[^>]*><span[^>]*>Ama<\/span><span[^>]*>Submit a pitch\.[^]*02<\/span><span[^>]*><span[^>]*>Kwame<\/span>[^]*03<\/span><span[^>]*><span[^>]*>Ama<\/span>/);
+    expect(order).toMatch(/>1<\/span><span[^>]*><span[^>]*>Ama<\/span><span[^>]*>Submit a pitch\.[^]*>2<\/span><span[^>]*><span[^>]*>Kwame<\/span>[^]*>3<\/span><span[^>]*><span[^>]*>Ama<\/span>/);
     expect(order).toContain('aria-live="polite"');
     expect(order).toContain("3 turns.");
     expect(order).toMatch(/aria-label="Move step 1, Ama up" disabled=""/);

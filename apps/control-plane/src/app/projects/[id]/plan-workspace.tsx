@@ -143,14 +143,14 @@ function OrderOfPlay({ personas, goals, onMove }: { personas: PlanPerson[]; goal
           const step = `step ${i + 1}, ${who}`;
           return (
             <li key={g.id} className={`grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 py-2 ${newTurn ? "border-t border-line" : ""}`}>
-              <span className="pt-0.5 font-mono text-xs text-muted">{String(i + 1).padStart(2, "0")}</span>
+              <span className="min-w-5 pt-0.5 text-sm text-muted tabular-nums">{i + 1}</span>
               <span className="flex min-w-0 flex-col sm:flex-row sm:gap-3">
-                <span className="shrink-0 text-sm font-semibold sm:w-28 sm:truncate">{newTurn ? who : ""}</span>
+                <span className="shrink-0 text-sm font-medium sm:w-28 sm:truncate">{newTurn ? who : ""}</span>
                 <span className="text-sm break-words">{g.instruction || <em className="text-muted">No text yet</em>}</span>
               </span>
               <span className="flex gap-1">
-                <button type="button" id={`move-${g.id}-up`} aria-label={`Move ${step} up`} disabled={i === 0} onClick={() => move(i, "up")} className="h-8 w-8 border border-line text-sm text-muted hover:border-ink hover:text-ink disabled:opacity-30">↑</button>
-                <button type="button" id={`move-${g.id}-down`} aria-label={`Move ${step} down`} disabled={i === goals.length - 1} onClick={() => move(i, "down")} className="h-8 w-8 border border-line text-sm text-muted hover:border-ink hover:text-ink disabled:opacity-30">↓</button>
+                <button type="button" id={`move-${g.id}-up`} aria-label={`Move ${step} up`} disabled={i === 0} onClick={() => move(i, "up")} className="grid size-8 place-items-center rounded-md text-sm text-muted hover:bg-soft hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent">↑</button>
+                <button type="button" id={`move-${g.id}-down`} aria-label={`Move ${step} down`} disabled={i === goals.length - 1} onClick={() => move(i, "down")} className="grid size-8 place-items-center rounded-md text-sm text-muted hover:bg-soft hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent">↓</button>
               </span>
             </li>
           );
@@ -349,7 +349,7 @@ export function PlanWorkspace({ projectId, planId, initialPersonas, initialGoals
                     <ol aria-label={`Goals of ${who}`} className="flex flex-col gap-1">
                       {own.map((g, n) => (
                         <li key={g.id} className="flex items-start gap-2">
-                          <span className="pt-1.5 font-mono text-xs text-muted">{String(n + 1).padStart(2, "0")}</span>
+                          <span className="min-w-5 pt-2 text-sm text-muted tabular-nums">{n + 1}</span>
                           <textarea aria-label={`Goal ${n + 1} of ${who}`} value={g.instruction} maxLength={1000} rows={1} onChange={(e) => updateGoal(g.id, e.target.value)} className={`${field} field-sizing-content resize-none text-sm`} />
                           {own.length > 1 && <RemoveButton label={`Remove goal ${n + 1} of ${who}`} onClick={() => setGoals((list) => list.filter((x) => x.id !== g.id))} />}
                         </li>
