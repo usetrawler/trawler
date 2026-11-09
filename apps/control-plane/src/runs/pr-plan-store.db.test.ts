@@ -123,7 +123,7 @@ test("a run on a pull request plan names the plan in the run list and on the run
   const result = runResultOf((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", skipped.id)))!, "https://app.trawler.test");
   expect(result).toMatchObject({ status: "cancelled", finished: true, skipped: true, people: 0, goalsTotal: 0, defects: { confirmed: 0 } });
   expect(result.commentMarkdown).toContain("### Nothing in this change can be tested through the product's UI, so Trawler did not start a run.");
-  expect(runView((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", skipped.id)))!).headline).toBe("Nothing in this change can be tested through the product's UI, so Trawler did not start a run.");
+  expect(runView((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", skipped.id)))!).headline).toBe("Nothing to test in the UI.");
   const lines = await withOrg(t.db, "org-a", (tx) => workspaceRuns(tx, "org-a", { projectId: project }));
   expect(lines.runs.map((r) => [r.number, r.status, r.planName])).toEqual([[skipped.number, "skipped", null], [run.number, "cancelled", "PR #900 v1"]]);
   const attention = await withOrg(t.db, "org-a", (tx) => workspaceRuns(tx, "org-a", { projectId: project, show: "attention" }));
