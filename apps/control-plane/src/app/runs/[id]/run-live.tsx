@@ -19,7 +19,7 @@ import { viaClient } from "../../../runs/via.ts";
 import { FindingScreenshots } from "./finding-screenshots.tsx";
 import { ConversationChat } from "./conversation-chat.tsx";
 import { Story, type StoryFilter } from "./story.tsx";
-import { TimelineLanes } from "./timeline-lanes.tsx";
+import { findingNumbers, TimelineLanes } from "./timeline-lanes.tsx";
 import { letterOf, toneOf } from "./person-tones.ts";
 import { RunAgainButton, RunAgainError, useRunAgain } from "./run-again-button.tsx";
 import { findingMarkdown } from "../../../runs/finding-markdown.ts";
@@ -298,7 +298,7 @@ export function CopyIssue({ f, status, runNumber }: { f: ReportFinding; status: 
   );
 }
 
-export function FindingRow({ f, n, mark, tag, note, detail, action, dismiss, copy, autoOpen, focus, reveal, onFocused }: { f: ReportFinding; n: number; mark?: string; tag?: string; note?: string; detail?: string; action?: React.ReactNode; dismiss?: React.ReactNode; copy?: React.ReactNode; autoOpen?: boolean; focus?: boolean; reveal?: boolean; onFocused?: () => void }) {
+export function FindingRow({ f, n, mark, tag, note, detail, action, dismiss, copy, autoOpen, focus, reveal, onFocused }: { f: ReportFinding; n?: number; mark?: string; tag?: string; note?: string; detail?: string; action?: React.ReactNode; dismiss?: React.ReactNode; copy?: React.ReactNode; autoOpen?: boolean; focus?: boolean; reveal?: boolean; onFocused?: () => void }) {
   const replay = f.replay as { observed: string } | null;
   const summary = useRef<HTMLElement>(null);
   const details = useRef<HTMLDetailsElement>(null);
@@ -341,7 +341,7 @@ export function FindingRow({ f, n, mark, tag, note, detail, action, dismiss, cop
           <span className="min-w-0">
             <strong className="block text-base leading-snug font-medium break-words">{f.title}</strong>
             <small className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm break-words text-muted">
-              <span className="inline-flex items-center gap-2"><span aria-hidden className="grid h-5 min-w-5 place-items-center rounded border border-line px-1 text-xs text-ink tabular-nums">{n}</span><span className="sr-only">Finding {n}, by </span>{[...new Set([f.personaName, ...f.sameReports.map((other) => other.personaName)])].join(", ")}</span>
+              <span className="inline-flex items-center gap-2">{n !== undefined && <><span aria-hidden className="grid h-5 min-w-5 place-items-center rounded border border-line px-1 text-xs text-ink tabular-nums">{n}</span><span className="sr-only">Finding {n} on the timeline, by </span></>}{[...new Set([f.personaName, ...f.sameReports.map((other) => other.personaName)])].join(", ")}</span>
               {tag && <span className="rounded border border-line px-1.5 text-xs text-ink">{tag}</span>}
             </small>
             <span className="mt-1 line-clamp-2 text-sm break-words text-muted group-open:hidden">{note ?? f.observed}</span>
@@ -395,11 +395,11 @@ export function FindingRow({ f, n, mark, tag, note, detail, action, dismiss, cop
 type Part<T extends ReportFinding> = { items: T[]; tag?: string; mark?: string; note?: boolean; detail?: (f: T) => string | undefined; action?: (f: T) => React.ReactNode; dismiss?: (f: T) => React.ReactNode };
 const part = <T extends ReportFinding>(p: Part<T>) => p as unknown as Part<ReportFinding & { reason?: string }>;
 
-function Group({ title, hint, parts, empty, issueStatus, runNumber, openFirst, focusKey, reveal, onFocused }: { title: string; hint: string; parts: Array<Part<ReportFinding & { reason?: string }>>; empty?: string; issueStatus: (tag?: string) => string; runNumber: number; openFirst?: boolean; focusKey?: string | null; reveal?: boolean; onFocused?: () => void }) {
+function Group({ title, hint, parts, empty, issueStatus, runNumber, numbers, openFirst, focusKey, reveal, onFocused }: { title: string; hint: string; numbers: Map<string, number>; parts: Array<Part<ReportFinding & { reason?: string }>>; empty?: string; issueStatus: (tag?: string) => string; runNumber: number; openFirst?: boolean; focusKey?: string | null; reveal?: boolean; onFocused?: () => void }) {
   const id = useId();
   const count = parts.reduce((sum, p) => sum + p.items.length, 0);
   if (count === 0 && !empty) return null;
-  let n = 0;
+  let shown = 0;
   return (
     <section aria-labelledby={id} className="flex flex-col">
       <div className="pb-3">
@@ -409,8 +409,8 @@ function Group({ title, hint, parts, empty, issueStatus, runNumber, openFirst, f
       {count === 0 ? <p className="text-sm text-muted">{empty}</p> : (
         <ol className="divide-y divide-line border-y border-line">
           {parts.flatMap((p) => p.items.map((f) => {
-            n += 1;
-            return <FindingRow key={f.key} f={f} n={n} mark={p.mark} tag={p.tag} note={p.note ? f.reason : undefined} detail={p.detail?.(f)} action={p.action?.(f)} dismiss={p.dismiss?.(f)} copy={<CopyIssue f={f} status={issueStatus(p.tag)} runNumber={runNumber} />} autoOpen={openFirst && n === 1} focus={f.key === focusKey} reveal={reveal} onFocused={onFocused} />;
+            shown += 1;
+            return <FindingRow key={f.key} f={f} n={numbers.get(f.key)} mark={p.mark} tag={p.tag} note={p.note ? f.reason : undefined} detail={p.detail?.(f)} action={p.action?.(f)} dismiss={p.dismiss?.(f)} copy={<CopyIssue f={f} status={issueStatus(p.tag)} runNumber={runNumber} />} autoOpen={openFirst && shown === 1} focus={f.key === focusKey} reveal={reveal} onFocused={onFocused} />;
           }))}
         </ol>
       )}
@@ -721,6 +721,7 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
   const when = view.live ? run.createdAt : run.finishedAt ?? run.createdAt;
   const subject = run.pullRequest?.title?.trim();
   const skipped = run.cancelReason === "nothing_to_test";
+  const numbers = findingNumbers(run.marks);
   const totalFindings = report.confirmed.length + report.couldNotJudge.length + report.inconclusive.length + report.notJudged.length + report.refuted.length + report.friction.length + report.dismissed.length;
   return (
     <div className="flex flex-col">
@@ -762,10 +763,10 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
       </nav>
       <div id="run-findings" hidden={skipped || panel !== "findings"} className="pt-6">
         <div className="flex min-w-0 flex-col gap-10">
-          <Group title="Confirmed" hint="Reproduced independently: a fresh agent followed the steps without seeing the report, and the judge agreed. Fix these." runNumber={run.number} openFirst={!view.live}
+          <Group title="Confirmed" hint="Reproduced independently: a fresh agent followed the steps without seeing the report, and the judge agreed. Fix these." runNumber={run.number} numbers={numbers} openFirst={!view.live}
             issueStatus={() => "Confirmed: reproduced independently"} empty={view.live ? "Nothing confirmed yet." : "No defect was confirmed."} focusKey={focusKey} reveal={reveal} onFocused={focused}
             parts={[part({ items: report.confirmed, mark: "✓ Reproduced", dismiss })]} />
-          <Group title="Unverified" hint="Reported, but the replay and the judge did not settle it. Judge again where it is offered, or read the timeline and decide." runNumber={run.number}
+          <Group title="Unverified" hint="Reported, but the replay and the judge did not settle it. Judge again where it is offered, or read the timeline and decide." runNumber={run.number} numbers={numbers}
             issueStatus={(tag) => `Unverified (${(tag ?? "").toLowerCase()})`} focusKey={focusKey} reveal={reveal} onFocused={focused}
             parts={[
               part<UnjudgedFinding>({ items: report.couldNotJudge, tag: "Could not be judged", note: true, detail: (f) => (f.action === "judging" ? undefined : f.reason), dismiss, action: (f) =>
@@ -776,10 +777,10 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
               part({ items: report.inconclusive, tag: "Inconclusive", dismiss }),
               part<UnjudgedFinding>({ items: report.notJudged as UnjudgedFinding[], tag: "Not judged", note: true, detail: (f) => f.reason, dismiss }),
             ]} />
-          <Group title="Rough edges" hint="Not broken, but slowed someone down. These are not replayed." runNumber={run.number}
+          <Group title="Rough edges" hint="Not broken, but slowed someone down. These are not replayed." runNumber={run.number} numbers={numbers}
             issueStatus={() => "Rough edge (not replayed)"} focusKey={focusKey} reveal={reveal} onFocused={focused}
             parts={[part({ items: report.friction, dismiss })]} />
-          <Group title="Ruled out" hint="The replay did not see the problem, or your team marked it not a bug. Later runs of this project are told, with the reason." runNumber={run.number}
+          <Group title="Ruled out" hint="The replay did not see the problem, or your team marked it not a bug. Later runs of this project are told, with the reason." runNumber={run.number} numbers={numbers}
             issueStatus={(tag) => (tag ?? "Ruled out")} focusKey={focusKey} reveal={reveal} onFocused={focused}
             parts={[
               part({ items: report.refuted, tag: "Refuted", dismiss }),

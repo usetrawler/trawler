@@ -95,6 +95,10 @@ export function turnsOfPeople(jobs: Job[], now: number): Turn[] {
     .sort((a, b) => a.start - b.start);
 }
 
+export function findingNumbers(marks: Mark[]): Map<string, number> {
+  return new Map(marks.flatMap((m) => (m.kind === "finding" ? [m.findingKey] : [])).map((key, i) => [key, i + 1]));
+}
+
 export function joinTurns(turns: Turn[], at: (t: number) => number, gap = 1): Turn[] {
   const out: Turn[] = [];
   for (const t of turns) {
@@ -185,7 +189,7 @@ export function TimelineLanes({ run, live, now }: { run: RunSummary; live: boole
   const at = scale.at;
   const passes = handoffs(turns);
   const toneOfPerson = new Map(run.personas.map((p, i) => [p.id, toneOf(i)]));
-  const findingNumber = new Map(run.marks.filter((m) => m.kind === "finding").map((m, i) => [m.kind === "finding" ? m.findingKey : "", i + 1]));
+  const findingNumber = findingNumbers(run.marks);
   const goalsOf = (id: string) => run.goals.filter((g) => g.personaKey === id);
   const replays = run.jobs.filter((j) => j.kind === "replay" && ms(j.started_at) !== null);
   const verdicts = run.marks.filter((m) => m.kind === "verdict");
