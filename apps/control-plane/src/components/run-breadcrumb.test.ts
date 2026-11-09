@@ -8,7 +8,7 @@ const crumbs = (html: string) => [...html.matchAll(/<li[^>]*>(?:<a href="([^"]*)
 
 test("a run made for a pull request leads back through the project's Pull requests, then the plan it used", () => {
   expect(crumbs(renderToStaticMarkup(createElement(RunBreadcrumb, { project, number: 300, plan: "PR #24 v5", fromPullRequest: true })))).toEqual([
-    ["Projects", "/"], ["Recurro", "/projects/p1/overview"], ["Pull requests", "/projects/p1/pull-requests"], ["PR #24 v5", "/runs/0300/plan"], ["Run 0300", null],
+    ["Overview", "/"], ["Recurro", "/projects/p1/overview"], ["Pull requests", "/projects/p1/pull-requests"], ["PR #24 v5", "/runs/0300/plan"], ["Run 0300", null],
   ]);
   expect(renderToStaticMarkup(createElement(RunBreadcrumb, { project, number: 12, plan: "Plan 1" }))).not.toContain("Pull requests");
   expect(renderToStaticMarkup(createElement(RunBreadcrumb, { number: 12, plan: "PR #24 v5", fromPullRequest: true }))).not.toContain("Pull requests");

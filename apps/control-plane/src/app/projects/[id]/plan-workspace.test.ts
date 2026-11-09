@@ -86,15 +86,15 @@ describe("PlanWorkspace", () => {
 
   it("Start a run links to the start page for this plan, described by why a start would be refused", () => {
     const html = render([{ ...ama, signsIn: true }, kwame], accounts);
-    expect(html).toMatch(/<a href="\/runs\/new\?project=p1&amp;plan=pl1" aria-describedby="start-blocked"[^>]*>Start a run<\/a>/);
-    expect(render([kwame], accounts)).toMatch(/<a href="\/runs\/new\?project=p1&amp;plan=pl1" class="[^"]*">Start a run<\/a>/);
+    expect(html).toMatch(/<a href="\/runs\/new\?project=p1&amp;plan=pl1" aria-describedby="start-blocked"[^>]*>Start run<\/a>/);
+    expect(render([kwame], accounts)).toMatch(/<a href="\/runs\/new\?project=p1&amp;plan=pl1" class="[^"]*">Start run<\/a>/);
     expect(render([kwame], accounts)).not.toContain('aria-disabled="true"');
   });
 
   it("on a private network the CI job can give the accounts, so a person without one does not stop Run from CI", () => {
     const html = renderToStaticMarkup(createElement(PlanWorkspace, { projectId: "p1", planId: "pl1", initialPersonas: [{ ...ama, signsIn: true }], initialGoals: [{ id: "g", instruction: "Look.", personaId: "ama" }], initialAccounts: accounts, ciOnly: true }));
     expect(html).not.toContain('id="start-blocked"');
-    expect(html).toMatch(/<a href="\/runs\/new\?project=p1&amp;plan=pl1" class="[^"]*">Set up runs from CI<\/a>/);
+    expect(html).toMatch(/<a href="\/runs\/new\?project=p1&amp;plan=pl1" class="[^"]*">Run from CI<\/a>/);
   });
 
   it("an account that is gone never shows as someone else's: the card asks for one and Start refuses", () => {

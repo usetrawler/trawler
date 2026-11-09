@@ -1,6 +1,7 @@
 "use client";
 import { unstable_isUnrecognizedActionError, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
+import { errorNote, field } from "../../../components/controls.ts";
 import { updatedSinceOpened } from "../../../components/updated-since-opened.ts";
 import { removePlanAction, renamePlanAction } from "./plan-actions.ts";
 
@@ -57,8 +58,8 @@ export function PlanTitle({ projectId, planId, name, canRemove }: { projectId: s
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-3">
-        <label className="flex min-w-0 items-center">
-          <span className="sr-only">Plan name</span>
+        <label className="flex min-w-0 items-center gap-3">
+          <span className="shrink-0 text-sm text-muted">Plan name</span>
           <input
             value={value}
             maxLength={100}
@@ -70,7 +71,7 @@ export function PlanTitle({ projectId, planId, name, canRemove }: { projectId: s
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? errorId : undefined}
             title="Rename this plan"
-            className="-ml-2 h-10 min-w-0 rounded-md border border-line/60 bg-transparent px-2 text-lg font-medium outline-none hover:border-muted focus:border-ink"
+            className={`${field} w-72 max-w-full font-medium`}
           />
         </label>
         {canRemove && !confirming && (
@@ -95,7 +96,7 @@ export function PlanTitle({ projectId, planId, name, canRemove }: { projectId: s
           </span>
         )}
       </div>
-      {error && <p id={errorId} role="alert" className="text-sm text-bad">{error}</p>}
+      {error && <p id={errorId} role="alert" className={errorNote}>{error}</p>}
     </div>
   );
 }

@@ -19,10 +19,10 @@ export function KeyFields({ apiKey, onKey, detected, chosen, onChoose, provider,
         An API key from your model provider: OpenAI, Anthropic, Google, OpenRouter or any OpenAI-compatible service. Runs are billed to it directly; Trawler adds nothing. It is stored encrypted and only its last characters are shown.
       </label>
       <div className="flex gap-2">
-        <input id={keyId} name="apiKey" type="password" autoComplete="off" spellCheck={false} required={required} autoFocus={autoFocus} readOnly={readOnly} aria-invalid={errorId ? true : undefined} aria-describedby={errorId} placeholder="sk-…, sk-ant-…, AIza…, sk-or-…" value={apiKey} onChange={(e) => onKey(e.target.value)} className={`${keyField} flex-1`} />
+        <input id={keyId} name="apiKey" type="password" autoComplete="off" spellCheck={false} aria-required={required || undefined} autoFocus={autoFocus} readOnly={readOnly} aria-invalid={errorId ? true : undefined} aria-describedby={errorId} placeholder="sk-…, sk-ant-…, AIza…, sk-or-…" value={apiKey} onChange={(e) => onKey(e.target.value)} className={`${keyField} flex-1`} />
         {aside}
       </div>
-      {detected && !chosen && <Recognised provider={detected} />}
+      {detected && !chosen && apiKey.trim().length >= 20 && <Recognised provider={detected} />}
       {apiKey.trim().length >= 20 && (
         <div className="grid gap-2 sm:grid-cols-[auto_1fr]">
           <select name="provider" value={provider ?? "custom"} onChange={(e) => { if (!readOnly) onChoose(e.target.value as Provider); }} aria-label="Provider" aria-disabled={readOnly || undefined} className={`${field} aria-disabled:cursor-wait`}>
@@ -35,7 +35,7 @@ export function KeyFields({ apiKey, onKey, detected, chosen, onChoose, provider,
           {provider === "custom" && <input name="baseUrl" type="url" placeholder="https://api.example.com/v1" aria-label="Base URL" readOnly={readOnly} aria-invalid={baseUrlErrorId ? true : undefined} aria-describedby={baseUrlErrorId} value={baseUrl} onChange={(e) => onBaseUrl(e.target.value)} className={keyField} />}
         </div>
       )}
-      {provider && provider !== "openrouter" && <p className="text-xs text-muted">Calls go straight to {label ?? "that service"}, under its own data policy. Through OpenRouter, Trawler asks providers not to keep or train on your data.</p>}
+      {provider && provider !== "openrouter" && <p className="text-sm text-muted">Calls go straight to {label ?? "that service"}, under its own data policy. Through OpenRouter, Trawler asks providers not to keep or train on your data.</p>}
     </div>
   );
 }

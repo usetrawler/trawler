@@ -22,7 +22,7 @@ export default async function FindingsPage() {
   const [findings, going] = await withOrg(getDb(), orgId, (tx) => Promise.all([openFindings(tx, orgId), workspaceRuns(tx, orgId, { active: true, size: 10 })]));
   return (
     <AppShell shell={shell} current="findings">
-      <FindingsView projects={shell.workspace.projects} findings={findings} going={going.runs} />
+      <FindingsView workspace={shell.workspace.name} projects={shell.workspace.projects} findings={findings} going={going.runs} />
     </AppShell>
   );
 }

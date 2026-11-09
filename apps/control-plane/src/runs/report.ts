@@ -151,7 +151,7 @@ export function runView(s: RunSummary) {
 }
 
 const STOPPED_BECAUSE: Record<CancelReason, string> = {
-  stopped: "This run was stopped.",
+  stopped: "Someone stopped this run.",
   key_removed: "Stopped when the model key was removed.",
   account_refused: "Stopped when the product refused a test account.",
   time_limit: `Stopped after ${RUN_TIME_LIMIT_HOURS} hours, the longest a run may take.`,

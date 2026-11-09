@@ -1,5 +1,5 @@
 "use client";
-import { area, field, keyField, primaryButton, secondaryButton } from "../../components/controls.ts";
+import { area, errorNote, field, formTitle, infoNote, keyField, primaryButton, secondaryButton, sectionTitle } from "../../components/controls.ts";
 import { unstable_isUnrecognizedActionError, unstable_rethrow, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import type { ProductSummary, SignUp } from "@usetrawler/core/setup";
@@ -86,6 +86,14 @@ export function afterLostDescription(progress: Settled): { summary: ProductSumma
   return { error: progress.state === "failed" ? LOST_MESSAGE.failed : LOST_MESSAGE.gone };
 }
 
+export function addressProblem(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return "Paste the product's address, such as https://app.example.com.";
+  const host = /\s/.test(trimmed) ? "" : hostOf(trimmed);
+  if (!host || !/^(localhost|\[[0-9a-f:.]+\]|[^.\s]+(\.[^.\s]+)+)(:\d+)?$/i.test(host)) return "That does not look like a web address. Paste one such as https://app.example.com.";
+  return null;
+}
+
 function hostOf(raw: string): string {
   const trimmed = raw.trim();
   try {
@@ -130,7 +138,7 @@ export function Progress({ step, host, checking = false, byHand = false }: { ste
       <Working />
       <div className="flex flex-col gap-3">
         <p className="text-sm text-muted">Building your test plan</p>
-        <h2 className="text-xl font-medium tracking-tight break-words">Understanding {host}</h2>
+        <h2 className={`${formTitle} break-words`}>Understanding {host}</h2>
         <p className="max-w-xl text-muted">{byHand ? "Trawler chooses people with different roles and goals from your description." : "Trawler reads the product's page, works out what it does, and then chooses people with different roles and goals."}{` This usually takes ${minutes} minutes; keep this page open.`}</p>
         {checking && <p className="max-w-xl text-sm text-muted">Trawler did not answer. Checking whether setup finished…</p>}
       </div>
@@ -172,6 +180,10 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
   const analyse = () => {
     const host = projectHost ?? hostOf(url);
     if (newPlanName !== undefined && !planName.trim()) return setError("Give the plan a name.");
+    if (!projectId) {
+      const problem = addressProblem(url);
+      if (problem) return setError(problem);
+    }
     setError(null);
     setStage({ kind: "working", step: "read", host });
     start(() => describe(host));
@@ -224,7 +236,7 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
         ) : (
           <p className="max-w-xl text-muted">Trawler reads {projectHost} again, lists what the product does, and proposes people for the features you choose. Proposing replaces the people and goals on the plan. Test accounts stay; check who signs in with them afterwards.</p>
         )}
-        {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
+        {error && <p role="alert" className={errorNote}>{error}</p>}
         <button type="button" onClick={analyse} disabled={pending} className={`${primaryButton} self-start`}>
           {newPlanName !== undefined ? "Read the product" : "Read the product again"}
         </button>
@@ -234,17 +246,17 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
 
   if (stage.kind === "address") {
     return (
-      <form className="flex flex-col gap-6" onSubmit={(e) => { e.preventDefault(); analyse(); }}>
+      <form noValidate className="flex flex-col gap-6" onSubmit={(e) => { e.preventDefault(); analyse(); }}>
         {intro}
         <label className="flex flex-col gap-2">
           <span className="text-sm text-muted">Product URL</span>
           <input
-            name="url" type="text" inputMode="url" autoComplete="url" required value={url} onChange={(e) => setUrl(e.target.value)}
+            name="url" type="text" inputMode="url" autoComplete="url" aria-invalid={error ? true : undefined} value={url} onChange={(e) => setUrl(e.target.value)}
             placeholder="https://app.example.com"
             className={keyField}
           />
         </label>
-        {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
+        {error && <p role="alert" className={errorNote}>{error}</p>}
         <div className="flex flex-col-reverse items-stretch justify-between gap-4 border-t border-line pt-6 sm:flex-row sm:items-center">
           <p className="text-sm text-muted">Next: confirm what the product does and which features to try.</p>
           <button type="submit" disabled={pending} className={primaryButton}>
@@ -258,6 +270,8 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
   if (stage.kind === "byHand") {
     const typed = stage;
     const describeByHand = () => {
+      if (!typed.name.trim()) return setError("Give the product a name.");
+      if (!typed.description.trim()) return setError("Say what the product does and who it is for.");
       setError(null);
       start(async () => {
         const read = await reached(() => readProductAction({ url, byHand: { name: typed.name, description: typed.description } }), "Reload the page to set up the product.");
@@ -267,23 +281,23 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
       });
     };
     return (
-      <form className="flex flex-col gap-6" onSubmit={(e) => { e.preventDefault(); describeByHand(); }}>
+      <form noValidate className="flex flex-col gap-6" onSubmit={(e) => { e.preventDefault(); describeByHand(); }}>
         <div className="flex flex-col gap-3">
           <p className="text-sm text-muted">{typed.host} is on a private network</p>
-          <h2 className="text-xl font-medium tracking-tight break-words">Describe it yourself.</h2>
+          <h2 className={`${formTitle} break-words`}>Describe it yourself.</h2>
           <p className="max-w-xl text-muted">Trawler cannot read a page that only your network or a CI job can reach, so tell it what the product is. The people still use it at {typed.host}, through a runner that can reach it.</p>
         </div>
         <label className="flex flex-col gap-2">
           <span className="text-sm text-muted">Product name</span>
-          <input name="name" type="text" required maxLength={200} value={typed.name} onChange={(e) => setStage({ ...typed, name: e.target.value })} className={field} />
+          <input name="name" type="text" maxLength={200} value={typed.name} onChange={(e) => setStage({ ...typed, name: e.target.value })} className={field} />
         </label>
         <label className="flex flex-col gap-2">
           <span className="text-sm text-muted">What it does and who it is for</span>
-          <textarea name="description" required maxLength={2000} rows={4} value={typed.description} onChange={(e) => setStage({ ...typed, description: e.target.value })} className={`${area} resize-y`} />
+          <textarea name="description" maxLength={2000} rows={4} value={typed.description} onChange={(e) => setStage({ ...typed, description: e.target.value })} className={`${area} resize-y`} />
         </label>
-        {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
+        {error && <p role="alert" className={errorNote}>{error}</p>}
         <div className="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
-          <button type="button" onClick={() => { setError(null); setStage({ kind: "address" }); }} className="text-sm text-muted hover:text-ink">← Back</button>
+          <button type="button" onClick={() => { setError(null); setStage({ kind: "address" }); }} className="-ml-2 h-10 px-2 text-sm text-muted hover:text-ink">← Back</button>
           <button type="submit" disabled={pending} className={primaryButton}>
             Choose the features
           </button>
@@ -329,9 +343,12 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-3">
         <p className="text-sm text-muted">{stage.byHand ? "Your description" : "Trawler understood the product"}</p>
-        <h2 className="text-xl font-medium tracking-tight break-words">Confirm the context.</h2>
+        <h2 className={`${formTitle} break-words`}>Confirm the context.</h2>
         <p className="max-w-xl text-muted">{stage.byHand ? "We use this only to choose the people and their goals." : "We use this only to choose the people and their goals. Edit it if we misunderstood anything."}</p>
       </div>
+      {!stage.byHand && !stage.description.trim() && stage.features.length === 0 && (
+        <p className={infoNote}>Trawler could not tell from the page what the product does. Describe it below, then add the features the people should try.</p>
+      )}
       <label className="flex flex-col gap-2">
         <span className="flex flex-wrap items-baseline justify-between gap-x-4 text-sm">
           <span>Product context</span><span className="text-muted">{stage.byHand ? "Written by you · editable" : "Trawler's draft · editable"}</span>
@@ -352,7 +369,7 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
       <section className="flex flex-col gap-3" aria-labelledby="features-heading">
         <div className="flex items-end justify-between gap-4">
           <div>
-            <h3 id="features-heading" className="text-lg font-medium">What should the people try?</h3>
+            <h3 id="features-heading" className={sectionTitle}>What should the people try?</h3>
             <p className="text-sm text-muted">{stage.byHand ? "Add each feature the people should try." : "We preselected the best match."}</p>
           </div>
           <p className="text-sm text-muted">Select one or more</p>
@@ -376,10 +393,10 @@ export function SetupWizard({ intro, projectId, planId, newPlanName, projectHost
         </form>
       </section>
       {projectId && <p className="text-sm text-muted">{newPlanName !== undefined ? `This creates the plan ${planName.trim()} with these people and goals. Your other plans stay as they are.` : "Proposing replaces the people and goals on the plan. Test accounts stay; check who signs in with them afterwards."}</p>}
-      {error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{error}</p>}
+      {error && <p role="alert" className={errorNote}>{error}</p>}
       <div className="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
-        <button type="button" onClick={() => { setError(null); setStage({ kind: "address" }); }} className="text-sm text-muted hover:text-ink">← Back</button>
-        <span className="text-sm text-muted">{chosen.length === 1 ? "1 feature selected" : `${chosen.length} features selected`}</span>
+        <button type="button" onClick={() => { setError(null); setStage({ kind: "address" }); }} className="-ml-2 h-10 px-2 text-sm text-muted hover:text-ink">← Back</button>
+        <span className="text-sm text-muted">{chosen.length === 0 ? "Choose or add at least one feature" : chosen.length === 1 ? "1 feature selected" : `${chosen.length} features selected`}</span>
         <button type="button" onClick={propose} disabled={pending || chosen.length === 0} className={primaryButton}>
           Meet the test users
         </button>

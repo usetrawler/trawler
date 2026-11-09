@@ -29,7 +29,7 @@ export default async function CapturePage({ params }: { params: Promise<{ id: st
   const title = capture.findingTitle ?? "Screen capture";
   const run = `${runPath(capture.runNumber)}${capture.findingKey ? `#${findingAnchor(capture.findingKey)}` : ""}`;
   return (
-    <AppShell shell={shell} current={{ project: capture.projectId }} parent wide>
+    <AppShell shell={shell} current={{ project: capture.projectId }} parent>
       <nav aria-label="Breadcrumb" className="mb-[34px]">
         <ol className="flex flex-wrap items-center gap-x-2 gap-y-4 font-mono text-xs text-muted">
           {project && <><li><a href={`/projects/${project.id}`} className="-my-2 inline-block py-2 hover:text-ink">{project.name}</a></li><li aria-hidden>/</li></>}

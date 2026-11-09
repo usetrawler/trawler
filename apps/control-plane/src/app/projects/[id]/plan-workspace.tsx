@@ -7,10 +7,8 @@ import { updatedSinceOpened } from "../../../components/updated-since-opened.ts"
 import { addAccountAction, removeAccountAction, savePlanAction, type AccountView } from "./plan-actions.ts";
 import { peopleLimitMessage, type WorkspacePlan } from "../../../runs/plan-limits.ts";
 import { Icon } from "../../../components/icon.tsx";
-import { field as controlField, invalidField, secondaryButton } from "../../../components/controls.ts";
+import { area, errorNote, field as controlField, invalidField, secondaryButton, sectionTitle, warnNote } from "../../../components/controls.ts";
 import { letterOf, toneOf } from "../../runs/[id]/person-tones.ts";
-
-const field = "w-full min-w-0 rounded-md border border-line bg-panel px-2.5 py-1.5 outline-none hover:border-muted/60 focus:border-ink";
 
 function nextKey(prefix: string, taken: Set<string>): string {
   let n = taken.size + 1;
@@ -19,7 +17,7 @@ function nextKey(prefix: string, taken: Set<string>): string {
 }
 
 function AddButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
-  return <button type="button" onClick={onClick} className="self-start text-sm text-muted underline-offset-4 hover:text-ink hover:underline">+ {children}</button>;
+  return <button type="button" onClick={onClick} className="-my-2 self-start py-2.5 text-sm text-muted underline-offset-4 hover:text-ink hover:underline">+ {children}</button>;
 }
 
 function RemoveButton({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) {
@@ -67,7 +65,7 @@ export function SignIn({ projectId, planId, person, accounts, onPick, onAccounts
   });
   return (
     <div className="mt-2 flex flex-col gap-2 border-t border-line pt-3">
-      <p aria-hidden className="text-xs text-muted">Sign-in</p>
+      <p aria-hidden className="text-sm text-muted">Sign-in</p>
       <select
         aria-label={`Sign-in for ${who}`}
         aria-invalid={missing || undefined}
@@ -80,10 +78,10 @@ export function SignIn({ projectId, planId, person, accounts, onPick, onAccounts
         {accounts.map((a) => <option key={a.ref} value={a.ref}>Signs in as {a.username}</option>)}
         <option value={SIGNS_UP}>Signs up as a new user</option>
       </select>
-      {missing && <p id={noteId} className="text-xs text-bad">{who} needs a test account to sign in.</p>}
-      {!person.accountRef && !person.signsIn && <p className="text-xs text-muted">Signs up the way a new user would, if your product lets them, with an example.com address and a password Trawler makes up. Cannot receive email yet.</p>}
+      {missing && <p id={noteId} className="text-sm text-bad">{who} needs a test account to sign in.</p>}
+      {!person.accountRef && !person.signsIn && <p className="text-sm text-muted">Signs up the way a new user would, if your product lets them, with an example.com address and a password Trawler makes up. Cannot receive email yet.</p>}
       {chosen && (
-        <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted">
+        <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted">
           <span className="font-mono">password {chosen.hint}</span>
           <button type="button" disabled={pending} onClick={() => remove(chosen.ref)} className="underline-offset-4 hover:text-bad hover:underline disabled:opacity-60">Remove {chosen.username} from the project</button>
         </p>
@@ -92,8 +90,8 @@ export function SignIn({ projectId, planId, person, accounts, onPick, onAccounts
         <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); add(); }}>
           <input aria-label={`Username or email for ${who}`} placeholder="Username or email" autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} className={controlField} />
           <input aria-label={`Password for ${who}`} placeholder="Password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} className={controlField} />
-          {password !== password.trim() && <p className="text-xs text-bad">This password starts or ends with a space, and it is kept exactly as typed. Remove the space if the account&apos;s password has none.</p>}
-          <p className="text-xs text-muted">Encrypted, never shown again, typed without the model seeing it. Anyone on the plan can use it. A password shorter than 8 characters cannot be masked if your product shows it on a page.</p>
+          {password !== password.trim() && <p className="text-sm text-bad">This password starts or ends with a space, and it is kept exactly as typed. Remove the space if the account&apos;s password has none.</p>}
+          <p className="text-sm text-muted">Encrypted, never shown again, typed without the model seeing it. Anyone on the plan can use it. A password shorter than 8 characters cannot be masked if your product shows it on a page.</p>
           <div className="flex gap-2">
             <button type="submit" disabled={pending} className={secondaryButton}>{pending ? "Saving…" : "Add account"}</button>
             <button type="button" onClick={() => { setAdding(false); setError(null); }} className="h-10 px-3 text-sm text-muted hover:text-ink">Cancel</button>
@@ -102,7 +100,7 @@ export function SignIn({ projectId, planId, person, accounts, onPick, onAccounts
       ) : (
         <AddButton onClick={() => setAdding(true)}>Add account for {who}</AddButton>
       )}
-      {error && <p role="alert" className="text-xs text-bad">{error}</p>}
+      {error && <p role="alert" className={errorNote}>{error}</p>}
     </div>
   );
 }
@@ -132,7 +130,7 @@ function OrderOfPlay({ personas, goals, onMove }: { personas: PlanPerson[]; goal
   return (
     <section className="flex flex-col gap-3" aria-labelledby="order-of-play">
       <div className="flex flex-col gap-1">
-        <h2 id="order-of-play" className="font-medium">Order of play</h2>
+        <h2 id="order-of-play" className={sectionTitle}>Order of play</h2>
         <p className="text-sm text-muted">People take turns in this order, one at a time, and each turn knows what happened before it. Put a step that needs someone else&apos;s work after it: submit, then review, then see the decision.{turns > personas.length ? ` ${turns} turns.` : ""}</p>
       </div>
       <p aria-live="polite" className="sr-only">{moved ? `Moved to step ${moved.to + 1}.` : ""}</p>
@@ -176,14 +174,14 @@ function planProblem(personas: PlanPerson[], goals: Goal[]): string | null {
 const startLink = secondaryButton;
 
 function StartLink({ href, ciOnly, blocked, held, closedBeta }: { href: string; ciOnly: boolean; blocked?: string; held: boolean; closedBeta?: string }) {
-  const label = ciOnly ? "Set up runs from CI" : "Start a run";
+  const label = ciOnly ? "Run from CI" : "Start run";
   const said = closedBeta ?? blocked;
   return (
     <section id="start" aria-labelledby="start-heading" className="flex flex-col gap-4 border-t border-line pt-6 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 flex-col gap-1" aria-live="polite">
-        <h2 id="start-heading" className="sr-only">{ciOnly ? "Run from CI" : "Start a run"}</h2>
+        <h2 id="start-heading" className="sr-only">{ciOnly ? "Run from CI" : "Start run"}</h2>
         {closedBeta ? <p id="start-blocked" className="border-l-2 border-warn pl-3 text-sm">{closedBeta}</p>
-          : blocked ? <p id="start-blocked" className="text-sm text-warn">{blocked}</p>
+          : blocked ? <p id="start-blocked" className={warnNote}>{blocked}</p>
           : <p className="text-sm text-muted">{ciOnly ? "This product is on a private network, so its runs start from your CI job." : "Choose the model and the cap, then start this plan."}</p>}
       </div>
       {held ? (
@@ -301,7 +299,7 @@ export function PlanWorkspace({ projectId, planId, initialPersonas, initialGoals
       <div className="grid items-start gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
         <section className="flex flex-col gap-3" aria-labelledby="plan-people">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 id="plan-people" className="font-medium">People</h2>
+            <h2 id="plan-people" className={sectionTitle}>People</h2>
             <p ref={status} tabIndex={-1} aria-live="polite" className={`text-sm outline-none ${error ? "text-bad" : "text-muted"}`}>
               {error ? (
                 <>
@@ -315,7 +313,7 @@ export function PlanWorkspace({ projectId, planId, initialPersonas, initialGoals
                 </>
               )}
             </p>
-            {!error && problem && <p className="basis-full text-sm text-bad">{problem}</p>}
+            {!error && problem && <p className={`basis-full ${errorNote}`}>{problem} Changes are not saved until it is fixed.</p>}
           </div>
           <p className="text-sm text-muted">Each person has their own goals, so give an administrator what only an administrator can do.</p>
           <ul className="divide-y divide-line border-y border-line">
@@ -341,16 +339,16 @@ export function PlanWorkspace({ projectId, planId, initialPersonas, initialGoals
                   </h3>
                   <div id={`person-${p.id}`} hidden={!isOpen} className="flex flex-col gap-2 pb-5">
                     <div className="flex items-start gap-2">
-                      <input aria-label={`Name of person ${i + 1}`} value={p.name} maxLength={100} onChange={(e) => updatePersona(i, { name: e.target.value })} className={`${field} font-medium`} />
+                      <input aria-label={`Name of person ${i + 1}`} value={p.name} maxLength={100} onChange={(e) => updatePersona(i, { name: e.target.value })} className={`${controlField} w-full font-medium`} />
                       {personas.length > 1 && <RemoveButton label={`Remove ${who}`} onClick={() => removePerson(p.id)} />}
                     </div>
-                    <textarea aria-label={`What ${who} is like`} value={p.brief} maxLength={2000} rows={3} onChange={(e) => updatePersona(i, { brief: e.target.value })} className={`${field} resize-y text-sm text-muted`} />
+                    <textarea aria-label={`What ${who} is like`} value={p.brief} maxLength={2000} rows={3} onChange={(e) => updatePersona(i, { brief: e.target.value })} className={`${area} w-full resize-y`} />
                     <p className="mt-2 text-sm text-muted">Goals</p>
                     <ol aria-label={`Goals of ${who}`} className="flex flex-col gap-1">
                       {own.map((g, n) => (
                         <li key={g.id} className="flex items-start gap-2">
                           <span className="min-w-5 pt-2 text-sm text-muted tabular-nums">{n + 1}</span>
-                          <textarea aria-label={`Goal ${n + 1} of ${who}`} value={g.instruction} maxLength={1000} rows={1} onChange={(e) => updateGoal(g.id, e.target.value)} className={`${field} field-sizing-content resize-none text-sm`} />
+                          <textarea aria-label={`Goal ${n + 1} of ${who}`} value={g.instruction} maxLength={1000} rows={1} onChange={(e) => updateGoal(g.id, e.target.value)} className={`${area} w-full field-sizing-content resize-none`} />
                           {own.length > 1 && <RemoveButton label={`Remove goal ${n + 1} of ${who}`} onClick={() => setGoals((list) => list.filter((x) => x.id !== g.id))} />}
                         </li>
                       ))}
@@ -375,7 +373,7 @@ export function PlanWorkspace({ projectId, planId, initialPersonas, initialGoals
         {personas.length > 1 && <aside className="lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto"><OrderOfPlay personas={personas} goals={goals} onMove={moveGoal} /></aside>}
       </div>
 
-      <StartLink href={`/runs/new?project=${projectId}&plan=${planId}`} ciOnly={ciOnly} closedBeta={ciOnly ? undefined : closedBeta} held={Boolean(error || problem || dirty || saving)} blocked={error?.message ?? problem ?? (dirty || saving ? "Saving your changes to the plan…" : withoutAccount && !ciOnly ? `${withoutAccount.name} needs a test account to sign in.` : overPlan)} />
+      <StartLink href={`/runs/new?project=${projectId}&plan=${planId}`} ciOnly={ciOnly} closedBeta={ciOnly ? undefined : closedBeta} held={Boolean(error || problem || dirty || saving)} blocked={error || problem ? "Fix the plan above to start a run." : (dirty || saving ? "Saving your changes to the plan…" : withoutAccount && !ciOnly ? `${withoutAccount.name} needs a test account to sign in.` : overPlan)} />
     </div>
   );
 }

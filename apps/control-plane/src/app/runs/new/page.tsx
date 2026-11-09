@@ -25,14 +25,14 @@ import { signInLine, type Person } from "./sign-in-line.ts";
 import { StartPicker } from "./start-picker.tsx";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Start a run" };
+export const metadata: Metadata = { title: "Start run" };
 
 
 function WhoSignsIn({ people, accounts, planHref, fromCi }: { people: Person[]; accounts: Array<{ ref: string; username: string }>; planHref: string; fromCi: boolean }) {
   return (
     <section aria-labelledby="who-signs-in" className="flex flex-col gap-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 id="who-signs-in" className="text-base font-medium">Who signs in</h2>
+        <h2 id="who-signs-in" className="font-medium">Who signs in</h2>
         <a href={planHref} className="text-sm text-muted underline underline-offset-4 hover:text-ink">Edit people and accounts</a>
       </div>
       {fromCi ? (
@@ -82,7 +82,7 @@ export default async function StartPage({ searchParams }: { searchParams: Promis
   const goalsPerTurn = turnsOf({ personas: project.personas.map((p) => ({ id: p.key })), goals }).map((t) => t.goalIds.length);
   return (
     <AppShell shell={shell} current={{ project: id }}>
-      <PageHead eyebrow={project.name} title={ciOnly ? "Run from CI" : "Start a run"} subtitle={ciOnly ? "This product is on a private network, so its runs start from your CI job." : "Pick the plan, check who signs in, then choose the model and the cap."} />
+      <PageHead eyebrow={project.name} title={ciOnly ? "Run from CI" : "Start run"} subtitle={ciOnly ? "This product is on a private network, so its runs start from your CI job." : "Pick the plan, check who signs in, then choose the model and the cap."} />
       <div className="flex flex-col gap-8">
         <StartPicker key={`${id}:${planId}`} projects={projects} project={id} plans={plans.map((p) => ({ id: p.id, name: p.name, people: p.people }))} plan={planId} />
         <WhoSignsIn people={project.personas} accounts={accounts} planHref={planHref} fromCi={ciOnly} />

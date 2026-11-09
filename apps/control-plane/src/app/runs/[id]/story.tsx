@@ -224,12 +224,12 @@ export function Story({ run, live, pulse, active, filter, onFilter }: { run: Run
   const personFilter = typeof filter === "object" ? filter.person : null;
   return (
     <section aria-labelledby="story" className="flex flex-col gap-3">
-      <h2 id="story" className="text-lg font-medium">What happened, step by step</h2>
+      <h2 id="story" className="font-medium">What happened, step by step</h2>
       <div role="group" aria-label="Show" className="flex flex-wrap gap-2">
         <button type="button" aria-pressed={filter === "everyone"} onClick={() => onFilter("everyone")} className={chip(filter === "everyone")}>Everyone</button>
         {people.map((p) => (
           <button key={p.id} id={trailAnchor(p.id)} type="button" aria-pressed={personFilter === p.id} onClick={() => onFilter({ person: p.id })} className={`${chip(personFilter === p.id)} scroll-mt-24`}>
-            <span aria-hidden className="size-2 rounded-full" style={{ background: p.tone.bar }} />{p.name}
+            <span aria-hidden className="size-2 rounded-full ring-1 ring-current/40" style={{ background: p.tone.bar }} />{p.name}
           </button>
         ))}
         {run.conversation && <button type="button" aria-pressed={filter === "conversation"} onClick={() => onFilter("conversation")} className={chip(filter === "conversation")}>Only the conversation</button>}
@@ -250,7 +250,7 @@ export function Story({ run, live, pulse, active, filter, onFilter }: { run: Run
       {!loaded && failed.length === 0 ? (
         <p role="status" className="text-sm text-muted">Loading the steps…</p>
       ) : groups.length === 0 ? (
-        <p className="text-sm text-muted">{filter === "conversation" ? "No one has said anything yet." : "Nothing to show yet."}</p>
+        <p className="text-sm text-muted">{filter === "conversation" ? (live ? "No one has said anything yet." : "No one said anything.") : live ? "Nothing to show yet." : "No steps were recorded."}</p>
       ) : (
         <StoryList ref={list} groups={groups} people={people} />
       )}

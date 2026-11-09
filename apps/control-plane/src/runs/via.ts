@@ -9,7 +9,7 @@ export interface RunVia {
 export type ShownVia = Omit<RunVia, "grant">;
 
 export type RunOrigin = "app" | "api" | "mcp";
-export const RUN_ORIGINS: Array<[RunOrigin | "any", string]> = [["any", "Any"], ["app", "In the app"], ["api", "API token"], ["mcp", "Assistant"]];
+export const RUN_ORIGINS: Array<[RunOrigin | "any", string]> = [["any", "Any"], ["app", "In the app"], ["api", "API token"], ["mcp", "MCP"]];
 
 export function viaOf(json: unknown): ShownVia | null {
   if (!json || typeof json !== "object") return null;

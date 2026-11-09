@@ -28,12 +28,12 @@ test("the project tabs are Home, Plan, Pull requests, Runs and Product", () => {
   expect(tabs(render("product")).filter((t) => t[2]).map((t) => t[0])).toEqual(["Product"]);
 });
 
-test("the open tab is set apart by weight and a bar, not only colour, and Pull requests and Runs carry their numbers", () => {
+test("the open tab is set apart by a bar, not only colour, keeps the weight of the others so nothing shifts, and Pull requests and Runs carry their numbers", () => {
   const html = render("runs");
-  expect(html).toMatch(/aria-current="page" class="[^"]*\bborder-ink\b[^"]*\bfont-medium\b[^"]*">Runs<span[^>]*>3<\/span><\/a>/);
+  expect(html).toMatch(/aria-current="page" class="[^"]*\bborder-b-2\b[^"]*\bborder-ink\b[^"]*">Runs<span[^>]*>3<\/span><\/a>/);
   expect(html).toMatch(/>Pull requests<span[^>]*>2<\/span><\/a>/);
   expect(html).toMatch(/<a href="\/projects\/p1" class="[^"]*\bborder-transparent\b[^"]*">Plan<\/a>/);
-  expect(html).not.toMatch(/<a href="\/projects\/p1" class="[^"]*\bfont-medium\b/);
+  expect(html).toMatch(/<a href="\/projects\/p1" class="[^"]*\bfont-medium\b/);
 });
 
 test("a project that shares its name shows the address the panel gives it, underlined as a link", () => {
@@ -42,17 +42,17 @@ test("a project that shares its name shows the address the panel gives it, under
 });
 
 test("a new run opens the start page for this project", () => {
-  expect(render("runs")).toMatch(/<a href="\/runs\/new\?project=p1"[^>]*>New run<\/a>/);
+  expect(render("runs")).toMatch(/<a href="\/runs\/new\?project=p1"[^>]*>Start run<\/a>/);
 });
 
 test("runs can be paused from the head, and a paused project says so above everything and offers Resume runs instead of a new run", () => {
   const open = render("plan");
   expect(open).toMatch(/<button type="button"[^>]*>Pause runs<\/button>/);
-  expect(open).toContain(">New run<");
+  expect(open).toContain(">Start run<");
   expect(open).not.toContain("are paused");
   const paused = render("home", { paused: true, liveRun: null });
-  expect(paused).toMatch(/^<div[^>]*><p role="status"[^>]*><span[^>]*>Runs on Acme Invoices are paused\.<\/span><span[^>]*>CI jobs and New run are refused until you resume them\.<\/span><\/p>/);
+  expect(paused).toMatch(/^<div[^>]*><p role="status"[^>]*><span[^>]*>Runs on Acme Invoices are paused\.<\/span><span[^>]*>Runs from CI and new runs are refused until you resume them\.<\/span><\/p>/);
   expect(paused).toMatch(/<button type="button"[^>]*>Resume runs<\/button>/);
-  expect(paused).not.toContain("New run<");
+  expect(paused).not.toContain("Start run<");
   expect(paused).not.toContain("Pause runs");
 });

@@ -32,7 +32,7 @@ function PullRequests({ projectId, lines, total }: { projectId: string; lines: P
         {lines.map((pr) => (
           <li key={pr.run.id}>
             <a href={runPath(pr.run.number)} className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-4 gap-y-1 py-3 hover:bg-soft sm:grid-cols-[3.5rem_minmax(0,1fr)_auto]">
-              <span className="font-mono text-sm text-muted">#{pr.number}</span>
+              <span className="text-sm text-muted tabular-nums">#{pr.number}</span>
               <span className="min-w-0">
                 <span className="block break-words">{pr.title ?? `Pull request #${pr.number}`}</span>
                 <span className="mt-1 block text-sm text-muted">{pr.plan.ofPullRequest ? "plan " : ""}{pr.plan.label} · {runTitle(pr.run.number)}</span>
@@ -51,7 +51,7 @@ function Latest({ run }: { run: RunLine | undefined }) {
   const source = sourceOf(run);
   return (
     <p className="text-sm text-muted">
-      Latest run: <a href={runPath(run.number)} className="text-ink underline underline-offset-4">{runTitle(run.number)}</a>{source ? ` · ${source}` : ""} · <span className={run.status === "failed" ? "text-bad" : run.status === "stopped_budget" ? "text-warn" : undefined}>{runResult(run)}</span> · <LocalTime iso={run.createdAt.toISOString()} />
+      Latest run: <a href={runPath(run.number)} className="-my-2 inline-block py-2.5 text-ink underline underline-offset-4">{runTitle(run.number)}</a>{source ? ` · ${source}` : ""} · <span className={run.status === "failed" ? "text-bad" : run.status === "stopped_budget" ? "text-warn" : undefined}>{runResult(run)}</span> · <LocalTime iso={run.createdAt.toISOString()} />
     </p>
   );
 }
@@ -66,15 +66,15 @@ function NextStep({ projectId, runs, finished, open, going }: { projectId: strin
 
 export function ProjectHomeView({ projectId, runs, finished, findings, going, latest, pullRequests, pullRequestCount }: { projectId: string; runs: number; finished: number; findings: OpenFinding[]; going: RunLine[]; latest?: RunLine; pullRequests: PullRequestLine[]; pullRequestCount: number }) {
   return (
-    <div className="flex max-w-3xl flex-col gap-10">
+    <div className="flex flex-col gap-10">
       <div className="flex flex-col gap-4">
-        <p className="text-2xl leading-tight font-medium tracking-tight wrap-anywhere md:text-[28px]">{homeHeadline(findings, runs, finished)}</p>
+        <p className="text-xl leading-snug font-medium tracking-tight wrap-anywhere md:text-[22px]">{homeHeadline(findings, runs, finished)}</p>
         <NextStep projectId={projectId} runs={runs} finished={finished} open={findings.length} going={going.length > 0} />
         {going.length > 0 ? <GoingRuns runs={going} /> : <Latest run={latest} />}
       </div>
       <Findings findings={findings} />
       <PullRequests projectId={projectId} lines={pullRequests.slice(0, SHOWN_PULL_REQUESTS)} total={pullRequestCount} />
-      {runs > 0 && <a href={`/projects/${projectId}/runs`} className="w-fit text-sm underline underline-offset-4">View run history</a>}
+      {runs > 0 && <a href={`/projects/${projectId}/runs`} className="-my-2 w-fit py-2.5 text-sm underline underline-offset-4">View run history</a>}
     </div>
   );
 }

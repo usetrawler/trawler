@@ -38,7 +38,7 @@ test("the result follows the run's state, with its tone, and the rows keep their
   const html = render(states.map((status, index) => line({ id: status, number: 17 - index, status, confirmed: 0 })));
   expect(rows(html).map((row) => row.match(/href="\/runs\/([^"]*)"/)?.[1])).toEqual(["0017", "0016", "0015", "0014", "0013"]);
   expect(rows(html).map((row) => row.match(/sm:block (text-[a-z]+)">([^<]*)</)?.slice(1))).toEqual([
-    ["text-warn", "Stopped at cap · No defect confirmed"], ["text-bad", "Failed"], ["text-info", "Live"], ["text-muted", "Cancelled"], ["text-muted", "Queued"],
+    ["text-warn", "Stopped at cap · No defect confirmed"], ["text-bad", "Failed"], ["text-info", "Live"], ["text-muted", "Stopped"], ["text-muted", "Queued"],
   ]);
   expect(rows(render([line()]))[0]).toContain("font-medium text-ink");
 });

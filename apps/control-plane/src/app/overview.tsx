@@ -46,7 +46,7 @@ export function Overview({ workspace, projects, recent, findings, going }: { wor
           eyebrow={workspace}
           title={workspaceHeadline(findings, projects)}
           subtitle={findings.length > 0 ? <a href="/findings" className="text-ink underline underline-offset-4">Open Findings</a> : recent.length === 0 ? "Start a run from a project's plan to see what people find." : undefined}
-          action={<PrimaryLink href="/runs/new">New run</PrimaryLink>}
+          action={<PrimaryLink href="/runs/new">Start run</PrimaryLink>}
           flush
         />
         <GoingRuns runs={going} withProject />

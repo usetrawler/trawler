@@ -94,9 +94,9 @@ test("a plan that is not valid yet is not saved; the status and Start say what i
   plan.settle();
   vi.advanceTimersByTime(5000);
   expect(actions.savePlanAction).not.toHaveBeenCalled();
-  expect(startBlocked(plan.tree)).toBe("Person 1 needs a name.");
+  expect(startBlocked(plan.tree)).toBe("Fix the plan above to start a run.");
   expect(startLink(plan.tree).held).toBe(true);
-  expect(nodes(plan.tree).some((node) => node.type === "p" && text(node) === "Person 1 needs a name.")).toBe(true);
+  expect(nodes(plan.tree).some((node) => node.type === "p" && text(node) === "Person 1 needs a name. Changes are not saved until it is fixed.")).toBe(true);
   expect(text(nodes(plan.tree).find((node) => node.props?.["aria-live"] === "polite")!)).not.toMatch(/sav/i);
 });
 

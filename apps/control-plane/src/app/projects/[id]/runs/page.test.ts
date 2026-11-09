@@ -104,7 +104,7 @@ test("the project is marked in the nav as the section the page belongs to, the R
   expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}" class="[^"]*">Plan</a>`));
   expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}/pull-requests" class="[^"]*">Pull requests<span[^>]*>2</span></a>`));
   expect(tabs).toMatch(new RegExp(`<a href="/projects/${ID}/runs" aria-current="page"[^>]*>Runs<span[^>]*>3</span></a>`));
-  expect(html).toMatch(new RegExp(`<a href="/runs/new\\?project=${ID}"[^>]*>New run<`));
+  expect(html).toMatch(new RegExp(`<a href="/runs/new\\?project=${ID}"[^>]*>Start run<`));
   expect(html).not.toContain("Back to the plan");
 });
 

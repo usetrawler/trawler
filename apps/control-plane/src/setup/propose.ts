@@ -22,7 +22,11 @@ export interface SetupDeps {
 
 export const SETUP_LIMITS = { perTenMinutes: 10, perDay: 100 };
 
-export class SetupLimited extends Error {}
+export class SetupLimited extends Error {
+  constructor(readonly window: "tenMinutes" | "day") {
+    super(`too many new projects in a ${window === "day" ? "day" : "short time"}`);
+  }
+}
 
 async function claimSetupAttempt(db: Database, orgId: string): Promise<void> {
   await withOrg(db, orgId, async (tx) => {
@@ -36,9 +40,8 @@ async function claimSetupAttempt(db: Database, orgId: string): Promise<void> {
       .where("org_id", "=", orgId)
       .where("created_at", ">", sql<Date>`now() - interval '1 day'`)
       .executeTakeFirstOrThrow();
-    if (Number(counts.recent) >= SETUP_LIMITS.perTenMinutes || Number(counts.today) >= SETUP_LIMITS.perDay) {
-      throw new SetupLimited("too many new projects in a short time");
-    }
+    if (Number(counts.today) >= SETUP_LIMITS.perDay) throw new SetupLimited("day");
+    if (Number(counts.recent) >= SETUP_LIMITS.perTenMinutes) throw new SetupLimited("tenMinutes");
     await tx.insertInto("setup_attempts").values({ org_id: orgId }).execute();
   });
 }

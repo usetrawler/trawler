@@ -40,7 +40,7 @@ export function RunTable({ runs, project = true }: { runs: RunLine[]; project?: 
                   project && (r.projectSite ? `${r.projectName} · ${r.projectSite}` : r.projectName),
                   planName !== planTitle && planName,
                   r.startedVia && viaLabel(r.startedVia),
-                  `${r.goalsReached} of ${r.goalsTotal} goals`,
+                  `${r.goalsReached} of ${r.goalsTotal} ${r.goalsTotal === 1 ? "goal" : "goals"}`,
                   cost(r),
                 ]} />
               </span>

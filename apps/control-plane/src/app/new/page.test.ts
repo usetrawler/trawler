@@ -39,15 +39,15 @@ test("the new project page is marked as the one the person is on, with the nav o
   expect(html).toContain(">Acme workspace</span>");
   expect(html).toMatch(/<a href="\/new" aria-current="page"[^>]*>(?:(?!<\/a>).)*New project<\/span><\/span><\/a>/);
   expect(state.shells).toEqual(["org-1"]);
-  expect(html).toMatch(/<main[^>]*>.*>New project<\/p><h1[^>]*>What should Trawler use\?<\/h1>/);
+  expect(html).toMatch(/<main[^>]*>.*>Acme workspace<\/div>.*<h1[^>]*>New project<\/h1>/);
   expect(html).not.toContain('aria-label="Progress"');
 });
 
 test("Sign out sits in the account menu: at the top on a phone and under the nav on wider screens, once each", async () => {
   const html = renderToStaticMarkup(await NewProjectPage());
   const [phone, wide] = html.match(/<details class="[^"]*">.*?<\/details>/g) ?? [];
-  expect(phone).toMatch(/^<details class="[^"]*\bmd:hidden\b/);
-  expect(wide).toMatch(/^<details class="[^"]*\bhidden\b[^"]*\bmd:block\b/);
+  expect(phone).toMatch(/^<details class="[^"]*\blg:hidden\b/);
+  expect(wide).toMatch(/^<details class="[^"]*\bhidden\b[^"]*\blg:block\b/);
   expect(html.indexOf(wide!)).toBeGreaterThan(html.indexOf("</nav>"));
   for (const menu of [phone!, wide!]) expect(menu.match(/>Sign out</g)).toHaveLength(1);
   expect(html.match(/>Sign out</g)).toHaveLength(2);
@@ -56,8 +56,8 @@ test("Sign out sits in the account menu: at the top on a phone and under the nav
 test("a workspace at its plan's project limit is told so, with what to do, instead of the setup", async () => {
   state.limit = { plan: { plan: "free", limits: { projects: 1, runsPerDay: 3, people: 4 } }, projects: 2 };
   const html = renderToStaticMarkup(await NewProjectPage());
-  expect(html).toContain(">This workspace has reached its project limit.</h1>");
+  expect(html).toContain("This workspace has reached its project limit.");
   expect(html).toContain("The Free plan includes 1 project, and this workspace has 2 projects already.");
-  expect(html).toMatch(/<a [^>]*href="\/"[^>]*>Go to your projects<\/a>/);
-  expect(html).not.toContain("What should Trawler use?");
+  expect(html).toMatch(/<a [^>]*href="\/"[^>]*>Go to Overview<\/a>/);
+  expect(html).not.toContain("Paste a real product");
 });

@@ -3,10 +3,11 @@ import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { startTransition, useEffect, useRef, useState, useTransition } from "react";
 import { pauseRunsAction, resumeRunsAction, type PauseState } from "../app/projects/[id]/pause-actions.ts";
 import { runPath, runTitle } from "../runs/status.ts";
+import { dangerButton, errorNote, secondaryButton } from "./controls.ts";
 import { updatedSinceOpened } from "./updated-since-opened.ts";
 
-const secondary = "flex h-10 shrink-0 items-center rounded-md border border-line bg-panel px-4 text-sm font-medium hover:border-muted aria-disabled:cursor-wait aria-disabled:opacity-60";
-const alert = "max-w-md border-l-2 border-bad pl-3 text-sm text-bad";
+const secondary = `${secondaryButton} aria-disabled:cursor-wait`;
+const alert = `max-w-md ${errorNote}`;
 
 type Run = { id: string; number: number; more?: number };
 
@@ -76,7 +77,7 @@ export function PauseRuns({ projectId, paused, liveRun }: { projectId: string; p
     <div ref={holder} className="flex flex-col items-start gap-2 md:items-end">
       {paused ? (
         <div className="flex flex-wrap items-center gap-3">
-          <p id={`paused-${projectId}`} className="text-xs text-warn">Runs paused</p>
+          <p id={`paused-${projectId}`} className="text-sm text-muted">Runs paused</p>
           <button type="button" data-switch aria-describedby={`paused-${projectId}`} aria-disabled={pending || undefined} onClick={(e) => { hold(e); if (!pending) resume(); }} className={secondary}>
             {pending ? "Resuming…" : "Resume runs"}
           </button>
@@ -85,7 +86,7 @@ export function PauseRuns({ projectId, paused, liveRun }: { projectId: string; p
         <div role="group" aria-labelledby="pause-confirm" onKeyDown={(e) => { if (e.key === "Escape") keepRunning(); }} className="flex max-w-md flex-col items-start gap-3 border border-line bg-panel p-4 md:items-end">
           <p id="pause-confirm" className="text-sm">Pausing stops <a href={runPath(asking.number)} className="underline underline-offset-4">{runTitle(asking.number)}</a>{others(asking)} now. What {asking.more ? "they" : "it"} found so far is kept.</p>
           <div className="flex flex-wrap gap-3">
-            <button type="button" aria-describedby="pause-confirm" aria-disabled={pending || undefined} onClick={(e) => { hold(e); if (!pending) pause(asking); }} className="flex h-10 shrink-0 items-center rounded-md border border-bad px-4 text-sm font-medium text-bad aria-disabled:cursor-wait aria-disabled:opacity-60">
+            <button type="button" aria-describedby="pause-confirm" aria-disabled={pending || undefined} onClick={(e) => { hold(e); if (!pending) pause(asking); }} className={`${dangerButton} aria-disabled:cursor-wait`}>
               {pending ? "Pausing…" : `Pause and stop ${runTitle(asking.number)}${others(asking)}`}
             </button>
             <button type="button" ref={keep} aria-describedby="pause-confirm" aria-disabled={pending || undefined} onClick={keepRunning} className="h-10 px-3 text-sm text-muted hover:text-ink aria-disabled:cursor-wait aria-disabled:opacity-60">{asking.more ? "Keep them running" : "Keep it running"}</button>

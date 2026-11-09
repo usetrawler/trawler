@@ -15,7 +15,7 @@ export function PrPlanView({ title, people, goals }: PrPlanViewProps) {
   return (
     <section aria-label={title} className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <h2 className="text-lg font-semibold">{title}</h2>
+        <h2 className="font-medium">{title}</h2>
         <p className="text-sm text-muted">Made by Trawler from the pull request; it is replaced when the pull request changes.</p>
       </div>
       <ol className="flex flex-col gap-4 text-sm">

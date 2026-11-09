@@ -2,11 +2,11 @@
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { startTransition, useActionState, useEffect, useReducer, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { field, primaryButton } from "../../components/controls.ts";
+import { field } from "../../components/controls.ts";
 import { LocalTime } from "../../components/local-time.tsx";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { changeRoleAction, inviteMemberAction, removeMemberAction, revokeInvitationAction, type MembersState } from "./actions.ts";
-import { button, heading, panel } from "./styles.ts";
+import { alert, button, danger, heading, keepButton, panel } from "./styles.ts";
 
 export interface MemberRow {
   id: string;
@@ -86,7 +86,6 @@ export const revokeInvitation = (previous: MembersState, form: FormData) => relo
 export const inviteSomeone = (previous: MembersState, form: FormData) => reloadable(inviteMemberAction, previous, form, "Reload the page to invite them.");
 
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" };
-const alert = "border-l-2 border-bad pl-3 text-sm text-bad";
 const tag = "text-xs text-muted";
 
 export const roleLabel = (role: string) => role.split(",").map((r) => ROLE_LABEL[r.trim()] ?? r.trim()).join(", ");
@@ -254,8 +253,8 @@ export function ConfirmRemoval({ member, action, held, removing, error, onSent, 
       <input type="hidden" name="memberId" value={member.id} />
       <p id={`remove-${member.id}`} className="wrap-anywhere">Remove {who}? They lose access to this workspace at once, in every browser they use.</p>
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" aria-describedby={`remove-${member.id}`} {...hold(held)} className="h-10 border border-bad px-4 text-bad aria-disabled:cursor-wait aria-disabled:opacity-60">{removing ? "Removing…" : <>Remove<span className="sr-only"> {who}</span></>}</button>
-        <button type="button" ref={keep} aria-describedby={`remove-${member.id}`} aria-disabled={held || undefined} onClick={() => { if (!held) onKeep(); }} className="h-10 px-2 text-muted hover:text-ink aria-disabled:cursor-wait aria-disabled:opacity-60">Keep<span className="sr-only"> {who}</span></button>
+        <button type="submit" aria-describedby={`remove-${member.id}`} {...hold(held)} className={danger}>{removing ? "Removing…" : <>Remove<span className="sr-only"> {who}</span></>}</button>
+        <button type="button" ref={keep} aria-describedby={`remove-${member.id}`} aria-disabled={held || undefined} onClick={() => { if (!held) onKeep(); }} className={keepButton}>Keep<span className="sr-only"> {who}</span></button>
       </div>
       {error && <p role="alert" className={alert}>{error}</p>}
     </form>
@@ -275,6 +274,7 @@ export function InviteForm({ state, shown, action, held, inviting, onSent, signI
   const addressRefused = shown.field === "email";
   return (
     <form
+      noValidate
       action={action}
       onSubmit={(e) => {
         e.preventDefault();
@@ -287,8 +287,8 @@ export function InviteForm({ state, shown, action, held, inviting, onSent, signI
       <h3 className="font-medium">Invite someone</h3>
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex min-w-0 flex-1 basis-64 flex-col gap-2">
-          <span className="text-sm text-muted">The email address they sign in with, on GitHub or Google.</span>
-          <input name="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" spellCheck={false} maxLength={254} readOnly={inviting} aria-invalid={addressRefused || undefined} aria-describedby={addressRefused ? "invite-error" : undefined} className={`${field} font-sans`} />
+          <span className="text-sm text-muted">Email</span>
+          <input name="email" type="email" placeholder="name@company.com" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" spellCheck={false} maxLength={254} readOnly={inviting} aria-invalid={addressRefused || undefined} aria-describedby={addressRefused ? "invite-hint invite-error" : "invite-hint"} className={`${field} font-sans`} />
         </label>
         <label className="flex flex-col gap-2">
           <span className="text-sm text-muted">Role</span>
@@ -298,9 +298,9 @@ export function InviteForm({ state, shown, action, held, inviting, onSent, signI
           </select>
         </label>
       </div>
-      <p className="text-sm text-muted">An admin can also rename the workspace, manage its model key and change who is in it.</p>
+      <p id="invite-hint" className="text-sm text-muted">The address they sign in with, on GitHub or Google. An admin can also rename the workspace, manage its model key and change who is in it.</p>
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" {...hold(held)} className={primaryButton}>{inviting ? "Inviting…" : "Invite"}</button>
+        <button type="submit" {...hold(held)} className={button}>{inviting ? "Inviting…" : "Invite"}</button>
         <span role="status" className="min-w-0 text-sm wrap-anywhere text-ok">{shown.invited ? invitedStatus(shown.invited, signInAt) : ""}</span>
       </div>
       {shown.error && <p id="invite-error" role="alert" className={alert}>{shown.error}</p>}

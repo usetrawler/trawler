@@ -6,6 +6,7 @@ import { RUN_ORIGINS, type RunOrigin } from "../../runs/via.ts";
 
 const FILTERS: Array<[RunFilter, string]> = [["all", "All"], ["completed", "Completed"], ["attention", "Needs attention"]];
 const EMPTY: Record<RunFilter, string> = { all: "No runs yet. Start one from a project's plan.", completed: "No run has completed yet.", attention: "No run needs attention." };
+const STARTED_PHRASE: Record<RunOrigin, string> = { app: "in the app", api: "with an API token", mcp: "from an MCP assistant" };
 const EMPTY_PROJECT: Record<RunFilter, string> = { ...EMPTY, all: "No runs yet. Start one from the plan." };
 
 export function RunsView({ head, basePath, show, origin = "any", counts, runs, olderThan, paged, scope = "workspace", plans = [], plan }: {
@@ -16,6 +17,7 @@ export function RunsView({ head, basePath, show, origin = "any", counts, runs, o
     const query = new URLSearchParams({ ...(filter === "all" ? {} : { show: filter }), ...(via === "any" ? {} : { via }), ...(before === undefined ? {} : { before: String(before) }), ...(chosen ? { plan: chosen } : {}) }).toString();
     return query ? `${basePath}?${query}` : basePath;
   };
+  const filtered = origin !== "any";
   return (
     <div>
       {head}
@@ -51,6 +53,7 @@ export function RunsView({ head, basePath, show, origin = "any", counts, runs, o
           ))}
         </ul>
       </nav>
+      {filtered && <p className="mb-3 text-sm text-muted">Counts and runs below are only those started {STARTED_PHRASE[origin as RunOrigin]}. <a href={href("all", undefined, undefined, "any")} className="-my-2 inline-block py-2.5 text-ink underline underline-offset-4">Clear filters</a></p>}
       {runs.length === 0 ? <p className="py-6 text-muted">{paged ? "There are no older runs here." : origin !== "any" ? "No run here was started this way." : (scope === "project" ? EMPTY_PROJECT : EMPTY)[show]}</p> : <RunTable runs={runs} project={scope === "workspace"} />}
       {(paged || olderThan !== null) && (
         <nav aria-label="Run history pages" className="mt-5 flex flex-wrap justify-between gap-3">

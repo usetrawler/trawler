@@ -142,7 +142,7 @@ test("invitations that can still be used are listed with their role and expiry, 
 
 test("an owner or admin invites by address, as a member unless they pick admin", () => {
   const form = inviteForm(render());
-  expect(form).toMatch(/<input type="email" required=""[^>]*name="email" value=""\/>/);
+  expect(form).toMatch(/<input type="email" placeholder="name@company.com"[^>]*aria-describedby="invite-hint"[^>]*name="email" value=""\/>/);
   expect(form).toMatch(/<span class="text-sm text-muted">Role<\/span><select name="role"[^>]*><option value="member" selected="">Member<\/option><option value="admin">Admin<\/option><\/select>/);
   expect(form).toMatch(/<button type="submit"[^>]*>Invite<\/button>/);
 });
@@ -153,7 +153,7 @@ test("after an invitation the page says where the invited person signs in, and a
   answered("invite", { error: "That address is already in this workspace.", field: "email" });
   react.states = ["max@acme.test", "admin"];
   const refused = inviteForm(render());
-  expect(refused).toMatch(/<input type="email" required=""[^>]*aria-invalid="true" aria-describedby="invite-error"[^>]*name="email" value="max@acme.test"\/>/);
+  expect(refused).toMatch(/<input type="email"[^>]*aria-invalid="true" aria-describedby="invite-hint invite-error"[^>]*name="email" value="max@acme.test"\/>/);
   expect(refused).toMatch(/<option value="admin" selected="">Admin<\/option>/);
   expect(refused).toMatch(/<p id="invite-error" role="alert"[^>]*>That address is already in this workspace.<\/p>/);
   answered("invite", { error: "Too many invitations. Wait a few minutes and try again." });

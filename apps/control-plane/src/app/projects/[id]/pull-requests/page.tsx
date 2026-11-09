@@ -40,7 +40,7 @@ export default async function PullRequestsPage({ params }: { params: Promise<{ i
   const { project, runState, counts, lines, earlier } = result;
   const shell = await shellFor(member);
   return (
-    <AppShell shell={shell} current={{ project: id }} wide>
+    <AppShell shell={shell} current={{ project: id }}>
       <ProjectHead project={project} address={shell.workspace.projects.find((p) => p.id === id)?.address} tab="pull-requests" counts={counts} runState={runState} />
       <div className="flex flex-col gap-6">
         <p className="max-w-3xl text-muted">

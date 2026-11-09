@@ -1,3 +1,5 @@
+import { tab, tabRow } from "../../components/controls.ts";
+
 export const SECTIONS = [
   { key: "general", label: "General" },
   { key: "members", label: "Members" },
@@ -14,15 +16,11 @@ export const settingsHref = (section: Section) => (section === "general" ? "/set
 
 export function SettingsNav({ current }: { current: Section }) {
   return (
-    <nav aria-label="Settings" className="min-w-0">
-      <ul className="flex gap-1 overflow-x-auto md:flex-col">
+    <nav aria-label="Settings" className="mt-6 mb-8 min-w-0">
+      <ul className={`${tabRow} flex-wrap`}>
         {SECTIONS.map((s) => (
           <li key={s.key} className="shrink-0">
-            <a
-              href={settingsHref(s.key)}
-              aria-current={s.key === current ? "page" : undefined}
-              className={`flex h-10 items-center rounded-md px-3 text-[15px] ${s.key === current ? "bg-soft font-medium text-ink" : "text-muted hover:text-ink"}`}
-            >
+            <a href={settingsHref(s.key)} aria-current={s.key === current ? "page" : undefined} className={tab(s.key === current)}>
               {s.label}
             </a>
           </li>

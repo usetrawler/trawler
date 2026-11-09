@@ -66,10 +66,10 @@ test("a run's page leads back to its project and the project's runs, without the
   expect(html).not.toContain('aria-label="Progress"');
 });
 
-test("a run's page takes the shell's full width, as the mockup's report does", async () => {
+test("a run's page takes the shell's full content width, like every other page", async () => {
   state.access = { signedIn: true, member, run: { id: ID, projectId: "p1", number: 17 } };
   const html = renderToStaticMarkup(await open());
-  expect(html).toMatch(/<div class="w-full"><nav aria-label="Breadcrumb"/);
+  expect(html).toMatch(/<div class="mx-auto w-full max-w-\[1100px\]"><nav aria-label="Breadcrumb"/);
 });
 
 test("a run asked for by its id or by its number without the padding moves for good to its padded number, and a number the workspace does not have is not found", async () => {

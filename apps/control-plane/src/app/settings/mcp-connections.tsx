@@ -4,7 +4,7 @@ import { useActionState, useEffect, useState } from "react";
 import { LocalTime } from "../../components/local-time.tsx";
 import { updatedSinceOpened } from "../../components/updated-since-opened.ts";
 import { revokeMcpConnectionAction, type McpConnectionState } from "./actions.ts";
-import { heading, panel } from "./styles.ts";
+import { alert, button, danger, heading, keepButton, panel } from "./styles.ts";
 
 export interface ConnectionView {
   id: string;
@@ -39,7 +39,7 @@ export function McpConnections({ connections }: { connections: ConnectionView[] 
         Assistants you have connected to this workspace, signed in as you. They are separate from the API tokens above: a token belongs to the workspace and
         is for CI, a connection is yours and acts as you. Disconnecting one ends its access and its refresh at once.
       </p>
-      {state.error && <p role="alert" className="border-l-2 border-bad pl-3 text-sm text-bad">{state.error}</p>}
+      {state.error && <p role="alert" className={alert}>{state.error}</p>}
       <p role="status" className="text-sm text-ok">{state.revoked && !revoking ? "Disconnected." : ""}</p>
       {connections.length === 0 ? (
         <p className="text-sm text-muted">No assistant is connected.</p>
@@ -63,11 +63,11 @@ export function McpConnections({ connections }: { connections: ConnectionView[] 
                 <form action={revoke} className="flex flex-wrap items-center gap-3 text-sm">
                   <input type="hidden" name="id" value={c.id} />
                   <span>Disconnect {c.clientName} ({c.projectName ? `only ${c.projectName}` : "whole workspace"}, connected {c.createdAt.slice(0, 10)})? It stops working at once.</span>
-                  <button type="submit" aria-disabled={revoking || undefined} onClick={(e) => { if (revoking) e.preventDefault(); }} className="inline-block py-2 text-bad underline underline-offset-4">{revoking ? "Disconnecting…" : "Disconnect"}</button>
-                  <button type="button" onClick={() => setAsking(null)} className="inline-block py-2 text-muted underline underline-offset-4">Keep it</button>
+                  <button type="submit" aria-disabled={revoking || undefined} onClick={(e) => { if (revoking) e.preventDefault(); }} className={danger}>{revoking ? "Disconnecting…" : "Disconnect"}</button>
+                  <button type="button" onClick={() => setAsking(null)} className={keepButton}>Keep it</button>
                 </form>
               ) : (
-                <button type="button" onClick={() => setAsking(c.id)} aria-label={`Disconnect ${c.clientName}, ${c.projectName ? `only ${c.projectName}` : "whole workspace"}, connected ${c.createdAt.slice(0, 10)}`} className="inline-block py-2 text-sm text-muted underline-offset-4 hover:text-bad hover:underline">Disconnect</button>
+                <button type="button" onClick={() => setAsking(c.id)} aria-label={`Disconnect ${c.clientName}, ${c.projectName ? `only ${c.projectName}` : "whole workspace"}, connected ${c.createdAt.slice(0, 10)}`} className={button}>Disconnect</button>
               )}
             </li>
           ))}

@@ -138,13 +138,11 @@ export default async function SettingsPage({ searchParams }: { searchParams?: Pr
   if (!member) redirect("/sign-in");
   const content = await CONTENT[section]({ member });
   return (
-    <AppShell shell={await shellFor(member)} current="settings" wide>
-      <PageHead eyebrow={member.orgName} title="Settings" />
-      <div className="grid gap-8 md:grid-cols-[13rem_minmax(0,1fr)] md:gap-12">
-        <SettingsNav current={section} />
-        <div className="flex max-w-3xl min-w-0 flex-col gap-8">
-          {content}
-        </div>
+    <AppShell shell={await shellFor(member)} current="settings">
+      <PageHead eyebrow={member.orgName} title="Settings" flush />
+      <SettingsNav current={section} />
+      <div className="flex max-w-3xl min-w-0 flex-col gap-8">
+        {content}
       </div>
     </AppShell>
   );

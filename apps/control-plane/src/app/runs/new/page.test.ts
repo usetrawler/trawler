@@ -66,7 +66,7 @@ beforeEach(() => {
 
 test("New run opens one page that picks the project and plan, the first of each unless the address names others", async () => {
   const html = await render();
-  expect(html).toContain(">Start a run</h1>");
+  expect(html).toContain(">Start run</h1>");
   expect(state.edited).toEqual([[ACME, PLANS[0]!.id]]);
   expect(html).toMatch(/<form [^>]*action="\/runs\/new" method="get">/);
   expect(html).toMatch(new RegExp(`<option value="${ACME}" selected="">Acme · app\\.acme\\.test</option><option value="${GLOBEX}">Globex · shop\\.globex\\.test</option>`));

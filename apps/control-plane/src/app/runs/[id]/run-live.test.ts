@@ -47,7 +47,7 @@ test("a finished run names its result, when it ended, and the actions to run aga
   const html = render(finished);
   const top = head(html);
   expect(top).toMatch(/<h1[^>]*>1 defect confirmed by replay\.<\/h1>/);
-  expect(text(top)).toContain("app.acme.test · 2026-09-25 19:59 UTC");
+  expect(text(top)).toContain("app.acme.test · finished 2026-09-25 19:59 UTC");
   expect(top).toContain('href="/runs/new?project=project-1"');
   expect(head(render(summary({ ...finished, savedPlan: { id: "plan-9", name: "Plan 2" } })))).toContain('href="/runs/new?project=project-1&amp;plan=plan-9"');
   const fromPr = { number: 4, mode: "change" as const, note: null, version: 2, reused: false, createdByRun: null, goals: [] };
@@ -58,7 +58,7 @@ test("a finished run names its result, when it ended, and the actions to run aga
 
 test("one line under the verdict gives the run state, goals, confirmed of reported, spend, product and time; findings open first and spend stays in Details", () => {
   const html = render(finished);
-  expect(text(band(html))).toBe("Complete · 3 of 4 goals reached · 1 of 2 reported confirmed · $0.35 of $2.00 cap · app.acme.test · 2026-09-25 19:59 UTC");
+  expect(text(band(html))).toBe("Complete · 3 of 4 goals reached · 1 of 2 reported confirmed · $0.35 of $2.00 cap · app.acme.test · finished 2026-09-25 19:59 UTC");
   expect(html).toContain('id="run-findings" class="pt-6"');
   expect(html).toContain('id="run-timeline" hidden=""');
   expect(html).toContain('id="run-details" hidden=""');
@@ -136,7 +136,7 @@ test("in Timeline, each person is listed with a mark, one line on how far they g
 
 test("a live run shows its cost against the cap, the four stages, each person and what they are on, and Stop run, with a summary of results so far", () => {
   const html = render(live);
-  expect(text(head(html))).toContain("app.acme.test · 2026-09-25 19:40 UTC");
+  expect(text(head(html))).toContain("app.acme.test · started 2026-09-25 19:40 UTC");
   expect(text(html)).toContain("Live cost $0.84 of $2.00 cap");
   expect(text(html)).toContain("Use : In progress Replay : Waiting Judge : Waiting Report : Waiting");
   expect(text(html)).toContain("Right now A Ana Goal reached 2 of 2 goals Reached all 2 goals.");
@@ -144,7 +144,7 @@ test("a live run shows its cost against the cap, the four stages, each person an
   expect(text(html)).toContain("Safe to leave. The run keeps going in the background.");
   expect(html).toMatch(/<button type="button"[^>]*>Stop run<\/button>/);
   expect(html).not.toContain("Run again");
-  expect(text(band(html))).toBe("Live · 2 of 4 goals reached · app.acme.test · 2026-09-25 19:40 UTC");
+  expect(text(band(html))).toBe("Live · 2 of 4 goals reached · app.acme.test · started 2026-09-25 19:40 UTC");
   expect(html).toContain('id="run-timeline" class="pt-6"');
   expect(html).toContain('id="run-findings" hidden=""');
   expect(text(html)).toContain("Confirmed 0 Reproduced independently: a fresh agent followed the steps without seeing the report, and the judge agreed. Fix these. Nothing confirmed yet.");
@@ -173,16 +173,16 @@ test("a person's line also covers waiting, failing without a reason, a single go
   expect(ended.personas.map(personLine)).toEqual(["Reached the goal.", "Could not finish.", "Did not reach a goal."]);
 });
 
-test("Run again and Start another run belong to every run that has ended, and to none that is still going", () => {
+test("Run again and Start run belong to every run that has ended, and to none that is still going", () => {
   for (const status of ["succeeded", "stopped_budget", "failed", "cancelled"]) {
     const top = head(render(summary({ ...finished, status })));
     expect(top).toContain(">Run again<");
-    expect(top).toContain(">Start another run</a>");
+    expect(top).toContain(">Start run</a>");
   }
   for (const status of ["queued", "running"]) {
     const html = render(summary({ ...live, status }));
     expect(html).not.toContain("Run again");
-    expect(html).not.toContain("Start another run");
+    expect(html).not.toContain("Start run");
   }
 });
 
@@ -192,7 +192,7 @@ test("a run that came from CI offers no Run again and says to start it from ther
     const html = render(summary({ ...finished, status, execution: "own" }));
     expect(html).not.toContain("Run again");
     expect(html).toContain(came);
-    expect(head(html)).toContain(">Start another run</a>");
+    expect(head(html)).toContain(">Start run</a>");
   }
   expect(render(summary({ ...finished, execution: "hosted" }))).not.toContain(came);
   expect(render(summary({ ...live, execution: "own" }))).not.toContain(came);
@@ -229,8 +229,8 @@ test("while a run is live, the latest things that happened are listed under the 
 
 test("the actions stay together and move under the text until the page is wide, a finding's line is cut at two lines, and an opened finding wraps long words", () => {
   const html = render(finished);
-  expect(head(html)).toContain('class="flex flex-wrap gap-2"');
-  expect(head(html)).toContain(">Start another run</a>");
+  expect(head(html)).toContain('class="flex shrink-0 flex-wrap gap-2"');
+  expect(head(html)).toContain(">Start run</a>");
   expect(head(html)).toContain(">Run again");
   const [row] = rows(html, "Confirmed");
   expect(row).toMatch(/<span class="mt-1 line-clamp-2 [^"]*\bgroup-open:hidden\b[^"]*">A 500 page\.<\/span>/);
@@ -342,7 +342,7 @@ test("every finding of a finished run opens to Not a bug, in every section, and 
   }));
   const all = ["Confirmed", "Unverified", "Rough edges", "Ruled out"].flatMap((group) => rows(html, group).map((row) => [group, row] as const));
   expect(all).toHaveLength(6);
-  for (const [group, row] of all) expect(row.split("</summary>")[1], group).toMatch(/^<div class="[^"]*"><div class="flex flex-wrap items-start gap-3"><div class="flex flex-col gap-2">.*?>Copy as issue<\/button>.*?<div class="min-w-0 flex-1"><button type="button"[^>]*>Not a bug<\/button><\/div><\/div>/);
+  for (const [group, row] of all) expect(row.split("</summary>")[1], group).toMatch(/^<div class="[^"]*"><div class="flex flex-wrap items-start gap-3"><div class="flex flex-col gap-2">.*?>Copy as issue<\/button>.*?<div class="min-w-0 has-\[form\]:basis-full"><button type="button"[^>]*>Not a bug<\/button><\/div><\/div>/);
   expect(render(summary({ ...live, findings: finished.findings }))).not.toContain(">Not a bug<");
 });
 
@@ -398,12 +398,12 @@ test("friction replayed as a possible defect whose judge gave no verdict can be 
   expect(text(band(html))).toContain("1 of 1 reported confirmed");
 });
 
-test("an account the beta list will refuse is told so in place of Run again and Judge again, and Start another run stays", () => {
+test("an account the beta list will refuse is told so in place of Run again and Judge again, and Start run stays", () => {
   const message = "Hosted runs are in private beta. Write to contact@usetrawler.com to get access.";
   const run = summary({ ...finished, jobs: [...finished.jobs, job("judge", "failed", { finding_key: "x:d4", error: "the judge timed out" })], findings: [...finished.findings, finding("x:d4", "ana", { title: "Export is empty" })] });
   const html = renderToStaticMarkup(createElement(RunLive, { initial: JSON.parse(JSON.stringify({ run, view: runView(run) })), closedBeta: message }));
   expect(html).not.toMatch(/>Run again/);
-  expect(html).toContain(">Start another run</a>");
+  expect(html).toContain(">Start run</a>");
   expect(html).toContain(`<p class="mt-3 max-w-md self-end border-l-2 border-warn pl-3 text-sm max-wide:self-start">${message}</p>`);
   const [unjudged] = rows(html, "Unverified");
   expect(unjudged).not.toContain(">Judge again</button>");
