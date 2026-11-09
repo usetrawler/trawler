@@ -35,7 +35,7 @@ export function RunsView({ head, basePath, show, origin = "any", counts, runs, o
           {FILTERS.map(([filter, label]) => (
             <li key={filter} className="shrink-0">
               <a href={href(filter)} aria-current={show === filter ? "page" : undefined} className={show === filter ? chipOn : chipOff}>
-                {label} <span className="tabular-nums opacity-70">{counts[filter]}</span>
+                {label} <span className="tabular-nums">{counts[filter]}</span>
               </a>
             </li>
           ))}

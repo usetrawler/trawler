@@ -19,7 +19,7 @@ export function PlansBar({ projectId, plans, current, canAdd }: { projectId: str
               className={p.id === current ? chipOn : chipOff}
             >
               {p.name}
-              <span className="opacity-70">· {p.people} {p.people === 1 ? "person" : "people"}</span>
+              <span>· {p.people} {p.people === 1 ? "person" : "people"}</span>
             </Link>
           </li>
         ))}

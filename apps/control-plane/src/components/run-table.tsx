@@ -29,7 +29,7 @@ export function RunTable({ runs, project = true }: { runs: RunLine[]; project?: 
     <ol aria-label="Runs" className="divide-y divide-line">
       {runs.map((r) => {
         const planName = r.savedPlan?.name ?? r.planName;
-        const planTitle = r.savedPlan?.title || planName;
+        const planTitle = r.savedPlan?.title || planName || null;
         return (
           <li key={r.id}>
             <a href={runPath(r.number)} className="grid grid-cols-1 gap-x-6 gap-y-1 py-3.5 -outline-offset-2 hover:bg-soft sm:grid-cols-[minmax(0,1fr)_auto]">

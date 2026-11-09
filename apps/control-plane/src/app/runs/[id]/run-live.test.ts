@@ -492,7 +492,8 @@ test("a run skipped because nothing in the change shows in the UI says so in a s
   const prPlan = { number: 13, mode: "change" as const, note: "Nothing in this change can be tested through the product's UI.", version: null, reused: false, createdByRun: null, goals: [] };
   const html = render(summary({ status: "cancelled", cancelReason: "nothing_to_test", prPlan, pullRequest: { number: 13, title: "chore: store amounts as grosze", url: null, repository: "acme/app", branch: null, commit: null } as RunSummary["pullRequest"] }));
   expect(head(html)).toMatch(/<h1[^>]*>Nothing to test in the UI\.<\/h1>/);
-  expect(text(head(html))).toContain("Nothing in this change can be tested through the product's UI, so Trawler did not start a run.");
+  expect(text(head(html))).toContain("Nothing in this change can be tested through the product's UI.");
+  expect(html).not.toContain('id="pr-plan"');
   expect(html).toMatch(/<nav aria-label="Run report" hidden=""/);
   expect(html).toContain('id="run-findings" hidden=""');
   expect(html).toContain('id="run-timeline" hidden=""');

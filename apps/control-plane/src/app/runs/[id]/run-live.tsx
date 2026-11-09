@@ -729,7 +729,7 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
         <div className="min-w-0">
           <h1 className={pageTitle}>{view.headline}</h1>
           {subject && <p className="mt-1 break-words text-ink">{subject}</p>}
-          {skipped && <p className="mt-2 max-w-2xl text-muted">{NOTHING_TO_TEST}</p>}
+          {skipped && <p className="mt-2 max-w-2xl text-muted">{run.prPlan?.note ?? NOTHING_TO_TEST}</p>}
           <RunMeta run={run} view={view} host={host} when={new Date(when)} />
           <p role="status" aria-live="polite" className="text-sm text-warn">
             {(gone || stale) && <span className="mt-2 block">{gone ? "This run is no longer available." : "Lost contact with Trawler. Retrying…"}</span>}
@@ -811,7 +811,7 @@ export function RunLive({ initial, closedBeta, project }: { initial: Data; close
       </div>
       <div id="run-details" hidden={!skipped && panel !== "details"} className={skipped ? "pt-8" : "pt-6"}>
         <RunDetails run={run} live={view.live} />
-        <PullRequestPlan run={run} />
+        {!skipped && <PullRequestPlan run={run} />}
       </div>
     </div>
   );
