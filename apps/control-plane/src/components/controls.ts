@@ -2,7 +2,7 @@ const fieldShape = "min-w-0 rounded-md border bg-panel text-ink outline-none tra
 const fieldBase = `${fieldShape} border-line hover:border-muted focus:border-ink`;
 
 export const field = `h-10 px-3 text-base sm:text-sm ${fieldBase}`;
-export const invalidField = `h-10 px-3 text-base sm:text-sm ${fieldShape} border-bad`;
+export const invalidField = `h-10 px-3 text-base sm:text-sm ${fieldShape} border-bad focus-visible:ring-2 focus-visible:ring-bad/30`;
 export const keyField = `${field} font-mono`;
 export const area = `px-3 py-2 text-base sm:text-sm ${fieldBase}`;
 
