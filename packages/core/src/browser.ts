@@ -1,7 +1,7 @@
 import { createMCPClient } from "@ai-sdk/mcp";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createConnection } from "@playwright/mcp";
-import { chromium, selectors, type Dialog, type ElementHandle, type Frame, type Locator, type Page, type Route } from "playwright";
+import { chromium, selectors, type Dialog, type ElementHandle, type Frame, type Locator, type Page, type Request, type Route } from "playwright";
 import { jsonSchema, type Tool, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
 import { MAX_ARTIFACT_BYTES, MAX_URL } from "@usetrawler/protocol";
@@ -406,6 +406,12 @@ function originOf(url: string): string | null {
   }
 }
 
+const STREAMED_TYPES = new Set(["eventsource", "media"]);
+
+function isStream(request: Request): boolean {
+  return STREAMED_TYPES.has(request.resourceType()) || /text\/event-stream/i.test(request.headers()["accept"] ?? "");
+}
+
 function textOf(result: unknown): string {
   return ((result as McpResult)?.content ?? []).map((c) => c.text ?? "").join("\n");
 }
@@ -527,13 +533,15 @@ export async function openBrowser(opts: {
       const url = request.url();
       if (!isAllowed(url)) return block(route, url);
       try {
-        if (!request.isNavigationRequest()) return await route.continue();
-        const response = await route.fetch({ maxRedirects: 0 });
+        if (isStream(request)) return await route.continue();
+        const navigation = request.isNavigationRequest();
+        const response = await route.fetch({ maxRedirects: 0, ...(navigation ? {} : { timeout: 0 }) });
         const location = response.headers()["location"];
         if (response.status() >= 300 && response.status() < 400 && location) {
           const next = new URL(location, url).href;
           if (!isAllowed(next)) return block(route, next);
         }
+        if (!navigation) return await route.fulfill({ response });
         const headers = Object.fromEntries(Object.entries(response.headers()).filter(([k]) => k.toLowerCase() !== "speculation-rules"));
         return await route.fulfill({ response, headers });
       } catch {
