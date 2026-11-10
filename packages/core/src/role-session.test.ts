@@ -4,7 +4,7 @@ import { describe, expect, test, vi } from "vitest";
 import { MockLanguageModelV4 } from "ai/test";
 import { JOB_STOPPED, ProjectConfigSchema, RunEventSchema, type RunEventInput } from "@usetrawler/protocol";
 import { Budget, createModel } from "./llm.ts";
-import { GOAL_SHARE, LOOP_WINDOW, rolePrompt, sessionStatus, standbyPrompt, stuckHints } from "./prompts.ts";
+import { GOAL_SHARE, REVISITS_HINT, REVISITS_STOP, rolePrompt, sessionStatus, standbyPrompt, stuckHints } from "./prompts.ts";
 import { runRoleSession } from "./role-session.ts";
 import { SecretScrubber } from "./secrets.ts";
 import { madeUpPassword, STANDBY } from "./session-tools.ts";
@@ -1084,37 +1084,78 @@ test("a person reads the lead's brief as what the change should do, fenced as da
 });
 
 describe("stuckHints", () => {
-  const page = (path: string) => `https://app.test${path}`;
-  const circling = Array.from({ length: LOOP_WINDOW }, (_, i) => ({ tool: i % 2 ? "browser_snapshot" : "browser_navigate", page: page(["/settings/users", "/settings/organisation", "/settings/licence"][i % 3]!) }));
+  const revisits = (count: number) => [{ url: "https://app.test/settings/users", count }, { url: "https://app.test/settings", count: 2 }];
 
   test("says nothing while a person makes progress or has no open goal", () => {
-    expect(stuckHints({ sinceStatus: 3, recent: circling.slice(0, 5), openGoals: 2 })).toBe("");
-    expect(stuckHints({ sinceStatus: 40, recent: circling, openGoals: 0 })).toBe("");
+    expect(stuckHints({ sinceStatus: 3, revisits: revisits(REVISITS_HINT - 1), openGoals: 2 })).toBe("");
+    expect(stuckHints({ sinceStatus: 40, revisits: revisits(REVISITS_STOP), openGoals: 0 })).toBe("");
   });
 
   test("asks for a goal status after a goal's share of steps", () => {
-    expect(stuckHints({ sinceStatus: GOAL_SHARE, recent: [], openGoals: 1 })).toMatch(/You have taken 20 steps since you last gave a goal a status. If the goal you are on cannot be done here, give it failed/);
+    expect(stuckHints({ sinceStatus: GOAL_SHARE, revisits: [], openGoals: 1 })).toMatch(/You have taken 20 steps since you last gave a goal a status. If the goal you are on cannot be done here, give it failed/);
   });
 
-  test("names the pages a person keeps circling without recording anything", () => {
-    expect(stuckHints({ sinceStatus: 5, recent: circling, openGoals: 2 })).toMatch(/Your last 12 steps went around the same pages \(\/settings\/users, \/settings\/organisation, \/settings\/licence\) without recording anything/);
-    const noted = circling.map((s, i) => (i === 5 ? { ...s, tool: "note" } : s));
-    expect(stuckHints({ sinceStatus: 5, recent: noted, openGoals: 2 })).toBe("");
-    const wandering = circling.map((s, i) => ({ ...s, page: page(`/p${i}`) }));
-    expect(stuckHints({ sinceStatus: 5, recent: wandering, openGoals: 2 })).toBe("");
+  test("names the page a person keeps coming back to without recording anything", () => {
+    expect(stuckHints({ sinceStatus: 5, revisits: revisits(REVISITS_HINT), openGoals: 2 })).toMatch(/You have come back to https:\/\/app\.test\/settings\/users 4 times without recording anything\. .* At 6 visits the browser closes until you give the goal a status\./);
   });
 });
 
-test("a person who circles the same pages is told so in the next step, and the counter starts again after a goal status", async () => {
+const toolsOffered = (model: ReturnType<typeof scriptedModel>, i: number) => (model.doGenerateCalls[i]!.tools ?? []).map((t) => t.name).sort();
+const BROWSER_CLOSED = ["finish", "goal_status", "note", "submit_finding"];
+
+test("a person who keeps coming back to the same page is warned, then the browser closes until the goal has a status, and the circling is recorded as friction", async () => {
   const pages = ["https://app.acme.test/a", "https://app.acme.test/b"];
   let call = 0;
-  const steps = [...Array.from({ length: LOOP_WINDOW + 1 }, () => look), reached("sign-up"), look, reached("invoice"), finish];
-  const model = scriptedModel(steps);
-  await run(model, { maxSteps: 40, pageUrl: () => pages[call++ % 2]! }).promise;
+  const circlingSteps = REVISITS_STOP * 2 - 1;
+  const model = scriptedModel([...Array.from({ length: circlingSteps }, () => look), toolCall("goal_status", { goal: "sign-up", status: "failed", note: "the form never saved" }), look, reached("invoice"), finish]);
+  const { result } = await run(model, { maxSteps: 40, pageUrl: () => pages[call++ % 2]! }).promise;
   const system = (i: number) => JSON.stringify(model.doGenerateCalls[i]!.prompt);
-  expect(system(LOOP_WINDOW - 1)).not.toContain("Check yourself");
-  expect(system(LOOP_WINDOW)).toContain("went around the same pages (/a, /b)");
-  expect(system(LOOP_WINDOW + 2)).not.toContain("since you last gave a goal a status");
+  expect(system(REVISITS_HINT * 2 - 3)).not.toContain("come back to");
+  expect(system(REVISITS_HINT * 2 - 1)).toContain("You have come back to https://app.acme.test/a 4 times without recording anything");
+  expect(toolsOffered(model, circlingSteps - 1)).toContain("browser_snapshot");
+  expect(system(circlingSteps)).toContain("You came back to https://app.acme.test/a 6 times without recording anything, so the browser is closed to you until you give goal sign-up a status");
+  expect(toolsOffered(model, circlingSteps)).toEqual(BROWSER_CLOSED);
+  expect(toolsOffered(model, circlingSteps + 1)).toContain("browser_snapshot");
+  expect(system(circlingSteps + 2)).not.toContain("come back to");
+  expect(result.stoppedBy).toBe("finish");
+  expect(result.findings).toEqual([{
+    id: "f1", kind: "friction", goal: "sign-up", severity: "low", title: "Went in circles around /a", url: "https://app.acme.test/a",
+    observed: "Kwame came back to https://app.acme.test/a 6 times without getting further or recording anything, so Trawler closed the browser until the goal had a status. Pages visited since the last progress, with how often: https://app.acme.test/a (6), https://app.acme.test/b (5). This usually means the goal is unclear, or the product gives no way forward from these pages.",
+    reproduction: ["Open https://app.acme.test/a", "Open https://app.acme.test/b"],
+  }]);
+});
+
+test("staying on one page to fill a form is not circling", async () => {
+  const model = scriptedModel([...Array.from({ length: 15 }, () => look), reached("sign-up"), reached("invoice"), finish]);
+  const { result } = await run(model, { maxSteps: 40, pageUrl: () => "https://app.acme.test/form" }).promise;
+  expect(model.doGenerateCalls.every((c) => !JSON.stringify(c.prompt).includes("come back to"))).toBe(true);
+  expect(toolsOffered(model, 15)).toContain("browser_snapshot");
+  expect(result.findings).toEqual([]);
+});
+
+test("once every goal has a status the browser closes and the person is asked to finish", async () => {
+  const model = scriptedModel([reached("sign-up"), reached("invoice"), look, finish]);
+  let looked = 0;
+  const counted = { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => ((looked += 1), { content: [{ type: "text", text: snapshot }] }) }) };
+  const session = run(model, { browserTools: counted });
+  const { result } = await session.promise;
+  const { events } = session;
+  expect(toolsOffered(model, 1)).toContain("browser_snapshot");
+  expect(toolsOffered(model, 2)).toEqual(BROWSER_CLOSED);
+  expect(JSON.stringify(model.doGenerateCalls[2]!.prompt)).toContain("Every goal has a status, so the browser is closed to you.");
+  expect(result.stoppedBy).toBe("finish");
+  expect(looked).toBe(0);
+  expect(events.filter((e) => e.type === "step").map((e) => (e as { tool: string | null }).tool)).toEqual(["goal_status", "goal_status", "browser_snapshot", "finish"]);
+});
+
+test("in the last steps the browser closes so open goals get a status", async () => {
+  const model = scriptedModel([...Array.from({ length: 9 }, () => look), toolCall("goal_status", { goal: "sign-up", status: "failed", note: "ran out" }), toolCall("goal_status", { goal: "invoice", status: "failed", note: "ran out" }), finish]);
+  const { result } = await run(model, { maxSteps: 12 }).promise;
+  expect(toolsOffered(model, 8)).toContain("browser_snapshot");
+  expect(toolsOffered(model, 9)).toEqual(BROWSER_CLOSED);
+  expect(JSON.stringify(model.doGenerateCalls[9]!.prompt)).toContain("Only 3 steps left, so the browser is closed to you.");
+  expect(result.goals.map((g) => g.status)).toEqual(["failed", "failed"]);
+  expect(result.stoppedBy).toBe("finish");
 });
 
 test("a person reads the team's description of the setup as limits not to report, and only when there is one", () => {

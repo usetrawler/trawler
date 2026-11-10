@@ -127,25 +127,37 @@ ${teamTalk(p.team)}When every goal has a status, call finish.`;
 }
 
 export const GOAL_SHARE = 20;
-export const LOOP_WINDOW = 12;
-const LOOP_PAGES = 3;
-const PROGRESS_TOOLS = new Set(["goal_status", "submit_finding", "note", "say_to_team", "finish"]);
+export const REVISITS_HINT = 4;
+export const REVISITS_STOP = 6;
 
-export interface RecentStep {
-  tool: string | null;
-  page: string | null;
+export interface Revisit {
+  url: string;
+  count: number;
 }
 
-export function stuckHints(p: { sinceStatus: number; recent: RecentStep[]; openGoals: number }): string {
+export function stuckHints(p: { sinceStatus: number; revisits: Revisit[]; openGoals: number }): string {
   if (p.openGoals === 0) return "";
   const hints: string[] = [];
   if (p.sinceStatus >= GOAL_SHARE) hints.push(`You have taken ${p.sinceStatus} steps since you last gave a goal a status. If the goal you are on cannot be done here, give it failed with what you saw and go on to the next one; if it is done, give it reached.`);
-  const window = p.recent.slice(-LOOP_WINDOW);
-  const pages = [...new Set(window.flatMap((s) => (s.page ? [new URL(s.page).pathname] : [])))];
-  if (window.length === LOOP_WINDOW && pages.length <= LOOP_PAGES && !window.some((s) => s.tool && PROGRESS_TOOLS.has(s.tool))) {
-    hints.push(`Your last ${LOOP_WINDOW} steps went around the same ${pages.length === 1 ? "page" : "pages"} (${pages.join(", ")}) without recording anything. Stop going in circles: give the current goal a status, write down what you learned, or try a different way.`);
+  const most = p.revisits[0];
+  if (most && most.count >= REVISITS_HINT) {
+    hints.push(`You have come back to ${most.url} ${most.count} times without recording anything. Stop going in circles: if something there behaved wrongly, record it with submit_finding; otherwise give the current goal a status or try a different way. At ${REVISITS_STOP} visits the browser closes until you give the goal a status.`);
   }
   return hints.length ? `\n\n## Check yourself\n${hints.map((h) => `- ${h}`).join("\n")}` : "";
+}
+
+export type WrapUp = { reason: "settled" } | { reason: "out_of_steps"; stepsLeft: number } | { reason: "circling"; goal: string; url: string; count: number };
+
+export function wrapUpPrompt(w: WrapUp): string {
+  const record = "If you saw something behave wrongly that you have not recorded yet, record it with submit_finding first, with steps a stranger can follow.";
+  switch (w.reason) {
+    case "settled":
+      return `\n\n## Wrap up\nEvery goal has a status, so the browser is closed to you. ${record} Then call finish.`;
+    case "out_of_steps":
+      return `\n\n## Wrap up\nOnly ${w.stepsLeft} step${w.stepsLeft === 1 ? "" : "s"} left, so the browser is closed to you. ${record} Then give every open goal a status (failed, with where you stopped, if you did not get there) and call finish.`;
+    case "circling":
+      return `\n\n## You are going in circles\nYou came back to ${w.url} ${w.count} times without recording anything, so the browser is closed to you until you give goal ${w.goal} a status. ${record} Then give ${w.goal} reached or failed, with what you saw in its note; the browser opens again for your next goal.`;
+  }
 }
 
 export function sessionStatus(notes: string[], goals: GoalOutcome[], step: number, maxSteps: number): string {

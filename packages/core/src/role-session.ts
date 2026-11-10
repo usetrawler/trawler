@@ -1,9 +1,9 @@
 import type { LanguageModel, ToolSet } from "ai";
 import type { Screenshot } from "./browser.ts";
-import { goalsFor, type JobUsage, type NotABug, type Persona, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
+import { FindingSchema, goalsFor, type JobUsage, type NotABug, type Persona, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
 import { browserQueue, runAgentLoop } from "./agent-loop.ts";
 import type { Budget } from "./llm.ts";
-import { LOOP_WINDOW, rolePrompt, sessionStatus, standbyPrompt, stuckHints, type RecentStep } from "./prompts.ts";
+import { REVISITS_STOP, rolePrompt, sessionStatus, standbyPrompt, stuckHints, wrapUpPrompt, type Revisit, type WrapUp } from "./prompts.ts";
 import type { SecretScrubber } from "./secrets.ts";
 import { findingUrl, madeUpEmail, madeUpPassword, newSessionState, noteBotProtection, ownPasswordTool, sessionTools, STANDBY, teamTools, type FillField, type TeamChannel } from "./session-tools.ts";
 import type { BotProtection } from "./bot-protection.ts";
@@ -11,6 +11,8 @@ import { LOOK_TOOL, lookTool } from "./look.ts";
 import { accountFromStory, accountNote, type AccountFormRead, type AccountRecord } from "./account-note.ts";
 
 const NOTHING_NEWER = 999_999_999_999_999;
+const PROGRESS_TOOLS = new Set(["goal_status", "submit_finding", "note", "say_to_team", "finish"]);
+const WRAP_UP_TOOLS = ["note", "submit_finding", "goal_status", "finish", "say_to_team", "read_team_channel"];
 const NUDGE = "Every turn must call a tool; plain text does nothing. Continue with the goals, and call finish once every goal has a status.";
 
 export async function runRoleSession(opts: {
@@ -101,15 +103,47 @@ export async function runRoleSession(opts: {
   });
   let standbyFrom: number | undefined;
   let sinceStatus = 0;
-  const recent: RecentStep[] = [];
+  let arrivals = new Map<string, number>();
+  let lastUrl: string | null = null;
+  let circling: { goal: string; url: string; count: number } | null = null;
   const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
+  const openGoals = () => [...state.goals.values()].filter((g) => g.status === "not_attempted");
+  const revisits = (): Revisit[] => [...arrivals].map(([url, count]) => ({ url, count })).sort((a, b) => b.count - a.count);
+  const wrapUp = (): WrapUp | null => {
+    if (state.standby || state.finished !== null) return null;
+    const open = openGoals().length;
+    if (open === 0) return { reason: "settled" };
+    if (circling) return { reason: "circling", ...circling };
+    const stepsLeft = opts.maxSteps - usage.steps;
+    return stepsLeft <= Math.min(open + 1, Math.floor(opts.maxSteps / 4)) ? { reason: "out_of_steps", stepsLeft } : null;
+  };
+  const recordCircling = (goal: string, url: string, count: number) => {
+    const visited = revisits();
+    const finding = FindingSchema.parse({
+      id: opts.newFindingId(),
+      kind: "friction",
+      goal,
+      severity: "low",
+      title: `Went in circles around ${new URL(url).pathname}`.slice(0, 300),
+      observed: `${opts.persona.name} came back to ${url} ${count} times without getting further or recording anything, so Trawler closed the browser until the goal had a status. Pages visited since the last progress, with how often: ${visited.map((v) => `${v.url} (${v.count})`).join(", ")}. This usually means the goal is unclear, or the product gives no way forward from these pages.`.slice(0, 4000),
+      reproduction: [...arrivals.keys()].slice(0, 30).map((u) => `Open ${u}`),
+      url,
+    });
+    emit({ type: "finding", jobId, finding });
+    state.findings.push(finding);
+  };
 
   emit({ type: "job_started", jobId, kind: "role_session" });
   if (earlierAccount) emit({ type: "note", jobId, text: accountNote(earlierAccount) });
   const { stoppedBy, error } = await runAgentLoop({
     model: opts.model,
     tools,
-    instructions: () => base + sessionStatus(state.notes, [...state.goals.values()], usage.steps, opts.maxSteps) + (state.standby ? standbyPrompt() : stuckHints({ sinceStatus, recent, openGoals: [...state.goals.values()].filter((g) => g.status === "not_attempted").length })),
+    instructions: () => {
+      const wrap = wrapUp();
+      const hints = state.standby ? standbyPrompt() : wrap ? wrapUpPrompt(wrap) : stuckHints({ sinceStatus, revisits: revisits(), openGoals: openGoals().length });
+      return base + sessionStatus(state.notes, [...state.goals.values()], usage.steps, opts.maxSteps) + hints;
+    },
+    activeTools: () => (wrapUp() ? WRAP_UP_TOOLS.filter((name) => name in tools) : undefined),
     nudge: NUDGE,
     scrubber: opts.scrubber,
     budget: opts.budget,
@@ -124,11 +158,24 @@ export async function runRoleSession(opts: {
         if (over) state.finished = state.standby.summary;
       }
       const url = findingUrl(opts.pageUrl?.());
-      const tool = step.toolCalls[0]?.toolName ?? null;
-      sinceStatus = step.toolCalls.some((c) => c.toolName === "goal_status") ? 0 : sinceStatus + 1;
-      recent.push({ tool, page: url ?? null });
-      if (recent.length > LOOP_WINDOW) recent.shift();
+      const called = step.toolCalls.map((c) => c.toolName);
+      const tool = called[0] ?? null;
+      sinceStatus = called.includes("goal_status") ? 0 : sinceStatus + 1;
+      if (called.includes("goal_status")) circling = null;
+      let circled: { url: string; count: number } | null = null;
+      if (called.some((name) => PROGRESS_TOOLS.has(name))) arrivals = new Map();
+      else if (url && url !== lastUrl && !state.standby) {
+        const count = (arrivals.get(url) ?? 0) + 1;
+        arrivals.set(url, count);
+        if (count >= REVISITS_STOP && !circling) circled = { url, count };
+      }
+      if (url) lastUrl = url;
       emit({ type: "step", jobId, step: usage.steps, tool, costUsd, ...(url ? { url } : {}) });
+      const goal = circled && openGoals()[0];
+      if (circled && goal) {
+        circling = { goal: goal.goal, ...circled };
+        recordCircling(goal.goal, circled.url, circled.count);
+      }
     },
   });
 
