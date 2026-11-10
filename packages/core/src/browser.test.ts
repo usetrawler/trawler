@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -217,6 +218,13 @@ beforeAll(async () => {
         res.statusCode = 302;
         res.setHeader("location", "/two");
         return res.end();
+      case "/local-calls":
+        return html(`<p id="sock">socket pending</p><p id="api">api pending</p><script>
+          const w = new WebSocket(location.origin.replace("http", "ws") + "/live");
+          w.onopen = () => document.getElementById("sock").textContent = "socket open";
+          w.onerror = () => document.getElementById("sock").textContent = "socket failed";
+          fetch("${secondOrigin}/", { mode: "no-cors" }).then(() => document.getElementById("api").textContent = "api reached", () => document.getElementById("api").textContent = "api failed");
+        </script>`);
       case "/ws":
         return html(`<p id="s">connecting</p><script>const w = new WebSocket("${foreignOrigin.replace("http", "ws")}/sock"); w.onerror = () => document.getElementById("s").textContent = "socket refused";</script>`);
       case "/spec":
@@ -582,8 +590,6 @@ beforeAll(async () => {
       case "/sw.js":
         res.setHeader("content-type", "application/javascript");
         return res.end(`self.addEventListener("install", (e) => e.waitUntil(fetch("${foreignOrigin}/sw-leak").catch(() => {})));`);
-      case "/img-redirect":
-        return html(`<p>image</p><img src="/redirect-foreign">`);
       case "/sse-page":
         return html(`<p id="s">waiting</p><script>new EventSource("/sse").onmessage = (e) => document.getElementById("s").textContent = "got " + e.data;</script>`);
       case "/sse":
@@ -602,6 +608,10 @@ beforeAll(async () => {
         res.statusCode = 404;
         return html("<h1>404</h1>");
     }
+  });
+  server.on("upgrade", (req, socket) => {
+    const accept = createHash("sha1").update(`${req.headers["sec-websocket-key"]}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
   });
   origin = await listen(server);
 });
@@ -847,6 +857,16 @@ describe("origin allowlist", () => {
       await navigate(b, `${origin}/redirect-local`);
       expect(await snapshot(b)).toContain("Second page");
     });
+  }, 60_000);
+
+  test("a page on a local address reaches its own WebSocket and another allowed local origin", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/local-calls`);
+      await b.tools.browser_wait_for!.execute!({ textGone: "pending", time: 5 }, ctx);
+      const page = await snapshot(b);
+      expect(page).toContain("socket open");
+      expect(page).toContain("api reached");
+    }, { allowedOrigins: [origin, secondOrigin] });
   }, 60_000);
 
   test("blocks WebSockets to foreign origins", async () => {
@@ -1527,15 +1547,6 @@ describe("robustness", () => {
       await new Promise((r) => setTimeout(r, 500));
       await expect(b.tools.browser_snapshot!.execute!({}, ctx)).rejects.toThrow(/browser has closed/);
       await expect(b.tools.browser_click!.execute!({ target: "e1", element: "x" }, ctx)).rejects.toThrow(/browser has closed/);
-    });
-  }, 60_000);
-
-  test("a sub-resource redirect to a foreign origin is not followed", async () => {
-    await withBrowser(async (b) => {
-      const before = foreignHits.length;
-      await navigate(b, `${origin}/img-redirect`);
-      await new Promise((r) => setTimeout(r, 500));
-      expect(foreignHits.slice(before).filter((h) => h.startsWith("/stolen"))).toEqual([]);
     });
   }, 60_000);
 

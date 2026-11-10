@@ -4,7 +4,9 @@ import { createConnection } from "@playwright/mcp";
 import { chromium, selectors, type Dialog, type ElementHandle, type Frame, type Locator, type Page, type Route } from "playwright";
 import { jsonSchema, type Tool, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
+import { lookup } from "node:dns/promises";
 import { MAX_ARTIFACT_BYTES, MAX_URL } from "@usetrawler/protocol";
+import { blockedAddresses, isBlockedAddress } from "./network.ts";
 import { asShown, longFormsOf, MASK, MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
 import { botProtection, botProtectionNote, clearedNote, COLLECT_PAGE_SIGNALS, type BotProtection, type PageSignals } from "./bot-protection.ts";
 
@@ -397,6 +399,19 @@ type McpResult = { content?: Array<{ type: string; text?: string }>; isError?: b
 
 const internalCall = { toolCallId: "internal", messages: [], context: {} };
 
+const LOOKUP_TIMEOUT_MS = 2_000;
+
+async function isLocalOrigin(origin: string): Promise<boolean> {
+  try {
+    const resolving = lookup(new URL(origin).hostname.replace(/^\[|\]$/g, ""), { all: true });
+    const addresses = await Promise.race([resolving, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), LOOKUP_TIMEOUT_MS).unref())]);
+    const local = blockedAddresses();
+    return addresses.some(({ address, family }) => isBlockedAddress(address, family, local));
+  } catch {
+    return false;
+  }
+}
+
 function originOf(url: string): string | null {
   try {
     const origin = new URL(url).origin;
@@ -514,6 +529,9 @@ export async function openBrowser(opts: {
       storageState: opts.storageState,
       serviceWorkers: "block",
     });
+    // Chromium cannot tell the address space of a document served by route.fulfill, treats it as public, and blocks its calls to local addresses.
+    const localOrigins = (await Promise.all([...allowed].map(async (o) => ((await isLocalOrigin(o)) ? o : null)))).filter((o) => o !== null);
+    for (const localOrigin of localOrigins) await context.grantPermissions(["local-network-access"], { origin: localOrigin });
     const block = (route: Route, url: string) => {
       report(url);
       if (route.request().isNavigationRequest() && route.request().frame().parentFrame() === null) blockedNavigation = url;
