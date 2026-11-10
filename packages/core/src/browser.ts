@@ -399,9 +399,12 @@ type McpResult = { content?: Array<{ type: string; text?: string }>; isError?: b
 
 const internalCall = { toolCallId: "internal", messages: [], context: {} };
 
+const LOOKUP_TIMEOUT_MS = 2_000;
+
 async function isLocalOrigin(origin: string): Promise<boolean> {
   try {
-    const addresses = await lookup(new URL(origin).hostname.replace(/^\[|\]$/g, ""), { all: true });
+    const resolving = lookup(new URL(origin).hostname.replace(/^\[|\]$/g, ""), { all: true });
+    const addresses = await Promise.race([resolving, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), LOOKUP_TIMEOUT_MS).unref())]);
     const local = blockedAddresses();
     return addresses.some(({ address, family }) => isBlockedAddress(address, family, local));
   } catch {
@@ -527,7 +530,8 @@ export async function openBrowser(opts: {
       serviceWorkers: "block",
     });
     // Chromium cannot tell the address space of a document served by route.fulfill, treats it as public, and blocks its calls to local addresses.
-    for (const allowedOrigin of allowed) if (await isLocalOrigin(allowedOrigin)) await context.grantPermissions(["local-network-access"], { origin: allowedOrigin });
+    const localOrigins = (await Promise.all([...allowed].map(async (o) => ((await isLocalOrigin(o)) ? o : null)))).filter((o) => o !== null);
+    for (const localOrigin of localOrigins) await context.grantPermissions(["local-network-access"], { origin: localOrigin });
     const block = (route: Route, url: string) => {
       report(url);
       if (route.request().isNavigationRequest() && route.request().frame().parentFrame() === null) blockedNavigation = url;
