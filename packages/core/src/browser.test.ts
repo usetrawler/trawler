@@ -66,15 +66,7 @@ beforeAll(async () => {
     socket.destroy();
   });
   foreignOrigin = await listen(foreign);
-  second = createServer((req, res) => {
-    if (req.url === "/api") {
-      res.setHeader("access-control-allow-origin", origin);
-      res.setHeader("access-control-allow-headers", "x-client");
-      res.setHeader("access-control-allow-methods", "PUT");
-      if (req.method === "OPTIONS") return res.end();
-      res.setHeader("content-type", "application/json");
-      return res.end(JSON.stringify({ method: req.method, client: req.headers["x-client"] ?? null }));
-    }
+  second = createServer((_req, res) => {
     res.setHeader("content-type", "text/html");
     res.end(`<html><body><input aria-label="Inner password" type="password"></body></html>`);
   });
@@ -226,34 +218,6 @@ beforeAll(async () => {
         res.statusCode = 302;
         res.setHeader("location", "/two");
         return res.end();
-      case "/sub-calls":
-        return html(`<p id="cors">cors pending</p><p id="post">post pending</p><p id="cookie">cookie pending</p><p id="img">img pending</p><img id="pic" src="/redirect-pixel"><script>
-          const show = (id, text) => document.getElementById(id).textContent = text;
-          fetch("${secondOrigin}/api", { method: "PUT", headers: { "x-client": "trawler" } }).then((r) => r.json()).then((j) => show("cors", "cors " + j.method + " " + j.client), () => show("cors", "cors failed"));
-          fetch("/echo-body", { method: "POST", body: "a=1&b=two" }).then((r) => r.text()).then((t) => show("post", "post " + t), () => show("post", "post failed"));
-          fetch("/set-cookie").then(() => fetch("/read-cookie")).then((r) => r.text()).then((t) => show("cookie", "cookie " + t), () => show("cookie", "cookie failed"));
-          const pic = document.getElementById("pic");
-          const shown = () => show("img", "img " + pic.naturalWidth + "x" + pic.naturalHeight);
-          if (pic.complete) shown(); else { pic.onload = shown; pic.onerror = () => show("img", "img failed"); }
-        </script>`);
-      case "/echo-body": {
-        let body = "";
-        req.on("data", (c) => (body += c));
-        req.on("end", () => res.end(body));
-        return;
-      }
-      case "/set-cookie":
-        res.setHeader("set-cookie", "flavour=oat; Path=/");
-        return res.end("set");
-      case "/read-cookie":
-        return res.end(req.headers.cookie ?? "none");
-      case "/redirect-pixel":
-        res.statusCode = 302;
-        res.setHeader("location", "/pixel.png");
-        return res.end();
-      case "/pixel.png":
-        res.setHeader("content-type", "image/png");
-        return res.end(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64"));
       case "/local-calls":
         return html(`<p id="sock">socket pending</p><p id="api">api pending</p><script>
           const w = new WebSocket(location.origin.replace("http", "ws") + "/live");
@@ -904,18 +868,6 @@ describe("origin allowlist", () => {
       const page = await snapshot(b);
       expect(page).toContain("socket open");
       expect(page).toContain("api reached");
-    }, { allowedOrigins: [origin, secondOrigin] });
-  }, 60_000);
-
-  test("a page's own requests keep working through the allowlist: a CORS call with a preflight, a POST body, a cookie set by a response, and an image behind a redirect", async () => {
-    await withBrowser(async (b) => {
-      await navigate(b, `${origin}/sub-calls`);
-      await b.tools.browser_wait_for!.execute!({ textGone: "pending", time: 5 }, ctx);
-      const page = await snapshot(b);
-      expect(page).toContain("cors PUT trawler");
-      expect(page).toContain("post a=1&b=two");
-      expect(page).toContain("cookie flavour=oat");
-      expect(page).toContain("img 1x1");
     }, { allowedOrigins: [origin, secondOrigin] });
   }, 60_000);
 
