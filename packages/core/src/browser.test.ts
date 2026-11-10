@@ -590,8 +590,6 @@ beforeAll(async () => {
       case "/sw.js":
         res.setHeader("content-type", "application/javascript");
         return res.end(`self.addEventListener("install", (e) => e.waitUntil(fetch("${foreignOrigin}/sw-leak").catch(() => {})));`);
-      case "/img-redirect":
-        return html(`<p>image</p><img src="/redirect-foreign">`);
       case "/sse-page":
         return html(`<p id="s">waiting</p><script>new EventSource("/sse").onmessage = (e) => document.getElementById("s").textContent = "got " + e.data;</script>`);
       case "/sse":
@@ -1549,15 +1547,6 @@ describe("robustness", () => {
       await new Promise((r) => setTimeout(r, 500));
       await expect(b.tools.browser_snapshot!.execute!({}, ctx)).rejects.toThrow(/browser has closed/);
       await expect(b.tools.browser_click!.execute!({ target: "e1", element: "x" }, ctx)).rejects.toThrow(/browser has closed/);
-    });
-  }, 60_000);
-
-  test("a sub-resource redirect to a foreign origin is not followed", async () => {
-    await withBrowser(async (b) => {
-      const before = foreignHits.length;
-      await navigate(b, `${origin}/img-redirect`);
-      await new Promise((r) => setTimeout(r, 500));
-      expect(foreignHits.slice(before).filter((h) => h.startsWith("/stolen"))).toEqual([]);
     });
   }, 60_000);
 

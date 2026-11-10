@@ -20,6 +20,7 @@ let direct: http.Server;
 let shopPort = 0;
 let directPort = 0;
 let proxy: Awaited<ReturnType<typeof startEgressProxy>>;
+const stolen: string[] = [];
 
 const page = (privatePort: number) => `<!doctype html><title>Shop</title>
 <p id="ws">ws: waiting</p><p id="private">private: waiting</p>
@@ -36,6 +37,19 @@ fetch("http://private.test:${privatePort}/secret").then((r) => r.text()).then(
 beforeAll(async () => {
   shop = http.createServer((req, res) => {
     if (req.url === "/secret") return res.end("leaked");
+    if (req.url?.startsWith("/stolen")) {
+      stolen.push(`${req.headers.host}${req.url}`);
+      return res.end("stolen");
+    }
+    const hop = { "/hop1": "/hop2", "/hop2": `http://foreign.test:${shopPort}/stolen` }[req.url ?? ""];
+    if (hop) {
+      res.writeHead(302, { location: hop });
+      return res.end();
+    }
+    if (req.url === "/hops") {
+      res.setHeader("content-type", "text/html");
+      return res.end(`<title>Hops</title><img src="/hop1"><script>fetch("/hop1").catch(() => undefined)</script><iframe src="/hop1"></iframe>`);
+    }
     if (req.url?.startsWith("/rtc?")) {
       res.setHeader("content-type", "text/html");
       return res.end(`<title>RTC</title><p id="rtc">rtc: waiting</p><script>
@@ -57,7 +71,7 @@ pc.createOffer().then((o) => pc.setLocalDescription(o)).then(() => (document.get
   direct = http.createServer((_req, res) => res.end("direct"));
   await new Promise<void>((r) => direct.listen(0, "127.0.0.1", r));
   directPort = (direct.address() as AddressInfo).port;
-  const hosts: Record<string, { address: string; family: number }> = { "shop.test": { address: "::1", family: 6 }, "private.test": { address: "10.9.9.9", family: 4 } };
+  const hosts: Record<string, { address: string; family: number }> = { "shop.test": { address: "::1", family: 6 }, "private.test": { address: "10.9.9.9", family: 4 }, "foreign.test": { address: "::1", family: 6 } };
   const resolve: Resolve = async (hostname) => (hosts[hostname] ? [hosts[hostname]] : Promise.reject(new Error("ENOTFOUND")));
   const blocked = blockedAddresses({ allowLoopback: true });
   blocked.addAddress("127.0.0.1");
@@ -126,4 +140,22 @@ test("a page's WebRTC cannot send UDP around the proxy", async () => {
     rmSync(dir, { recursive: true, force: true });
     udp.close();
   }
+}, 60_000);
+
+test("a redirect chain from an allowed origin to a foreign one is cut at the proxy, for sub-resources and navigations", async () => {
+  const egress = egressClient(`http://127.0.0.1:${proxy.port}`, TOKEN);
+  const origins = [`http://shop.test:${shopPort}`];
+  const session = await egress.open(origins);
+  const dir = mkdtempSync(join(tmpdir(), "trw-egress-"));
+  const browser = await openBrowser({ allowedOrigins: origins, outputDir: dir, scrubber: new SecretScrubber(), onBlocked: () => undefined, proxy: session.proxy });
+  try {
+    await browser.tools.browser_navigate!.execute!({ url: `http://shop.test:${shopPort}/hops` }, ctx);
+    await browser.tools.browser_navigate!.execute!({ url: `http://shop.test:${shopPort}/hop1` }, ctx);
+    await new Promise((r) => setTimeout(r, 1_000));
+  } finally {
+    await browser.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+  expect(stolen).toEqual([]);
+  expect(await session.close()).toContainEqual({ url: `http://foreign.test:${shopPort}`, reason: "origin" });
 }, 60_000);
