@@ -1,7 +1,7 @@
 import type { LanguageModel, ToolSet } from "ai";
 import type { Screenshot } from "./browser.ts";
 import { FindingSchema, goalsFor, type JobUsage, type NotABug, type Persona, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
-import { browserQueue, runAgentLoop } from "./agent-loop.ts";
+import { browserQueue, OUTAGE_WAITS_MS, runAgentLoop } from "./agent-loop.ts";
 import type { Budget } from "./llm.ts";
 import { REVISITS_STOP, rolePrompt, sessionStatus, standbyPrompt, stuckHints, wrapUpPrompt, type Revisit, type WrapUp } from "./prompts.ts";
 import type { SecretScrubber } from "./secrets.ts";
@@ -158,7 +158,7 @@ export async function runRoleSession(opts: {
       return state.browserClosed ? WRAP_UP_TOOLS.filter((name) => name in tools) : undefined;
     },
     nudge: NUDGE,
-    outageWaitsMs: opts.outageWaitsMs,
+    outageWaitsMs: opts.outageWaitsMs ?? OUTAGE_WAITS_MS,
     scrubber: opts.scrubber,
     budget: opts.budget,
     maxSteps: opts.maxSteps,

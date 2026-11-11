@@ -421,6 +421,24 @@ describe("runRoleSession", () => {
     expect(events.filter((e) => e.type === "step").map((e) => (e as { tool: string | null }).tool)).toEqual(["browser_snapshot", "note", "goal_status", "goal_status", "finish"]);
   });
 
+  test("each outage after the person got further gets the pauses afresh", async () => {
+    const down = new APICallError({ message: "Service Unavailable", url: "https://openrouter.ai/api/v1/chat/completions", requestBodyValues: {}, statusCode: 503, responseHeaders: { "retry-after-ms": "1" } });
+    const model = scriptedModel([look, down, down, down, look, down, down, down, reached("sign-up"), reached("invoice"), finish]);
+    const { result } = await run(model, { outageWaitsMs: [5] }).promise;
+    expect(result.stoppedBy).toBe("finish");
+  });
+
+  test("a Stop that comes during a pause ends the session at once instead of after the pause", async () => {
+    const down = new APICallError({ message: "Service Unavailable", url: "https://openrouter.ai/api/v1/chat/completions", requestBodyValues: {}, statusCode: 503, responseHeaders: { "retry-after-ms": "1" } });
+    const budget = new Budget(10);
+    const model = scriptedModel([look, down, down, down]);
+    setTimeout(() => budget.add(10), 300);
+    const started = Date.now();
+    const { result } = await run(model, { budget, outageWaitsMs: [60_000] }).promise;
+    expect(result.stoppedBy).toBe("budget");
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
   test("a provider still unreachable after every pause ends the session as an error with the provider's reason", async () => {
     const down = new APICallError({ message: "Service Unavailable", url: "https://openrouter.ai/api/v1/chat/completions", requestBodyValues: {}, statusCode: 503, responseHeaders: { "retry-after-ms": "1" } });
     const model = scriptedModel([look, ...Array.from({ length: 9 }, () => down)]);

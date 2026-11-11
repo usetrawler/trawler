@@ -9,6 +9,7 @@ const MAX_CUT_OFFS = 3;
 const MAX_BROWSER_CRASHES = 3;
 const REASONING_STEPS_KEPT = 2;
 export const OUTAGE_WAITS_MS = [30_000, 60_000, 120_000, 240_000];
+const PAUSE_SLICE_MS = 1_000;
 const CUT_OFF = "Your reply was cut off before this tool ran. Call one tool at a time.";
 const CUT_OFF_TEXT = "Your reply was cut off. Plain text does nothing; call one tool at a time.";
 
@@ -90,7 +91,11 @@ export async function runAgentLoop(opts: {
   let silentTurns = 0;
   let cutOffs = 0;
   let outages = 0;
-  const waits = opts.outageWaitsMs ?? OUTAGE_WAITS_MS;
+  const waits = opts.outageWaitsMs ?? [];
+  const pause = async (ms: number) => {
+    const until = Date.now() + ms;
+    while (!done() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, Math.min(PAUSE_SLICE_MS, until - Date.now())));
+  };
   try {
     while (!done()) {
       let completed: ModelMessage[] = [];
@@ -122,7 +127,7 @@ export async function runAgentLoop(opts: {
       });
       if (result === null) {
         history = answerUnrunToolCalls([...history, ...completed]).messages;
-        await new Promise((resolve) => setTimeout(resolve, waits[outages++]));
+        await pause(waits[outages++]!);
         continue;
       }
       outages = 0;
