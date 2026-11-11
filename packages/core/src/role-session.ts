@@ -11,6 +11,7 @@ import { LOOK_TOOL, lookTool } from "./look.ts";
 import { accountFromStory, accountNote, type AccountFormRead, type AccountRecord } from "./account-note.ts";
 
 const NOTHING_NEWER = 999_999_999_999_999;
+const MAX_STEP_URL = 990;
 const PROGRESS_TOOLS = new Set(["goal_status", "submit_finding", "note", "say_to_team", "finish"]);
 const WRAP_UP_TOOLS = ["note", "submit_finding", "goal_status", "finish", "say_to_team", "read_team_channel"];
 const NUDGE = "Every turn must call a tool; plain text does nothing. Continue with the goals, and call finish once every goal has a status.";
@@ -106,6 +107,8 @@ export async function runRoleSession(opts: {
   let arrivals = new Map<string, number>();
   let lastUrl: string | null = null;
   let circling: { goal: string; url: string; count: number } | null = null;
+  let outOfSteps = false;
+  const circledGoals = new Set<string>();
   const usage: JobUsage = { model: opts.modelId, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 };
   const openGoals = () => [...state.goals.values()].filter((g) => g.status === "not_attempted");
   const revisits = (): Revisit[] => [...arrivals].map(([url, count]) => ({ url, count })).sort((a, b) => b.count - a.count);
@@ -115,22 +118,28 @@ export async function runRoleSession(opts: {
     if (open === 0) return { reason: "settled" };
     if (circling) return { reason: "circling", ...circling };
     const stepsLeft = opts.maxSteps - usage.steps;
-    return stepsLeft <= Math.min(open + 1, Math.floor(opts.maxSteps / 4)) ? { reason: "out_of_steps", stepsLeft } : null;
+    outOfSteps ||= stepsLeft <= Math.min(open + 2, Math.floor(opts.maxSteps / 4));
+    return outOfSteps ? { reason: "out_of_steps", stepsLeft } : null;
   };
+  const reproducible = (url: string) => (url.length <= MAX_STEP_URL ? url : `${new URL(url).origin}${new URL(url).pathname}`.slice(0, MAX_STEP_URL));
   const recordCircling = (goal: string, url: string, count: number) => {
+    if (circledGoals.has(goal)) return;
+    circledGoals.add(goal);
+    const title = `Went in circles around ${new URL(url).pathname}`.slice(0, 300);
     const visited = revisits();
-    const finding = FindingSchema.parse({
+    const parsed = FindingSchema.safeParse({
       id: opts.newFindingId(),
       kind: "friction",
       goal,
       severity: "low",
-      title: `Went in circles around ${new URL(url).pathname}`.slice(0, 300),
+      title,
       observed: `${opts.persona.name} came back to ${url} ${count} times without getting further or recording anything, so Trawler closed the browser until the goal had a status. Pages visited since the last progress, with how often: ${visited.map((v) => `${v.url} (${v.count})`).join(", ")}. This usually means the goal is unclear, or the product gives no way forward from these pages.`.slice(0, 4000),
-      reproduction: [...arrivals.keys()].slice(0, 30).map((u) => `Open ${u}`),
+      reproduction: [...new Set([...arrivals.keys()].map(reproducible))].slice(0, 30).map((u) => `Open ${u}`),
       url,
     });
-    emit({ type: "finding", jobId, finding });
-    state.findings.push(finding);
+    if (!parsed.success) return;
+    emit({ type: "finding", jobId, finding: parsed.data });
+    state.findings.push(parsed.data);
   };
 
   emit({ type: "job_started", jobId, kind: "role_session" });
@@ -143,7 +152,10 @@ export async function runRoleSession(opts: {
       const hints = state.standby ? standbyPrompt() : wrap ? wrapUpPrompt(wrap) : stuckHints({ sinceStatus, revisits: revisits(), openGoals: openGoals().length });
       return base + sessionStatus(state.notes, [...state.goals.values()], usage.steps, opts.maxSteps) + hints;
     },
-    activeTools: () => (wrapUp() ? WRAP_UP_TOOLS.filter((name) => name in tools) : undefined),
+    activeTools: () => {
+      state.browserClosed = wrapUp() !== null;
+      return state.browserClosed ? WRAP_UP_TOOLS.filter((name) => name in tools) : undefined;
+    },
     nudge: NUDGE,
     scrubber: opts.scrubber,
     budget: opts.budget,
@@ -158,12 +170,12 @@ export async function runRoleSession(opts: {
         if (over) state.finished = state.standby.summary;
       }
       const url = findingUrl(opts.pageUrl?.());
-      const called = step.toolCalls.map((c) => c.toolName);
-      const tool = called[0] ?? null;
-      sinceStatus = called.includes("goal_status") ? 0 : sinceStatus + 1;
-      if (called.includes("goal_status")) circling = null;
+      const tool = step.toolCalls[0]?.toolName ?? null;
+      const accepted = step.toolResults.filter((r) => !(typeof r.output === "string" && r.output.startsWith("rejected"))).map((r) => r.toolName);
+      sinceStatus = accepted.includes("goal_status") ? 0 : sinceStatus + 1;
+      if (accepted.includes("goal_status")) circling = null;
       let circled: { url: string; count: number } | null = null;
-      if (called.some((name) => PROGRESS_TOOLS.has(name))) arrivals = new Map();
+      if (accepted.some((name) => PROGRESS_TOOLS.has(name))) arrivals = new Map();
       else if (url && url !== lastUrl && !state.standby) {
         const count = (arrivals.get(url) ?? 0) + 1;
         arrivals.set(url, count);

@@ -1125,6 +1125,46 @@ test("a person who keeps coming back to the same page is warned, then the browse
   }]);
 });
 
+test("circling a page with a very long address records the friction with a shortened step instead of ending the session", async () => {
+  const long = `https://app.acme.test/search?q=${"a".repeat(1500)}`;
+  const pages = [long, "https://app.acme.test/b"];
+  let call = 0;
+  const model = scriptedModel([...Array.from({ length: REVISITS_STOP * 2 - 1 }, () => look), toolCall("goal_status", { goal: "sign-up", status: "failed", note: "x" }), reached("invoice"), finish]);
+  const { result } = await run(model, { maxSteps: 40, pageUrl: () => pages[call++ % 2]! }).promise;
+  expect(result.stoppedBy).toBe("finish");
+  expect(result.findings.map((f) => f.reproduction)).toEqual([["Open https://app.acme.test/search", "Open https://app.acme.test/b"]]);
+});
+
+test("a rejected goal status does not reopen the browser, and circling the same page again for the same goal is recorded once", async () => {
+  const pages = ["https://app.acme.test/a", "https://app.acme.test/b"];
+  let call = 0;
+  const circle = Array.from({ length: REVISITS_STOP * 2 - 1 }, () => look);
+  const model = scriptedModel([
+    ...circle,
+    toolCall("goal_status", { goal: "nope", status: "failed", note: "" }),
+    reached("invoice"),
+    ...circle,
+    toolCall("goal_status", { goal: "sign-up", status: "failed", note: "x" }),
+    finish,
+  ]);
+  const { result } = await run(model, { maxSteps: 60, pageUrl: () => pages[call++ % 2]! }).promise;
+  const at = circle.length;
+  expect(toolsOffered(model, at + 1)).toEqual(BROWSER_CLOSED);
+  expect(toolsOffered(model, at + 2)).toContain("browser_snapshot");
+  expect(toolsOffered(model, at + 2 + circle.length)).toEqual(BROWSER_CLOSED);
+  expect(result.findings.map((f) => f.title)).toEqual(["Went in circles around /a"]);
+  expect(result.stoppedBy).toBe("finish");
+});
+
+test("with the browser closed, a person can still record what they saw before their last browser action failed", async () => {
+  let looks = 0;
+  const flaky = { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => { if (++looks === 2) throw new Error("page crashed"); return { content: [{ type: "text", text: snapshot }] }; } }) };
+  const model = scriptedModel([look, look, reached("sign-up"), reached("invoice"), toolCall("submit_finding", { kind: "friction", goal: "invoice", title: "Slow", observed: "it took ages", reproduction: ["Open the invoices page"], severity: "low" }), finish]);
+  const { result } = await run(model, { browserTools: flaky }).promise;
+  expect(result.findings.map((f) => f.title)).toEqual(["Slow"]);
+  expect(result.stoppedBy).toBe("finish");
+});
+
 test("staying on one page to fill a form is not circling", async () => {
   const model = scriptedModel([...Array.from({ length: 15 }, () => look), reached("sign-up"), reached("invoice"), finish]);
   const { result } = await run(model, { maxSteps: 40, pageUrl: () => "https://app.acme.test/form" }).promise;
