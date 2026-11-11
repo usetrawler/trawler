@@ -416,9 +416,8 @@ describe("runRoleSession", () => {
     const { events } = session;
     expect(result.stoppedBy).toBe("finish");
     expect(result.goals.map((g) => g.status)).toEqual(["reached", "reached"]);
-    const resumed = JSON.stringify(model.doGenerateCalls[5]!.prompt);
-    expect(resumed).toContain("Pricing page lists three plans.");
-    expect(resumed).toContain("browser_snapshot");
+    const answered = (i: number) => model.doGenerateCalls[i]!.prompt.flatMap((m) => (m.role === "tool" ? m.content.flatMap((p) => (p.type === "tool-result" ? [p.toolName] : [])) : []));
+    expect(answered(5)).toEqual(["browser_snapshot", "note"]);
     expect(events.filter((e) => e.type === "step").map((e) => (e as { tool: string | null }).tool)).toEqual(["browser_snapshot", "note", "goal_status", "goal_status", "finish"]);
   });
 
