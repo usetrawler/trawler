@@ -13,7 +13,7 @@ import { accountFromStory, accountNote, type AccountFormRead, type AccountRecord
 const NOTHING_NEWER = 999_999_999_999_999;
 const MAX_STEP_URL = 990;
 const PROGRESS_TOOLS = new Set(["goal_status", "submit_finding", "note", "say_to_team", "finish"]);
-const WRAP_UP_TOOLS = ["note", "submit_finding", "goal_status", "finish", "say_to_team", "read_team_channel"];
+const WRAP_UP_TOOLS = ["note", "submit_finding", "goal_status", "finish", "say_to_team", "read_team_channel", LOOK_TOOL];
 const NUDGE = "Every turn must call a tool; plain text does nothing. Continue with the goals, and call finish once every goal has a status.";
 
 export async function runRoleSession(opts: {
