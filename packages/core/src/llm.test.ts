@@ -1,8 +1,8 @@
-import { generateText, RetryError, streamText } from "ai";
+import { APICallError, generateText, RetryError, streamText } from "ai";
 import { expect, test } from "vitest";
 import { ANSWER_UNUSABLE, JOB_STOPPED } from "@usetrawler/protocol";
-import { Budget, createModel, failureMessage, stoppedByRun, stepCost } from "./llm.ts";
-import { scriptedModel, text, toolCall } from "./testing.ts";
+import { Budget, createModel, failureMessage, providerUnreachable, stoppedByRun, stepCost } from "./llm.ts";
+import { proxyRefusal, scriptedModel, text, toolCall } from "./testing.ts";
 
 test("stepCost reads OpenRouter usage accounting", () => {
   expect(stepCost({ providerMetadata: { openrouter: { usage: { cost: 0.0012 } } } })).toBeCloseTo(0.0012, 10);
@@ -213,4 +213,15 @@ test("an answer the proxy could not use is not asked for again, since it would b
   };
   expect(await calls(answer(ANSWER_UNUSABLE))).toEqual({ made: 1, message: "the provider's answer was too large", stopped: false });
   expect(await calls(answer())).toEqual({ made: 3, message: "the provider's answer was too large (after 3 attempts)", stopped: false });
+});
+
+test("only a provider that cannot be reached or is briefly overloaded counts as unreachable, never a refusal or a stop", () => {
+  const url = "https://openrouter.ai/api/v1/chat/completions";
+  const offline = new APICallError({ message: "Cannot connect to API: getaddrinfo ENOTFOUND openrouter.ai", url, requestBodyValues: {}, isRetryable: true });
+  const overloaded = new APICallError({ message: "Service Unavailable", url, requestBodyValues: {}, statusCode: 503 });
+  const limited = new APICallError({ message: "Too Many Requests", url, requestBodyValues: {}, statusCode: 429 });
+  const retried = new RetryError({ message: "failed after 3 attempts", reason: "maxRetriesExceeded", errors: [offline, offline, offline] });
+  expect([offline, overloaded, limited, retried].map(providerUnreachable)).toEqual([true, true, true, true]);
+  const unauthorised = new APICallError({ message: "No auth credentials found", url, requestBodyValues: {}, statusCode: 401 });
+  expect([unauthorised, proxyRefusal("the provider refused the workspace key"), proxyRefusal("the run is no longer active", JOB_STOPPED), new Error("boom")].map(providerUnreachable)).toEqual([false, false, false, false]);
 });

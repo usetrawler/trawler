@@ -41,6 +41,7 @@ export async function runRoleSession(opts: {
   jobId?: string;
   look?: boolean;
   conversation?: { peers: { id: string; name: string }[]; channel: TeamChannel };
+  outageWaitsMs?: number[];
 }): Promise<{ result: RoleResult; usage: JobUsage }> {
   if (!Number.isInteger(opts.maxSteps) || opts.maxSteps < 1) throw new RangeError(`maxSteps must be a positive integer, got ${opts.maxSteps}`);
   const jobId = opts.jobId ?? `role:${opts.persona.id}`;
@@ -157,6 +158,7 @@ export async function runRoleSession(opts: {
       return state.browserClosed ? WRAP_UP_TOOLS.filter((name) => name in tools) : undefined;
     },
     nudge: NUDGE,
+    outageWaitsMs: opts.outageWaitsMs,
     scrubber: opts.scrubber,
     budget: opts.budget,
     maxSteps: opts.maxSteps,

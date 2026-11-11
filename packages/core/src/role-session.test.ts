@@ -408,6 +408,28 @@ describe("runRoleSession", () => {
     expect(result.error).toBeUndefined();
   });
 
+  test("when the provider is briefly unreachable the person pauses and carries on from the last step done, keeping what they did before", async () => {
+    const down = new APICallError({ message: "Service Unavailable", url: "https://openrouter.ai/api/v1/chat/completions", requestBodyValues: {}, statusCode: 503, responseHeaders: { "retry-after-ms": "1" } });
+    const model = scriptedModel([look, toolCall("note", { text: "Pricing page lists three plans." }), down, down, down, reached("sign-up"), reached("invoice"), finish]);
+    const session = run(model, { outageWaitsMs: [5] });
+    const { result } = await session.promise;
+    const { events } = session;
+    expect(result.stoppedBy).toBe("finish");
+    expect(result.goals.map((g) => g.status)).toEqual(["reached", "reached"]);
+    const resumed = JSON.stringify(model.doGenerateCalls[5]!.prompt);
+    expect(resumed).toContain("Pricing page lists three plans.");
+    expect(resumed).toContain("browser_snapshot");
+    expect(events.filter((e) => e.type === "step").map((e) => (e as { tool: string | null }).tool)).toEqual(["browser_snapshot", "note", "goal_status", "goal_status", "finish"]);
+  });
+
+  test("a provider still unreachable after every pause ends the session as an error with the provider's reason", async () => {
+    const down = new APICallError({ message: "Service Unavailable", url: "https://openrouter.ai/api/v1/chat/completions", requestBodyValues: {}, statusCode: 503, responseHeaders: { "retry-after-ms": "1" } });
+    const model = scriptedModel([look, ...Array.from({ length: 9 }, () => down)]);
+    const { result } = await run(model, { outageWaitsMs: [5, 5] }).promise;
+    expect(model.doGenerateCalls).toHaveLength(10);
+    expect(result).toMatchObject({ stoppedBy: "error", error: "Service Unavailable (after 3 attempts)" });
+  });
+
   test("a key refused on a retried model call ends the session with the proxy's reason, not the retry's wording", async () => {
     const busy = new APICallError({ message: "one model call at a time per job", url: "https://cp.test/api/llm/v1/chat/completions", requestBodyValues: {}, statusCode: 429, responseHeaders: { "retry-after-ms": "1" } });
     const model = scriptedModel([look, busy, proxyRefusal("the provider refused the workspace key; an owner or admin can replace it in Settings")]);
