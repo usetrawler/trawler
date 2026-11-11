@@ -70,6 +70,7 @@ export async function runAgentLoop(opts: {
   model: LanguageModel;
   tools: ToolSet;
   instructions: () => string;
+  activeTools?: () => string[] | undefined;
   nudge: string;
   scrubber: SecretScrubber;
   budget: Budget;
@@ -95,6 +96,7 @@ export async function runAgentLoop(opts: {
         stopWhen: [done, ({ steps }) => steps.at(-1)?.finishReason === "length"],
         prepareStep: async ({ messages }) => ({
           instructions: opts.scrubber.scrub(opts.instructions()),
+          activeTools: opts.activeTools?.(),
           messages: opts.scrubber.scrub(pruneMessages(dropOldReasoning(showUnreadPictures(messages), REASONING_STEPS_KEPT), { keepLargeResults: 1, largeResultChars: opts.largeResultChars ?? 1500 })),
         }),
         onStepEnd: (step) => {

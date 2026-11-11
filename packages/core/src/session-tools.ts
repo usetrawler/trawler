@@ -13,6 +13,7 @@ export interface SessionState {
   finished: string | null;
   standby: { since: number; summary: string; emptyWaits: number } | null;
   page: "unseen" | "seen" | "stale";
+  browserClosed: boolean;
   botProtection: BotProtection | null;
 }
 
@@ -47,6 +48,7 @@ export function newSessionState(goals: Goal[]): SessionState {
     finished: null,
     standby: null,
     page: "unseen",
+    browserClosed: false,
     botProtection: null,
   };
 }
@@ -194,7 +196,7 @@ export function sessionTools(opts: {
         if (state.finished !== null) return CLOSED;
         const blocked = botProtectionRefusal(opts.botProtection?.() ?? null);
         if (blocked) return blocked;
-        if (state.page !== "seen") return state.page === "unseen" ? "rejected: you have not looked at the product yet; open it and take a browser_snapshot, then report what it shows" : "rejected: your last browser action failed, so you are not looking at the page any more; take a browser_snapshot and report what it shows";
+        if (state.page === "unseen" || (state.page === "stale" && !state.browserClosed)) return state.page === "unseen" ? "rejected: you have not looked at the product yet; open it and take a browser_snapshot, then report what it shows" : "rejected: your last browser action failed, so you are not looking at the page any more; take a browser_snapshot and report what it shows";
         const goal = lower(input.goal);
         if (typeof goal !== "string" || !state.goals.has(goal)) return unknownGoal(input.goal);
         const url = findingUrl(opts.pageUrl ? await opts.inBrowser(async () => opts.pageUrl!()) : null);
