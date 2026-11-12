@@ -81,6 +81,11 @@ export function stoppedByRun(err: unknown): boolean {
   return APICallError.isInstance(last) && last.statusCode === 402 && (last.data as { error?: { type?: unknown } } | undefined)?.error?.type === JOB_STOPPED;
 }
 
+export function providerUnreachable(err: unknown): boolean {
+  const last = lastAttempt(err);
+  return APICallError.isInstance(last) && last.isRetryable && !stoppedByRun(err);
+}
+
 export function failureMessage(err: unknown): string {
   const last = lastAttempt(err);
   const message = last instanceof Error ? last.message : String(last);

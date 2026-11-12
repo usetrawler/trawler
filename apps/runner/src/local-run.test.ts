@@ -335,3 +335,28 @@ test("a defect that needs two people is replayed in two browsers, one per person
   expect(browsers.opened).toHaveLength(5);
   expect(browsers.closed()).toBe(5);
 });
+
+test("once a turn ends in an error the later turns are not started, and their goals say why", async () => {
+  const team = ProjectConfigSchema.parse({
+    name: "Pitches", targetUrl: "https://a.test",
+    personas: [{ id: "priya", name: "Priya", brief: "b" }, { id: "marco", name: "Marco", brief: "b", accountRef: "acct" }],
+    goals: [
+      { id: "submit", instruction: "Submit a pitch.", personaId: "priya" },
+      { id: "review", instruction: "Accept Priya's pitch.", personaId: "marco" },
+      { id: "decision", instruction: "See the decision.", personaId: "priya" },
+    ],
+    accounts: [{ ref: "acct", username: "a@a.test", password: "hunter22-secret" }],
+  });
+  const agent = scriptedModel([signedIn, text("thinking"), text("still thinking"), text("hmm")]);
+  const browsers = fakeBrowsers();
+  const summary = await localRun({
+    project: team, agentModel: agent, agentModelId: "m", judgeModel: scriptedModel([]), judgeModelId: "m",
+    budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: () => {}, openBrowser: browsers.open,
+  });
+  expect(summary.jobs.map((j) => j.jobId)).toEqual(["account:acct", "role:priya#1"]);
+  const why = "not started: the turn of Priya (role:priya#1) ended in an error, so this turn would have built on what never happened";
+  expect(summary.roles.map((r) => [r.persona, r.goals])).toEqual([
+    ["priya", [{ goal: "submit", status: "not_attempted", note: "" }, { goal: "decision", status: "not_attempted", note: why }]],
+    ["marco", [{ goal: "review", status: "not_attempted", note: why }]],
+  ]);
+});

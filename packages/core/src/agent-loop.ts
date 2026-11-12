@@ -1,13 +1,15 @@
 import { generateText, type LanguageModel, type ModelMessage, type StepResult, type ToolSet } from "ai";
 import type { JobUsage, StopReason } from "@usetrawler/protocol";
 import { dropOldReasoning, pruneMessages, showUnreadPictures } from "./context.ts";
-import { type Budget, failureMessage, stoppedByRun, tallyStep } from "./llm.ts";
+import { type Budget, failureMessage, providerUnreachable, stoppedByRun, tallyStep } from "./llm.ts";
 import type { SecretScrubber } from "./secrets.ts";
 
 const MAX_SILENT_TURNS = 3;
 const MAX_CUT_OFFS = 3;
 const MAX_BROWSER_CRASHES = 3;
 const REASONING_STEPS_KEPT = 2;
+export const OUTAGE_WAITS_MS = [30_000, 60_000, 120_000, 240_000];
+const PAUSE_SLICE_MS = 1_000;
 const CUT_OFF = "Your reply was cut off before this tool ran. Call one tool at a time.";
 const CUT_OFF_TEXT = "Your reply was cut off. Plain text does nothing; call one tool at a time.";
 
@@ -80,6 +82,7 @@ export async function runAgentLoop(opts: {
   crashed: () => string | false;
   onStep: (step: StepResult<ToolSet>, costUsd: number) => void;
   largeResultChars?: number;
+  outageWaitsMs?: number[];
 }): Promise<{ stoppedBy: StopReason; error?: string }> {
   const { usage } = opts;
   let stepFailure: unknown;
@@ -87,18 +90,28 @@ export async function runAgentLoop(opts: {
   let history: ModelMessage[] = [{ role: "user", content: "Begin." }];
   let silentTurns = 0;
   let cutOffs = 0;
+  let outages = 0;
+  const waits = opts.outageWaitsMs ?? [];
+  const pause = async (ms: number) => {
+    const until = Date.now() + ms;
+    while (!done() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, Math.min(PAUSE_SLICE_MS, until - Date.now())));
+  };
   try {
     while (!done()) {
+      let completed: ModelMessage[] = [];
       const result = await generateText({
         model: opts.model,
         tools: opts.tools,
         messages: history,
         stopWhen: [done, ({ steps }) => steps.at(-1)?.finishReason === "length"],
-        prepareStep: async ({ messages }) => ({
-          instructions: opts.scrubber.scrub(opts.instructions()),
-          activeTools: opts.activeTools?.(),
-          messages: opts.scrubber.scrub(pruneMessages(dropOldReasoning(showUnreadPictures(messages), REASONING_STEPS_KEPT), { keepLargeResults: 1, largeResultChars: opts.largeResultChars ?? 1500 })),
-        }),
+        prepareStep: async ({ messages, responseMessages }) => {
+          completed = responseMessages;
+          return {
+            instructions: opts.scrubber.scrub(opts.instructions()),
+            activeTools: opts.activeTools?.(),
+            messages: opts.scrubber.scrub(pruneMessages(dropOldReasoning(showUnreadPictures(messages), REASONING_STEPS_KEPT), { keepLargeResults: 1, largeResultChars: opts.largeResultChars ?? 1500 })),
+          };
+        },
         onStepEnd: (step) => {
           const cost = tallyStep(usage, opts.budget, step);
           try {
@@ -107,7 +120,17 @@ export async function runAgentLoop(opts: {
             stepFailure = err;
           }
         },
+      }).catch((err: unknown) => {
+        if (completed.length > 0) outages = 0;
+        if (stepFailure !== undefined || outages >= waits.length || !providerUnreachable(err)) throw err;
+        return null;
       });
+      if (result === null) {
+        history = answerUnrunToolCalls([...history, ...completed]).messages;
+        await pause(waits[outages++]!);
+        continue;
+      }
+      outages = 0;
       const answered = answerUnrunToolCalls([...history, ...result.responseMessages]);
       history = answered.messages;
       const last = result.steps.at(-1);

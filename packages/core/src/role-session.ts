@@ -1,7 +1,7 @@
 import type { LanguageModel, ToolSet } from "ai";
 import type { Screenshot } from "./browser.ts";
 import { FindingSchema, goalsFor, type JobUsage, type NotABug, type Persona, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
-import { browserQueue, runAgentLoop } from "./agent-loop.ts";
+import { browserQueue, OUTAGE_WAITS_MS, runAgentLoop } from "./agent-loop.ts";
 import type { Budget } from "./llm.ts";
 import { REVISITS_STOP, rolePrompt, sessionStatus, standbyPrompt, stuckHints, wrapUpPrompt, type Revisit, type WrapUp } from "./prompts.ts";
 import type { SecretScrubber } from "./secrets.ts";
@@ -41,6 +41,7 @@ export async function runRoleSession(opts: {
   jobId?: string;
   look?: boolean;
   conversation?: { peers: { id: string; name: string }[]; channel: TeamChannel };
+  outageWaitsMs?: number[];
 }): Promise<{ result: RoleResult; usage: JobUsage }> {
   if (!Number.isInteger(opts.maxSteps) || opts.maxSteps < 1) throw new RangeError(`maxSteps must be a positive integer, got ${opts.maxSteps}`);
   const jobId = opts.jobId ?? `role:${opts.persona.id}`;
@@ -157,6 +158,7 @@ export async function runRoleSession(opts: {
       return state.browserClosed ? WRAP_UP_TOOLS.filter((name) => name in tools) : undefined;
     },
     nudge: NUDGE,
+    outageWaitsMs: opts.outageWaitsMs ?? OUTAGE_WAITS_MS,
     scrubber: opts.scrubber,
     budget: opts.budget,
     maxSteps: opts.maxSteps,

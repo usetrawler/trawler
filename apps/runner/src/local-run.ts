@@ -86,10 +86,18 @@ export async function localRun(opts: {
   const signUpSeed = randomBytes(24).toString("base64url");
   const story: StoryEntry[] = [];
   const byPersona = new Map<string, RoleResult>();
+  let failedTurn: string | null = null;
   for (const [i, turn] of turns.entries()) {
     if (budget.exceeded) break;
     const persona = opts.project.personas.find((p) => p.id === turn.personaId)!;
     const jobId = teamed ? `role:${persona.id}#${i + 1}` : `role:${persona.id}`;
+    if (teamed && failedTurn) {
+      const note = `not started: ${failedTurn} ended in an error, so this turn would have built on what never happened`;
+      const skipped: RoleResult = { persona: persona.id, goals: turn.goalIds.map((goal) => ({ goal, status: "not_attempted", note })), findings: [], stoppedBy: "error", error: note };
+      const earlier = byPersona.get(persona.id);
+      byPersona.set(persona.id, earlier ? { ...earlier, goals: [...earlier.goals, ...skipped.goals] } : skipped);
+      continue;
+    }
     const scrubber = scrubberFor();
     const told: StoryEntry[] = [];
     const emit = (e: RunEventInput) => {
@@ -116,6 +124,7 @@ export async function localRun(opts: {
         usage: noUsage(opts.agentModelId),
       };
     });
+    if (result.stoppedBy === "error") failedTurn = `the turn of ${persona.name} (${jobId})`;
     story.push(...told);
     const earlier = byPersona.get(persona.id);
     byPersona.set(persona.id, earlier
