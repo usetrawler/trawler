@@ -27,7 +27,8 @@ export function turnEnd(t: TrailTurn): string {
   if (t.status === "failed") return `Could not finish: ${t.error ?? "no reason was recorded"}`;
   if (t.status === "queued") return "Waiting for this turn.";
   if (t.status === "leased") return "Working on it now.";
-  if (t.status === "cancelled") return t.entries === 0 ? "Did not start: the run stopped first." : "Stopped before the end of this turn.";
+  if (t.status === "cancelled" && t.entries === 0) return t.error?.startsWith("not started: ") ? `Did not start: ${t.error.slice("not started: ".length)}` : "Did not start: the run stopped first.";
+  if (t.status === "cancelled") return "Stopped before the end of this turn.";
   if (t.stoppedBy === "max_steps") return "Used all the steps this turn had.";
   if (t.stoppedBy === "budget") return "Stopped: the run's cap ran out or the run was stopped.";
   return "Finished this turn.";

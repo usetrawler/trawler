@@ -1020,6 +1020,18 @@ describe("a team session", () => {
     accounts: [{ ref: "admin", username: "admin@pitches.test", password: "admin-pass-1" }],
   });
 
+  test("in a plan with one turn per person, a turn that ends in an error leaves the other people to their own goals", async () => {
+    await drain();
+    const solo = ProjectConfigSchema.parse({ ...team, goals: team.goals.filter((g) => g.id !== "decision") });
+    const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", solo, keys));
+    await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", id, keys, options));
+
+    const first = (await claimPastChecks())!;
+    await completeJob(t.db, first.token, { usage: usage(0), stoppedBy: "error", error: "the model provider could not be reached" });
+    expect(await claimPastChecks()).toMatchObject({ kind: "role_session", personaKey: "marco" });
+    await drain();
+  });
+
   test("a turn that ends in an error stops the turns after it, and their goals say why they never started", async () => {
     await drain();
     const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", team, keys));
