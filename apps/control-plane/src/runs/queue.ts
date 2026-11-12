@@ -708,7 +708,33 @@ async function handOverToNextReport(tx: Tx, runId: string, key: string): Promise
   return successor.key;
 }
 
-async function planNext(tx: Tx, job: { run_id: string; org_id: string; kind: string; finding_key: string | null }, result: JobResult) {
+async function skipTurnsAfterFailed(tx: Tx, job: { id: string; run_id: string }) {
+  const failed = await tx
+    .selectFrom("jobs as j")
+    .innerJoin("runs as r", "r.id", "j.run_id")
+    .select(["j.position", "j.persona_key", "r.config_snapshot", "r.sign_up_seed", "r.conversation"])
+    .where("j.id", "=", job.id)
+    .executeTakeFirstOrThrow();
+  if (!failed.sign_up_seed || failed.conversation) return;
+  const snapshot = failed.config_snapshot as unknown as ConfigSnapshot;
+  if (!Array.isArray(snapshot.goals) || !Array.isArray(snapshot.personas) || turnsOf(snapshot).length <= snapshot.personas.length) return;
+  const name = snapshot.personas.find((p) => p.id === failed.persona_key)?.name ?? failed.persona_key;
+  const note = `not started: the turn of ${name} ended in an error, so this turn would have built on what never happened`;
+  const later = await tx
+    .updateTable("jobs")
+    .set({ status: "cancelled", error: note, finished_at: new Date() })
+    .where("run_id", "=", job.run_id)
+    .where("kind", "=", "role_session")
+    .where("status", "=", "queued")
+    .where("position", ">", failed.position)
+    .returning(["org_id", "position", "persona_key"])
+    .execute();
+  const outcomes = later.flatMap((j) => (turnsOf(snapshot)[j.position]?.goalIds ?? []).map((goal) => ({ org_id: j.org_id, run_id: job.run_id, persona_key: j.persona_key!, goal, status: "not_attempted", note })));
+  if (outcomes.length) await tx.insertInto("goal_outcomes").values(outcomes).onConflict((oc) => oc.columns(["run_id", "persona_key", "goal"]).doNothing()).execute();
+}
+
+async function planNext(tx: Tx, job: { id: string; run_id: string; org_id: string; kind: string; finding_key: string | null }, result: JobResult) {
+  if (job.kind === "role_session" && result.stoppedBy === "error") await skipTurnsAfterFailed(tx, job);
   const { next } = await tx.selectFrom("jobs").select(sql<number>`coalesce(max(position), -1) + 1`.as("next")).where("run_id", "=", job.run_id).executeTakeFirstOrThrow();
   if (job.kind === "role_session") {
     const rolesLeft = await tx.selectFrom("jobs").select("id").where("run_id", "=", job.run_id).where("kind", "=", "role_session").where("status", "in", ["queued", "leased"]).executeTakeFirst();
@@ -747,7 +773,7 @@ async function planNext(tx: Tx, job: { run_id: string; org_id: string; kind: str
   if (!open && job.kind !== "triage" && (await queueTriage(tx, job, next))) return;
   if (!open) {
     const roles = await tx.selectFrom("jobs").select("status").where("run_id", "=", job.run_id).where("kind", "=", "role_session").execute();
-    const allFailed = roles.length > 0 && roles.every((r) => r.status === "failed");
+    const allFailed = roles.some((r) => r.status === "failed") && roles.every((r) => r.status === "failed" || r.status === "cancelled");
     await tx.updateTable("runs").set({ status: allFailed ? "failed" : "succeeded", finished_at: new Date() }).where("id", "=", job.run_id).where("status", "in", ACTIVE).execute();
     await giveBackUnusedFirstRun(tx, job.run_id);
   }

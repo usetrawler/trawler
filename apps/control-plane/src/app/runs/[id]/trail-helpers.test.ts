@@ -66,6 +66,7 @@ test("each way a turn can end has its own line", () => {
   expect(turnEnd(turn("t", 1, { status: "queued", stoppedBy: null }))).toBe("Waiting for this turn.");
   expect(turnEnd(turn("t", 1, { status: "leased", stoppedBy: null }))).toBe("Working on it now.");
   expect(turnEnd(turn("t", 1, { status: "cancelled", stoppedBy: null, entries: 0 }))).toBe("Did not start: the run stopped first.");
+  expect(turnEnd(turn("t", 1, { status: "cancelled", stoppedBy: null, entries: 0, error: "not started: the turn of Priya ended in an error, so this turn would have built on what never happened" }))).toBe("Did not start: the turn of Priya ended in an error, so this turn would have built on what never happened");
   expect(turnEnd(turn("t", 1, { status: "cancelled", stoppedBy: null }))).toBe("Stopped before the end of this turn.");
   expect(turnEnd(turn("t", 1, { stoppedBy: "max_steps" }))).toBe("Used all the steps this turn had.");
   expect(turnEnd(turn("t", 1, { stoppedBy: "budget" }))).toBe("Stopped: the run's cap ran out or the run was stopped.");
