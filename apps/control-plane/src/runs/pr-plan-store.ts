@@ -18,6 +18,7 @@ export interface StoredPrPlan {
   inputsHash: string;
   turns: LeadTurn[];
   accountFlow: AccountFlow;
+  signUps: string[];
   accountReason?: string;
   brief?: string;
   createdByRun: number | null;
@@ -58,12 +59,12 @@ export async function turnsOfPlan(tx: Tx, planId: string): Promise<LeadTurn[]> {
 export async function currentPrPlan(tx: Tx, projectId: string, sourceId: string, key: PrKey): Promise<StoredPrPlan | null> {
   const row = await current(tx, projectId, sourceId, key)
     .leftJoin("runs as r", "r.id", "p.created_by_run_id")
-    .select(["p.id", "p.name", "p.version", "p.inputs_hash", "p.account_flow", "p.account_reason", "p.brief", "r.number as created_by_number"])
+    .select(["p.id", "p.name", "p.version", "p.inputs_hash", "p.account_flow", "p.sign_ups", "p.account_reason", "p.brief", "r.number as created_by_number"])
     .executeTakeFirst();
   if (!row) return null;
   return {
     id: row.id, name: row.name, version: row.version!, inputsHash: row.inputs_hash!, turns: await turnsOfPlan(tx, row.id),
-    accountFlow: row.account_flow === "exercise" ? "exercise" : "provided", ...(row.account_reason ? { accountReason: row.account_reason } : {}), ...(row.brief ? { brief: row.brief } : {}), createdByRun: row.created_by_number,
+    accountFlow: row.account_flow === "exercise" ? "exercise" : "provided", signUps: row.sign_ups ?? [], ...(row.account_reason ? { accountReason: row.account_reason } : {}), ...(row.brief ? { brief: row.brief } : {}), createdByRun: row.created_by_number,
   };
 }
 
@@ -96,13 +97,13 @@ export async function prunePrPlans(tx: Tx, projectId: string): Promise<void> {
     .execute();
 }
 
-export async function storePrPlan(tx: Tx, plan: { orgId: string; projectId: string; sourceId: string; key: PrKey; hash: string; content: PlanContent; accountFlow: AccountFlow; accountReason?: string; brief?: string; runId: string }): Promise<{ id: string; name: string; version: number }> {
+export async function storePrPlan(tx: Tx, plan: { orgId: string; projectId: string; sourceId: string; key: PrKey; hash: string; content: PlanContent; accountFlow: AccountFlow; signUps?: string[]; accountReason?: string; brief?: string; runId: string }): Promise<{ id: string; name: string; version: number }> {
   const { orgId, projectId, sourceId, key } = plan;
   await sql`select pg_advisory_xact_lock(hashtextextended(${`pr-plan:${projectId}:${sourceId}:${key.repo}:${key.number}`}, 0))`.execute(tx);
   const previous = await current(tx, projectId, sourceId, key).select(["p.id", "p.version"]).forUpdate().executeTakeFirst();
   const version = (previous?.version ?? 0) + 1;
   const now = new Date();
-  const fields = { inputs_hash: plan.hash, version, account_flow: plan.accountFlow, account_reason: plan.accountReason ?? null, brief: plan.brief ?? null, created_by_run_id: plan.runId, last_used_at: now, updated_at: now };
+  const fields = { inputs_hash: plan.hash, version, account_flow: plan.accountFlow, sign_ups: plan.signUps ?? [], account_reason: plan.accountReason ?? null, brief: plan.brief ?? null, created_by_run_id: plan.runId, last_used_at: now, updated_at: now };
   const name = prPlanName(key.number);
   const id = previous
     ? (await tx.updateTable("plans").set(fields).where("id", "=", previous.id).returning("id").executeTakeFirstOrThrow()).id
