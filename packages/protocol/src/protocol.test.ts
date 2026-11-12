@@ -135,6 +135,12 @@ describe("RunEvent", () => {
   test("rejects a finding event carrying an invalid finding", () => {
     expect(() => RunEventSchema.parse({ seq: 1, at: "2026-09-24T10:00:00.000Z", jobId: "x", type: "finding", finding: { id: "f1", kind: "defect", goal: "g", title: "t", observed: "o", reproduction: ["one"], severity: "low" } })).toThrow(/two reproduction steps/);
   });
+  test("a blocked request carries the browser's cause only as a short net::ERR_ code, and none for Trawler's own block", () => {
+    const blocked = (more: object) => ({ seq: 1, at: "2026-09-24T10:00:00.000Z", jobId: "x", type: "blocked_request", url: "ws://localhost:3000/_next/webpack-hmr", ...more });
+    expect(RunEventSchema.parse(blocked({}))).not.toHaveProperty("cause");
+    expect(RunEventSchema.parse(blocked({ cause: "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS" }))).toMatchObject({ cause: "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS" });
+    for (const cause of ["blocked", "net::ERR_x", `net::ERR_${"A".repeat(100)}`, "net::ERR_FAILED <script>"]) expect(() => RunEventSchema.parse(blocked({ cause }))).toThrow();
+  });
   test("numbers steps from one", () => {
     expect(() => RunEventSchema.parse({ seq: 1, at: "2026-09-24T10:00:00.000Z", jobId: "x", type: "step", step: 0, tool: null, costUsd: 0 })).toThrow();
   });

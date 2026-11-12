@@ -16,7 +16,7 @@ const summary = (over: Partial<RunSummary>): RunSummary => ({
   startedVia: null, stoppedVia: null, origin: "app",
   id: "run-1", number: 7, status: "succeeded", cancelReason: null, projectId: "project-1", planName: null, savedPlan: null, costUsd: 0.35, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash",
   provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0, createdAt: new Date("2026-09-25T19:40:00Z"), startedAt: new Date("2026-09-25T19:40:05Z"), finishedAt: new Date("2026-09-25T19:59:00Z"),
-  jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [], conversation: false, pullRequest: null, prPlan: null, conversationMessages: [], marks: [], execution: "hosted", providedAccounts: [],
+  jobs: [], findings: [], goals: [], botProtection: null, browserFailures: [], target: "https://app.acme.test/", activity: [], conversation: false, pullRequest: null, prPlan: null, conversationMessages: [], marks: [], execution: "hosted", providedAccounts: [],
   personas: [{ id: "ana", name: "Ana" }, { id: "lee", name: "Lee Park" }], goalTexts: [{ id: "g1", instruction: "Get an account." }, { id: "g2", instruction: "Send an invoice." }],
   ...over,
 });
@@ -318,6 +318,22 @@ test("a confirmed defect a person filed as friction says so, and a defect they f
   const said = text(render(run)).match(/filed this as friction on a goal they did not reach, so Trawler replayed it too/g);
   expect(text(render(run))).toContain("Ana filed this as friction on a goal they did not reach, so Trawler replayed it too.");
   expect(said).toHaveLength(1);
+});
+
+test("a run whose browser could not load parts of the product names each address and cause, live and finished, says it is the environment and links to the fix", () => {
+  const failures = [{ origin: "http://localhost:3000", cause: "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS" }, { origin: "http://localhost:4000", cause: "net::ERR_CONNECTION_REFUSED" }];
+  for (const run of [summary({ ...finished, browserFailures: failures }), summary({ ...live, browserFailures: failures })]) {
+    const html = render(run);
+    const t = text(html);
+    expect(t).toContain("The browser could not load parts of the product");
+    expect(t).toContain("often come from where the product runs rather than from the product itself");
+    expect(t).not.toContain("were told");
+    expect(t).toContain("http://localhost:3000 · net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS");
+    expect(t).toContain("http://localhost:4000 · net::ERR_CONNECTION_REFUSED");
+    expect(html).toContain('href="https://usetrawler.com/docs/reference/troubleshooting/#the-browser-could-not-load-parts-of-the-product"');
+  }
+  expect(text(render(finished))).toContain("Saving an invoice fails");
+  expect(text(render(finished))).not.toContain("could not load");
 });
 
 test("a run stopped by bot protection says which check blocked Trawler and where, live and finished, and links to how to let Trawler through", () => {

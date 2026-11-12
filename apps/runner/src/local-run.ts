@@ -1,12 +1,13 @@
 import { randomBytes } from "node:crypto";
 import type { LanguageModel } from "ai";
 import { Budget, checkAccount, judge, runReplay, runRoleSession, SecretScrubber, type Browser } from "@usetrawler/core";
-import { ACCOUNT_CHECK_STEPS, MAX_URL, trimStory, turnsOf, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
+import { ACCOUNT_CHECK_STEPS, trimStory, turnsOf, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
 import type { RunSummary } from "./run-dir.ts";
+import { blockedRequest } from "./blocked-request.ts";
 
 const CLOSE_TIMEOUT_MS = 10_000;
 
-export type OpenBrowser = (opts: { onBlocked: (url: string) => void; scrubber: SecretScrubber }) => Promise<Browser>;
+export type OpenBrowser = (opts: { onBlocked: (url: string, cause?: string) => void; scrubber: SecretScrubber }) => Promise<Browser>;
 
 export async function localRun(opts: {
   project: ProjectConfig;
@@ -27,19 +28,22 @@ export async function localRun(opts: {
     project: opts.project.name, agentModel: opts.agentModelId, judgeModel: opts.judgeModelId,
     startedAt, finishedAt: startedAt, budgetUsd: opts.budgetUsd, totalCostUsd: 0, jobs: [], roles: [], replays: {}, replayErrors: {}, verdicts: {}, judgeErrors: {},
     people: Object.fromEntries(opts.project.personas.map((p) => [p.id, p.name])),
+    browserFailures: [],
   };
   const scrubberFor = () => SecretScrubber.forProject(opts.project);
   let findingNo = 0;
 
+  const blockedFor = (jobId: string, scrubber: SecretScrubber) => (url: string, cause?: string) => {
+    try {
+      const event = scrubber.scrub(blockedRequest(jobId, url, cause));
+      opts.emit(event);
+      if (cause && event.type === "blocked_request") summary.browserFailures!.push({ jobId, url: event.url, cause });
+    } catch {
+      return;
+    }
+  };
   const withBrowser = async <T>(jobId: string, scrubber: SecretScrubber, fn: (b: Browser) => Promise<T>): Promise<T> => {
-    const onBlocked = (url: string) => {
-      try {
-        opts.emit(scrubber.scrub({ type: "blocked_request", jobId, url: url.slice(0, MAX_URL) }));
-      } catch {
-        return;
-      }
-    };
-    const browser = await opts.openBrowser({ onBlocked, scrubber });
+    const browser = await opts.openBrowser({ onBlocked: blockedFor(jobId, scrubber), scrubber });
     try {
       return await fn(browser);
     } finally {
@@ -144,7 +148,7 @@ export async function localRun(opts: {
           model: opts.agentModel, modelId: opts.agentModelId, finding, project: opts.project, accountRef,
           browserTools: b.tools, fillField: b.fillField, botProtection: () => b.botProtection?.() ?? null, scrubber, budget,
           ...(opts.look ? { look: true, screenshot: () => b.screenshot() } : {}), maxSteps: opts.replaySteps * Math.max(1, new Set(finding.by ?? []).size), emit: opts.emit,
-          openBrowser: () => opts.openBrowser({ scrubber, onBlocked: (url) => { try { opts.emit(scrubber.scrub({ type: "blocked_request", jobId: `replay:${finding.id}`, url: url.slice(0, MAX_URL) })); } catch { return; } } }),
+          openBrowser: () => opts.openBrowser({ scrubber, onBlocked: blockedFor(`replay:${finding.id}`, scrubber) }),
         }),
       ).catch((err) => {
         const error = failure(scrubber, err);

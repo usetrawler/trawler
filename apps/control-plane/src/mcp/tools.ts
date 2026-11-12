@@ -171,13 +171,14 @@ export function registerReadTools(server: McpServer, deps: ToolDeps): void {
   tool("get_run", {
     _meta: RUN_REPORT_META,
     title: "Read a run's report",
-    description: `Reads one run: the headline, goals per person, and the findings grouped as the dashboard groups them (confirmed by replay, inconclusive, refuted, could not be judged, not judged, friction, dismissed). Up to ${LIMITS.findingsPerGroup} findings per group; use get_finding for one finding in full. ${UNTRUSTED_NOTICE}`,
+    description: `Reads one run: the headline, goals per person, and the findings grouped as the dashboard groups them (confirmed by replay, inconclusive, refuted, could not be judged, not judged, friction, dismissed), and the addresses the browser itself could not load (browserFailures), which point to the environment rather than the product. Up to ${LIMITS.findingsPerGroup} findings per group; use get_finding for one finding in full. ${UNTRUSTED_NOTICE}`,
     inputSchema: z.object({ run: RunArg }).strict(),
     outputSchema: z.object({
       id: z.string(), number: z.number(), url: z.string(), status: z.string(), live: z.boolean(), headline: z.string(), headlineDetail: UntrustedSchema.nullable(), project: z.object({ id: z.string() }), plan: z.string().nullable(), target: z.string(), model: z.string(),
       createdAt: z.string().nullable(), startedAt: z.string().nullable(), finishedAt: z.string().nullable(), costUsd: z.number(), budgetUsd: z.number(),
       pullRequest: z.object({ number: z.number().nullable(), repository: z.string().nullable(), url: z.string().nullable(), title: UntrustedSchema.nullable() }).nullable(),
       botProtection: z.object({ vendor: z.string() }).nullable(),
+      browserFailures: z.array(z.object({ origin: z.string(), cause: z.string() })),
       goals: z.object({ reached: z.number(), total: z.number(), notReached: z.array(GoalSchema) }),
       people: z.array(z.object({ id: z.string(), name: z.string(), state: z.string(), defects: z.number(), friction: z.number(), goals: z.array(z.object({ id: z.string(), goal: GoalSchema, status: z.string().nullable(), note: UntrustedSchema.nullable() })) })),
       findings: z.object(Object.fromEntries(GROUPS.map((g) => [g, z.object({

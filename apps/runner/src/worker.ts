@@ -2,8 +2,9 @@ import type { LanguageModel } from "ai";
 import { z } from "zod";
 import { type Browser, Budget, checkAccount, groupDefects, judge, triageFindings, MIN_SECRET_LENGTH, runReplay, runRoleSession, type Screenshot, SecretScrubber, type TeamChannel } from "@usetrawler/core";
 import { withProvidedAccounts } from "./provided-accounts.ts";
+import { blockedRequest } from "./blocked-request.ts";
 import {
-  ChannelSchema, JobAssignmentSchema, MAX_EVENTS_PER_BATCH, MAX_URL, PROTOCOL_HEADER, PROTOCOL_VERSION,
+  ChannelSchema, JobAssignmentSchema, MAX_EVENTS_PER_BATCH, PROTOCOL_HEADER, PROTOCOL_VERSION,
   type AccountsFile, type JobAssignment, type JobCompletion, type JobStopReason, type JobUsage, type ProjectConfig, type RunEvent, type RunEventInput,
 } from "@usetrawler/protocol";
 
@@ -18,7 +19,7 @@ export interface WorkerDeps {
   controlPlane: string;
   runnerToken: string;
   model: (modelId: string, jobToken: string) => LanguageModel;
-  openBrowser: (config: ProjectConfig, opts: { onBlocked: (url: string) => void; scrubber: SecretScrubber }) => Promise<Browser>;
+  openBrowser: (config: ProjectConfig, opts: { onBlocked: (url: string, cause?: string) => void; scrubber: SecretScrubber }) => Promise<Browser>;
   log: (line: string, fields?: LogFields) => void;
   report?: (message: string, fields: LogFields) => void;
   maskReportsWith?: (scrubber: SecretScrubber) => void;
@@ -271,7 +272,7 @@ class Screenshots {
 const zeroUsage = (model: string): JobUsage => ({ model, inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 });
 
 async function withBrowser<T>(deps: WorkerDeps, config: ProjectConfig, scrubber: SecretScrubber, events: JobEvents, jobId: string, fn: (b: Browser) => Promise<T>): Promise<T> {
-  const browser = await deps.openBrowser(config, { scrubber, onBlocked: (url) => events.emit(scrubber.scrub({ type: "blocked_request", jobId, url: url.slice(0, MAX_URL) })) });
+  const browser = await deps.openBrowser(config, { scrubber, onBlocked: (url, cause) => events.emit(scrubber.scrub(blockedRequest(jobId, url, cause))) });
   try {
     return await fn(browser);
   } finally {
@@ -327,7 +328,7 @@ async function run(deps: WorkerDeps, job: JobAssignment, events: JobEvents, budg
         model: deps.model(job.agentModel, job.token), modelId: job.agentModel, finding, project: config, accountRef: job.accountRef,
         browserTools: b.tools, fillField: b.fillField, scrubber, budget, maxSteps: job.maxSteps, emit: events.emit,
         screenshot: () => b.screenshot(), keepScreenshot: screenshots.keep, botProtection: () => b.botProtection?.() ?? null, look: deps.look?.(config.targetUrl),
-        openBrowser: () => deps.openBrowser(config, { scrubber, onBlocked: (url) => events.emit(scrubber.scrub({ type: "blocked_request", jobId: job.jobId, url: url.slice(0, MAX_URL) })) }),
+        openBrowser: () => deps.openBrowser(config, { scrubber, onBlocked: (url, cause) => events.emit(scrubber.scrub(blockedRequest(job.jobId, url, cause))) }),
       }),
     );
     return { usage, stoppedBy: events.finished?.stoppedBy ?? "error", observation, ...(events.finished?.error ? { error: clip(events.finished.error) } : {}) };

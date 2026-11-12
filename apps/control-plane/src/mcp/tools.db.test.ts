@@ -491,3 +491,18 @@ test("the tools whose results the app shows point at it, and the app is served a
   expect(read[0]!.text).toMatch(/^<!doctype html>/);
   expect(read[0]!._meta!.ui!.csp).toEqual({ connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [] });
 });
+
+test("get_run and a person's trail name what the browser itself could not load, apart from Trawler's own blocks", async () => {
+  await asSystem(t.db, async (tx) => {
+    const job = await tx.selectFrom("jobs").select("id").where("run_id", "=", runs.a2!.id).where("persona_key", "=", "ana").executeTakeFirstOrThrow();
+    await tx.insertInto("run_events").values([
+      { url: "https://tracker.example/pixel.gif" },
+      { url: "ws://localhost:3000/_next/webpack-hmr", cause: "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS" },
+    ].map((p, i) => ({ org_id: "org-a", run_id: runs.a2!.id, job_id: job.id, seq: 1000 + i, at: new Date(), type: "blocked_request", payload: JSON.stringify({ type: "blocked_request", ...p }) }))).execute();
+  });
+  const run = await call(A, "get_run", { run: runs.a2!.number });
+  expect(run.structured.browserFailures).toEqual([{ origin: "http://localhost:3000", cause: "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS" }]);
+  const trail = (await call(A, "get_evidence", { run: runs.a2!.number, ref: "trail:ana" })).structured.trail.text;
+  expect(trail).toContain("the browser could not load localhost:3000 (net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS)");
+  expect(trail).toContain("blocked a request to tracker.example");
+});

@@ -421,6 +421,31 @@ function originOf(url: string): string | null {
   }
 }
 
+const NOT_THE_ENVIRONMENT = new Set(["net::ERR_ABORTED", "net::ERR_BLOCKED_BY_CLIENT"]);
+const BROWSER_CAUSE = /net::ERR_[A-Z0-9_]+/;
+const MAX_CAUSE = 100;
+const SOCKET_FAILURE = "WebSocket connection to ";
+const URL_IN_TEXT = /\b(?:wss?|https?):\/\/[^\s'"]+/;
+const MAX_BROWSER_FAILURES = 20;
+const ENVIRONMENT_CAUSE = /^net::ERR_(BLOCKED_BY_(LOCAL|PRIVATE)_NETWORK_ACCESS_CHECKS|INTERNET_DISCONNECTED|ADDRESS_UNREACHABLE|TUNNEL_CONNECTION_FAILED|PROXY_[A-Z0-9_]+)$/;
+
+export function browserFailure(text: string, fallbackUrl: string): { url: string; cause: string } | null {
+  const cause = BROWSER_CAUSE.exec(text)?.[0];
+  if (!cause || cause.length > MAX_CAUSE || NOT_THE_ENVIRONMENT.has(cause)) return null;
+  const url = URL_IN_TEXT.exec(text)?.[0] ?? fallbackUrl;
+  return originOf(url.replace(/^ws(s?):/, "http$1:")) ? { url, cause } : null;
+}
+
+export function browserFailureNote(failures: Array<{ origin: string; cause: string }>): string {
+  const lines = (list: typeof failures) => list.map(({ origin, cause }) => `- ${origin}: ${cause}`).join("\n");
+  const environment = failures.filter((f) => ENVIRONMENT_CAUSE.test(f.cause));
+  const other = failures.filter((f) => !ENVIRONMENT_CAUSE.test(f.cause));
+  const parts = ["### Browser could not load\nThe browser itself failed to load requests, so parts of the page that depend on them may be missing or not respond."];
+  if (environment.length > 0) parts.push(`These failed because of the test environment, not the product:\n${lines(environment)}\nDo not report what follows from them as a defect. If a goal cannot go on without them, mark the goal as failed with a note naming the error.`);
+  if (other.length > 0) parts.push(`These failed, and the cause may be the product or where it runs:\n${lines(other)}\nIf you report something that follows from them, name the error in what you observed.`);
+  return parts.join("\n");
+}
+
 function textOf(result: unknown): string {
   return ((result as McpResult)?.content ?? []).map((c) => c.text ?? "").join("\n");
 }
@@ -492,7 +517,7 @@ export async function openBrowser(opts: {
   storageState?: string;
   outputDir: string;
   scrubber: SecretScrubber;
-  onBlocked: (url: string) => void;
+  onBlocked: (url: string, cause?: string) => void;
   proxy?: { server: string };
   executablePath?: string;
   downloadsPath?: string;
@@ -517,6 +542,17 @@ export async function openBrowser(opts: {
     opts.onBlocked(url);
   };
   let blockedNavigation: string | null = null;
+  const failedKeys = new Set<string>();
+  let untold: Array<{ origin: string; cause: string }> = [];
+  const failed = (found: { url: string; cause: string } | null) => {
+    if (!found || !isAllowed(found.url)) return;
+    const origin = originOf(found.url.replace(/^ws(s?):/, "http$1:"))!;
+    const key = `${origin} ${found.cause}`;
+    if (failedKeys.has(key) || failedKeys.size >= MAX_BROWSER_FAILURES) return;
+    failedKeys.add(key);
+    untold.push({ origin, cause: found.cause });
+    opts.onBlocked(found.url, found.cause);
+  };
 
   await registerEngines();
   const chrome = await chromium.launch({ headless: opts.headless ?? true, executablePath: opts.executablePath, downloadsPath: opts.downloadsPath, env: browserEnv(process.env, { proxied: Boolean(opts.proxy) }), proxy: opts.proxy, args: opts.proxy ? ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"] : [], handleSIGTERM: !opts.survivesSignals, handleSIGINT: !opts.survivesSignals, handleSIGHUP: !opts.survivesSignals });
@@ -654,7 +690,13 @@ export async function openBrowser(opts: {
       return pending.size;
     };
     context.on("requestfinished", done);
-    context.on("requestfailed", done);
+    context.on("requestfailed", (request) => {
+      done(request);
+      failed(browserFailure(request.failure()?.errorText ?? "", request.url()));
+    });
+    context.on("console", (message) => {
+      if (message.type() === "error" && message.text().startsWith(SOCKET_FAILURE)) failed(browserFailure(message.text(), message.location().url));
+    });
     const settled = async (page: Page | undefined) => {
       if (!page) return;
       const quietMs = opts.quietMs ?? QUIET_MS;
@@ -890,6 +932,10 @@ export async function openBrowser(opts: {
         result.content = result.content?.map((part) => (typeof part.text === "string" ? { ...part, text: part.text.replace(SILENT_LEAVE_PROMPT, `[${LEAVE_PROMPT}]`) } : part));
         if (blockedNavigation) {
           result.content = [...(result.content ?? []), { type: "text", text: `### Blocked\n${blockedNavigation} is outside the allowed origins, so the browser did not open it. Go back or navigate to an allowed page.` }];
+        }
+        if (untold.length > 0) {
+          result.content = [...(result.content ?? []), { type: "text", text: browserFailureNote(untold) }];
+          untold = [];
         }
         const { found, cleared } = await checkBotProtection();
         if (found) result.content = [...(result.content ?? []), { type: "text", text: botProtectionNote(found) }];

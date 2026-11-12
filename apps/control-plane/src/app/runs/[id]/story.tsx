@@ -170,7 +170,8 @@ function Row({ row, people }: { row: StoryRow; people: Person[] }) {
         {e.kind === "note" && <span className="text-muted">Noted: {e.text}</span>}
         {e.kind === "goal" && <span className={`font-medium ${e.status === "reached" ? "text-ok" : e.status === "failed" ? "text-bad" : "text-muted"}`}>{e.status === "reached" ? "✓ Reached: " : e.status === "failed" ? "✕ Did not reach: " : "· Left without an answer: "}{e.goal}{e.note && <span className="font-normal text-muted"> — {e.note}</span>}</span>}
         {e.kind === "finding" && <a href={`#${findingAnchor(e.findingKey)}`} className="font-medium hover:underline hover:underline-offset-4">{e.findingKind === "defect" ? "Reported: " : "Noted friction: "}{e.title}</a>}
-        {e.kind === "blocked" && <span className="text-muted">Trawler blocked a request to {e.address}, outside the product.</span>}
+        {e.kind === "blocked" && !e.cause && <span className="text-muted">Trawler blocked a request to {e.address}, outside the product.</span>}
+        {e.kind === "blocked" && e.cause && <span className="text-warn">The browser could not load {e.address}: <span className="font-mono break-all">{e.cause}</span>.</span>}
         {e.kind === "bot_protection" && <span className="text-warn">{e.vendor}&apos;s bot protection stopped the browser{e.page ? ` at ${e.page}` : ""}.</span>}
       </span>
       <span className="text-xs text-muted">{kindLabel}</span>

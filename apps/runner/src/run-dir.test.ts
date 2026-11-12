@@ -83,3 +83,28 @@ test("a defect that needed several people names who did each step", () => {
   });
   expect(md).toContain("1. Lee: Invite Ana\n2. Ana: Open the invite");
 });
+
+test("the report lists what the browser itself could not load, once per origin and cause, after the jobs and before the goals", () => {
+  const md = renderReport({
+    ...summary,
+    browserFailures: [
+      { jobId: "role:a", url: "ws://localhost:3000/_next/webpack-hmr", cause: "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS" },
+      { jobId: "role:a", url: "http://localhost:3000/_next/static/editor.js", cause: "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS" },
+      { jobId: "replay:f1", url: "http://localhost:3000/api", cause: "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS" },
+      { jobId: "role:a", url: "http://localhost:4000/api", cause: "net::ERR_CONNECTION_REFUSED" },
+    ],
+  });
+  const section = md.slice(md.indexOf("## The browser could not load"), md.indexOf("## Goals"));
+  expect(section).toContain("often come from where the product runs");
+  expect(section.match(/^- .*$/gm)).toEqual([
+    "- http://localhost:3000: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS (role:a, replay:f1)",
+    "- http://localhost:4000: net::ERR_CONNECTION_REFUSED (role:a)",
+  ]);
+  expect(md.indexOf("| role:a |")).toBeLessThan(md.indexOf("## The browser could not load"));
+  expect(md.indexOf("## The browser could not load")).toBeLessThan(md.indexOf("## Goals"));
+});
+
+test("a run where the browser loaded everything has no such section", () => {
+  expect(renderReport({ ...summary, browserFailures: [] })).not.toContain("could not load");
+  expect(renderReport(summary)).not.toContain("could not load");
+});

@@ -51,7 +51,7 @@ const press = (node: Node) => (node.props!.onClick as () => void)();
 const summary = (status: string, over: Partial<RunSummary> = {}): RunSummary => ({
   startedVia: null, stoppedVia: null, origin: "app",
   id: "run-1", number: 7, status, cancelReason: null, projectId: "project-1", planName: null, savedPlan: null, costUsd: 0.2, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "m", judgeModel: "m", provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0,
-  createdAt: new Date(), startedAt: new Date(), finishedAt: null, jobs: [], findings: [], goals: [], botProtection: null, target: "https://app.acme.test/", activity: [], conversation: false, pullRequest: null, prPlan: null, conversationMessages: [], marks: [], execution: "hosted", providedAccounts: [],
+  createdAt: new Date(), startedAt: new Date(), finishedAt: null, jobs: [], findings: [], goals: [], botProtection: null, browserFailures: [], target: "https://app.acme.test/", activity: [], conversation: false, pullRequest: null, prPlan: null, conversationMessages: [], marks: [], execution: "hosted", providedAccounts: [],
   personas: [{ id: "ana", name: "Ana" }], goalTexts: [{ id: "g1", instruction: "Get an account." }],
   ...over,
 });

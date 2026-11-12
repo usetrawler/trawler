@@ -67,6 +67,27 @@ test("roles, then a replay and a judge per defect, each in its own browser", asy
   expect(events).not.toContain("hunter22-secret");
 });
 
+test("what the browser itself could not load goes into the events with its cause and into the summary, masked; Trawler's own blocks only into the events", async () => {
+  const open: OpenBrowser = async ({ onBlocked }) => ({
+    tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => {
+      onBlocked("https://evil.test/");
+      onBlocked("ws://localhost:3000/_next/webpack-hmr?key=hunter22-secret", "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS");
+      return "page";
+    } }) },
+    fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => {},
+  });
+  const events: RunEventInput[] = [];
+  const summary = await localRun({
+    project: { ...project, personas: [project.personas[1]!] }, agentModel: scriptedModel([look, ...finished("done")]), agentModelId: "a",
+    judgeModel: scriptedModel([]), judgeModelId: "j", budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: (e) => events.push(e), openBrowser: open,
+  });
+  expect(events.filter((e) => e.type === "blocked_request")).toEqual([
+    { type: "blocked_request", jobId: "role:p2", url: "https://evil.test/" },
+    { type: "blocked_request", jobId: "role:p2", url: "ws://localhost:3000/_next/webpack-hmr?key=•••", cause: "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS" },
+  ]);
+  expect(summary.browserFailures).toEqual([{ jobId: "role:p2", url: "ws://localhost:3000/_next/webpack-hmr?key=•••", cause: "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS" }]);
+});
+
 test("the replay signs in with the account of the persona that found the defect", async () => {
   const signIn = toolCall("sign_in", { account: "acct", usernameField: "e1", passwordField: "e2" });
   const agent = scriptedModel([signedIn, 
