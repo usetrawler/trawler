@@ -1,6 +1,6 @@
 import type { GoalBlocker } from "@usetrawler/protocol";
 
-export type GoalCause = GoalBlocker | "other";
+export type GoalCause = GoalBlocker | "unknown" | "other";
 export type UncheckedCause = Exclude<GoalCause, "product">;
 
 export interface Coverage {
@@ -14,11 +14,12 @@ export interface Coverage {
 
 export function causeOf(g: { status: string | null; blockedBy: GoalBlocker | null }): GoalCause | null {
   if (g.status === "reached") return null;
-  return g.status === "failed" && g.blockedBy ? g.blockedBy : "other";
+  if (g.status !== "failed") return "other";
+  return g.blockedBy ?? "unknown";
 }
 
 export function coverageOf(goals: Array<{ goal: string; status: string | null; blockedBy: GoalBlocker | null }>): Coverage {
-  const c: Coverage = { total: goals.length, checked: 0, reached: 0, notChecked: { setup: 0, person: 0, other: 0 }, failedOnProduct: 0, unchecked: [] };
+  const c: Coverage = { total: goals.length, checked: 0, reached: 0, notChecked: { setup: 0, person: 0, unknown: 0, other: 0 }, failedOnProduct: 0, unchecked: [] };
   for (const g of goals) {
     const cause = causeOf(g);
     if (cause === null) c.reached++;
@@ -35,11 +36,12 @@ export function coverageOf(goals: Array<{ goal: string; status: string | null; b
 const NOT_CHECKED_BECAUSE: Record<UncheckedCause, (n: number) => string> = {
   setup: (n) => `${n} because the setup lacked what ${n === 1 ? "it" : "they"} needed`,
   person: (n) => `${n} because a person could not find the way`,
+  unknown: (n) => `${n} failed with no cause given`,
   other: (n) => `${n} not finished`,
 };
 
 export function notCheckedParts(c: Pick<Coverage, "notChecked">): string[] {
-  return (["setup", "person", "other"] as const).filter((k) => c.notChecked[k] > 0).map((k) => NOT_CHECKED_BECAUSE[k](c.notChecked[k]));
+  return (["setup", "person", "unknown", "other"] as const).filter((k) => c.notChecked[k] > 0).map((k) => NOT_CHECKED_BECAUSE[k](c.notChecked[k]));
 }
 
 export function checkedLine(c: Pick<Coverage, "reached" | "failedOnProduct" | "notChecked" | "checked">, total: number, goals: (n: number) => string): string {

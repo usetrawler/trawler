@@ -69,7 +69,7 @@ export function personLine(p: Person): string {
   return `Reached ${reached} of ${p.goals.length} ${p.goals.length === 1 ? "goal" : "goals"}.`;
 }
 
-export const BLOCKED_LABEL: Record<GoalBlocker, string> = { product: "the product stopped them", setup: "the setup lacked what it needs", person: "could not find the way" };
+export const BLOCKED_LABEL: Record<GoalBlocker, string> = { product: "the product stopped them", setup: "the setup lacked what it needed", person: "they could not find the way" };
 
 export function outcome(view: View): { people: string; goals: string } {
   const everyGoal = view.personas.filter((p) => p.state === "reached").length;

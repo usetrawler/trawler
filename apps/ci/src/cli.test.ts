@@ -144,6 +144,13 @@ describe("runCli", () => {
     expect(h.err.join("\n")).not.toContain("trw_secret");
   });
 
+  it("prints how many goals were checked when the control plane says so", async () => {
+    const coverage = { checked: 1, reached: 1, failedOnProduct: 0, notChecked: { setup: 3, person: 0, unknown: 0, other: 0 }, unchecked: [] };
+    const h = harness([result({ status: "running", finished: false, coverage }), result({ coverage })], {});
+    await runCli(argv, h.deps);
+    expect(h.err.join("\n")).toContain("running, 1/4 goals checked");
+  });
+
   it("posts the pull request comment and writes the step summary on GitHub Actions", async () => {
     const dir = mkdtempSync(join(tmpdir(), "trawler-ci-"));
     const event = join(dir, "event.json");

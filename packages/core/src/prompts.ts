@@ -62,7 +62,7 @@ The product's team wrote down how the product is set up for this test and what i
 <setup-${tag}>
 ${setup}
 </setup-${tag}>
-Do not report what it describes as a defect or as friction. When a goal cannot be reached because of it, give the goal failed and say which limit stopped you. When it says where mail the product sends can be read, open that place whenever a goal needs a mail, such as an invitation or a reminder.
+Do not report what it describes as a defect or as friction. When a goal cannot be reached because of it, give the goal failed with blockedBy setup and say which limit stopped you. When it says where mail the product sends can be read, open that place whenever a goal needs a mail, such as an invitation or a reminder.
 `;
 }
 
@@ -139,7 +139,7 @@ export interface Revisit {
 export function stuckHints(p: { sinceStatus: number; revisits: Revisit[]; openGoals: number }): string {
   if (p.openGoals === 0) return "";
   const hints: string[] = [];
-  if (p.sinceStatus >= GOAL_SHARE) hints.push(`You have taken ${p.sinceStatus} steps since you last gave a goal a status. If the goal you are on cannot be done here, give it failed with what you saw and go on to the next one; if it is done, give it reached.`);
+  if (p.sinceStatus >= GOAL_SHARE) hints.push(`You have taken ${p.sinceStatus} steps since you last gave a goal a status. If the goal you are on cannot be done here, give it failed with blockedBy and what you saw, and go on to the next one; if it is done, give it reached.`);
   const most = p.revisits[0];
   if (most && most.count >= REVISITS_HINT) {
     hints.push(`You have come back to ${most.url} ${most.count} times without recording anything. Stop going in circles: if something there behaved wrongly, record it with submit_finding; otherwise give the current goal a status or try a different way. At ${REVISITS_STOP} visits the browser closes until you give the goal a status.`);
@@ -155,9 +155,9 @@ export function wrapUpPrompt(w: WrapUp): string {
     case "settled":
       return `\n\n## Wrap up\nEvery goal has a status, so the browser is closed to you. ${record} Then call finish.`;
     case "out_of_steps":
-      return `\n\n## Wrap up\nOnly ${w.stepsLeft} step${w.stepsLeft === 1 ? "" : "s"} left, so the browser is closed to you. ${record} Then give every open goal a status (failed, with where you stopped, if you did not get there) and call finish.`;
+      return `\n\n## Wrap up\nOnly ${w.stepsLeft} step${w.stepsLeft === 1 ? "" : "s"} left, so the browser is closed to you. ${record} Then give every open goal a status (failed, with blockedBy and where you stopped, if you did not get there) and call finish.`;
     case "circling":
-      return `\n\n## You are going in circles\nYou came back to ${w.url} ${w.count} times without recording anything, so the browser is closed to you until you give goal ${w.goal} a status. ${record} Then give ${w.goal} reached or failed, with what you saw in its note; the browser opens again for your next goal.`;
+      return `\n\n## You are going in circles\nYou came back to ${w.url} ${w.count} times without recording anything, so the browser is closed to you until you give goal ${w.goal} a status. ${record} Then give ${w.goal} reached or failed (with blockedBy), with what you saw in its note; the browser opens again for your next goal.`;
   }
 }
 
@@ -167,7 +167,7 @@ export function sessionStatus(notes: string[], goals: GoalOutcome[], step: numbe
   const left = maxSteps - step;
   const open = goals.filter((g) => g.status === "not_attempted").length;
   const warning = left <= Math.max(3, open + 1, Math.ceil(maxSteps / 10))
-    ? ` Only ${left} step${left === 1 ? "" : "s"} left: give every open goal a status now (reached or failed) and call finish.`
+    ? ` Only ${left} step${left === 1 ? "" : "s"} left: give every open goal a status now (reached, or failed with blockedBy) and call finish.`
     : "";
   return `\n\n## Your scratchpad\n${pad}\n\n## Goal status\n${table}\n\nStep ${step + 1} of ${maxSteps}.${warning}`;
 }

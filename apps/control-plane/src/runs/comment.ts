@@ -13,7 +13,7 @@ const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? on
 
 const checkedOf = (r: CommentInput) => r.coverage?.checked ?? r.goalsReached;
 
-const SHORT_CAUSE: Record<Coverage["unchecked"][number]["cause"], string> = { setup: "the setup lacked what it needs", person: "a person could not find the way", other: "not finished" };
+const SHORT_CAUSE: Record<Coverage["unchecked"][number]["cause"], string> = { setup: "the setup lacked what it needed", person: "a person could not find the way", unknown: "failed with no cause given", other: "not finished" };
 
 function goalsLine(r: CommentInput): string {
   const goals = r.goalsTotal === 1 ? "goal" : "goals";
@@ -32,7 +32,7 @@ function headline(r: CommentInput): string {
   if (r.defects.confirmed === 0 && (r.unverified ?? 0) > 0) return `Trawler: ${count(r.unverified!, "report")} not verified before the run ended`;
   if (r.defects.confirmed > 0) return `Trawler: ${count(r.defects.confirmed, "defect")} confirmed by replay`;
   if (r.leadFallback) return "Trawler could not plan for this change, so it ran the project's plan instead";
-  if (r.coverage && r.goalsTotal > 0 && r.coverage.checked === 0) return "Trawler could not reach this change";
+  if (r.coverage && r.goalsTotal > 0 && r.coverage.checked === 0 && r.coverage.notChecked.setup + r.coverage.notChecked.person > 0) return "Trawler could not reach this change";
   if (thinCoverage(checkedOf(r), r.goalsTotal)) return "Trawler could check only part of this change";
   return "Trawler found no confirmed defects";
 }

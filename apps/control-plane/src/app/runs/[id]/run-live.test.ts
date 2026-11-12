@@ -158,7 +158,7 @@ test("each person's line says how far they got, in every state", () => {
     goals: [{ personaKey: "a", goal: "g1", status: "reached", note: "" }, { personaKey: "b", goal: "g2", status: "failed", note: "" }],
   }));
   expect(view.personas.map(personLine)).toEqual(["Reached 1 of 2 goals.", "Did not reach: Send an invoice.", "Could not finish: the browser crashed", "Stopped before their turn.", "Stopped before the end."]);
-  expect(outcome(view)).toEqual({ people: "0 of 5 people reached every goal.", goals: "1 of 10 goals checked: 1 reached. Not checked: 9 not finished." });
+  expect(outcome(view)).toEqual({ people: "0 of 5 people reached every goal.", goals: "1 of 10 goals checked: 1 reached. Not checked: 1 failed with no cause given, 8 not finished." });
 });
 
 test("a goal that was not reached says what stopped the person, and only a block by the product counts as checked", () => {
@@ -175,8 +175,8 @@ test("a goal that was not reached says what stopped the person, and only a block
   expect(outcome(view).goals).toBe("2 of 4 goals checked: 1 reached, 1 failed on the product. Not checked: 1 because the setup lacked what it needed, 1 because a person could not find the way.");
   const html = render(summary({ ...finished, personas: [{ id: "a", name: "A" }, { id: "b", name: "B" }], goalTexts: view.personas.flatMap((p) => p.goals.map((g) => ({ id: g.id, instruction: g.goal, personaId: p.id }))), jobs: [job("role_session", "succeeded", { persona_key: "a" }), job("role_session", "succeeded", { persona_key: "b" })], goals: view.personas.flatMap((p) => p.goals.flatMap((g) => (g.status ? [{ personaKey: p.id, goal: g.id, status: g.status, note: g.note, ...(g.blockedBy ? { blockedBy: g.blockedBy } : {}) }] : []))), findings: [] }));
   expect(text(html)).toContain("Send an invoice. · the product stopped them — Save gives a 500.");
-  expect(text(html)).toContain("Open the setup screen. · could not find the way — No link leads there.");
-  expect(text(html)).toContain("Read the invitation mail. · the setup lacked what it needs — No mail inbox here.");
+  expect(text(html)).toContain("Open the setup screen. · they could not find the way — No link leads there.");
+  expect(text(html)).toContain("Read the invitation mail. · the setup lacked what it needed — No mail inbox here.");
   expect(text(band(html))).toContain("2 of 4 goals checked");
 });
 

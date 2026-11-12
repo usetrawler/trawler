@@ -186,7 +186,7 @@ function headline(s: RunSummary, confirmed: number, defects: number, replaysAllF
   if (replaysAllFailed) return `${prefix}None of the reported defects could be checked: every replay failed.`;
   if (defects > 0) return `${prefix}None of the reported defects was confirmed.`;
   if (defectsDismissed) return `${prefix}Every reported defect was marked not a bug.`;
-  if (thinCoverage(coverage.checked, coverage.total)) return `${prefix}No defects found, but only ${coverage.checked} of ${coverage.total} goals were checked (not checked: ${notCheckedParts(coverage).join(", ")}), so this run cannot say the change works.`;
+  if (thinCoverage(coverage.checked, coverage.total)) return `${prefix}No defects found, but only ${coverage.checked} of ${coverage.total} ${coverage.total === 1 ? "goal was" : "goals were"} checked (not checked: ${notCheckedParts(coverage).join(", ")}), so this run cannot say the change works.`;
   return `${prefix}No defects found.`;
 }
 
