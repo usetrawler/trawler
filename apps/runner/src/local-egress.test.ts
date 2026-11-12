@@ -146,3 +146,26 @@ test("a session opens in time when the lookups of its allowed origins are slow",
     await egress.close();
   }
 }, 15_000);
+
+const tunnel = (server: string, target: string) =>
+  new Promise<string>((resolveAnswer) => {
+    const socket = net.connect(Number(new URL(server).port), "127.0.0.1", () => socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`));
+    socket.once("data", (data) => (socket.destroy(), resolveAnswer(data.toString())));
+    socket.once("error", (err) => resolveAnswer(`error ${(err as NodeJS.ErrnoException).code}`));
+  });
+
+test("closing the browser ends its proxy session at once and reports what the proxy refused", async () => {
+  const egress = await startLocalEgress();
+  try {
+    const blocked: string[] = [];
+    let server = "";
+    const browser = await egress.browse([`http://localhost:${appPort}`], (url) => blocked.push(url), async (proxy) => ((server = proxy.server), fakeBrowser(async () => undefined)));
+    expect(await tunnel(server, `localhost:${appPort}`)).toMatch(/^HTTP\/1.1 200/);
+    expect(await tunnel(server, `localhost:${otherPort}`)).toMatch(/^HTTP\/1.1 403/);
+    await browser.close();
+    expect(blocked).toEqual([`https://localhost:${otherPort}`]);
+    expect(await tunnel(server, `localhost:${appPort}`)).toBe("error ECONNREFUSED");
+  } finally {
+    await egress.close();
+  }
+});

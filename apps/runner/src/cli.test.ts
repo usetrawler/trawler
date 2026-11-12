@@ -11,6 +11,13 @@ import type { LogFields } from "./worker.ts";
 import { startEgressProxy } from "./egress-proxy.ts";
 import net from "node:net";
 
+const connectThrough = (port: number, target: string) =>
+  new Promise<string>((resolveAnswer) => {
+    const socket = net.connect(port, "127.0.0.1", () => socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`));
+    socket.once("data", (data) => (socket.destroy(), resolveAnswer(data.toString().split("\r\n")[0]!)));
+    socket.once("error", (err) => resolveAnswer(String((err as NodeJS.ErrnoException).code)));
+  });
+
 function deps(over: Partial<CliDeps> = {}) {
   const out: string[] = [];
   const err: string[] = [];
@@ -150,12 +157,21 @@ test("run passes --judge-model, --headed and the budget through, and browses thr
   const models: string[] = [];
   const headless: boolean[] = [];
   const proxies: unknown[] = [];
+  const answers: string[] = [];
   const agent = scriptedModel([toolCall("goal_status", { goal: "g", status: "reached", note: "" }), toolCall("finish", { summary: "done" })]);
   const run = deps({
     model: (id) => (models.push(id), agent),
-    openBrowser: async (o) => (headless.push(o.headless), proxies.push(o.proxy), { tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => {} }),
+    openBrowser: async (o) => {
+      headless.push(o.headless);
+      proxies.push(o.proxy);
+      const port = Number(new URL(o.proxy!.server).port);
+      for (const target of ["a.test:443", "elsewhere.test:443"]) answers.push(await connectThrough(port, target));
+      return { tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => {} };
+    },
   });
   expect(await runCli(["run", "--config", join(dir, "p.yaml"), "--model", "m/a", "--judge-model", "m/j", "--headed"], run.d)).toBe(0);
+  expect(answers).toEqual(["HTTP/1.1 502 Bad Gateway", "HTTP/1.1 403 Forbidden"]);
+  expect(await connectThrough(Number(new URL((proxies[0] as { server: string }).server).port), "a.test:443")).toBe("ECONNREFUSED");
   expect(models).toEqual(["m/a", "m/j"]);
   expect(headless).toEqual([false]);
   expect(proxies).toEqual([{ server: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/) }]);
