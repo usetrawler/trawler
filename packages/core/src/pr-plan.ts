@@ -33,6 +33,7 @@ const REASON_CHARS = 200;
 const Answer = z.object({
   turns: z.array(z.object({ person: z.string(), goals: z.array(z.object({ id: z.string(), instruction: z.string(), promise: z.boolean().optional().catch(undefined) })) })),
   accountFlow: z.string().optional().catch(undefined).describe('"provided" or "exercise"'),
+  signUps: z.array(z.string()).optional().catch(undefined),
   accountReason: z.string().optional().catch(undefined),
   notVisibleHere: z.string().optional().catch(undefined),
   brief: z.string().optional().catch(undefined),
@@ -138,10 +139,12 @@ export function settleTurns(answer: z.infer<typeof Answer>, people: LeadPerson[]
   return { turns, dropped, ...(firstDrop ? { firstDrop } : {}) };
 }
 
-export function settleAccountFlow(answer: { accountFlow?: unknown; accountReason?: unknown }, pr: PullRequestText): { accountFlow: AccountFlow; accountReason?: string } {
-  const accountFlow: AccountFlow = typeof answer.accountFlow === "string" && answer.accountFlow.trim().toLowerCase() === "exercise" ? "exercise" : "provided";
+export function settleAccountFlow(answer: { accountFlow?: unknown; signUps?: unknown; accountReason?: unknown }, pr: PullRequestText, people: LeadPerson[]): { accountFlow: AccountFlow; signUps?: string[]; accountReason?: string } {
+  const exercise = typeof answer.accountFlow === "string" && answer.accountFlow.trim().toLowerCase() === "exercise";
+  const named = exercise && Array.isArray(answer.signUps) ? answer.signUps.filter((n): n is string => typeof n === "string") : [];
+  const signUps = [...new Set(named.flatMap((n) => personId(n, people) ?? []))];
   const reason = typeof answer.accountReason === "string" ? clip(answer.accountReason, REASON_CHARS) : "";
-  return { accountFlow, ...(reason && !leaksPullRequest(reason, pr) ? { accountReason: reason } : {}) };
+  return { ...(signUps.length > 0 ? { accountFlow: "exercise", signUps } : { accountFlow: "provided" }), ...(reason && !leaksPullRequest(reason, pr) ? { accountReason: reason } : {}) };
 }
 
 export function settleNotVisible(answer: { notVisibleHere?: unknown }, turns: LeadTurn[], pr: PullRequestText): string | undefined {
@@ -167,10 +170,10 @@ export async function planForPullRequest(opts: {
   goals: Array<{ person: string; instruction: string }>;
   takenGoalIds?: string[];
   page?: string;
-}): Promise<{ turns: LeadTurn[]; dropped: number; firstDrop?: string; usage: JobUsage; accountFlow: AccountFlow; accountReason?: string; notVisibleHere?: string; brief?: string }> {
+}): Promise<{ turns: LeadTurn[]; dropped: number; firstDrop?: string; usage: JobUsage; accountFlow: AccountFlow; signUps?: string[]; accountReason?: string; notVisibleHere?: string; brief?: string }> {
   const { answer, usage } = await ask(opts, Answer, prPlanPrompt(opts), (a) => problemsOf(a, opts.people, opts.pullRequest));
   const settled = settleTurns(answer, opts.people, opts.pullRequest, opts.takenGoalIds);
   const notVisibleHere = settleNotVisible(answer, settled.turns, opts.pullRequest);
   const brief = settleBrief(answer, settled.turns, opts.pullRequest);
-  return { ...settled, ...settleAccountFlow(answer, opts.pullRequest), ...(notVisibleHere ? { notVisibleHere } : {}), ...(brief ? { brief } : {}), usage };
+  return { ...settled, ...settleAccountFlow(answer, opts.pullRequest, opts.people), ...(notVisibleHere ? { notVisibleHere } : {}), ...(brief ? { brief } : {}), usage };
 }

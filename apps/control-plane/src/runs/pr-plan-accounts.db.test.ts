@@ -32,7 +32,7 @@ beforeAll(async () => {
 
 const answer = (flow: Record<string, unknown>) => text(JSON.stringify({ turns: [{ person: "priya", goals: [{ id: "joins", instruction: "A new colleague joins the team and sees its workspace", promise: true }] }], untried: [{ case: "an invitation used twice", goal: "joins" }], ...flow }));
 const lead = (model: ReturnType<typeof scriptedModel> | null) => ({ db: t.db, model, modelId: "setup-model" });
-const newProject = (name: string) => withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", { ...config, name }, keys, { signsIn: ["ana"] }));
+const newProject = (name: string, signsIn = ["ana"]) => withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", { ...config, name }, keys, { signsIn }));
 const startOn = (project: string, over: Partial<Parameters<typeof startRun>[4]> = {}) => withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", project, keys, { ...options, pullRequest, ...over }));
 const provided = async (runId: string) => (await sql<{ provided_accounts: string[] }>`select provided_accounts from runs where id = ${runId}`.execute(t.db)).rows[0]!.provided_accounts;
 const summary = (runId: string) => withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", runId));
@@ -58,13 +58,36 @@ test("exercise: only the people who sign in keep the CI account, and the change 
   const run = await startOn(project);
   expect(await provided(run.id)).toEqual(["Ana", "Priya"]);
   expect(await claimJob(t.db, keys, scopeOf(project))).toBeNull();
-  expect(await planDueRuns(lead(scriptedModel([answer({ accountFlow: "exercise", accountReason: "Changes how invited colleagues join a team." })])))).toBe(1);
+  expect(await planDueRuns(lead(scriptedModel([answer({ accountFlow: "exercise", signUps: ["priya"], accountReason: "Changes how invited colleagues join a team." })])))).toBe(1);
   expect(await provided(run.id)).toEqual(["Ana"]);
   const seen = (await summary(run.id))!;
   expect(seen.providedAccounts).toEqual(["Ana"]);
   expect(seen.prPlan).toMatchObject({ signUps: ["Priya"], accountReason: "Changes how invited colleagues join a team." });
   expect((await claimTurn(project, "priya")).providedAccounts).toEqual(["Ana"]);
   expect(await leadOutput(project)).toEqual([{ accountFlow: "exercise", accountReason: "Changes how invited colleagues join a team." }]);
+  await finish(run.id);
+});
+
+test("exercise: a person the lead does not name keeps the CI account, even one the plan lets sign up, so goals that need what that account already has can still be reached", async () => {
+  const project = await newProject("exercise-named", []);
+  const run = await startOn(project);
+  await planDueRuns(lead(scriptedModel([answer({ accountFlow: "exercise", signUps: ["priya"] })])));
+  expect(await provided(run.id)).toEqual(["Ana"]);
+  expect((await summary(run.id))!.prPlan).toMatchObject({ signUps: ["Priya"] });
+  await finish(run.id);
+
+  const reused = await startOn(project);
+  expect(await provided(reused.id)).toEqual(["Ana"]);
+  expect((await summary(reused.id))!.prPlan).toMatchObject({ reused: true, signUps: ["Priya"] });
+  await finish(reused.id);
+});
+
+test("exercise: a person the plan says signs in keeps the account even when the lead names them", async () => {
+  const project = await newProject("exercise-signs-in");
+  const run = await startOn(project);
+  await planDueRuns(lead(scriptedModel([answer({ accountFlow: "exercise", signUps: ["ana"] })])));
+  expect(await provided(run.id)).toEqual(["Ana", "Priya"]);
+  expect((await summary(run.id))!.prPlan).not.toHaveProperty("signUps");
   await finish(run.id);
 });
 
@@ -91,7 +114,7 @@ test("a lead that gives no valid flow leaves the provided accounts as they are",
 test("a reused stored plan applies its flow with no lead call", async () => {
   const project = await newProject("reuse");
   const first = await startOn(project);
-  await planDueRuns(lead(scriptedModel([answer({ accountFlow: "exercise", accountReason: "Changes how invited colleagues join a team." })])));
+  await planDueRuns(lead(scriptedModel([answer({ accountFlow: "exercise", signUps: ["priya"], accountReason: "Changes how invited colleagues join a team." })])));
   await finish(first.id);
 
   const second = await startOn(project);
@@ -106,7 +129,7 @@ test("a reused stored plan applies its flow with no lead call", async () => {
 test("replan asks the lead again and takes its new flow", async () => {
   const project = await newProject("replan");
   const first = await startOn(project);
-  await planDueRuns(lead(scriptedModel([answer({ accountFlow: "exercise" })])));
+  await planDueRuns(lead(scriptedModel([answer({ accountFlow: "exercise", signUps: ["priya"] })])));
   await finish(first.id);
   const again = await startOn(project, { replan: true });
   expect(await provided(again.id)).toEqual(["Ana", "Priya"]);
@@ -119,7 +142,7 @@ test("replan asks the lead again and takes its new flow", async () => {
 test("a person who is not named by the CI job is left alone, and a failed lead changes nothing", async () => {
   const project = await newProject("none");
   const own = await startOn(project, { providedAccounts: ["Ana"] });
-  await planDueRuns(lead(scriptedModel([answer({ accountFlow: "exercise" })])));
+  await planDueRuns(lead(scriptedModel([answer({ accountFlow: "exercise", signUps: ["priya"] })])));
   expect(await provided(own.id)).toEqual(["Ana"]);
   await finish(own.id);
   const failing = await startOn(project, { pullRequest: { ...pullRequest, number: 78 } });

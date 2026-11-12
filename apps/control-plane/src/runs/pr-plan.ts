@@ -33,10 +33,10 @@ export interface PrPlanRecord {
   signUps?: string[];
 }
 
-export async function accountsFor(tx: Tx, planId: string | null, provided: string[], flow: AccountFlow): Promise<{ accounts: string[]; signUps: string[] }> {
-  if (flow !== "exercise" || !planId || provided.length === 0) return { accounts: provided, signUps: [] };
-  const signing = new Set((await tx.selectFrom("personas").select("name").where("plan_id", "=", planId).where("signs_in", "=", true).where("name", "in", provided).execute()).map((p) => p.name));
-  return { accounts: provided.filter((n) => signing.has(n)), signUps: provided.filter((n) => !signing.has(n)) };
+export async function accountsFor(tx: Tx, planId: string | null, provided: string[], flow: AccountFlow, chosen: string[]): Promise<{ accounts: string[]; signUps: string[] }> {
+  if (flow !== "exercise" || !planId || provided.length === 0 || chosen.length === 0) return { accounts: provided, signUps: [] };
+  const signing = new Set((await tx.selectFrom("personas").select("name").where("plan_id", "=", planId).where("signs_in", "=", false).where("key", "in", chosen).where("name", "in", provided).execute()).map((p) => p.name));
+  return { accounts: provided.filter((n) => !signing.has(n)), signUps: provided.filter((n) => signing.has(n)) };
 }
 
 export const hasPullRequestDetails = (pr: PullRequest | undefined) => Boolean(pr && (pr.title?.trim() || pr.description?.trim() || pr.changedFiles?.length));
@@ -137,7 +137,7 @@ async function claimPrPlan(db: Database) {
 }
 
 type Claimed = NonNullable<Awaited<ReturnType<typeof claimPrPlan>>>;
-type Outcome = { turns: LeadTurn[]; accountFlow: AccountFlow; accountReason?: string; notVisibleHere?: string; brief?: string; usage: { model: string; inputTokens: number; outputTokens: number; costUsd: number; steps: number } } | { failure: unknown };
+type Outcome = { turns: LeadTurn[]; accountFlow: AccountFlow; signUps: string[]; accountReason?: string; notVisibleHere?: string; brief?: string; usage: { model: string; inputTokens: number; outputTokens: number; costUsd: number; steps: number } } | { failure: unknown };
 
 async function ask(deps: PrPlanDeps, job: Claimed): Promise<Outcome> {
   try {
@@ -152,7 +152,7 @@ async function ask(deps: PrPlanDeps, job: Claimed): Promise<Outcome> {
       goals: playedGoals(snapshot).map((g) => ({ person: name.get(g.personaId) ?? g.personaId, instruction: g.instruction })), takenGoalIds: snapshot.goals.map((g) => g.id), page,
     });
     if (planned.turns.length === 0 && planned.dropped > 0) throw new Error(`every one of the ${planned.dropped} goals the lead wrote was dropped; the first: ${planned.firstDrop}`);
-    return { turns: planned.turns, accountFlow: planned.accountFlow, ...(planned.accountReason ? { accountReason: planned.accountReason } : {}), ...(planned.notVisibleHere ? { notVisibleHere: planned.notVisibleHere } : {}), ...(planned.brief ? { brief: planned.brief } : {}), usage: planned.usage };
+    return { turns: planned.turns, accountFlow: planned.accountFlow, signUps: planned.signUps ?? [], ...(planned.accountReason ? { accountReason: planned.accountReason } : {}), ...(planned.notVisibleHere ? { notVisibleHere: planned.notVisibleHere } : {}), ...(planned.brief ? { brief: planned.brief } : {}), usage: planned.usage };
   } catch (err) {
     return { failure: err };
   }
@@ -173,9 +173,9 @@ async function finish(db: Database, job: Claimed, outcome: Outcome): Promise<voi
     const pr = job.pull_request as unknown as PullRequest;
     const key = prKey(pr);
     const stored = lead && "turns" in outcome && job.plan_id && key
-      ? await storePrPlan(tx, { orgId: job.org_id, projectId: run.project_id, sourceId: job.plan_id, key, hash: inputsHash(pr), content: { personas: lead.personas, goals: lead.added }, accountFlow: outcome.accountFlow, accountReason: outcome.accountReason, brief: outcome.brief, runId: job.run_id })
+      ? await storePrPlan(tx, { orgId: job.org_id, projectId: run.project_id, sourceId: job.plan_id, key, hash: inputsHash(pr), content: { personas: lead.personas, goals: lead.added }, accountFlow: outcome.accountFlow, signUps: outcome.signUps, accountReason: outcome.accountReason, brief: outcome.brief, runId: job.run_id })
       : null;
-    const provided = "turns" in outcome ? await accountsFor(tx, job.plan_id, run.provided_accounts as string[], outcome.accountFlow) : null;
+    const provided = "turns" in outcome ? await accountsFor(tx, job.plan_id, run.provided_accounts as string[], outcome.accountFlow, outcome.signUps) : null;
     const nothingToTest = mode === "change" && "turns" in outcome && !merged;
     const notVisibleHere = "turns" in outcome ? outcome.notVisibleHere : undefined;
     const record: PrPlanRecord = {

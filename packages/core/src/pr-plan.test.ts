@@ -330,12 +330,30 @@ describe("planForPullRequest", () => {
     const goal = [{ person: "tom", goals: [{ id: "joins", instruction: "A new colleague joins the team and sees its workspace" }] }];
 
     test("a pull request about invitations yields exercise, with the reason for the owner", async () => {
-      const model = scriptedModel([withFlow(goal, { accountFlow: "exercise", accountReason: "Changes how invited colleagues join a team." })]);
+      const model = scriptedModel([withFlow(goal, { accountFlow: "exercise", signUps: ["tom"], accountReason: "Changes how invited colleagues join a team." })]);
       const planned = await plan(model, { pullRequest: invite });
-      expect(planned).toMatchObject({ accountFlow: "exercise", accountReason: "Changes how invited colleagues join a team." });
+      expect(planned).toMatchObject({ accountFlow: "exercise", signUps: ["tom"], accountReason: "Changes how invited colleagues join a team." });
       const prompt = JSON.stringify(model.doGenerateCalls[0]!.prompt);
       expect(prompt).toContain("accountFlow");
+      expect(prompt).toContain("signUps");
       expect(prompt).toContain("whenever you are unsure");
+    });
+
+    test("only the people the lead names go through sign-up, by id or by name, each once", () => {
+      expect(settleAccountFlow({ accountFlow: "exercise", signUps: ["Tom", "tom", "nobody"] }, invite, people)).toEqual({ accountFlow: "exercise", signUps: ["tom"] });
+    });
+
+    test.each([
+      ["names nobody", { signUps: [] }],
+      ["leaves the list out", {}],
+      ["names only people who are not in the list", { signUps: ["nobody"] }],
+      ["gives a list of the wrong kind", { signUps: "tom" }],
+    ])("exercise falls back to provided when the lead %s, so nobody loses the account the goals expect", (_, over) => {
+      expect(settleAccountFlow({ accountFlow: "exercise", ...over }, invite, people)).toEqual({ accountFlow: "provided" });
+    });
+
+    test("provided names nobody to sign up, whatever the lead lists", () => {
+      expect(settleAccountFlow({ accountFlow: "provided", signUps: ["tom"] }, invite, people)).toEqual({ accountFlow: "provided" });
     });
 
     test("an unrelated pull request yields provided", async () => {
@@ -357,7 +375,7 @@ describe("planForPullRequest", () => {
     });
 
     test("the value is read without regard to case and spaces", () => {
-      expect(settleAccountFlow({ accountFlow: " Exercise " }, pr).accountFlow).toBe("exercise");
+      expect(settleAccountFlow({ accountFlow: " Exercise ", signUps: ["tom"] }, pr, people).accountFlow).toBe("exercise");
     });
 
     test.each([
@@ -365,11 +383,11 @@ describe("planForPullRequest", () => {
       ["gives an address", "Changes https://app.acme.test/invite."],
       ["is empty", "   "],
     ])("the reason is dropped when it %s, and the flow stays", (_, reason) => {
-      expect(settleAccountFlow({ accountFlow: "exercise", accountReason: reason }, invite)).toEqual({ accountFlow: "exercise" });
+      expect(settleAccountFlow({ accountFlow: "exercise", signUps: ["tom"], accountReason: reason }, invite, people)).toEqual({ accountFlow: "exercise", signUps: ["tom"] });
     });
 
     test("a long reason is cut short", () => {
-      expect(settleAccountFlow({ accountFlow: "exercise", accountReason: "Colleagues join. ".repeat(40) }, invite).accountReason!.length).toBeLessThanOrEqual(200);
+      expect(settleAccountFlow({ accountFlow: "exercise", signUps: ["tom"], accountReason: "Colleagues join. ".repeat(40) }, invite, people).accountReason!.length).toBeLessThanOrEqual(200);
     });
   });
 });

@@ -422,6 +422,7 @@ export interface Plans {
   pr_number: number | null;
   project_id: string;
   repo: string | null;
+  sign_ups: string[] | null;
   source_plan_id: string | null;
   updated_at: Generated<Timestamp>;
   version: number | null;

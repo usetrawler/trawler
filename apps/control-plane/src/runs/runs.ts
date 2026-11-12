@@ -266,7 +266,7 @@ export async function startRun(tx: Tx, orgId: string, projectId: string, keys: K
       if (merged) planned = { ...config, personas: merged.personas, goals: merged.goals, ...(stored.brief ? { brief: stored.brief } : {}) };
       await tx.updateTable("plans").set({ last_used_at: new Date() }).where("id", "=", stored.id).execute();
     }
-    const flow = await accountsFor(tx, plan.id, providedAccounts, stored.accountFlow);
+    const flow = await accountsFor(tx, plan.id, providedAccounts, stored.accountFlow, stored.signUps);
     providedAccounts = flow.accounts;
     prPlan = {
       mode: prPlan!.mode, goalIds: merged?.added.map((g) => g.id) ?? [], ...(merged ? {} : { note: NOTHING }), prPlanId: stored.id, version: stored.version, reused: true, ...(stored.createdByRun ? { createdByRun: stored.createdByRun } : {}),
