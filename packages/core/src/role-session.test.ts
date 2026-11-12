@@ -550,7 +550,7 @@ describe("runRoleSession", () => {
     await run(model, { maxSteps: 10 }).promise;
     const prompts = model.doGenerateCalls.map((c) => JSON.stringify(c.prompt[0]));
     expect(prompts[5]).not.toMatch(/steps left/);
-    expect(prompts[7]).toContain("Only 3 steps left: give every open goal a status now (reached or failed) and call finish.");
+    expect(prompts[7]).toContain("Only 3 steps left: give every open goal a status now (reached, or failed with blockedBy) and call finish.");
     expect(prompts[9]).toContain("Only 1 step left");
   });
 
@@ -1250,7 +1250,7 @@ test("a person reads the team's description of the setup as limits not to report
   const tag = /<setup-([a-z0-9]+)>/.exec(prompt)![1]!;
   expect(prompt).toContain(`<setup-${tag}>\nThere is no self sign-up; accounts come from an invitation.\n</setup-${tag}>`);
   expect(prompt).toMatch(/Do not report what it describes as a defect or as friction/);
-  expect(prompt).toMatch(/give the goal failed and say which limit stopped you/);
+  expect(prompt).toMatch(/give the goal failed with blockedBy setup and say which limit stopped you/);
   expect(rolePrompt(base)).not.toContain("<setup-");
 });
 
