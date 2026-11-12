@@ -139,10 +139,11 @@ export function settleTurns(answer: z.infer<typeof Answer>, people: LeadPerson[]
   return { turns, dropped, ...(firstDrop ? { firstDrop } : {}) };
 }
 
-export function settleAccountFlow(answer: { accountFlow?: unknown; signUps?: unknown; accountReason?: unknown }, pr: PullRequestText, people: LeadPerson[]): { accountFlow: AccountFlow; signUps?: string[]; accountReason?: string } {
+export function settleAccountFlow(answer: { accountFlow?: unknown; signUps?: unknown; accountReason?: unknown }, pr: PullRequestText, people: LeadPerson[], turns: LeadTurn[]): { accountFlow: AccountFlow; signUps?: string[]; accountReason?: string } {
   const exercise = typeof answer.accountFlow === "string" && answer.accountFlow.trim().toLowerCase() === "exercise";
   const named = exercise && Array.isArray(answer.signUps) ? answer.signUps.filter((n): n is string => typeof n === "string") : [];
-  const signUps = [...new Set(named.flatMap((n) => personId(n, people) ?? []))];
+  const playing = new Set(turns.map((t) => t.person));
+  const signUps = [...new Set(named.flatMap((n) => personId(n, people) ?? []))].filter((id) => playing.has(id));
   const reason = typeof answer.accountReason === "string" ? clip(answer.accountReason, REASON_CHARS) : "";
   return { ...(signUps.length > 0 ? { accountFlow: "exercise", signUps } : { accountFlow: "provided" }), ...(reason && !leaksPullRequest(reason, pr) ? { accountReason: reason } : {}) };
 }
@@ -175,5 +176,5 @@ export async function planForPullRequest(opts: {
   const settled = settleTurns(answer, opts.people, opts.pullRequest, opts.takenGoalIds);
   const notVisibleHere = settleNotVisible(answer, settled.turns, opts.pullRequest);
   const brief = settleBrief(answer, settled.turns, opts.pullRequest);
-  return { ...settled, ...settleAccountFlow(answer, opts.pullRequest, opts.people), ...(notVisibleHere ? { notVisibleHere } : {}), ...(brief ? { brief } : {}), usage };
+  return { ...settled, ...settleAccountFlow(answer, opts.pullRequest, opts.people, settled.turns), ...(notVisibleHere ? { notVisibleHere } : {}), ...(brief ? { brief } : {}), usage };
 }

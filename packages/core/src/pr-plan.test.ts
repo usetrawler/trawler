@@ -328,6 +328,7 @@ describe("planForPullRequest", () => {
     const invite: PullRequestText = { title: "Let admins invite colleagues by email", description: "Admins can send an invitation link that expires after a week.", changedFiles: ["src/server/invitations.ts", "src/app/team/invite/page.tsx"] };
     const withFlow = (turns: unknown, flow: Record<string, unknown>) => text(JSON.stringify({ turns: promised(turns), untried: untriedFor(turns), ...flow }));
     const goal = [{ person: "tom", goals: [{ id: "joins", instruction: "A new colleague joins the team and sees its workspace" }] }];
+    const playing = [{ person: "tom", goals: [{ id: "joins", instruction: "A new colleague joins the team and sees its workspace" }] }];
 
     test("a pull request about invitations yields exercise, with the reason for the owner", async () => {
       const model = scriptedModel([withFlow(goal, { accountFlow: "exercise", signUps: ["tom"], accountReason: "Changes how invited colleagues join a team." })]);
@@ -340,7 +341,7 @@ describe("planForPullRequest", () => {
     });
 
     test("only the people the lead names go through sign-up, by id or by name, each once", () => {
-      expect(settleAccountFlow({ accountFlow: "exercise", signUps: ["Tom", "tom", "nobody"] }, invite, people)).toEqual({ accountFlow: "exercise", signUps: ["tom"] });
+      expect(settleAccountFlow({ accountFlow: "exercise", signUps: ["Tom", "tom", "nobody"] }, invite, people, playing)).toEqual({ accountFlow: "exercise", signUps: ["tom"] });
     });
 
     test.each([
@@ -349,11 +350,19 @@ describe("planForPullRequest", () => {
       ["names only people who are not in the list", { signUps: ["nobody"] }],
       ["gives a list of the wrong kind", { signUps: "tom" }],
     ])("exercise falls back to provided when the lead %s, so nobody loses the account the goals expect", (_, over) => {
-      expect(settleAccountFlow({ accountFlow: "exercise", ...over }, invite, people)).toEqual({ accountFlow: "provided" });
+      expect(settleAccountFlow({ accountFlow: "exercise", ...over }, invite, people, playing)).toEqual({ accountFlow: "provided" });
+    });
+
+    test("a person the lead names but gives no goal never signs up, since they would play the standing plan's goals on an empty account", async () => {
+      const onlyAna = [{ person: "ana", goals: [{ id: "invites", instruction: "Ana invites a new colleague to the team" }] }];
+      expect(settleAccountFlow({ accountFlow: "exercise", signUps: ["tom"] }, invite, people, onlyAna)).toEqual({ accountFlow: "provided" });
+      const planned = await plan(scriptedModel([withFlow(onlyAna, { accountFlow: "exercise", signUps: ["tom"] })]), { pullRequest: invite });
+      expect(planned).toMatchObject({ accountFlow: "provided" });
+      expect(planned).not.toHaveProperty("signUps");
     });
 
     test("provided names nobody to sign up, whatever the lead lists", () => {
-      expect(settleAccountFlow({ accountFlow: "provided", signUps: ["tom"] }, invite, people)).toEqual({ accountFlow: "provided" });
+      expect(settleAccountFlow({ accountFlow: "provided", signUps: ["tom"] }, invite, people, playing)).toEqual({ accountFlow: "provided" });
     });
 
     test("an unrelated pull request yields provided", async () => {
@@ -375,7 +384,7 @@ describe("planForPullRequest", () => {
     });
 
     test("the value is read without regard to case and spaces", () => {
-      expect(settleAccountFlow({ accountFlow: " Exercise ", signUps: ["tom"] }, pr, people).accountFlow).toBe("exercise");
+      expect(settleAccountFlow({ accountFlow: " Exercise ", signUps: ["tom"] }, pr, people, playing).accountFlow).toBe("exercise");
     });
 
     test.each([
@@ -383,11 +392,11 @@ describe("planForPullRequest", () => {
       ["gives an address", "Changes https://app.acme.test/invite."],
       ["is empty", "   "],
     ])("the reason is dropped when it %s, and the flow stays", (_, reason) => {
-      expect(settleAccountFlow({ accountFlow: "exercise", signUps: ["tom"], accountReason: reason }, invite, people)).toEqual({ accountFlow: "exercise", signUps: ["tom"] });
+      expect(settleAccountFlow({ accountFlow: "exercise", signUps: ["tom"], accountReason: reason }, invite, people, playing)).toEqual({ accountFlow: "exercise", signUps: ["tom"] });
     });
 
     test("a long reason is cut short", () => {
-      expect(settleAccountFlow({ accountFlow: "exercise", signUps: ["tom"], accountReason: "Colleagues join. ".repeat(40) }, invite, people).accountReason!.length).toBeLessThanOrEqual(200);
+      expect(settleAccountFlow({ accountFlow: "exercise", signUps: ["tom"], accountReason: "Colleagues join. ".repeat(40) }, invite, people, playing).accountReason!.length).toBeLessThanOrEqual(200);
     });
   });
 });
