@@ -105,11 +105,11 @@ export function renderReport(s: RunSummary): string {
   return `# ${oneLine(s.project)}
 
 Agent model ${s.agentModel}, judge model ${s.judgeModel}. Total ${usd(s.totalCostUsd)} of ${usd(s.budgetUsd)}.${stopped}
-${s.refusedAccount ? `\n**Stopped before anyone started:** ${oneLine(s.refusedAccount)} Check that account in the project file and run again.\n` : ""}${browserFailures(s.browserFailures ?? [])}
+${s.refusedAccount ? `\n**Stopped before anyone started:** ${oneLine(s.refusedAccount)} Check that account in the project file and run again.\n` : ""}
 | Job | Model | Steps | Cost |
 |---|---|---|---|
 ${jobs}
-
+${browserFailures(s.browserFailures ?? [])}
 ## Goals
 
 ${goals}

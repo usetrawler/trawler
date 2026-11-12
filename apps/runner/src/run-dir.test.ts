@@ -84,7 +84,7 @@ test("a defect that needed several people names who did each step", () => {
   expect(md).toContain("1. Lee: Invite Ana\n2. Ana: Open the invite");
 });
 
-test("the report lists what the browser itself could not load, once per origin and cause, before the findings", () => {
+test("the report lists what the browser itself could not load, once per origin and cause, after the jobs and before the goals", () => {
   const md = renderReport({
     ...summary,
     browserFailures: [
@@ -100,7 +100,8 @@ test("the report lists what the browser itself could not load, once per origin a
     "- http://localhost:3000: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS (role:a, replay:f1)",
     "- http://localhost:4000: net::ERR_CONNECTION_REFUSED (role:a)",
   ]);
-  expect(md.indexOf("## The browser could not load")).toBeLessThan(md.indexOf("## Confirmed defects"));
+  expect(md.indexOf("| role:a |")).toBeLessThan(md.indexOf("## The browser could not load"));
+  expect(md.indexOf("## The browser could not load")).toBeLessThan(md.indexOf("## Goals"));
 });
 
 test("a run where the browser loaded everything has no such section", () => {
