@@ -424,6 +424,7 @@ function originOf(url: string): string | null {
 const NOT_THE_ENVIRONMENT = new Set(["net::ERR_ABORTED", "net::ERR_BLOCKED_BY_CLIENT"]);
 const BROWSER_CAUSE = /net::ERR_[A-Z0-9_]+/;
 const MAX_CAUSE = 100;
+const SOCKET_FAILURE = "WebSocket connection to ";
 const URL_IN_TEXT = /\b(?:wss?|https?):\/\/[^\s'"]+/;
 const MAX_BROWSER_FAILURES = 20;
 const ENVIRONMENT_CAUSE = /^net::ERR_(BLOCKED_BY_(LOCAL|PRIVATE)_NETWORK_ACCESS_CHECKS|INTERNET_DISCONNECTED|ADDRESS_UNREACHABLE|TUNNEL_CONNECTION_FAILED|PROXY_[A-Z0-9_]+)$/;
@@ -694,7 +695,7 @@ export async function openBrowser(opts: {
       failed(browserFailure(request.failure()?.errorText ?? "", request.url()));
     });
     context.on("console", (message) => {
-      if (message.type() === "error") failed(browserFailure(message.text(), message.location().url));
+      if (message.type() === "error" && message.text().startsWith(SOCKET_FAILURE)) failed(browserFailure(message.text(), message.location().url));
     });
     const settled = async (page: Page | undefined) => {
       if (!page) return;

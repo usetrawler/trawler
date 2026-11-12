@@ -86,16 +86,18 @@ beforeAll(async () => {
     }
     if (req.url?.startsWith("/refused-calls?")) {
       const to = new URL(req.url, "http://x").searchParams.get("to")!;
+      const socketTo = new URL(req.url, "http://x").searchParams.get("ws")!;
       return html(`<h1>Editor</h1><p id="state">pending</p><script>
         const cancel = new AbortController();
         fetch("/api/hang", { signal: cancel.signal }).catch(() => {});
         cancel.abort();
         fetch(${JSON.stringify(`${to}/api/data`)}).catch(() => {});
         fetch(${JSON.stringify(`${to}/api/more`)}).catch(() => {});
-        const socket = new WebSocket(${JSON.stringify(`${to.replace("http", "ws")}/_next/webpack-hmr`)});
+        const socket = new WebSocket(${JSON.stringify(`${socketTo.replace("http", "ws")}/_next/webpack-hmr`)});
         socket.onerror = () => (document.getElementById("state").textContent = "socket failed");
-        console.error("Failed: net::ERR_NAME_NOT_RESOLVED https://elsewhere.example/x");
-        console.error("net::ERR_" + "A".repeat(300) + " " + location.origin + "/x");
+        console.error("WebSocket connection to 'wss://elsewhere.example/x' failed: net::ERR_NAME_NOT_RESOLVED");
+        console.error("WebSocket connection to '" + location.origin.replace("http", "ws") + "/x' failed: net::ERR_" + "A".repeat(300));
+        console.error("Failed to load " + location.origin + "/fake: net::ERR_INVALID_RESPONSE");
       </script><img src="https://blocked.example/pixel.png">`);
     }
     switch (req.url) {
@@ -1618,17 +1620,19 @@ describe("an app's own requests", () => {
     const closed = createServer();
     const closedOrigin = await listen(closed);
     await new Promise((r) => closed.close(r));
+    const closedSocket = createServer();
+    const socketOrigin = await listen(closedSocket);
+    await new Promise((r) => closedSocket.close(r));
     const reported: Array<{ url: string; cause?: string }> = [];
     const dir = mkdtempSync(join(tmpdir(), "trw-"));
-    const b = await openBrowser({ allowedOrigins: [origin, closedOrigin], outputDir: dir, scrubber: new SecretScrubber(), onBlocked: (url, cause) => reported.push({ url, cause }), actionGapMs: 0 });
+    const b = await openBrowser({ allowedOrigins: [origin, closedOrigin, socketOrigin], outputDir: dir, scrubber: new SecretScrubber(), onBlocked: (url, cause) => reported.push({ url, cause }), actionGapMs: 0 });
     try {
-      const first = JSON.stringify(await navigate(b, `${origin}/refused-calls?to=${encodeURIComponent(closedOrigin)}`));
+      const first = JSON.stringify(await navigate(b, `${origin}/refused-calls?to=${encodeURIComponent(closedOrigin)}&ws=${encodeURIComponent(socketOrigin)}`));
       await b.tools.browser_wait_for!.execute!({ text: "socket failed", time: 5 }, ctx);
       const later = JSON.stringify(await b.tools.browser_snapshot!.execute!({}, ctx));
       const told = `${first}${later}`;
       const failures = reported.filter((r) => r.cause);
-      expect(failures.map((r) => r.cause)).toEqual(["net::ERR_CONNECTION_REFUSED"]);
-      expect(failures[0]!.url.replace(/^ws/, "http").startsWith(closedOrigin)).toBe(true);
+      expect(failures.map((r) => [r.url.replace(/^ws/, "http").split("/").slice(0, 3).join("/"), r.cause]).sort()).toEqual([[closedOrigin, "net::ERR_CONNECTION_REFUSED"], [socketOrigin, "net::ERR_CONNECTION_REFUSED"]].sort());
       expect(reported.some((r) => r.url.startsWith("https://blocked.example") && r.cause === undefined)).toBe(true);
       expect(reported.some((r) => r.cause === "net::ERR_ABORTED" || r.cause === "net::ERR_BLOCKED_BY_CLIENT")).toBe(false);
       expect(told.match(/### Browser could not load/g)).toHaveLength(1);
