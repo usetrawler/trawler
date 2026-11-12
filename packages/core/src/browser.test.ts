@@ -1607,9 +1607,9 @@ describe("browserFailure", () => {
     const environment = browserFailureNote([{ origin: "http://localhost:3000", cause: "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS" }]);
     expect(environment).toContain("because of the test environment, not the product:\n- http://localhost:3000: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS\nDo not report");
     expect(environment).not.toContain("may be the product");
-    const either = browserFailureNote([{ origin: "http://localhost:4000", cause: "net::ERR_TOO_MANY_REDIRECTS" }, { origin: "https://api.acme.test", cause: "net::ERR_CERT_DATE_INVALID" }]);
-    expect(either).toContain("may be the product or where it runs:\n- http://localhost:4000: net::ERR_TOO_MANY_REDIRECTS\nIf you report");
-    expect(either).toContain("not the product:\n- https://api.acme.test: net::ERR_CERT_DATE_INVALID\n");
+    const both = browserFailureNote([{ origin: "http://localhost:4000", cause: "net::ERR_TOO_MANY_REDIRECTS" }, { origin: "https://api.acme.test", cause: "net::ERR_CERT_DATE_INVALID" }, { origin: "http://localhost:3000", cause: "net::ERR_PROXY_CONNECTION_FAILED" }]);
+    expect(both).toContain("may be the product or where it runs:\n- http://localhost:4000: net::ERR_TOO_MANY_REDIRECTS\n- https://api.acme.test: net::ERR_CERT_DATE_INVALID\nIf you report");
+    expect(both).toContain("not the product:\n- http://localhost:3000: net::ERR_PROXY_CONNECTION_FAILED\nDo not report");
   });
 });
 
