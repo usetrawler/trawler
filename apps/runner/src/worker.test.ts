@@ -100,6 +100,16 @@ test("a replay uploads a screenshot of where it ended", async () => {
   expect(seen.order.slice(0, seen.order.indexOf("complete"))).toContain("artifacts answered");
 });
 
+test("a request the browser itself could not load reaches the control plane with its cause", async () => {
+  const { url, seen } = await fakeControlPlane({ ...baseJob, kind: "role_session", personaKey: "ana" });
+  const failing: WorkerDeps["openBrowser"] = async (_config, { onBlocked }) => ({
+    ...(await shooting()),
+    tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => (onBlocked("ws://localhost:3000/_next/webpack-hmr", "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS"), "the page") }) },
+  });
+  await workOnce(deps(url, reportsDefect(), { openBrowser: failing }));
+  expect(seen.events.filter((e) => e.type === "blocked_request")).toEqual([expect.objectContaining({ url: "ws://localhost:3000/_next/webpack-hmr", cause: "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS" })]);
+});
+
 const namesOfTools = (model: ReturnType<typeof scriptedModel>) => model.doGenerateCalls[0]!.tools!.map((t) => t.name);
 
 test.each([[true, true], [false, false], [undefined, false]])("a role session can look at the page as a picture only when the runner is set to (look %j: %s)", async (look, offered) => {

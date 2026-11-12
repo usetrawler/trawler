@@ -18,6 +18,7 @@ export interface RunSummary {
   judgeErrors: Record<string, string>;
   refusedAccount?: string;
   people?: Record<string, string>;
+  browserFailures?: Array<{ jobId: string; url: string; cause: string }>;
 }
 
 export class RunDir {
@@ -55,6 +56,25 @@ function readable(url: string): string {
 
 type Located = Finding & { persona: string };
 
+function originOf(url: string): string {
+  try {
+    return new URL(url.replace(/^ws(s?):/, "http$1:")).origin;
+  } catch {
+    return url;
+  }
+}
+
+function browserFailures(failures: NonNullable<RunSummary["browserFailures"]>): string {
+  if (failures.length === 0) return "";
+  const byOriginAndCause = new Map<string, Set<string>>();
+  for (const f of failures) {
+    const key = `${originOf(f.url)}: ${f.cause}`;
+    byOriginAndCause.set(key, (byOriginAndCause.get(key) ?? new Set()).add(f.jobId));
+  }
+  const lines = [...byOriginAndCause].map(([key, jobs]) => `- ${key} (${[...jobs].join(", ")})`).join("\n");
+  return `\n## The browser could not load\n\nThe browser itself failed or blocked these requests, so parts of the product may not have worked during the run. That is the test environment, not the product: check findings about missing or broken parts against this list before acting on them.\n\n${lines}\n`;
+}
+
 function describe(f: Located, people: Record<string, string>, replay?: ReplayObservation, replayError?: string, judgeError?: string): string {
   const who = (i: number) => (f.by && f.by.length === f.reproduction.length ? `${oneLine(people[f.by[i]!] ?? f.by[i]!)}: ` : "");
   const steps = f.reproduction.map((step, i) => `${i + 1}. ${who(i)}${oneLine(step)}`).join("\n");
@@ -85,7 +105,7 @@ export function renderReport(s: RunSummary): string {
   return `# ${oneLine(s.project)}
 
 Agent model ${s.agentModel}, judge model ${s.judgeModel}. Total ${usd(s.totalCostUsd)} of ${usd(s.budgetUsd)}.${stopped}
-${s.refusedAccount ? `\n**Stopped before anyone started:** ${oneLine(s.refusedAccount)} Check that account in the project file and run again.\n` : ""}
+${s.refusedAccount ? `\n**Stopped before anyone started:** ${oneLine(s.refusedAccount)} Check that account in the project file and run again.\n` : ""}${browserFailures(s.browserFailures ?? [])}
 | Job | Model | Steps | Cost |
 |---|---|---|---|
 ${jobs}
