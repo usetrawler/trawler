@@ -13,6 +13,8 @@ export type JobUsage = z.infer<typeof JobUsageSchema>;
 export const JobStopReasonSchema = z.union([StopReasonSchema, z.enum(["report", "no_report", "done"])]);
 export type JobStopReason = z.infer<typeof JobStopReasonSchema>;
 
+export const BrowserCauseSchema = z.string().max(100).regex(/^net::ERR_[A-Z0-9_]+$/);
+
 const base = { seq: z.number().int().positive().max(2_147_483_647), at: z.iso.datetime(), jobId: z.string().min(1) };
 
 export const RunEventSchema = z.discriminatedUnion("type", [
@@ -23,7 +25,7 @@ export const RunEventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("standby") }),
   z.object({ ...base, type: z.literal("finding"), finding: FindingSchema }),
   z.object({ ...base, type: z.literal("goal_status"), outcome: GoalOutcomeSchema }),
-  z.object({ ...base, type: z.literal("blocked_request"), url: z.string().max(MAX_URL) }),
+  z.object({ ...base, type: z.literal("blocked_request"), url: z.string().max(MAX_URL), cause: BrowserCauseSchema.optional() }),
   z.object({ ...base, type: z.literal("bot_protection"), vendor: z.string().min(1).max(100), url: z.string().max(MAX_URL) }),
   z.object({ ...base, type: z.literal("verdict"), findingId: z.string().min(1), verdict: VerdictSchema, observed: z.string().max(8000) }),
   z.object({ ...base, type: z.literal("job_finished"), usage: JobUsageSchema, stoppedBy: JobStopReasonSchema, error: z.string().max(2000).optional() }),

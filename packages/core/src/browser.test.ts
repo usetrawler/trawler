@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, type Browser as PlaywrightBrowser } from "playwright";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { BROWSER_TOOLS, openBrowser, type Browser, type Screenshot } from "./browser.ts";
+import { BROWSER_TOOLS, browserFailure, openBrowser, type Browser, type Screenshot } from "./browser.ts";
 import { MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
 import { newSessionState, ownPasswordTool, type FillField } from "./session-tools.ts";
 import { accountFields } from "./account-note.ts";
@@ -77,6 +77,25 @@ beforeAll(async () => {
       res.setHeader("content-type", "text/html");
       res.end(`<!doctype html><html><body>${body}</body></html>`);
     };
+    if (req.url?.startsWith("/socket-only?")) {
+      const to = new URL(req.url, "http://x").searchParams.get("to")!;
+      return html(`<h1>Editor</h1><p id="state">pending</p><script>
+        const socket = new WebSocket(${JSON.stringify(`${to.replace("http", "ws")}/_next/webpack-hmr`)});
+        socket.onerror = () => (document.getElementById("state").textContent = "socket failed");
+      </script>`);
+    }
+    if (req.url?.startsWith("/refused-calls?")) {
+      const to = new URL(req.url, "http://x").searchParams.get("to")!;
+      return html(`<h1>Editor</h1><p id="state">pending</p><script>
+        const cancel = new AbortController();
+        fetch("/api/hang", { signal: cancel.signal }).catch(() => {});
+        cancel.abort();
+        fetch(${JSON.stringify(`${to}/api/data`)}).catch(() => {});
+        fetch(${JSON.stringify(`${to}/api/more`)}).catch(() => {});
+        const socket = new WebSocket(${JSON.stringify(`${to.replace("http", "ws")}/_next/webpack-hmr`)});
+        socket.onerror = () => (document.getElementById("state").textContent = "socket failed");
+      </script><img src="https://blocked.example/pixel.png">`);
+    }
     switch (req.url) {
       case "/app-loads-late":
         return html(`<h1>Charges</h1><p id="list">Nothing here yet.</p><script>
@@ -1566,7 +1585,67 @@ describe("robustness", () => {
   }, 60_000);
 });
 
+describe("browserFailure", () => {
+  test("reads the cause and the address from Chromium's console lines", () => {
+    expect(browserFailure("Failed to load resource: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS", "http://localhost:3000/_next/static/chunk.js"))
+      .toEqual({ url: "http://localhost:3000/_next/static/chunk.js", cause: "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS" });
+    expect(browserFailure("WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr' failed: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS", "http://localhost:3000/editor"))
+      .toEqual({ url: "ws://localhost:3000/_next/webpack-hmr", cause: "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS" });
+  });
+
+  test("leaves out what the page cancelled, what Trawler blocked, lines with no network error and lines with no address", () => {
+    expect(browserFailure("Failed to load resource: net::ERR_ABORTED", "http://localhost:3000/a")).toBeNull();
+    expect(browserFailure("Failed to load resource: net::ERR_BLOCKED_BY_CLIENT", "https://ads.example/x")).toBeNull();
+    expect(browserFailure("Uncaught TypeError: x is undefined", "http://localhost:3000/a")).toBeNull();
+    expect(browserFailure("net::ERR_CONNECTION_REFUSED", "")).toBeNull();
+  });
+});
+
 describe("an app's own requests", () => {
+  test("reports what the browser itself failed to load once per origin and cause, tells the person once, and leaves page cancels and Trawler's own blocks out", async () => {
+    const closed = createServer();
+    const closedOrigin = await listen(closed);
+    await new Promise((r) => closed.close(r));
+    const reported: Array<{ url: string; cause?: string }> = [];
+    const dir = mkdtempSync(join(tmpdir(), "trw-"));
+    const b = await openBrowser({ allowedOrigins: [origin, closedOrigin], outputDir: dir, scrubber: new SecretScrubber(), onBlocked: (url, cause) => reported.push({ url, cause }), actionGapMs: 0 });
+    try {
+      const first = JSON.stringify(await navigate(b, `${origin}/refused-calls?to=${encodeURIComponent(closedOrigin)}`));
+      await b.tools.browser_wait_for!.execute!({ text: "socket failed", time: 5 }, ctx);
+      const later = JSON.stringify(await b.tools.browser_snapshot!.execute!({}, ctx));
+      const told = `${first}${later}`;
+      const failures = reported.filter((r) => r.cause);
+      expect(failures.map((r) => r.cause)).toEqual(["net::ERR_CONNECTION_REFUSED"]);
+      expect(failures[0]!.url.replace(/^ws/, "http").startsWith(closedOrigin)).toBe(true);
+      expect(reported.some((r) => r.url.startsWith("https://blocked.example") && r.cause === undefined)).toBe(true);
+      expect(reported.some((r) => r.cause === "net::ERR_ABORTED" || r.cause === "net::ERR_BLOCKED_BY_CLIENT")).toBe(false);
+      expect(told.match(/### Browser could not load/g)).toHaveLength(1);
+      expect(told).toContain(`${closedOrigin}: net::ERR_CONNECTION_REFUSED`);
+      expect(told).not.toContain("blocked.example: net::");
+    } finally {
+      await b.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  test("a WebSocket the browser could not open is reported from the console, where it is the only trace", async () => {
+    const closed = createServer();
+    const closedOrigin = await listen(closed);
+    await new Promise((r) => closed.close(r));
+    const reported: Array<{ url: string; cause?: string }> = [];
+    const dir = mkdtempSync(join(tmpdir(), "trw-"));
+    const b = await openBrowser({ allowedOrigins: [origin, closedOrigin], outputDir: dir, scrubber: new SecretScrubber(), onBlocked: (url, cause) => reported.push({ url, cause }), actionGapMs: 0 });
+    try {
+      await navigate(b, `${origin}/socket-only?to=${encodeURIComponent(closedOrigin)}`);
+      await b.tools.browser_wait_for!.execute!({ text: "socket failed", time: 5 }, ctx);
+      await new Promise((r) => setTimeout(r, 300));
+      expect(reported.filter((r) => r.cause)).toEqual([{ url: `${closedOrigin.replace("http", "ws")}/_next/webpack-hmr`, cause: "net::ERR_CONNECTION_REFUSED" }]);
+    } finally {
+      await b.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   test("the page is read once the app's data has arrived, not in the empty state it shows while loading", async () => {
     await withBrowser(async (b) => {
       await navigate(b, `${origin}/app-loads-late`);
