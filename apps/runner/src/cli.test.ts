@@ -144,19 +144,21 @@ test("a run whose test account the product refuses exits 1 and says which accoun
   expect(run.err.join("\n")).toContain("The product refused the username and password of p@a.test: Username and password do not match. Check that account in the project file and run again.");
 });
 
-test("run passes --judge-model, --headed and the budget through", async () => {
+test("run passes --judge-model, --headed and the budget through, and browses through its own egress proxy", async () => {
   const dir = mkdtempSync(join(tmpdir(), "cfg-"));
   writeFileSync(join(dir, "p.yaml"), YAML.stringify({ name: "A", targetUrl: "https://a.test", personas: [{ id: "p", name: "P", brief: "b" }], goals: [{ id: "g", instruction: "x" }] }));
   const models: string[] = [];
   const headless: boolean[] = [];
+  const proxies: unknown[] = [];
   const agent = scriptedModel([toolCall("goal_status", { goal: "g", status: "reached", note: "" }), toolCall("finish", { summary: "done" })]);
   const run = deps({
     model: (id) => (models.push(id), agent),
-    openBrowser: async (o) => (headless.push(o.headless), { tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => {} }),
+    openBrowser: async (o) => (headless.push(o.headless), proxies.push(o.proxy), { tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close: async () => {} }),
   });
   expect(await runCli(["run", "--config", join(dir, "p.yaml"), "--model", "m/a", "--judge-model", "m/j", "--headed"], run.d)).toBe(0);
   expect(models).toEqual(["m/a", "m/j"]);
   expect(headless).toEqual([false]);
+  expect(proxies).toEqual([{ server: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/) }]);
   const [runDir] = readdirSync(run.d.runsRoot);
   expect(JSON.parse(readFileSync(join(run.d.runsRoot, runDir!, "summary.json"), "utf8"))).toMatchObject({ agentModel: "m/a", judgeModel: "m/j" });
   expect(await runCli(["run", "--config", join(dir, "p.yaml"), "--budget", "0"], deps().d)).toBe(2);

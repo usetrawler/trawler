@@ -5,7 +5,8 @@ import net, { type BlockList } from "node:net";
 import type { Duplex } from "node:stream";
 import { blockedAddresses, isBlockedAddress } from "@usetrawler/core/network";
 
-export type Resolve = (hostname: string) => Promise<Array<{ address: string; family: number }>>;
+type Address = { address: string; family: number };
+export type Resolve = (hostname: string) => Promise<Address[]>;
 
 export interface BlockedAttempt {
   url: string;
@@ -15,6 +16,7 @@ export interface BlockedAttempt {
 interface Session {
   server: http.Server;
   origins: Set<string>;
+  local: Map<string, Address[]>;
   blocked: BlockedAttempt[];
   reported: Set<string>;
   expires: number;
@@ -31,6 +33,7 @@ const MAX_CONNECTIONS = 128;
 const IDLE_MS = 10 * 60 * 1000;
 const HOP_HEADERS = new Set(["proxy-authorization", "proxy-connection"]);
 
+const LOOPBACK: Address[] = [{ address: "::1", family: 6 }, { address: "127.0.0.1", family: 4 }];
 const systemResolve: Resolve = (hostname) => lookup(hostname, { all: true, verbatim: true });
 
 const bracketed = (host: string) => (net.isIPv6(host) ? `[${host}]` : host);
@@ -41,12 +44,13 @@ function reply(socket: Duplex, status: string, extra = "") {
   socket.end(`HTTP/1.1 ${status}\r\n${extra}Content-Length: 0\r\nConnection: close\r\n\r\n`);
 }
 
-export async function startEgressProxy(opts: { token: string; port?: number; resolve?: Resolve; blocked?: BlockList; now?: () => number; maxConnections?: number; idleMs?: number }): Promise<{ port: number; close: () => Promise<void> }> {
+export async function startEgressProxy(opts: { token: string; port?: number; resolve?: Resolve; blocked?: BlockList; localTargets?: boolean; now?: () => number; maxConnections?: number; idleMs?: number }): Promise<{ port: number; close: () => Promise<void> }> {
   const maxConnections = opts.maxConnections ?? MAX_CONNECTIONS;
   const idleMs = opts.idleMs ?? IDLE_MS;
   const token = Buffer.from(opts.token);
   if (token.length < 32) throw new RangeError("the egress control token must be at least 32 characters");
-  const resolve = opts.resolve ?? systemResolve;
+  const lookupHost = opts.resolve ?? systemResolve;
+  const resolve: Resolve = async (hostname) => (hostname === "localhost" || hostname.endsWith(".localhost") ? LOOPBACK : lookupHost(hostname));
   const blocked = opts.blocked ?? blockedAddresses();
   const now = opts.now ?? Date.now;
   const sessions = new Map<string, Session>();
@@ -73,23 +77,40 @@ export async function startEgressProxy(opts: { token: string; port?: number; res
   const candidates = (host: string, port: string) => ["http", "https"].map((scheme) => new URL(`${scheme}://${bracketed(host)}:${port}`).origin);
   const allowed = (s: Session, host: string, port: string) => candidates(host, port).some((origin) => s.origins.has(origin));
 
-  async function destination(host: string): Promise<{ address: string; family: number } | "private" | "unresolved"> {
+  async function addressesOf(host: string): Promise<Address[]> {
     const literal = net.isIP(host);
-    let addresses: Array<{ address: string; family: number }>;
-    if (literal) addresses = [{ address: host, family: literal }];
-    else {
-      try {
-        addresses = await resolve(host);
-      } catch {
-        return "unresolved";
-      }
-    }
-    if (addresses.length === 0) return "unresolved";
-    if (addresses.some((a) => isBlockedAddress(a.address, a.family, blocked))) return "private";
-    return addresses[0]!;
+    if (literal) return [{ address: host, family: literal }];
+    return resolve(host).catch(() => []);
   }
 
-  function dial(address: { address: string; family: number }, port: number): Promise<net.Socket> {
+  async function destination(s: Session, host: string, port: string): Promise<Address[] | "private" | "unresolved"> {
+    const pinned = candidates(host, port).map((origin) => s.local.get(origin)).find((addresses) => addresses !== undefined);
+    if (pinned) return pinned;
+    const addresses = await addressesOf(host);
+    if (addresses.length === 0) return "unresolved";
+    if (addresses.some((a) => isBlockedAddress(a.address, a.family, blocked))) return "private";
+    return addresses;
+  }
+
+  async function localOrigins(origins: Set<string>): Promise<Map<string, Address[]>> {
+    const local = new Map<string, Address[]>();
+    if (!opts.localTargets) return local;
+    for (const origin of origins) {
+      const addresses = await addressesOf(unbracketed(new URL(origin).hostname));
+      if (addresses.some((a) => isBlockedAddress(a.address, a.family, blocked))) local.set(origin, addresses);
+    }
+    return local;
+  }
+
+  async function dialAny(addresses: Address[], port: number): Promise<net.Socket | null> {
+    for (const address of addresses) {
+      const socket = await dial(address, port).catch(() => null);
+      if (socket) return socket;
+    }
+    return null;
+  }
+
+  function dial(address: Address, port: number): Promise<net.Socket> {
     return new Promise((resolveSocket, reject) => {
       const socket = net.connect({ host: address.address, port, family: address.family });
       socket.setTimeout(CONNECT_TIMEOUT_MS, () => socket.destroy(new Error("connect timed out")));
@@ -122,7 +143,7 @@ export async function startEgressProxy(opts: { token: string; port?: number; res
       refuse(s, shown, "origin");
       return { status: "403 Forbidden" };
     }
-    const target = await destination(host);
+    const target = await destination(s, host, port);
     if (target === "private") {
       refuse(s, shown, "private");
       return { status: "403 Forbidden" };
@@ -130,7 +151,7 @@ export async function startEgressProxy(opts: { token: string; port?: number; res
     if (target === "unresolved") return { status: "502 Bad Gateway" };
     if (s.connections >= maxConnections) return { status: "429 Too Many Requests" };
     s.connections++;
-    const upstream = await dial(target, Number(port)).catch(() => null);
+    const upstream = await dialAny(target, Number(port));
     if (!upstream) {
       s.connections--;
       return { status: "502 Bad Gateway" };
@@ -288,7 +309,7 @@ export async function startEgressProxy(opts: { token: string; port?: number; res
 
   async function openSession(id: string, allowedOrigins: Set<string>): Promise<number> {
     const proxyServer = tracked(http.createServer());
-    const s: Session = { server: proxyServer, origins: allowedOrigins, blocked: [], reported: new Set(), expires: now() + SESSION_MS, connections: 0 };
+    const s: Session = { server: proxyServer, origins: allowedOrigins, local: await localOrigins(allowedOrigins), blocked: [], reported: new Set(), expires: now() + SESSION_MS, connections: 0 };
     proxyServer.requestTimeout = 0;
     proxyServer.on("request", (req, res) => void onProxyRequest(s, req, res).catch(failed(res)));
     proxyServer.on("connect", (req, socket, head) => void onConnect(s, req, socket, head).catch(() => socket.destroy()));
