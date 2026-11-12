@@ -222,3 +222,37 @@ test("a tunnel left idle is closed", async () => {
     await idle.close();
   }
 });
+
+test("with local targets, an allowed origin on this machine is reached at the addresses it had when the session opened, and every other local address stays refused", async () => {
+  const hosts: Record<string, string> = { "dev.test": "127.0.0.1", "late.test": "93.184.216.34" };
+  const local = await startEgressProxy({ token: TOKEN, localTargets: true, resolve: async (hostname) => (hosts[hostname] ? [{ address: hosts[hostname], family: 4 }] : Promise.reject(new Error("ENOTFOUND"))) });
+  try {
+    const { body } = await (await fetch(`http://127.0.0.1:${local.port}/sessions`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({ origins: [`http://localhost:${upstreamPort}`, `http://app.localhost:${upstreamPort}`, `http://dev.test:${upstreamPort}`, `http://late.test:${upstreamPort}`] }),
+    }).then(async (res) => ({ body: (await res.json()) as { id: string; port: number } })));
+    hosts["dev.test"] = "10.0.0.9";
+    hosts["late.test"] = "127.0.0.1";
+    for (const host of ["localhost", "app.localhost", "dev.test"]) {
+      const through = await connect(body.port, `${host}:${upstreamPort}`, get(`${host}:${upstreamPort}`));
+      expect(status(through)).toBe("HTTP/1.1 200 Connection Established");
+      expect(through).toContain(`hello /x from ${host}:${upstreamPort}`);
+    }
+    expect(await exchange(body.port, `GET http://localhost:${upstreamPort}/plain HTTP/1.1\r\nHost: localhost:${upstreamPort}\r\nConnection: close\r\n\r\n`)).toContain(`hello /plain from localhost:${upstreamPort}`);
+    for (const target of [`late.test:${upstreamPort}`, `127.0.0.1:${upstreamPort}`, `localhost:${upstreamPort + 1}`, "169.254.169.254:80"]) {
+      expect(status(await connect(body.port, target, get(target)))).toBe("HTTP/1.1 403 Forbidden");
+    }
+    const blocked = await fetch(`http://127.0.0.1:${local.port}/sessions/${body.id}/blocked`, { headers: { authorization: `Bearer ${TOKEN}` } }).then((res) => res.json());
+    expect(blocked).toEqual({
+      blocked: [
+        { url: `http://late.test:${upstreamPort}`, reason: "private" },
+        { url: `https://127.0.0.1:${upstreamPort}`, reason: "origin" },
+        { url: `https://localhost:${upstreamPort + 1}`, reason: "origin" },
+        { url: "http://169.254.169.254", reason: "origin" },
+      ],
+    });
+  } finally {
+    await local.close();
+  }
+});

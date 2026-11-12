@@ -11,7 +11,7 @@ import { localRun, type OpenBrowser } from "./local-run.ts";
 import { RunDir, renderReport } from "./run-dir.ts";
 import { FatalClaim, workLoop, workOnce, type WorkerDeps } from "./worker.ts";
 import { egressClient } from "./egress-client.ts";
-import type { BlockedAttempt } from "./egress-proxy.ts";
+import { forwardBlocked, startLocalEgress } from "./local-egress.ts";
 import { startReporting, workerLog } from "./report.ts";
 import { cleanBrowserUser } from "./browser-user.ts";
 
@@ -19,7 +19,6 @@ export const DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
 const SETUP_BUDGET_USD = 0.25;
 const FETCH_TIMEOUT_MS = 20_000;
 const MAX_PAGE_BYTES = 2_000_000;
-const EGRESS_POLL_MS = 1_000;
 const EGRESS_DOWN = "stopped: the egress proxy is not answering, so no browser can be started safely";
 
 const USAGE = `Usage:
@@ -45,6 +44,7 @@ export interface CliDeps {
   fetchImpl?: typeof fetch;
   startReporting?: typeof startReporting;
   cleanBrowserUser?: (launcher: string) => Promise<{ keysReachable: boolean } | void>;
+  startLocalEgress?: typeof startLocalEgress;
 }
 
 class UsageError extends Error {}
@@ -212,28 +212,20 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
             throw new Error(`the egress proxy could not open a session, so the browser was not started: ${err instanceof Error ? err.message : String(err)}`);
           })
         : undefined;
-      const reported = new Set<string>();
-      const report = (blocked: BlockedAttempt[]) => {
-        for (const { url } of blocked) {
-          if (reported.has(url)) continue;
-          reported.add(url);
-          onBlocked(url);
-        }
-      };
-      const polling = session ? setInterval(() => void session.drain().then(report, () => undefined), EGRESS_POLL_MS) : undefined;
+      const finishSession = session ? forwardBlocked(session, onBlocked) : undefined;
       let finished: Promise<void> | undefined;
       const finish = () => (finished ??= finishOnce());
       unfinished.add(finish);
       const finishOnce = async () => {
         unfinished.delete(finish);
-        clearInterval(polling);
+        const closing = finishSession?.();
         rmSync(outputDir, { recursive: true, force: true });
         try {
           if (downloadsPath) rmSync(downloadsPath, { recursive: true, force: true });
         } catch {
           // the job's end clears what the browser locked in here
         }
-        if (session) report(await session.close().catch(() => []));
+        await closing;
       };
       try {
         const browser = await deps.openBrowser({ project, outputDir, headless: true, onBlocked, scrubber, survivesSignals: true, proxy: session?.proxy, executablePath: browserLauncher, downloadsPath });
@@ -298,6 +290,7 @@ async function run(args: string[], deps: CliDeps, apiKey: () => string): Promise
   const runDir = new RunDir(join(deps.runsRoot, new Date().toISOString().replace(/[:.]/g, "-")));
   deps.err(`run ${runDir.root}: ${project.personas.length} personas, budget $${budgetUsd.toFixed(2)}`);
   let summary;
+  const egress = await (deps.startLocalEgress ?? startLocalEgress)();
   try {
     summary = await localRun({
     project, agentModel: deps.model(agentModelId, key), agentModelId, judgeModel: deps.model(judgeModelId, key), judgeModelId,
@@ -306,10 +299,13 @@ async function run(args: string[], deps: CliDeps, apiKey: () => string): Promise
       runDir.emit(e);
       progress(deps.err, e);
     },
-    openBrowser: ({ onBlocked, scrubber: jobScrubber }) => deps.openBrowser({ project, outputDir: runDir.path("browser"), headless: !values.headed, onBlocked, scrubber: jobScrubber }),
+    openBrowser: ({ onBlocked, scrubber: jobScrubber }) =>
+      egress.browse(project.allowedOrigins, onBlocked, (proxy) => deps.openBrowser({ project, outputDir: runDir.path("browser"), headless: !values.headed, onBlocked, scrubber: jobScrubber, proxy })),
     });
   } catch (err) {
     throw new Error(scrubber.scrub(err instanceof Error ? err.message : String(err)));
+  } finally {
+    await egress.close();
   }
   runDir.writeSummary(summary);
   runDir.writeReport(renderReport(summary));
