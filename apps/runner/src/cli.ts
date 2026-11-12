@@ -44,6 +44,7 @@ export interface CliDeps {
   fetchImpl?: typeof fetch;
   startReporting?: typeof startReporting;
   cleanBrowserUser?: (launcher: string) => Promise<{ keysReachable: boolean } | void>;
+  startLocalEgress?: typeof startLocalEgress;
 }
 
 class UsageError extends Error {}
@@ -289,7 +290,7 @@ async function run(args: string[], deps: CliDeps, apiKey: () => string): Promise
   const runDir = new RunDir(join(deps.runsRoot, new Date().toISOString().replace(/[:.]/g, "-")));
   deps.err(`run ${runDir.root}: ${project.personas.length} personas, budget $${budgetUsd.toFixed(2)}`);
   let summary;
-  const egress = await startLocalEgress();
+  const egress = await (deps.startLocalEgress ?? startLocalEgress)();
   try {
     summary = await localRun({
     project, agentModel: deps.model(agentModelId, key), agentModelId, judgeModel: deps.model(judgeModelId, key), judgeModelId,

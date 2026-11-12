@@ -9,6 +9,7 @@ import { scriptedModel, text, toolCall } from "../../../packages/core/src/testin
 import { fetchPage, runCli, type CliDeps } from "./cli.ts";
 import type { LogFields } from "./worker.ts";
 import { startEgressProxy } from "./egress-proxy.ts";
+import { startLocalEgress } from "./local-egress.ts";
 import net from "node:net";
 
 const connectThrough = (port: number, target: string) =>
@@ -158,9 +159,14 @@ test("run passes --judge-model, --headed and the budget through, and browses thr
   const headless: boolean[] = [];
   const proxies: unknown[] = [];
   const answers: string[] = [];
+  let egressClosed = 0;
   const agent = scriptedModel([toolCall("goal_status", { goal: "g", status: "reached", note: "" }), toolCall("finish", { summary: "done" })]);
   const run = deps({
     model: (id) => (models.push(id), agent),
+    startLocalEgress: async () => {
+      const egress = await startLocalEgress();
+      return { ...egress, close: () => (egressClosed++, egress.close()) };
+    },
     openBrowser: async (o) => {
       headless.push(o.headless);
       proxies.push(o.proxy);
@@ -171,6 +177,7 @@ test("run passes --judge-model, --headed and the budget through, and browses thr
   });
   expect(await runCli(["run", "--config", join(dir, "p.yaml"), "--model", "m/a", "--judge-model", "m/j", "--headed"], run.d)).toBe(0);
   expect(answers).toEqual(["HTTP/1.1 502 Bad Gateway", "HTTP/1.1 403 Forbidden"]);
+  expect(egressClosed).toBe(1);
   expect(await connectThrough(Number(new URL((proxies[0] as { server: string }).server).port), "a.test:443")).toBe("ECONNREFUSED");
   expect(models).toEqual(["m/a", "m/j"]);
   expect(headless).toEqual([false]);
