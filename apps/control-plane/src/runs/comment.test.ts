@@ -56,6 +56,39 @@ describe("renderComment", () => {
     expect(renderComment({ ...base, goalsReached: 6, goalsTotal: 6 })).toContain("### Trawler found no confirmed defects");
   });
 
+  test("a run that checked nothing of the change says it could not reach it, and why each goal was not checked", () => {
+    const coverage = { checked: 0, reached: 0, failedOnProduct: 0, notChecked: { setup: 4, person: 1, unknown: 0, other: 1 }, unchecked: [
+      { goal: "You resend Halina's invitation", cause: "setup" as const }, { goal: "You open the setup screen", cause: "person" as const }, { goal: "You join as a viewer", cause: "other" as const },
+    ] };
+    const md = renderComment({ ...base, goalsReached: 0, goalsTotal: 6, coverage });
+    expect(md).toContain("### Trawler could not reach this change");
+    expect(md).toContain("3 people used the product. 0 of 6 goals checked: 0 reached. Not checked: 4 because the setup lacked what they needed, 1 because a person could not find the way, 1 not finished. Cost $0.42.");
+    expect(md).toContain("Most goals were not checked, so finding no defect is not proof that the change works. Not checked:\n- You resend Halina's invitation (the setup lacked what it needed)\n- You open the setup screen (a person could not find the way)\n- You join as a viewer (not finished)");
+  });
+
+  test("a run that stopped before anyone got far is not said to be out of reach, and a failed goal from an older runner says it gave no cause", () => {
+    const stopped = { checked: 0, reached: 0, failedOnProduct: 0, notChecked: { setup: 0, person: 0, unknown: 1, other: 3 }, unchecked: [{ goal: "A", cause: "unknown" as const }, { goal: "B", cause: "other" as const }] };
+    const md = renderComment({ ...base, goalsReached: 0, goalsTotal: 4, coverage: stopped });
+    expect(md).toContain("### Trawler could check only part of this change");
+    expect(md).toContain("0 of 4 goals checked: 0 reached. Not checked: 1 failed with no cause given, 3 not finished.");
+    expect(md).toContain("- A (failed with no cause given)\n- B (not finished)");
+  });
+
+  test("a goal that failed on the product counts as checked, so a run where the product stopped people is not called thin", () => {
+    const coverage = { checked: 4, reached: 1, failedOnProduct: 3, notChecked: { setup: 0, person: 0, unknown: 0, other: 0 }, unchecked: [] };
+    const md = renderComment({ ...base, goalsReached: 1, goalsTotal: 4, coverage });
+    expect(md).toContain("### Trawler found no confirmed defects");
+    expect(md).toContain("3 people used the product. 4 of 4 goals checked: 1 reached, 3 failed on the product. Cost $0.42.");
+    expect(md).not.toContain("not proof");
+  });
+
+  test("a run where most goals were blocked by the person or the setup checked only part of the change", () => {
+    const coverage = { checked: 2, reached: 2, failedOnProduct: 0, notChecked: { setup: 0, person: 3, unknown: 0, other: 0 }, unchecked: [{ goal: "A", cause: "person" as const }, { goal: "B", cause: "person" as const }, { goal: "C", cause: "person" as const }] };
+    const md = renderComment({ ...base, goalsReached: 2, goalsTotal: 5, coverage });
+    expect(md).toContain("### Trawler could check only part of this change");
+    expect(md).toContain("2 of 5 goals checked: 2 reached. Not checked: 3 because a person could not find the way.");
+  });
+
   test("lists at most five unreached goals", () => {
     const md = renderComment({ ...base, goalsReached: 0, goalsTotal: 8, unreachedGoals: Array.from({ length: 8 }, (_, i) => `Goal ${i + 1}`) });
     expect(md).toContain("- Goal 5\n- and 3 more, in the report");

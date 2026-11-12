@@ -6,7 +6,7 @@ import { withOrg } from "../db/tenancy.ts";
 import { testDb } from "../db/test-db.ts";
 import { Keyring } from "../lib/secrets.ts";
 import { createProject } from "../projects/projects.ts";
-import { cancelRun, startRun } from "../runs/runs.ts";
+import { cancelRun, runSummary, startRun } from "../runs/runs.ts";
 import { claimJob, releaseJob } from "../runs/queue.ts";
 import { handleClaim, handleComplete, handleEvents, type RunnerApiDeps } from "./handlers.ts";
 
@@ -123,6 +123,22 @@ test("text the database cannot store is cleaned instead of failing the batch, an
   await handleComplete(post(`/api/jobs/${job.jobId}/complete`, done(5), auth), job.jobId, deps);
   const { rows } = await sql<{ cost_usd: string }>`select cost_usd from runs where id = ${run.id}`.execute(t.db);
   expect(Number(rows[0]!.cost_usd)).toBe(0);
+});
+
+test("what stopped a person on a goal is stored with the goal and reaches the run's summary, and a later answer replaces it", async () => {
+  const run = await startAndClaim();
+  const job = await (await handleClaim(post("/api/runner/claim", {}, runner), deps)).json();
+  const auth = { authorization: `Bearer ${job.token}` };
+  const at = new Date().toISOString();
+  const send = (seq: number, outcome: Record<string, unknown>) => handleEvents(post(`/api/jobs/${job.jobId}/events`, { events: [{ seq, at, jobId: job.jobId, type: "goal_status", outcome }] }, auth), job.jobId, deps);
+  expect((await send(1, { goal: "g", status: "failed", note: "no mail here", blockedBy: "setup" })).status).toBe(200);
+  const stored = async () => (await sql<{ status: string; blocked_by: string | null }>`select status, blocked_by from goal_outcomes where run_id = ${run.id}`.execute(t.db)).rows;
+  expect(await stored()).toEqual([{ status: "failed", blocked_by: "setup" }]);
+  expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.goals).toEqual([expect.objectContaining({ goal: "g", status: "failed", blockedBy: "setup" })]);
+  await send(2, { goal: "g", status: "reached", note: "" });
+  expect(await stored()).toEqual([{ status: "reached", blocked_by: null }]);
+  expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.goals[0]).not.toHaveProperty("blockedBy");
+  await handleComplete(post(`/api/jobs/${job.jobId}/complete`, { usage: { model: "a", inputTokens: 0, outputTokens: 0, costUsd: 0, steps: 0 }, stoppedBy: "finish" }, auth), job.jobId, deps);
 });
 
 test("a claim released after its run was cancelled is cancelled, not queued forever", async () => {

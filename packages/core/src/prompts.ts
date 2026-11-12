@@ -62,7 +62,7 @@ The product's team wrote down how the product is set up for this test and what i
 <setup-${tag}>
 ${setup}
 </setup-${tag}>
-Do not report what it describes as a defect or as friction. When a goal cannot be reached because of it, give the goal failed and say which limit stopped you. When it says where mail the product sends can be read, open that place whenever a goal needs a mail, such as an invitation or a reminder.
+Do not report what it describes as a defect or as friction. When a goal cannot be reached because of it, give the goal failed with blockedBy setup and say which limit stopped you. When it says where mail the product sends can be read, open that place whenever a goal needs a mail, such as an invitation or a reminder.
 `;
 }
 
@@ -115,7 +115,8 @@ Every turn must call a tool; plain text does nothing.
 Use browser_snapshot to see the page; actions such as clicking do not return the page. To act on an element, pass its ref from the latest snapshot (for example e12) as target. Older page results are removed from your view, so write anything you need to remember with note.
 ${p.look ? `${LOOKING}
 Something you see is a defect like any other when the product shows it wrongly, for example a picture that does not match its item, the same picture where different ones belong, or text covered or cut off so it cannot be read.
-` : ""}Do not give up on a goal the moment it is awkward, and do not keep going once you are convinced it cannot be done. Keep an eye on the step count and leave enough steps for every goal: when one cannot be done here, give it failed and go on to the next instead of spending the turn on it. After each goal call goal_status with reached or failed.
+` : ""}Do not give up on a goal the moment it is awkward, and do not keep going once you are convinced it cannot be done. Keep an eye on the step count and leave enough steps for every goal: when one cannot be done here, give it failed and go on to the next instead of spending the turn on it. After each goal call goal_status with reached or failed. A failed goal says what stopped you, as blockedBy: product when the product stopped you (it behaved wrongly, or a user has no way to do it); setup when this copy of the product lacks what the goal needs (an account, data, mail or an outside service); person when you could not find the way, though the product may have one.
+Look for a page the way a user would: through the product's menus, links, buttons and settings. An address you made up that shows "not found" says nothing about the product, so it is never a defect and never a step of one. When you cannot reach something the goal or the brief says exists, and no menu, link or setting leads to it, report friction about how to find it, not a defect.
 Your goals are what you want, written for you; they are not the product's promises. When the product gets you the outcome but not a detail your goal mentioned, the goal is reached, and you say what was missing in its note, or report friction. Missing something is a defect only when the product itself promised it, in its own words, labels or documentation, or a control that should provide it does not work. This is only about a detail of an outcome you got. These are behaviour and a defect as usual: an action that does nothing or gives no response, a record or change that does not appear where the product shows such things, a value that contradicts what the product said, showed elsewhere or what you entered (for example a balance its own history does not account for), empty results, and input refused without saying why. Do not explain such a thing away with a reason the product did not give.
 
 Record findings with submit_finding the moment you see them, not at the end. Give each one a quote: one sentence, as you would tell a friend how it felt.
@@ -138,7 +139,7 @@ export interface Revisit {
 export function stuckHints(p: { sinceStatus: number; revisits: Revisit[]; openGoals: number }): string {
   if (p.openGoals === 0) return "";
   const hints: string[] = [];
-  if (p.sinceStatus >= GOAL_SHARE) hints.push(`You have taken ${p.sinceStatus} steps since you last gave a goal a status. If the goal you are on cannot be done here, give it failed with what you saw and go on to the next one; if it is done, give it reached.`);
+  if (p.sinceStatus >= GOAL_SHARE) hints.push(`You have taken ${p.sinceStatus} steps since you last gave a goal a status. If the goal you are on cannot be done here, give it failed with blockedBy and what you saw, and go on to the next one; if it is done, give it reached.`);
   const most = p.revisits[0];
   if (most && most.count >= REVISITS_HINT) {
     hints.push(`You have come back to ${most.url} ${most.count} times without recording anything. Stop going in circles: if something there behaved wrongly, record it with submit_finding; otherwise give the current goal a status or try a different way. At ${REVISITS_STOP} visits the browser closes until you give the goal a status.`);
@@ -154,9 +155,9 @@ export function wrapUpPrompt(w: WrapUp): string {
     case "settled":
       return `\n\n## Wrap up\nEvery goal has a status, so the browser is closed to you. ${record} Then call finish.`;
     case "out_of_steps":
-      return `\n\n## Wrap up\nOnly ${w.stepsLeft} step${w.stepsLeft === 1 ? "" : "s"} left, so the browser is closed to you. ${record} Then give every open goal a status (failed, with where you stopped, if you did not get there) and call finish.`;
+      return `\n\n## Wrap up\nOnly ${w.stepsLeft} step${w.stepsLeft === 1 ? "" : "s"} left, so the browser is closed to you. ${record} Then give every open goal a status (failed, with blockedBy and where you stopped, if you did not get there) and call finish.`;
     case "circling":
-      return `\n\n## You are going in circles\nYou came back to ${w.url} ${w.count} times without recording anything, so the browser is closed to you until you give goal ${w.goal} a status. ${record} Then give ${w.goal} reached or failed, with what you saw in its note; the browser opens again for your next goal.`;
+      return `\n\n## You are going in circles\nYou came back to ${w.url} ${w.count} times without recording anything, so the browser is closed to you until you give goal ${w.goal} a status. ${record} Then give ${w.goal} reached or failed (with blockedBy), with what you saw in its note; the browser opens again for your next goal.`;
   }
 }
 
@@ -166,7 +167,7 @@ export function sessionStatus(notes: string[], goals: GoalOutcome[], step: numbe
   const left = maxSteps - step;
   const open = goals.filter((g) => g.status === "not_attempted").length;
   const warning = left <= Math.max(3, open + 1, Math.ceil(maxSteps / 10))
-    ? ` Only ${left} step${left === 1 ? "" : "s"} left: give every open goal a status now (reached or failed) and call finish.`
+    ? ` Only ${left} step${left === 1 ? "" : "s"} left: give every open goal a status now (reached, or failed with blockedBy) and call finish.`
     : "";
   return `\n\n## Your scratchpad\n${pad}\n\n## Goal status\n${table}\n\nStep ${step + 1} of ${maxSteps}.${warning}`;
 }
@@ -225,6 +226,7 @@ ${fence("observation", observation.observed)}
 
 Did their observation independently show the behaviour the claim describes? A step that could not be carried out can itself be the defect, for example a page that failed before its button appeared.
 If the steps spell out the expected result and the observation only repeats it without describing what the page showed, that is not independent.
+An address the tester typed by guess that shows "not found" says nothing about the product. When the claim rests only on such addresses (a page they were told exists but could not reach), answer "refuted" unless the observation shows a menu, link or button of the product itself leading to a page that is missing or broken.
 If the observation says the product refused the stored test account's credentials (a wrong username or password, or an unknown account), the replay never reached the product, so nothing is settled: answer "inconclusive", even when the claim itself is about signing in.
 Some claims say an outcome worked but lacked a detail the tester expected, such as an extra value or field on a result that otherwise appeared. Such a claim is not a defect unless the claim or the observation shows the product promising that detail, in its own words, labels or documentation. Without that, the observation shows the product working, so answer "refuted", even when it agrees the detail is absent.
 That rule is only about details of an outcome that happened. An action that does nothing or gives no response, a record or change that does not appear where the product shows such things, a value that contradicts what the product said or what was entered, empty results, and input refused without saying why are behaviour, and the observation decides them as usual.
@@ -379,7 +381,8 @@ Otherwise answer with turns, in the order the people play them:
 - An untried case uses only what the product already offers: never ask anyone to use an option, a field or a state the change and the product do not show.
 - Answer untried: a list with each of these cases, as case (a short phrase) and goal (the id of the goal that tries it). When goals run short, keep the promise goal, then the untried cases, and leave out other cases the pull request lists.
 - Choose only people whose role can reach the change; skip the rest.
-- Write brief: what you, as the lead, tell the people you chose before they start, in three short parts: what changed (which feature, in a user's words); what it should do, only as far as the pull request promises it, with any limits it gives; and where to look for trouble, in one or two hints drawn from the untried cases, without the values to type. Use a user's words; never name a file, component, function, route, address, variable or setting, and never how it was built or what its author already tried. With no turns, leave brief out.
+- Write brief: what you, as the lead, tell the people you chose before they start, in three short parts: what changed (which feature, in a user's words); what it should do, only as far as the pull request promises it, with any limits it gives; and where to look for trouble, in one or two hints drawn from the untried cases, without the values to type. Use a user's words; never name a file, component, function, route, address, variable or setting, and never how it was built or what its author already tried. When the change adds or moves a screen, say where a user finds it, by the menu, page or button that leads there, as far as the pull request says; never tell the people to type an address. With no turns, leave brief out.
+- Promise only what a user can reach through the product's own menus, links and buttons. A screen the pull request says is opened only by typing its address cannot be found by the people, so leave it out, or test it where a user would arrive at it.
 - When the people need an account to use the product, the first turn starts with a short goal about getting in (signing in or signing up and reaching the product's home page), so the plan never depends on a standing sign-in check; the goals for the change follow it.
 
 Also decide how the people get their accounts, and answer it as accountFlow:

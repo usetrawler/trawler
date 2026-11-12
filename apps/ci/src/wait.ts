@@ -29,7 +29,7 @@ export async function waitForRun(opts: WaitOptions): Promise<Waited> {
     try {
       last = await opts.api.getRun(opts.id);
       failures = 0;
-      const line = `${last.status}, ${last.goalsReached}/${last.goalsTotal} goals reached, ${last.defects.confirmed} confirmed defect(s)`;
+      const line = `${last.status}, ${last.coverage ? `${last.coverage.checked}/${last.goalsTotal} goals checked` : `${last.goalsReached}/${last.goalsTotal} goals reached`}, ${last.defects.confirmed} confirmed defect(s)`;
       if (line !== shown) {
         shown = line;
         opts.onProgress(line);

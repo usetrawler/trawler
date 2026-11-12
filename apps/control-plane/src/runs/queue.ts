@@ -518,8 +518,8 @@ export async function ingestEvents(db: Database, token: string, events: RunEvent
         const o = e.outcome;
         await tx
           .insertInto("goal_outcomes")
-          .values({ org_id: job.org_id, run_id: job.run_id, persona_key: job.persona_key!, goal: o.goal, status: o.status, note: o.note })
-          .onConflict((oc) => oc.columns(["run_id", "persona_key", "goal"]).doUpdateSet({ status: o.status, note: o.note }))
+          .values({ org_id: job.org_id, run_id: job.run_id, persona_key: job.persona_key!, goal: o.goal, status: o.status, note: o.note, blocked_by: o.blockedBy ?? null })
+          .onConflict((oc) => oc.columns(["run_id", "persona_key", "goal"]).doUpdateSet({ status: o.status, note: o.note, blocked_by: o.blockedBy ?? null }))
           .execute();
       } else if (e.type === "verdict" && job.kind === "judge" && e.findingId === job.finding_key) {
         await tx.updateTable("findings").set({ verdict: e.verdict, updated_at: new Date() }).where("run_id", "=", job.run_id).where("key", "=", e.findingId).execute();

@@ -278,7 +278,7 @@ test("work hands the browser's screenshots and page address to the job, so a fin
     model: () => scriptedModel([
       toolCall("browser_snapshot", {}),
       toolCall("submit_finding", { kind: "defect", goal: "g", title: "Broken", observed: "500", reproduction: ["Open /", "Click Save"], severity: "high" }),
-      toolCall("goal_status", { goal: "g", status: "failed", note: "500" }),
+      toolCall("goal_status", { goal: "g", status: "failed", blockedBy: "product", note: "500" }),
       toolCall("finish", { summary: "done" }),
     ]),
     openBrowser: async () => ({ tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => "the page" }) }, fillField: async () => "typed", screenshot: async () => ({ bytes: png, contentType: "image/png" as const }), pageUrl: () => "https://a.test/save?token=t0ps3cr3t", close: async () => {} }),
@@ -431,7 +431,7 @@ test("in work mode with an egress proxy, each browser gets its own proxy session
   const { d } = deps({
     env: { TRAWLER_RUNNER_TOKEN: "t".repeat(40), TRAWLER_EGRESS_PROXY: `http://127.0.0.1:${proxy.port}`, TRAWLER_EGRESS_TOKEN: egressToken, TRAWLER_BROWSER_LAUNCHER: "/usr/local/bin/trawler-chromium", TRAWLER_BROWSER_DOWNLOADS: sharedDownloads },
     fetchImpl: controlPlane,
-    model: () => scriptedModel([toolCall("goal_status", { goal: "g", status: "failed", note: "blocked" }), toolCall("finish", { summary: "done" })]),
+    model: () => scriptedModel([toolCall("goal_status", { goal: "g", status: "failed", blockedBy: "product", note: "blocked" }), toolCall("finish", { summary: "done" })]),
     openBrowser: async ({ proxy: given, executablePath, downloadsPath }) => {
       proxies.push(given);
       launchers.push(executablePath);

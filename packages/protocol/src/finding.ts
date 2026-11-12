@@ -28,10 +28,14 @@ export const FindingSchema = z
   });
 export type Finding = z.infer<typeof FindingSchema>;
 
+export const GOAL_BLOCKERS = ["product", "setup", "person"] as const;
+export type GoalBlocker = (typeof GOAL_BLOCKERS)[number];
+
 export const GoalOutcomeSchema = z.object({
   goal: z.string().min(1).max(100),
   status: z.enum(["reached", "failed", "not_attempted"]),
   note: z.string().max(MAX_GOAL_NOTE),
+  blockedBy: z.enum(GOAL_BLOCKERS).optional(),
 });
 export type GoalOutcome = z.infer<typeof GoalOutcomeSchema>;
 

@@ -26,8 +26,8 @@ test("while people explore, the use stage is active and each person shows where 
   }));
   expect(view.stages.map((s) => s.state)).toEqual(["active", "waiting", "waiting", "waiting"]);
   expect(view.personas.map((p) => p.state)).toEqual(["reached", "exploring"]);
-  expect(view.personas[0]!.goals).toEqual([{ id: "g", goal: "Get in.", status: "reached", note: "" }]);
-  expect(view.personas[1]!.goals).toEqual([{ id: "g", goal: "Get in.", status: null, note: "" }]);
+  expect(view.personas[0]!.goals).toEqual([{ id: "g", goal: "Get in.", status: "reached", note: "", blockedBy: null }]);
+  expect(view.personas[1]!.goals).toEqual([{ id: "g", goal: "Get in.", status: null, note: "", blockedBy: null }]);
   expect(view.headline).toMatch(/using the product/);
 });
 
@@ -412,9 +412,12 @@ test("a finished run with no defects says how few goals it reached when most wer
   const finished = (goals: RunSummary["goals"]) => runView(summary({ status: "succeeded", personas: [{ id: "ana", name: "Ana" }], goalTexts: [{ id: "g", instruction: "Get in.", personaId: "ana" }, { id: "h", instruction: "Add a task.", personaId: "ana" }, { id: "i", instruction: "See it.", personaId: "ana" }], goals }));
   const reached = (id: string) => ({ personaKey: "ana", goal: id, status: "reached" as const, note: "" });
   const view = finished([reached("g")]);
-  expect(view.headline).toBe("No defects found, but only 1 of 3 goals were reached, so this run cannot say the change works.");
+  expect(view.headline).toBe("No defects found, but only 1 of 3 goals were checked (not checked: 2 not finished), so this run cannot say the change works.");
   expect(view.unreachedGoals).toEqual(["Add a task.", "See it."]);
   expect(finished([reached("g"), reached("h")]).headline).toBe("No defects found.");
+  const blocked = (id: string, blockedBy: "product" | "setup" | "person") => ({ personaKey: "ana", goal: id, status: "failed" as const, note: "", blockedBy });
+  expect(finished([reached("g"), blocked("h", "setup"), blocked("i", "person")]).headline).toBe("No defects found, but only 1 of 3 goals were checked (not checked: 1 because the setup lacked what it needed, 1 because a person could not find the way), so this run cannot say the change works.");
+  expect(finished([reached("g"), blocked("h", "product"), blocked("i", "setup")]).headline).toBe("No defects found.");
 });
 
 test("a run an assistant stopped names the assistant and the person, and falls back to the plain reason without them", () => {

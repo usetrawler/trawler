@@ -42,7 +42,7 @@ describe("runRoleSession", () => {
     const model = scriptedModel([
       toolCall("browser_snapshot", {}),
       toolCall("submit_finding", { kind: "defect", goal: "sign-up", title: "500", observed: "got a 500", reproduction: ["a", "b"], severity: "high" }),
-      toolCall("goal_status", { goal: "sign-up", status: "failed", note: "500 on submit" }),
+      toolCall("goal_status", { goal: "sign-up", status: "failed", blockedBy: "product", note: "500 on submit" }),
       reached("invoice"),
       finish,
     ]);
@@ -51,7 +51,7 @@ describe("runRoleSession", () => {
     expect(result.stoppedBy).toBe("finish");
     expect(result.findings.map((f) => f.id)).toEqual(["f1"]);
     expect(result.goals).toEqual([
-      { goal: "sign-up", status: "failed", note: "500 on submit" },
+      { goal: "sign-up", status: "failed", note: "500 on submit", blockedBy: "product" },
       { goal: "invoice", status: "reached", note: "" },
     ]);
     expect(usage).toMatchObject({ model: "mock", steps: 5, inputTokens: 500, outputTokens: 100 });
@@ -320,7 +320,7 @@ describe("runRoleSession", () => {
   test("a finding reported in the same step as finish still gets its screenshot before the session ends", async () => {
     const kept: string[] = [];
     const defect = toolCall("submit_finding", { kind: "defect", goal: "sign-up", title: "500", observed: "got a 500", reproduction: ["a", "b"], severity: "high" });
-    const model = scriptedModel([look, reached("invoice"), [defect, toolCall("goal_status", { goal: "sign-up", status: "failed", note: "500" }), finish]]);
+    const model = scriptedModel([look, reached("invoice"), [defect, toolCall("goal_status", { goal: "sign-up", status: "failed", blockedBy: "product", note: "500" }), finish]]);
     await run(model, {
       screenshot: async () => (await new Promise((r) => setTimeout(r, 50)), { bytes: new Uint8Array([1]), contentType: "image/png" }),
       keepScreenshot: (id) => void kept.push(id),
@@ -550,7 +550,7 @@ describe("runRoleSession", () => {
     await run(model, { maxSteps: 10 }).promise;
     const prompts = model.doGenerateCalls.map((c) => JSON.stringify(c.prompt[0]));
     expect(prompts[5]).not.toMatch(/steps left/);
-    expect(prompts[7]).toContain("Only 3 steps left: give every open goal a status now (reached or failed) and call finish.");
+    expect(prompts[7]).toContain("Only 3 steps left: give every open goal a status now (reached, or failed with blockedBy) and call finish.");
     expect(prompts[9]).toContain("Only 1 step left");
   });
 
@@ -794,6 +794,13 @@ test("a person is told their goals are not the product's promises, so a detail t
   expect(prompt).toMatch(/empty results, and input refused without saying why/);
 });
 
+test("a person says what stopped them on a failed goal, and never treats a made-up address that shows not found as a defect", () => {
+  const prompt = rolePrompt({ persona: { id: "owen", name: "Owen", brief: "You move money." }, targetUrl: "https://bank.test/", goals: [{ id: "move", instruction: "Money is in savings." }], signUpEmail: "owen@example.com" });
+  expect(prompt).toMatch(/A failed goal says what stopped you, as blockedBy: product when the product stopped you .*; setup when this copy of the product lacks what the goal needs .*; person when you could not find the way/);
+  expect(prompt).toMatch(/An address you made up that shows "not found" says nothing about the product, so it is never a defect and never a step of one/);
+  expect(prompt).toMatch(/no menu, link or setting leads to it, report friction about how to find it, not a defect/);
+});
+
 test("a person keeps a value the product contradicts, such as a balance its own history does not account for, as a defect and does not explain it away", () => {
   const prompt = rolePrompt({ persona: { id: "dana", name: "Dana", brief: "You opened an account." }, targetUrl: "https://bank.test/", goals: [{ id: "history", instruction: "You can read through the transactions listed for your new account." }], signUpEmail: "dana@example.com" });
   expect(prompt).toMatch(/a balance its own history does not account for/);
@@ -909,7 +916,7 @@ describe("bot protection", () => {
       look,
       toolCall("submit_finding", blockedSignUp),
       look,
-      toolCall("goal_status", { goal: "sign-up", status: "failed", note: "blocked by bot protection" }),
+      toolCall("goal_status", { goal: "sign-up", status: "failed", blockedBy: "product", note: "blocked by bot protection" }),
       toolCall("browser_navigate", { url: "https://acme.test/invoices/1" }),
       toolCall("submit_finding", { ...blockedSignUp, title: "Cloudflare verification never finishes" }),
       toolCall("submit_finding", realDefect),
@@ -1146,7 +1153,7 @@ test("a person who keeps coming back to the same page is warned, then the browse
   const pages = ["https://app.acme.test/a", "https://app.acme.test/b"];
   let call = 0;
   const circlingSteps = REVISITS_STOP * 2 - 1;
-  const model = scriptedModel([...Array.from({ length: circlingSteps }, () => look), toolCall("goal_status", { goal: "sign-up", status: "failed", note: "the form never saved" }), look, reached("invoice"), finish]);
+  const model = scriptedModel([...Array.from({ length: circlingSteps }, () => look), toolCall("goal_status", { goal: "sign-up", status: "failed", blockedBy: "product", note: "the form never saved" }), look, reached("invoice"), finish]);
   const { result } = await run(model, { maxSteps: 40, pageUrl: () => pages[call++ % 2]! }).promise;
   const system = (i: number) => JSON.stringify(model.doGenerateCalls[i]!.prompt);
   expect(system(REVISITS_HINT * 2 - 3)).not.toContain("come back to");
@@ -1168,7 +1175,7 @@ test("circling a page with a very long address records the friction with a short
   const long = `https://app.acme.test/search?q=${"a".repeat(1500)}`;
   const pages = [long, "https://app.acme.test/b"];
   let call = 0;
-  const model = scriptedModel([...Array.from({ length: REVISITS_STOP * 2 - 1 }, () => look), toolCall("goal_status", { goal: "sign-up", status: "failed", note: "x" }), reached("invoice"), finish]);
+  const model = scriptedModel([...Array.from({ length: REVISITS_STOP * 2 - 1 }, () => look), toolCall("goal_status", { goal: "sign-up", status: "failed", blockedBy: "product", note: "x" }), reached("invoice"), finish]);
   const { result } = await run(model, { maxSteps: 40, pageUrl: () => pages[call++ % 2]! }).promise;
   expect(result.stoppedBy).toBe("finish");
   expect(result.findings.map((f) => f.reproduction)).toEqual([["Open https://app.acme.test/search", "Open https://app.acme.test/b"]]);
@@ -1180,10 +1187,10 @@ test("a rejected goal status does not reopen the browser, and circling the same 
   const circle = Array.from({ length: REVISITS_STOP * 2 - 1 }, () => look);
   const model = scriptedModel([
     ...circle,
-    toolCall("goal_status", { goal: "nope", status: "failed", note: "" }),
+    toolCall("goal_status", { goal: "nope", status: "failed", blockedBy: "product", note: "" }),
     reached("invoice"),
     ...circle,
-    toolCall("goal_status", { goal: "sign-up", status: "failed", note: "x" }),
+    toolCall("goal_status", { goal: "sign-up", status: "failed", blockedBy: "product", note: "x" }),
     finish,
   ]);
   const { result } = await run(model, { maxSteps: 60, pageUrl: () => pages[call++ % 2]! }).promise;
@@ -1228,7 +1235,7 @@ test("once every goal has a status the browser closes and the person is asked to
 });
 
 test("in the last steps the browser closes so open goals get a status", async () => {
-  const model = scriptedModel([...Array.from({ length: 9 }, () => look), toolCall("goal_status", { goal: "sign-up", status: "failed", note: "ran out" }), toolCall("goal_status", { goal: "invoice", status: "failed", note: "ran out" }), finish]);
+  const model = scriptedModel([...Array.from({ length: 9 }, () => look), toolCall("goal_status", { goal: "sign-up", status: "failed", blockedBy: "product", note: "ran out" }), toolCall("goal_status", { goal: "invoice", status: "failed", blockedBy: "product", note: "ran out" }), finish]);
   const { result } = await run(model, { maxSteps: 12 }).promise;
   expect(toolsOffered(model, 8)).toContain("browser_snapshot");
   expect(toolsOffered(model, 9)).toEqual(BROWSER_CLOSED);
@@ -1243,7 +1250,7 @@ test("a person reads the team's description of the setup as limits not to report
   const tag = /<setup-([a-z0-9]+)>/.exec(prompt)![1]!;
   expect(prompt).toContain(`<setup-${tag}>\nThere is no self sign-up; accounts come from an invitation.\n</setup-${tag}>`);
   expect(prompt).toMatch(/Do not report what it describes as a defect or as friction/);
-  expect(prompt).toMatch(/give the goal failed and say which limit stopped you/);
+  expect(prompt).toMatch(/give the goal failed with blockedBy setup and say which limit stopped you/);
   expect(rolePrompt(base)).not.toContain("<setup-");
 });
 

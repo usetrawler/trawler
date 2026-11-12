@@ -80,7 +80,7 @@ const shooting = async () => ({ tools: { browser_snapshot: tool({ inputSchema: z
 const reportsDefect = () => scriptedModel([
   toolCall("browser_snapshot", {}),
   toolCall("submit_finding", { kind: "defect", goal: "g", title: "Broken", observed: "500", reproduction: ["Open /", "Click Save"], severity: "high" }),
-  toolCall("goal_status", { goal: "g", status: "failed", note: "500" }),
+  toolCall("goal_status", { goal: "g", status: "failed", blockedBy: "product", note: "500" }),
   toolCall("finish", { summary: "done" }),
 ]);
 

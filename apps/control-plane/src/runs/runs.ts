@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { sql } from "kysely";
-import { MAX_ORIGINS, turnsOf, type Execution, type PlanMode, type ProjectConfig, type PullRequest, type RunEvent, type Verdict } from "@usetrawler/protocol";
+import { GOAL_BLOCKERS, MAX_ORIGINS, turnsOf, type GoalBlocker, type Execution, type PlanMode, type ProjectConfig, type PullRequest, type RunEvent, type Verdict } from "@usetrawler/protocol";
 import { modelKey } from "../credentials/credentials.ts";
 import type { Tx } from "../db/tenancy.ts";
 import type { Keyring } from "../lib/secrets.ts";
@@ -436,7 +436,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const [jobs, findings, goals, activity, screenshots, botProtection, dismissals, said, marks, failures] = await Promise.all([
     tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error", "started_at", "finished_at", sql<number>`coalesce((usage->>'steps')::int, (select count(*)::int from run_events e where e.job_id = jobs.id and e.type = 'step'))`.as("steps"), sql<boolean>`requested_by is not null`.as("requested"), sql<boolean>`status = 'leased' and exists (select 1 from run_events e where e.job_id = jobs.id and e.type = 'standby')`.as("on_standby")]).where("run_id", "=", runId).orderBy("position").execute(),
     tx.selectFrom("findings").select(["key", "persona_key", "kind", "filed_as", "goal", "title", "observed", "reproduction", "severity", "replay", "verdict", "same_as", "url", "quote", "step_people"]).where("run_id", "=", runId).orderBy("created_at").orderBy("key").execute(),
-    tx.selectFrom("goal_outcomes").select(["persona_key", "goal", "status", "note"]).where("run_id", "=", runId).orderBy("persona_key").orderBy("goal").execute(),
+    tx.selectFrom("goal_outcomes").select(["persona_key", "goal", "status", "note", "blocked_by"]).where("run_id", "=", runId).orderBy("persona_key").orderBy("goal").execute(),
     tx
       .selectFrom("run_events as e")
       .innerJoin("jobs as j", "j.id", "e.job_id")
@@ -534,7 +534,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
       screenshots: { reported: latestScreenshot(f.key, "role_session"), replayed: latestScreenshot(f.key, "replay") },
       dismissal: dismissal.get(f.key) ?? null,
     })),
-    goals: goals.map((g) => ({ personaKey: g.persona_key, goal: g.goal, status: g.status, note: g.note })),
+    goals: goals.map((g): SummaryGoal => ({ personaKey: g.persona_key, goal: g.goal, status: g.status, note: g.note, ...(blockerOf(g.blocked_by) ? { blockedBy: blockerOf(g.blocked_by)! } : {}) })),
     botProtection: botProtection ? (({ vendor, url }) => ({ vendor, url }))(botProtection.payload as unknown as Extract<RunEvent, { type: "bot_protection" }>) : null,
     browserFailures: browserFailuresOf(failures),
     target: snapshot.targetUrl,
@@ -593,6 +593,16 @@ function browserFailuresOf(rows: Array<{ url: string; cause: string }>): Array<{
   }
   return [...seen.values()].slice(0, BROWSER_FAILURES_SHOWN);
 }
+
+export interface SummaryGoal {
+  personaKey: string;
+  goal: string;
+  status: string;
+  note: string;
+  blockedBy?: GoalBlocker;
+}
+
+const blockerOf = (value: string | null): GoalBlocker | null => (GOAL_BLOCKERS.includes(value as GoalBlocker) ? (value as GoalBlocker) : null);
 
 export type RunSummary = NonNullable<Awaited<ReturnType<typeof runSummary>>>;
 
