@@ -129,7 +129,7 @@ test("a run goes from start to a confirmed defect, with the screenshots of its r
   const { reported, replayed } = summary!.findings[0]!.screenshots;
   const listed = await bucket.client.send(new ListObjectsV2Command({ Bucket: bucket.storage.bucket, Prefix: `orgs/org-a/runs/${run.id}/` }));
   expect((listed.Contents ?? []).map((o) => o.Key).sort()).toEqual([reported, replayed].map((id) => `orgs/org-a/runs/${run.id}/${id}.png`).sort());
-  expect(summary!.goals).toEqual([{ personaKey: "ana", goal: "g", status: "failed", note: "error page" }]);
+  expect(summary!.goals).toEqual([{ personaKey: "ana", goal: "g", status: "failed", note: "error page", blockedBy: "product" }]);
   expect(summary!.costUsd).toBeCloseTo(0.006, 6);
   expect(seen).toHaveLength(6);
   for (const call of seen) {
