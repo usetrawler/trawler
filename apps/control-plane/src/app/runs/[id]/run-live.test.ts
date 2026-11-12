@@ -129,7 +129,7 @@ test("a refuted defect is ruled out, tagged Refuted, and carries no reproduced m
 test("in Timeline, each person is listed with a mark, one line on how far they got, and every goal in view with its note", () => {
   const html = render(finished);
   const aside = text(html.slice(html.indexOf('id="run-timeline"')));
-  expect(aside).toContain("Goals 1 of 2 people reached every goal. A Ana Goal reached 2 of 2 goals Reached all 2 goals. ✓ Reached: Get an account. ✓ Reached: Send an invoice.");
+  expect(aside).toContain("Goals 1 of 2 people reached every goal. 4 of 4 goals checked: 3 reached, 1 failed on the product. A Ana Goal reached 2 of 2 goals Reached all 2 goals. ✓ Reached: Get an account. ✓ Reached: Send an invoice.");
   expect(aside).toContain("L Lee Park Goal not reached 1 of 2 goals The invoice form never saved. ✓ Reached: Get an account. ✕ Not reached: Send an invoice. · the product stopped them — The invoice form never saved.");
   expect(aside).not.toContain("Each goal");
 });

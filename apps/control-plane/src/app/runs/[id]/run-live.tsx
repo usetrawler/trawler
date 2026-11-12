@@ -598,7 +598,7 @@ function PeopleColumn({ view, steps, onShow }: { view: View; steps: Map<string, 
   return (
     <section aria-labelledby="people-goals" className="flex min-w-0 flex-col">
       <h2 id="people-goals" className="font-medium">{view.live ? "Right now" : "Goals"}</h2>
-      {!view.live && <p className="text-sm text-muted">{outcome(view).people}</p>}
+      {!view.live && <p className="text-sm text-muted">{outcome(view).people} {outcome(view).goals}</p>}
       <ul aria-label="People" className="mt-3">
         {view.personas.map((p, i) => {
           const [state, tone] = PERSONA_LABEL[p.state];
