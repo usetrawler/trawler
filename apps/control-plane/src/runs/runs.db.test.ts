@@ -1020,6 +1020,24 @@ describe("a team session", () => {
     accounts: [{ ref: "admin", username: "admin@pitches.test", password: "admin-pass-1" }],
   });
 
+  test("a turn that ends in an error stops the turns after it, and their goals say why they never started", async () => {
+    await drain();
+    const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", team, keys));
+    const run = await withOrg(t.db, "org-a", (tx) => startRun(tx, "org-a", id, keys, options));
+
+    const first = (await claimPastChecks())!;
+    expect(first).toMatchObject({ personaKey: "priya", turn: 0 });
+    await completeJob(t.db, first.token, { usage: usage(0), stoppedBy: "error", error: "the model provider could not be reached" });
+
+    expect(await claimPastChecks()).toBeNull();
+    const why = "not started: the turn of Priya ended in an error, so this turn would have built on what never happened";
+    const summary = await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id));
+    expect(summary!.goals.map((g) => [g.personaKey, g.goal, g.status, g.note])).toEqual([["marco", "review", "not_attempted", why], ["priya", "decision", "not_attempted", why]]);
+    const status = await sql<{ status: string }>`select status from runs where id = ${run.id}`.execute(t.db);
+    expect(status.rows[0]!.status).toBe("failed");
+    await drain();
+  });
+
   test("people take turns in the plan's order, each turn gets its goals and what happened before, and results stay with each person", async () => {
     await drain();
     const id = await withOrg(t.db, "org-a", (tx) => createProject(tx, "org-a", team, keys));
