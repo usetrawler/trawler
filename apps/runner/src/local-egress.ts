@@ -53,8 +53,11 @@ export async function startLocalEgress(opts: { resolve?: Resolve } = {}): Promis
       }
     },
     close: async () => {
-      await Promise.all([...unfinished].map((finish) => finish()));
-      await proxy.close();
+      try {
+        await Promise.all([...unfinished].map((finish) => finish()));
+      } finally {
+        await proxy.close();
+      }
     },
   };
 }
