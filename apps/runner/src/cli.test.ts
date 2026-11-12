@@ -164,7 +164,7 @@ test("run passes --judge-model, --headed and the budget through, and browses thr
   const run = deps({
     model: (id) => (models.push(id), agent),
     startLocalEgress: async () => {
-      const egress = await startLocalEgress();
+      const egress = await startLocalEgress({ resolve: async () => Promise.reject(new Error("ENOTFOUND")) });
       return { ...egress, close: () => (egressClosed++, egress.close()) };
     },
     openBrowser: async (o) => {

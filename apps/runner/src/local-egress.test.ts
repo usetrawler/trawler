@@ -135,7 +135,7 @@ test("closing the local egress finishes a session whose browser never finished c
 });
 
 test("a session opens in time when the lookups of its allowed origins are slow", async () => {
-  const egress = await startLocalEgress({ resolve: () => new Promise((resolveLater) => setTimeout(() => resolveLater([{ address: "93.184.216.34", family: 4 }]), 3_000)) });
+  const egress = await startLocalEgress({ resolve: () => new Promise((resolveLater) => setTimeout(() => resolveLater([{ address: "93.184.216.34", family: 4 }]), 8_000)) });
   try {
     const origins = ["https://a.test", "https://b.test", "https://c.test", "https://d.test", `http://localhost:${appPort}`];
     const started = Date.now();
@@ -145,7 +145,7 @@ test("a session opens in time when the lookups of its allowed origins are slow",
   } finally {
     await egress.close();
   }
-}, 15_000);
+}, 20_000);
 
 const tunnel = (server: string, target: string) =>
   new Promise<string>((resolveAnswer) => {
