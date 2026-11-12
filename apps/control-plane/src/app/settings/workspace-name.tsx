@@ -40,6 +40,7 @@ function RenameForm({ name }: { name: string }) {
     if (state.saved) setValue((typed) => typed.trim());
   }, [state]);
   const failed = Boolean(state.error) && !pending;
+  const unchanged = value.trim() === name;
   return (
     <form action={action} className="flex flex-col gap-3">
       <label className="flex flex-col gap-2">
@@ -47,7 +48,7 @@ function RenameForm({ name }: { name: string }) {
         <input name="name" value={value} onChange={(e) => { setValue(e.target.value); setEdited(true); }} autoComplete="off" aria-invalid={failed || undefined} aria-describedby={failed ? "workspace-error" : undefined} className={field} />
       </label>
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" aria-disabled={pending || undefined} onClick={(e) => { if (pending) e.preventDefault(); }} className={button}>{pending ? "Saving…" : "Save name"}</button>
+        <button type="submit" disabled={unchanged && !pending} aria-disabled={pending || undefined} onClick={(e) => { if (pending) e.preventDefault(); }} className={button}>{pending ? "Saving…" : "Save name"}</button>
         <span role="status" className="text-sm text-ok">{state.saved && !pending && !edited ? "Saved." : ""}</span>
       </div>
       {failed && <p id="workspace-error" role="alert" className={alert}>{state.error}</p>}

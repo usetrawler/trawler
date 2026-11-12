@@ -524,6 +524,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
     pullRequest: pullRequestOf(pullRequest),
     startedVia: viaOf(run.started_via),
     origin: originOf(run.created_by, run.started_via),
+    startedBy: originOf(run.created_by, run.started_via) === "app" ? run.created_by : null,
     stoppedVia: viaOf(run.stopped_via),
     prPlan: run.pr_plan ? plannedFor(record!, pullRequest?.number ?? null, snapshot, record?.createdByRun ?? origin?.number ?? null) : null,
     createdAt: run.created_at, startedAt: run.started_at, finishedAt: run.finished_at,

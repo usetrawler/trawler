@@ -20,7 +20,7 @@ export function WorkspacePlan({ plan, projects, runsToday }: { plan: Plan; proje
           <div key={row.label} className="flex flex-col gap-1 py-3 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
             <dt>{row.label}</dt>
             <dd className="flex flex-col gap-1 sm:items-end">
-              <span className="tabular-nums">{row.used === null ? row.limit : Number.isFinite(row.limit) ? `${row.used} of ${row.limit}` : `${row.used}, no limit`}</span>
+              <span className="tabular-nums">{row.used === null ? row.limit : !Number.isFinite(row.limit) ? `${row.used}, no limit` : row.used > row.limit ? `${row.used}, over the ${row.limit} this plan includes` : `${row.used} of ${row.limit}`}</span>
               {row.note && <span className="text-sm text-muted">{row.note}</span>}
             </dd>
           </div>
