@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, type Browser as PlaywrightBrowser } from "playwright";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { BROWSER_TOOLS, browserFailure, openBrowser, type Browser, type Screenshot } from "./browser.ts";
+import { BROWSER_TOOLS, browserFailure, browserFailureNote, openBrowser, type Browser, type Screenshot } from "./browser.ts";
 import { MIN_SECRET_LENGTH, SecretScrubber } from "./secrets.ts";
 import { newSessionState, ownPasswordTool, type FillField } from "./session-tools.ts";
 import { accountFields } from "./account-note.ts";
@@ -94,6 +94,8 @@ beforeAll(async () => {
         fetch(${JSON.stringify(`${to}/api/more`)}).catch(() => {});
         const socket = new WebSocket(${JSON.stringify(`${to.replace("http", "ws")}/_next/webpack-hmr`)});
         socket.onerror = () => (document.getElementById("state").textContent = "socket failed");
+        console.error("Failed: net::ERR_NAME_NOT_RESOLVED https://elsewhere.example/x");
+        console.error("net::ERR_" + "A".repeat(300) + " " + location.origin + "/x");
       </script><img src="https://blocked.example/pixel.png">`);
     }
     switch (req.url) {
@@ -1598,6 +1600,16 @@ describe("browserFailure", () => {
     expect(browserFailure("Failed to load resource: net::ERR_BLOCKED_BY_CLIENT", "https://ads.example/x")).toBeNull();
     expect(browserFailure("Uncaught TypeError: x is undefined", "http://localhost:3000/a")).toBeNull();
     expect(browserFailure("net::ERR_CONNECTION_REFUSED", "")).toBeNull();
+    expect(browserFailure(`net::ERR_${"A".repeat(300)} http://localhost:3000/x`, "")).toBeNull();
+  });
+
+  test("tells the person not to report what the environment caused, and to name the error for a cause that may be the product's", () => {
+    const environment = browserFailureNote([{ origin: "http://localhost:3000", cause: "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS" }]);
+    expect(environment).toContain("because of the test environment, not the product:\n- http://localhost:3000: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS\nDo not report");
+    expect(environment).not.toContain("may be the product");
+    const either = browserFailureNote([{ origin: "http://localhost:4000", cause: "net::ERR_TOO_MANY_REDIRECTS" }, { origin: "https://api.acme.test", cause: "net::ERR_CERT_DATE_INVALID" }]);
+    expect(either).toContain("may be the product or where it runs:\n- http://localhost:4000: net::ERR_TOO_MANY_REDIRECTS\nIf you report");
+    expect(either).toContain("not the product:\n- https://api.acme.test: net::ERR_CERT_DATE_INVALID\n");
   });
 });
 
@@ -1620,8 +1632,9 @@ describe("an app's own requests", () => {
       expect(reported.some((r) => r.url.startsWith("https://blocked.example") && r.cause === undefined)).toBe(true);
       expect(reported.some((r) => r.cause === "net::ERR_ABORTED" || r.cause === "net::ERR_BLOCKED_BY_CLIENT")).toBe(false);
       expect(told.match(/### Browser could not load/g)).toHaveLength(1);
-      expect(told).toContain(`${closedOrigin}: net::ERR_CONNECTION_REFUSED`);
+      expect(told).toContain(`may be the product or where it runs:\\n- ${closedOrigin}: net::ERR_CONNECTION_REFUSED`);
       expect(told).not.toContain("blocked.example: net::");
+      expect(told).not.toContain("elsewhere.example");
     } finally {
       await b.close();
       rmSync(dir, { recursive: true, force: true });

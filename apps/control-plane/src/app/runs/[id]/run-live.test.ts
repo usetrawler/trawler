@@ -326,7 +326,8 @@ test("a run whose browser could not load parts of the product names each address
     const html = render(run);
     const t = text(html);
     expect(t).toContain("The browser could not load parts of the product");
-    expect(t).toContain("That comes from where the product runs, not from the product");
+    expect(t).toContain("often come from where the product runs rather than from the product itself");
+    expect(t).not.toContain("were told");
     expect(t).toContain("http://localhost:3000 · net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS");
     expect(t).toContain("http://localhost:4000 · net::ERR_CONNECTION_REFUSED");
     expect(html).toContain('href="https://usetrawler.com/docs/reference/troubleshooting/#the-browser-could-not-load-parts-of-the-product"');

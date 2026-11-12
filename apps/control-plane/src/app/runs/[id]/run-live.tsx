@@ -479,7 +479,7 @@ function BrowserFailuresNotice({ failures }: { failures: RunSummary["browserFail
   return (
     <section aria-labelledby="browser-failures" className="mt-6 flex max-w-[760px] flex-col gap-2 border border-line border-l-4 border-l-warn bg-panel p-4">
       <h2 id="browser-failures" className="font-medium">The browser could not load parts of the product</h2>
-      <p className="text-sm">Trawler&apos;s browser itself failed or blocked requests to these addresses, so parts of the product may not have worked in this run. That comes from where the product runs, not from the product, and the people were told not to report it. Check findings about missing or broken parts against it.</p>
+      <p className="text-sm">Trawler&apos;s browser itself failed or blocked requests to these addresses, so parts of the product may not have worked in this run. Errors like these often come from where the product runs rather than from the product itself, so check findings about missing or broken parts against them before acting on them.</p>
       <ul className="flex flex-col gap-1 text-sm">
         {failures.map((f) => <li key={`${f.origin} ${f.cause}`} className="break-all"><span className="font-mono">{f.origin}</span> <span className="text-muted">·</span> <span className="font-mono">{f.cause}</span></li>)}
       </ul>

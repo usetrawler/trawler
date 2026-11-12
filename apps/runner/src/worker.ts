@@ -2,9 +2,9 @@ import type { LanguageModel } from "ai";
 import { z } from "zod";
 import { type Browser, Budget, checkAccount, groupDefects, judge, triageFindings, MIN_SECRET_LENGTH, runReplay, runRoleSession, type Screenshot, SecretScrubber, type TeamChannel } from "@usetrawler/core";
 import { withProvidedAccounts } from "./provided-accounts.ts";
-import { blockedRequest } from "./local-run.ts";
+import { blockedRequest } from "./blocked-request.ts";
 import {
-  ChannelSchema, JobAssignmentSchema, MAX_EVENTS_PER_BATCH, MAX_URL, PROTOCOL_HEADER, PROTOCOL_VERSION,
+  ChannelSchema, JobAssignmentSchema, MAX_EVENTS_PER_BATCH, PROTOCOL_HEADER, PROTOCOL_VERSION,
   type AccountsFile, type JobAssignment, type JobCompletion, type JobStopReason, type JobUsage, type ProjectConfig, type RunEvent, type RunEventInput,
 } from "@usetrawler/protocol";
 

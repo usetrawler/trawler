@@ -1,14 +1,13 @@
 import { randomBytes } from "node:crypto";
 import type { LanguageModel } from "ai";
 import { Budget, checkAccount, judge, runReplay, runRoleSession, SecretScrubber, type Browser } from "@usetrawler/core";
-import { ACCOUNT_CHECK_STEPS, MAX_URL, trimStory, turnsOf, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
+import { ACCOUNT_CHECK_STEPS, trimStory, turnsOf, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
 import type { RunSummary } from "./run-dir.ts";
+import { blockedRequest } from "./blocked-request.ts";
 
 const CLOSE_TIMEOUT_MS = 10_000;
 
 export type OpenBrowser = (opts: { onBlocked: (url: string, cause?: string) => void; scrubber: SecretScrubber }) => Promise<Browser>;
-
-export const blockedRequest = (jobId: string, url: string, cause?: string): RunEventInput => ({ type: "blocked_request", jobId, url: url.slice(0, MAX_URL), ...(cause ? { cause } : {}) });
 
 export async function localRun(opts: {
   project: ProjectConfig;

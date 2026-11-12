@@ -72,7 +72,7 @@ function browserFailures(failures: NonNullable<RunSummary["browserFailures"]>): 
     byOriginAndCause.set(key, (byOriginAndCause.get(key) ?? new Set()).add(f.jobId));
   }
   const lines = [...byOriginAndCause].map(([key, jobs]) => `- ${key} (${[...jobs].join(", ")})`).join("\n");
-  return `\n## The browser could not load\n\nThe browser itself failed or blocked these requests, so parts of the product may not have worked during the run. That is the test environment, not the product: check findings about missing or broken parts against this list before acting on them.\n\n${lines}\n`;
+  return `\n## The browser could not load\n\nThe browser itself failed or blocked these requests, so parts of the product may not have worked during the run. Errors like these often come from where the product runs rather than from the product itself: check findings about missing or broken parts against this list before acting on them.\n\n${lines}\n`;
 }
 
 function describe(f: Located, people: Record<string, string>, replay?: ReplayObservation, replayError?: string, judgeError?: string): string {

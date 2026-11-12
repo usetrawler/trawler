@@ -95,7 +95,7 @@ test("the report lists what the browser itself could not load, once per origin a
     ],
   });
   const section = md.slice(md.indexOf("## The browser could not load"), md.indexOf("## Goals"));
-  expect(section).toContain("not the product");
+  expect(section).toContain("often come from where the product runs");
   expect(section.match(/^- .*$/gm)).toEqual([
     "- http://localhost:3000: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS (role:a, replay:f1)",
     "- http://localhost:4000: net::ERR_CONNECTION_REFUSED (role:a)",
