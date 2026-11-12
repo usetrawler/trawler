@@ -717,7 +717,7 @@ async function skipTurnsAfterFailed(tx: Tx, job: { id: string; run_id: string })
     .executeTakeFirstOrThrow();
   if (!failed.sign_up_seed || failed.conversation) return;
   const snapshot = failed.config_snapshot as unknown as ConfigSnapshot;
-  if (turnsOf(snapshot).length <= snapshot.personas.length) return;
+  if (!Array.isArray(snapshot.goals) || !Array.isArray(snapshot.personas) || turnsOf(snapshot).length <= snapshot.personas.length) return;
   const name = snapshot.personas.find((p) => p.id === failed.persona_key)?.name ?? failed.persona_key;
   const note = `not started: the turn of ${name} ended in an error, so this turn would have built on what never happened`;
   const later = await tx
