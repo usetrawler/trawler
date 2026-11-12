@@ -1,4 +1,5 @@
 import type { RunResult } from "@usetrawler/protocol";
+import { checkedLine, type Coverage } from "./coverage.ts";
 import { runView } from "./report.ts";
 import type { RunSummary } from "./runs.ts";
 import { NOT_VISIBLE_HERE, NOTHING_TO_TEST, runPath, thinCoverage } from "./status.ts";
@@ -10,6 +11,18 @@ type CommentInput = Omit<RunResult, "commentMarkdown"> & { peopleFailed?: number
 const plain = (text: string) => text.replace(/\s*\n\s*/g, " ").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
 const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+const checkedOf = (r: CommentInput) => r.coverage?.checked ?? r.goalsReached;
+
+const SHORT_CAUSE: Record<Coverage["unchecked"][number]["cause"], string> = { setup: "the setup lacked what it needs", person: "a person could not find the way", other: "not finished" };
+
+function goalsLine(r: CommentInput): string {
+  const goals = r.goalsTotal === 1 ? "goal" : "goals";
+  const people = count(r.people, "person", "people");
+  const c = r.coverage;
+  if (!c) return `${people} used the product and reached ${r.goalsReached} of ${r.goalsTotal} ${goals}.`;
+  return `${people} used the product. ${checkedLine(c, r.goalsTotal, (n) => `${n} ${n === 1 ? "goal" : "goals"}`)}`;
+}
+
 function headline(r: CommentInput): string {
   if (!r.finished) return "Trawler is still testing this change";
   if (r.cancelReason === "superseded") return "Trawler stopped this run because a newer push started another";
@@ -19,7 +32,8 @@ function headline(r: CommentInput): string {
   if (r.defects.confirmed === 0 && (r.unverified ?? 0) > 0) return `Trawler: ${count(r.unverified!, "report")} not verified before the run ended`;
   if (r.defects.confirmed > 0) return `Trawler: ${count(r.defects.confirmed, "defect")} confirmed by replay`;
   if (r.leadFallback) return "Trawler could not plan for this change, so it ran the project's plan instead";
-  if (thinCoverage(r.goalsReached, r.goalsTotal)) return "Trawler could check only part of this change";
+  if (r.coverage && r.goalsTotal > 0 && r.coverage.checked === 0) return "Trawler could not reach this change";
+  if (thinCoverage(checkedOf(r), r.goalsTotal)) return "Trawler could check only part of this change";
   return "Trawler found no confirmed defects";
 }
 
@@ -43,8 +57,8 @@ function defectBlock(d: RunResult["confirmed"][number]): string {
 const SHOWN_UNREACHED = 5;
 
 function unreachedBlock(r: CommentInput): string {
-  const lead = `Most goals were not reached, so ${r.defects.confirmed === 0 ? "finding no defect is not proof that the change works" : "other defects may be missing"}.`;
-  const goals = r.unreachedGoals ?? [];
+  const lead = `Most goals were not ${r.coverage ? "checked" : "reached"}, so ${r.defects.confirmed === 0 ? "finding no defect is not proof that the change works" : "other defects may be missing"}.`;
+  const goals = r.coverage ? r.coverage.unchecked.map((g) => `${g.goal} (${SHORT_CAUSE[g.cause]})`) : (r.unreachedGoals ?? []);
   if (goals.length === 0) return lead;
   const more = goals.length > SHOWN_UNREACHED ? [`- and ${goals.length - SHOWN_UNREACHED} more, in the report`] : [];
   return [`${lead} Not checked:`, ...goals.slice(0, SHOWN_UNREACHED).map((g) => `- ${plain(g)}`), ...more].join("\n");
@@ -65,8 +79,8 @@ export function renderComment(r: CommentInput): string {
   }
   if (r.finished && (r.peopleFailed ?? 0) > 0) sections.push(`${count(r.peopleFailed!, "person", "people")} could not finish, for example because the model provider refused the key. See the report.`);
   if (r.finished && r.status !== "stopped_budget" && (r.unverified ?? 0) > 0) sections.push(`${count(r.unverified!, "reported defect")} could not be verified by replay before the run ended, for example because its cap ran out. They are not confirmed; see the report.`);
-  if (r.finished) sections.push(`${count(r.people, "person", "people")} used the product and reached ${r.goalsReached} of ${r.goalsTotal} ${r.goalsTotal === 1 ? "goal" : "goals"}. Cost $${r.costUsd.toFixed(2)}.`);
-  if (r.finished && thinCoverage(r.goalsReached, r.goalsTotal)) sections.push(unreachedBlock(r));
+  if (r.finished) sections.push(`${goalsLine(r)} Cost $${r.costUsd.toFixed(2)}.`);
+  if (r.finished && thinCoverage(checkedOf(r), r.goalsTotal)) sections.push(unreachedBlock(r));
   sections.push(`[Full report](${r.reportUrl})`);
   return sections.join("\n\n");
 }
@@ -84,6 +98,7 @@ export function runResultOf(s: RunSummary, baseUrl: string): RunResult {
     goalsReached: view.goalsReached,
     goalsTotal: skipped ? 0 : view.goalsTotal,
     unreachedGoals: skipped ? [] : view.unreachedGoals,
+    ...(skipped ? {} : { coverage: { checked: view.coverage.checked, reached: view.coverage.reached, failedOnProduct: view.coverage.failedOnProduct, notChecked: view.coverage.notChecked, unchecked: view.coverage.unchecked } }),
     defects: { confirmed: view.report.confirmed.length, refuted: view.report.refuted.length, inconclusive: view.report.inconclusive.length },
     confirmed: view.report.confirmed.map((f) => ({
       title: f.title,

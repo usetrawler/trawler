@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { tool } from "ai";
 import { z } from "zod";
-import { FindingSchema, type ChannelMessage, type Finding, type Goal, type GoalOutcome, type RunEventInput, type TargetAccount, MAX_GOAL_NOTE, MAX_NOTE, MAX_QUOTE, MAX_URL } from "@usetrawler/protocol";
+import { FindingSchema, type ChannelMessage, type Finding, type Goal, type GoalOutcome, type RunEventInput, type TargetAccount, GOAL_BLOCKERS, type GoalBlocker, MAX_GOAL_NOTE, MAX_NOTE, MAX_QUOTE, MAX_URL } from "@usetrawler/protocol";
 import { MIN_SECRET_LENGTH, type SecretScrubber } from "./secrets.ts";
 import { botProtectionRefusal, type BotProtection } from "./bot-protection.ts";
 import { accountFields, type AccountFormRead, type AccountRecord } from "./account-note.ts";
@@ -222,8 +222,8 @@ export function sessionTools(opts: {
       },
     }),
     goal_status: tool({
-      description: "Record where a goal ended up. goal and status are required; status: reached | failed; note: where you stopped or what you saw. A later call for the same goal replaces the earlier one.",
-      inputSchema: z.object({ goal: z.string().nullish(), status: z.string().nullish(), note: z.string().nullish() }),
+      description: "Record where a goal ended up. goal and status are required; status: reached | failed; note: where you stopped or what you saw. For failed, blockedBy is required: product (the product stopped you: it behaved wrongly, or offers no way to do it), setup (this copy of the product cannot do it: an account, data, mail or a service it lacks) or person (you could not find the way, though the product may have one). A later call for the same goal replaces the earlier one.",
+      inputSchema: z.object({ goal: z.string().nullish(), status: z.string().nullish(), note: z.string().nullish(), blockedBy: z.string().nullish() }),
       execute: async (input) => {
         if (state.finished !== null) return CLOSED;
         const goal = lower(input.goal);
@@ -231,7 +231,9 @@ export function sessionTools(opts: {
         if (typeof goal !== "string" || !state.goals.has(goal)) return unknownGoal(input.goal);
         const normalised = lower(status);
         if (normalised !== "reached" && normalised !== "failed") return `rejected: status: use reached or failed`;
-        const outcome = { goal, status: normalised, note: Array.from(note ?? "").slice(0, MAX_GOAL_NOTE).join("") } as const;
+        const blockedBy = lower(input.blockedBy);
+        if (normalised === "failed" && !GOAL_BLOCKERS.includes(blockedBy as GoalBlocker)) return `rejected: for failed, give blockedBy: product (the product stopped you), setup (this copy of the product lacks what the goal needs) or person (you could not find the way)`;
+        const outcome = { goal, status: normalised, note: Array.from(note ?? "").slice(0, MAX_GOAL_NOTE).join(""), ...(normalised === "failed" ? { blockedBy: blockedBy as GoalBlocker } : {}) } as const;
         emit({ type: "goal_status", jobId, outcome });
         state.goals.set(goal, outcome);
         return "recorded";

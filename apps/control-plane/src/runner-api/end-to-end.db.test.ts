@@ -112,7 +112,7 @@ test("a run goes from start to a confirmed defect, with the screenshots of its r
   replies = [
     toolReply("browser_snapshot", {}),
     toolReply("submit_finding", { kind: "defect", goal: "g", title: "Saving fails", observed: "Save returned an error page", reproduction: ["Open https://app.acme.test/invoices/new", "Click Save"], severity: "high" }),
-    toolReply("goal_status", { goal: "g", status: "failed", note: "error page" }),
+    toolReply("goal_status", { goal: "g", status: "failed", blockedBy: "product", note: "error page" }),
     toolReply("finish", { summary: "done" }),
     toolReply("report_replay", { completed: true, observed: "An Internal Server Error page appeared", blockedAt: null }),
     toolReply("report_verdict", { verdict: "confirmed" }),
@@ -460,7 +460,7 @@ test("a session interrupted by a runner shutdown goes back to the queue with its
   const project = await withOrg(t.db, "org-s", (tx) => createProject(tx, "org-s", config, keys));
   const run = await withOrg(t.db, "org-s", (tx) => startRun(tx, "org-s", project, keys, { budgetUsd: 1, agentModel: "m/agent", judgeModel: "m/judge", maxSteps: 10, replaySteps: 10, createdBy: "u" }));
   replies = [
-    { ...toolReply("goal_status", { goal: "g", status: "failed", note: "half way" }), delayMs: 0 },
+    { ...toolReply("goal_status", { goal: "g", status: "failed", blockedBy: "product", note: "half way" }), delayMs: 0 },
     ...Array.from({ length: 4 }, () => ({ ...toolReply("note", { text: "still going" }), delayMs: 150 })),
   ];
   const stop = new AbortController();

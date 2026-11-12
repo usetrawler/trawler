@@ -6,6 +6,8 @@ import { Icon } from "../../../components/icon.tsx";
 import { pageTitle } from "../../../components/page-head.tsx";
 import type { runView, StageState, PersonaState } from "../../../runs/report.ts";
 import type { RunSummary } from "../../../runs/runs.ts";
+import { checkedLine } from "../../../runs/coverage.ts";
+import type { GoalBlocker } from "@usetrawler/protocol";
 import { findingAnchor } from "../../../runs/finding-anchor.ts";
 import { SEVERITY_TONE } from "../../../runs/severity.ts";
 import { webLink } from "../../../lib/web-link.ts";
@@ -67,12 +69,14 @@ export function personLine(p: Person): string {
   return `Reached ${reached} of ${p.goals.length} ${p.goals.length === 1 ? "goal" : "goals"}.`;
 }
 
+export const BLOCKED_LABEL: Record<GoalBlocker, string> = { product: "the product stopped them", setup: "the setup lacked what it needs", person: "could not find the way" };
+
 export function outcome(view: View): { people: string; goals: string } {
   const everyGoal = view.personas.filter((p) => p.state === "reached").length;
   const people = view.personas.length;
   return {
     people: `${everyGoal} of ${plural(people, "person", "people")} reached every goal.`,
-    goals: `${view.goalsReached} of ${plural(view.goalsTotal, "goal", "goals")} reached in all.`,
+    goals: checkedLine(view.coverage, view.coverage.total, (n) => plural(n, "goal", "goals")),
   };
 }
 
@@ -500,7 +504,7 @@ function RunMeta({ run, view, host, when }: { run: RunSummary; view: View; host:
   const confirmed = view.report.confirmed.length;
   const checked = view.live || status === "succeeded" || confirmed > 0;
   const parts = [
-    hasGoals && `${view.goalsReached} of ${plural(view.goalsTotal, "goal", "goals")} reached`,
+    hasGoals && `${view.coverage.checked} of ${plural(view.coverage.total, "goal", "goals")} checked`,
     checked && view.reported > 0 && `${confirmed} of ${view.reported} reported ${view.live ? "confirmed so far" : "confirmed"}`,
     !view.live && spentLine(run),
     host,
@@ -618,6 +622,7 @@ function PeopleColumn({ view, steps, onShow }: { view: View; steps: Map<string, 
                     <li key={g.id} className="break-words">
                       <span aria-hidden className={g.status === "reached" ? "text-ok" : g.status === "failed" ? "text-bad" : ""}>{g.status === "reached" ? "✓" : g.status === "failed" ? "✕" : "·"}</span>
                       <span className="sr-only">{g.status === "reached" ? "Reached: " : g.status === "failed" ? "Not reached: " : "No answer: "}</span> <span className="text-ink">{g.goal}</span>
+                      {g.status === "failed" && g.blockedBy && <span> · {BLOCKED_LABEL[g.blockedBy]}</span>}
                       {g.note && <span> — {g.note}</span>}
                     </li>
                   ))}

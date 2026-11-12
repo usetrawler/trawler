@@ -132,6 +132,7 @@ export interface FirstRunsOnUs {
 }
 
 export interface GoalOutcomes {
+  blocked_by: string | null;
   goal: string;
   note: Generated<string>;
   org_id: string;

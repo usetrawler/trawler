@@ -197,6 +197,9 @@ describe("planForPullRequest", () => {
       expect(prompt).toContain("in three short parts: what changed");
       expect(prompt).toContain("where to look for trouble, in one or two hints drawn from the untried cases, without the values to type");
       expect(prompt).toContain("never how it was built or what its author already tried");
+      expect(prompt).toContain("say where a user finds it, by the menu, page or button that leads there");
+      expect(prompt).toContain("never tell the people to type an address");
+      expect(prompt).toContain("Promise only what a user can reach through the product's own menus, links and buttons.");
     });
   });
 

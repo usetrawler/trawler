@@ -24,7 +24,7 @@ const finished = summary({
   jobs: [job("role_session", "succeeded", { persona_key: "ana" }), job("role_session", "succeeded", { persona_key: "lee" })],
   goals: [
     { personaKey: "ana", goal: "g1", status: "reached", note: "" }, { personaKey: "ana", goal: "g2", status: "reached", note: "" },
-    { personaKey: "lee", goal: "g1", status: "reached", note: "" }, { personaKey: "lee", goal: "g2", status: "failed", note: "The invoice form never saved." },
+    { personaKey: "lee", goal: "g1", status: "reached", note: "" }, { personaKey: "lee", goal: "g2", status: "failed", note: "The invoice form never saved.", blockedBy: "product" },
   ],
   findings: [
     finding("ana:f1", "ana", { title: "Saving an invoice fails", observed: "A 500 page.", verdict: "confirmed", replay: { completed: true, observed: "The same 500 page.", blockedAt: null } }),
@@ -58,7 +58,7 @@ test("a finished run names its result, when it ended, and the actions to run aga
 
 test("one line under the verdict gives the run state, goals, confirmed of reported, spend, product and time; findings open first and spend stays in Details", () => {
   const html = render(finished);
-  expect(text(band(html))).toBe("Complete · 3 of 4 goals reached · 1 of 2 reported confirmed · $0.35 of $2.00 cap · app.acme.test · finished 2026-09-25 19:59 UTC");
+  expect(text(band(html))).toBe("Complete · 4 of 4 goals checked · 1 of 2 reported confirmed · $0.35 of $2.00 cap · app.acme.test · finished 2026-09-25 19:59 UTC");
   expect(html).toContain('id="run-findings" class="pt-6"');
   expect(html).toContain('id="run-timeline" hidden=""');
   expect(html).toContain('id="run-details" hidden=""');
@@ -130,7 +130,7 @@ test("in Timeline, each person is listed with a mark, one line on how far they g
   const html = render(finished);
   const aside = text(html.slice(html.indexOf('id="run-timeline"')));
   expect(aside).toContain("Goals 1 of 2 people reached every goal. A Ana Goal reached 2 of 2 goals Reached all 2 goals. ✓ Reached: Get an account. ✓ Reached: Send an invoice.");
-  expect(aside).toContain("L Lee Park Goal not reached 1 of 2 goals The invoice form never saved. ✓ Reached: Get an account. ✕ Not reached: Send an invoice. — The invoice form never saved.");
+  expect(aside).toContain("L Lee Park Goal not reached 1 of 2 goals The invoice form never saved. ✓ Reached: Get an account. ✕ Not reached: Send an invoice. · the product stopped them — The invoice form never saved.");
   expect(aside).not.toContain("Each goal");
 });
 
@@ -144,7 +144,7 @@ test("a live run shows its cost against the cap, the four stages, each person an
   expect(text(html)).toContain("Safe to leave. The run keeps going in the background.");
   expect(html).toMatch(/<button type="button"[^>]*>Stop run<\/button>/);
   expect(html).not.toContain("Run again");
-  expect(text(band(html))).toBe("Live · 2 of 4 goals reached · app.acme.test · started 2026-09-25 19:40 UTC");
+  expect(text(band(html))).toBe("Live · 2 of 4 goals checked · app.acme.test · started 2026-09-25 19:40 UTC");
   expect(html).toContain('id="run-timeline" class="pt-6"');
   expect(html).toContain('id="run-findings" hidden=""');
   expect(text(html)).toContain("Confirmed 0 Nothing confirmed yet.");
@@ -158,7 +158,26 @@ test("each person's line says how far they got, in every state", () => {
     goals: [{ personaKey: "a", goal: "g1", status: "reached", note: "" }, { personaKey: "b", goal: "g2", status: "failed", note: "" }],
   }));
   expect(view.personas.map(personLine)).toEqual(["Reached 1 of 2 goals.", "Did not reach: Send an invoice.", "Could not finish: the browser crashed", "Stopped before their turn.", "Stopped before the end."]);
-  expect(outcome(view)).toEqual({ people: "0 of 5 people reached every goal.", goals: "1 of 10 goals reached in all." });
+  expect(outcome(view)).toEqual({ people: "0 of 5 people reached every goal.", goals: "1 of 10 goals checked: 1 reached. Not checked: 9 not finished." });
+});
+
+test("a goal that was not reached says what stopped the person, and only a block by the product counts as checked", () => {
+  const view = runView(summary({
+    status: "succeeded",
+    personas: [{ id: "a", name: "A" }, { id: "b", name: "B" }],
+    goalTexts: [{ id: "g1", instruction: "Get an account.", personaId: "a" }, { id: "g2", instruction: "Send an invoice.", personaId: "a" }, { id: "g3", instruction: "Open the setup screen.", personaId: "b" }, { id: "g4", instruction: "Read the invitation mail.", personaId: "b" }],
+    jobs: [job("role_session", "succeeded", { persona_key: "a" }), job("role_session", "succeeded", { persona_key: "b" })],
+    goals: [
+      { personaKey: "a", goal: "g1", status: "reached", note: "" }, { personaKey: "a", goal: "g2", status: "failed", note: "Save gives a 500.", blockedBy: "product" },
+      { personaKey: "b", goal: "g3", status: "failed", note: "No link leads there.", blockedBy: "person" }, { personaKey: "b", goal: "g4", status: "failed", note: "No mail inbox here.", blockedBy: "setup" },
+    ],
+  }));
+  expect(outcome(view).goals).toBe("2 of 4 goals checked: 1 reached, 1 failed on the product. Not checked: 1 because the setup lacked what it needed, 1 because a person could not find the way.");
+  const html = render(summary({ ...finished, personas: [{ id: "a", name: "A" }, { id: "b", name: "B" }], goalTexts: view.personas.flatMap((p) => p.goals.map((g) => ({ id: g.id, instruction: g.goal, personaId: p.id }))), jobs: [job("role_session", "succeeded", { persona_key: "a" }), job("role_session", "succeeded", { persona_key: "b" })], goals: view.personas.flatMap((p) => p.goals.flatMap((g) => (g.status ? [{ personaKey: p.id, goal: g.id, status: g.status, note: g.note, ...(g.blockedBy ? { blockedBy: g.blockedBy } : {}) }] : []))), findings: [] }));
+  expect(text(html)).toContain("Send an invoice. · the product stopped them — Save gives a 500.");
+  expect(text(html)).toContain("Open the setup screen. · could not find the way — No link leads there.");
+  expect(text(html)).toContain("Read the invitation mail. · the setup lacked what it needs — No mail inbox here.");
+  expect(text(band(html))).toContain("2 of 4 goals checked");
 });
 
 test("a person's line also covers waiting, failing without a reason, a single goal, and a failed goal the plan no longer has", () => {

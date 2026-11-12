@@ -208,7 +208,7 @@ describe("note, goal_status and finish", () => {
   test("a later goal_status replaces an earlier one", async () => {
     const { tools, state } = setup();
     await tools.goal_status.execute!({ goal: "sign-up", status: "reached", note: "" }, ctx);
-    await tools.goal_status.execute!({ goal: "sign-up", status: "failed", note: "broke later" }, ctx);
+    await tools.goal_status.execute!({ goal: "sign-up", status: "failed", blockedBy: "product", note: "broke later" }, ctx);
     expect(state.goals.get("sign-up")?.status).toBe("failed");
   });
   test("goal_status rejects an unknown goal or status without changing state", async () => {
@@ -218,6 +218,21 @@ describe("note, goal_status and finish", () => {
     expect(state.goals.has("nope")).toBe(false);
     expect(state.goals.get("sign-up")?.status).toBe("not_attempted");
     expect(events).toHaveLength(0);
+  });
+  test("a failed goal says what stopped the person, and is refused without it", async () => {
+    const { tools, state, events } = setup();
+    expect(await tools.goal_status.execute!({ goal: "invoice", status: "failed", note: "no such page" }, ctx)).toMatch(/^rejected: for failed, give blockedBy: product .*setup .*person/);
+    expect(await tools.goal_status.execute!({ goal: "invoice", status: "failed", blockedBy: "luck", note: "" }, ctx)).toMatch(/^rejected: for failed/);
+    expect(state.goals.get("invoice")?.status).toBe("not_attempted");
+    expect(events).toHaveLength(0);
+    await tools.goal_status.execute!({ goal: "invoice", status: "failed", blockedBy: " Setup ", note: "no mail here" }, ctx);
+    expect(state.goals.get("invoice")).toEqual({ goal: "invoice", status: "failed", blockedBy: "setup", note: "no mail here" });
+    expect(events[0]).toMatchObject({ type: "goal_status", outcome: { goal: "invoice", status: "failed", blockedBy: "setup" } });
+  });
+  test("a reached goal keeps no cause, whatever the person sends", async () => {
+    const { tools, state } = setup();
+    await tools.goal_status.execute!({ goal: "sign-up", status: "reached", blockedBy: "person", note: "" }, ctx);
+    expect(state.goals.get("sign-up")).toEqual({ goal: "sign-up", status: "reached", note: "" });
   });
   test("goal ids are matched in any case", async () => {
     const { tools, state } = setup();
@@ -258,7 +273,7 @@ describe("note, goal_status and finish", () => {
   test("finish stores the summary once every goal has a status", async () => {
     const { tools, state } = setup();
     await tools.goal_status.execute!({ goal: "sign-up", status: "reached", note: "" }, ctx);
-    await tools.goal_status.execute!({ goal: "invoice", status: "failed", note: "no button" }, ctx);
+    await tools.goal_status.execute!({ goal: "invoice", status: "failed", blockedBy: "product", note: "no button" }, ctx);
     expect(await tools.finish.execute!({ summary: "all good" }, ctx)).toBe("finished");
     expect(state.finished).toBe("all good");
   });
@@ -269,7 +284,7 @@ describe("note, goal_status and finish", () => {
     await tools.finish.execute!({ summary: "first" }, ctx);
     const before = events.length;
     expect(await tools.finish.execute!({ summary: "second" }, ctx)).toBe("rejected: the session is already finished");
-    expect(await tools.goal_status.execute!({ goal: "sign-up", status: "failed", note: "" }, ctx)).toBe("rejected: the session is already finished");
+    expect(await tools.goal_status.execute!({ goal: "sign-up", status: "failed", blockedBy: "product", note: "" }, ctx)).toBe("rejected: the session is already finished");
     expect(await tools.submit_finding.execute!(finding, ctx)).toBe("rejected: the session is already finished");
     expect(await tools.note.execute!({ text: "late" }, ctx)).toBe("rejected: the session is already finished");
     expect(await tools.sign_in.execute!({ account: "solo", usernameField: "e3", passwordField: "e4" }, ctx)).toBe("rejected: the session is already finished");

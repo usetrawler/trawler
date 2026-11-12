@@ -1,4 +1,5 @@
 import { goalsFor } from "@usetrawler/protocol";
+import { coverageOf, notCheckedParts, type Coverage } from "./coverage.ts";
 import { RUN_TIME_LIMIT_HOURS, UNCLAIMED_RUN_MINUTES } from "./limits.ts";
 import { ACCOUNT_REFUSED, outOfBudget, type CancelReason, type RunSummary } from "./runs.ts";
 import { NOTHING_TO_TEST, thinCoverage } from "./status.ts";
@@ -109,7 +110,7 @@ export function runView(s: RunSummary) {
       hadTurn: turns.some((j) => j.status === "succeeded" || j.status === "failed"),
       goals: own.map((g) => {
         const outcome = goals.find((o) => o.goal === g.id);
-        return { id: g.id, goal: g.instruction, status: outcome?.status ?? null, note: outcome?.note ?? "" };
+        return { id: g.id, goal: g.instruction, status: outcome?.status ?? null, note: outcome?.note ?? "", blockedBy: outcome?.status === "failed" ? (outcome.blockedBy ?? null) : null };
       }),
       defects: findings.filter((f) => f.kind === "defect").length,
       friction: findings.filter((f) => f.kind === "friction").length,
@@ -145,9 +146,10 @@ export function runView(s: RunSummary) {
   const goalsReached = s.goals.filter((g) => g.status === "reached").length;
   const goalsTotal = s.personas.reduce((sum, p) => sum + goalsFor(s.goalTexts, p.id).length, 0);
   const unreachedGoals = s.goalTexts.filter((t) => !s.goals.some((g) => g.goal === t.id && g.status === "reached")).map((t) => t.instruction);
+  const coverage = coverageOf(personas.flatMap((p) => p.goals));
   const replaysAllFailed = defects.length > 0 && defects.every((f) => failedReplay(f));
   const refreshes = live || s.jobs.some((j) => j.status === "leased" || (j.status === "queued" && j.requested));
-  return { live, rejudging, refreshes, stages, personas, report, reported: defects.length, goalsReached, goalsTotal, unreachedGoals, headline: headline(s, report.confirmed.length, defects.length, replaysAllFailed, dismissed.some((f) => f.kind === "defect"), goalsReached, goalsTotal) };
+  return { live, rejudging, refreshes, stages, personas, report, reported: defects.length, goalsReached, goalsTotal, unreachedGoals, coverage, headline: headline(s, report.confirmed.length, defects.length, replaysAllFailed, dismissed.some((f) => f.kind === "defect"), coverage) };
 }
 
 const STOPPED_BECAUSE: Record<CancelReason, string> = {
@@ -166,7 +168,7 @@ const STOPPED_BECAUSE: Record<CancelReason, string> = {
   nothing_to_test: NOTHING_TO_TEST,
 };
 
-function headline(s: RunSummary, confirmed: number, defects: number, replaysAllFailed: boolean, defectsDismissed: boolean, goalsReached: number, goalsTotal: number): string {
+function headline(s: RunSummary, confirmed: number, defects: number, replaysAllFailed: boolean, defectsDismissed: boolean, coverage: Coverage): string {
   const { status, cancelReason } = s;
   const checks = s.jobs.filter((j) => j.kind === "account_check");
   if (status === "queued") return "Waiting for a runner.";
@@ -184,7 +186,7 @@ function headline(s: RunSummary, confirmed: number, defects: number, replaysAllF
   if (replaysAllFailed) return `${prefix}None of the reported defects could be checked: every replay failed.`;
   if (defects > 0) return `${prefix}None of the reported defects was confirmed.`;
   if (defectsDismissed) return `${prefix}Every reported defect was marked not a bug.`;
-  if (thinCoverage(goalsReached, goalsTotal)) return `${prefix}No defects found, but only ${goalsReached} of ${goalsTotal} goals were reached, so this run cannot say the change works.`;
+  if (thinCoverage(coverage.checked, coverage.total)) return `${prefix}No defects found, but only ${coverage.checked} of ${coverage.total} goals were checked (not checked: ${notCheckedParts(coverage).join(", ")}), so this run cannot say the change works.`;
   return `${prefix}No defects found.`;
 }
 
