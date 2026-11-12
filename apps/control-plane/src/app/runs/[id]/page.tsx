@@ -4,6 +4,7 @@ import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { AppShell } from "../../../components/app-shell.tsx";
 import { runView } from "../../../runs/report.ts";
 import { runPath } from "../../../runs/status.ts";
+import { getAuth } from "../../../server/auth.ts";
 import { betaRefusal } from "../../../server/beta.ts";
 import { runFor } from "../../../server/runs.ts";
 import { shellFor } from "../../../server/shell.ts";
@@ -26,9 +27,10 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   if (`/runs/${id}` !== runPath(access.run.number)) permanentRedirect(runPath(access.run.number));
   const shell = await shellFor(access.member);
   const project = shell.workspace.projects.find((p) => p.id === access.run!.projectId);
+  const startedBy = access.run.startedBy ? (await getAuth().workspaceMembers(access.member.orgId)).find((m) => m.userId === access.run!.startedBy)?.name ?? null : null;
   return (
     <AppShell shell={shell} current={{ project: access.run.projectId }} parent>
-      <RunLive project={project} ciOnly={onPrivateNetwork(access.run.target)} initial={JSON.parse(JSON.stringify({ run: access.run, view: runView(access.run) }))} closedBeta={betaRefusal(access.member.email) ?? undefined} />
+      <RunLive project={project} ciOnly={onPrivateNetwork(access.run.target)} initial={JSON.parse(JSON.stringify({ run: access.run, view: runView(access.run) }))} closedBeta={betaRefusal(access.member.email) ?? undefined} startedBy={startedBy} />
     </AppShell>
   );
 }

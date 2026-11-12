@@ -514,7 +514,7 @@ function RunMeta({ run, view, host, when }: { run: RunSummary; view: View; host:
   );
 }
 
-const STARTED_BY: Record<RunSummary["origin"], string> = { app: "Someone in this workspace, in the app", api: "An API token", mcp: "An assistant, over MCP" };
+const STARTED_BY: Record<RunSummary["origin"], string> = { app: "A member of this workspace, in the app", api: "An API token", mcp: "An assistant, over MCP" };
 
 function took(from: string | Date, to: string | Date): string | null {
   const minutes = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60_000);
@@ -532,7 +532,7 @@ function costLine(run: RunSummary): string {
   return `${usd(run.costUsd)} of ${usd(run.budgetUsd)} cap${payer}`;
 }
 
-export function RunDetails({ run, live }: { run: RunSummary; live: boolean }) {
+export function RunDetails({ run, live, startedBy = null }: { run: RunSummary; live: boolean; startedBy?: string | null }) {
   const started = run.startedAt ?? run.createdAt;
   const duration = run.startedAt && run.finishedAt ? took(run.startedAt, run.finishedAt) : null;
   const rows: Array<[string, React.ReactNode]> = [
@@ -543,7 +543,7 @@ export function RunDetails({ run, live }: { run: RunSummary; live: boolean }) {
   ];
   if (run.finishedAt) rows.push(["Finished", <LocalTime key="finished" iso={new Date(run.finishedAt).toISOString()} />]);
   if (duration) rows.push(["Took", duration]);
-  rows.push(["Started by", run.startedVia ? <>{viaClient(run.startedVia)} for {run.startedVia.person}, over MCP</> : run.execution === "own" ? "Your CI job" : STARTED_BY[run.origin]]);
+  rows.push(["Started by", run.startedVia ? <>{viaClient(run.startedVia)} for {run.startedVia.person}, over MCP</> : run.execution === "own" ? "Your CI job" : run.origin === "app" && startedBy ? `${startedBy}, in the app` : STARTED_BY[run.origin]]);
   if (run.pullRequest) rows.push(["Pull request", <PullRequestSubject key="pr" pr={run.pullRequest} />]);
   if (run.prPlan && run.prPlan.goals.length > 0) rows.push(["Pull request plan", <a key="checked" href="#pr-plan" className="underline underline-offset-4">{run.prPlan.goals.length} {run.prPlan.goals.length === 1 ? "goal" : "goals"} Trawler wrote for {prLabel(run.prPlan.number)}</a>]);
   if (run.providedAccounts.length > 0) rows.push(["Accounts", `${run.providedAccounts.join(", ")} ${run.providedAccounts.length === 1 ? "signs" : "sign"} in with ${run.providedAccounts.length === 1 ? "an account" : "accounts"} provided by the CI job.`]);
@@ -654,7 +654,7 @@ export function panelForHash(hash: string, unaddressed: Panel): Panel {
   return unaddressed;
 }
 
-export function RunLive({ initial, closedBeta, project, ciOnly = false }: { initial: Data; closedBeta?: string; project?: { id: string; name: string }; ciOnly?: boolean }) {
+export function RunLive({ initial, closedBeta, project, ciOnly = false, startedBy = null }: { initial: Data; closedBeta?: string; project?: { id: string; name: string }; ciOnly?: boolean; startedBy?: string | null }) {
   const [data, setData] = useState(initial);
   const [stale, setStale] = useState(false);
   const [gone, setGone] = useState(false);
@@ -858,7 +858,7 @@ export function RunLive({ initial, closedBeta, project, ciOnly = false }: { init
         <div className="mt-12"><Story run={run} live={view.live} pulse={data} active={panel === "timeline"} filter={storyFilter} onFilter={setStoryFilter} /></div>
       </div>
       <div id="run-details" hidden={!skipped && panel !== "details"} className={skipped ? "pt-8" : "pt-6"}>
-        <RunDetails run={run} live={view.live} />
+        <RunDetails run={run} live={view.live} startedBy={startedBy} />
       </div>
     </div>
   );

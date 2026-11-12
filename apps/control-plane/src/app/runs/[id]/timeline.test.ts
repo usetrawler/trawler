@@ -139,3 +139,8 @@ test("the axis, every lane and the overlay share one inset, so a mark on the run
   expect(html).toContain('<span class="relative mx-5 block h-5">');
   expect(html).toMatch(/<div aria-hidden="true" class="pointer-events-none absolute inset-y-0 right-5 left-\[11\.25rem\]">/);
 });
+
+test("a person with no goals is said to have none yet only while the run is live", () => {
+  expect(renderToStaticMarkup(createElement(TimelineLanes, { run, live: false, now: T(9).getTime() }))).toMatch(/>no goals</);
+  expect(renderToStaticMarkup(createElement(TimelineLanes, { run, live: true, now: T(9).getTime() }))).toContain(">no goals yet<");
+});

@@ -1,3 +1,4 @@
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
@@ -90,6 +91,7 @@ test("settings name who added the key among this workspace's members, and mark S
   expect(html).toMatch(/<a href="\/settings" aria-current="page"[^>]*>.*?Settings/);
   expect(state.tenants).toEqual(["org-1"]);
   expect(renderToStaticMarkup(await open()).match(/<input[^>]*\bname="name"[^>]*>/)?.[0]).toContain('value="Acme"');
+  expect(renderToStaticMarkup(await open()).match(/<button[^>]*>Save name<\/button>/)?.[0]).toContain('disabled=""');
 });
 
 test("the page is headed with the workspace, and a side menu leads to each part of the settings, marking the one open", async () => {
@@ -248,4 +250,12 @@ test("General also says who you are signed in as and what your role lets you do"
   expect(general).toMatch(/You Signed in as .+ Role Owner You can rename the workspace/);
   state.member = { ...owner, role: "member" };
   expect(text(renderToStaticMarkup(await open()))).toMatch(/Role Member An owner or admin manages the members/);
+});
+
+test("a workspace over a plan limit says how far over it is instead of a count that reads backwards", async () => {
+  const { WorkspacePlan } = await import("./workspace-plan.tsx");
+  const plan = { plan: "free" as const, limits: { projects: 1, runsPerDay: 3, people: 4 } };
+  const html = text(renderToStaticMarkup(createElement(WorkspacePlan, { plan, projects: 4, runsToday: 0 })));
+  expect(html).toContain("Projects 4, over the 1 this plan includes");
+  expect(html).not.toContain("4 of 1");
 });

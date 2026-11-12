@@ -13,7 +13,7 @@ const job = (kind: string, status: string, extra: Partial<RunSummary["jobs"][num
 const finding = (key: string, persona: string, extra: Partial<RunSummary["findings"][number]> = {}) =>
   ({ key, personaKey: persona, kind: "defect", filedAs: null, goal: "g1", title: key, observed: "o", reproduction: ["Open Invoices.", "Save."], severity: "high", replay: null, verdict: null, sameAs: null, url: null, quote: null, stepPeople: null, screenshots: { reported: null, replayed: null }, dismissal: null, ...extra }) as RunSummary["findings"][number];
 const summary = (over: Partial<RunSummary>): RunSummary => ({
-  startedVia: null, stoppedVia: null, origin: "app",
+  startedVia: null, stoppedVia: null, origin: "app", startedBy: null,
   id: "run-1", number: 7, status: "succeeded", cancelReason: null, projectId: "project-1", planName: null, savedPlan: null, costUsd: 0.35, budgetUsd: 2, completionUsdPerMtok: null, agentModel: "deepseek/deepseek-v4.1-flash", judgeModel: "deepseek/deepseek-v4.1-flash",
   provider: "openrouter", paidBy: "workspace", tokenCap: null, tokensUsed: 0, createdAt: new Date("2026-09-25T19:40:00Z"), startedAt: new Date("2026-09-25T19:40:05Z"), finishedAt: new Date("2026-09-25T19:59:00Z"),
   jobs: [], findings: [], goals: [], botProtection: null, browserFailures: [], target: "https://app.acme.test/", activity: [], conversation: false, pullRequest: null, prPlan: null, conversationMessages: [], marks: [], execution: "hosted", providedAccounts: [],
@@ -527,6 +527,12 @@ test("the details list the cost, models, times, who started the run and how long
   const html = text(activity(render(summary({ ...finished, judgeModel: "anthropic/claude-sonnet-5.5", execution: "own" }))));
   expect(html).toContain("Cost $0.35 of $2.00 cap Model deepseek/deepseek-v4.1-flash Judge model anthropic/claude-sonnet-5.5 Started 2026-09-25 19:40 UTC Finished 2026-09-25 19:59 UTC Took 19 minutes Started by Your CI job");
   expect(text(activity(render(live)))).not.toContain("Finished");
+});
+
+test("the details name the member who started a run in the app, and fall back when they have left", () => {
+  const named = renderToStaticMarkup(createElement(RunLive, { initial: JSON.parse(JSON.stringify({ run: finished, view: runView(finished) })), startedBy: "Ana Lopez" }));
+  expect(text(activity(named))).toContain("Started by Ana Lopez, in the app");
+  expect(text(activity(render(finished)))).toContain("Started by A member of this workspace, in the app");
 });
 
 test("the details name an API token as the starter, and a run that never started says when it was created and gives no duration", () => {

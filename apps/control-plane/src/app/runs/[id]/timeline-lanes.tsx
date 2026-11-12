@@ -215,7 +215,7 @@ export function TimelineLanes({ run, live, now }: { run: RunSummary; live: boole
               const mine = joinTurns(turns.filter((t) => t.personaKey === p.id), at);
               const first = firstStart.get(p.id);
               return (
-                <Lane key={p.id} name={p.name} detail={own.length ? `${reached} of ${own.length} ${own.length === 1 ? "goal" : "goals"}` : "no goals yet"} tone={tone} initialsText={letterOf(p.name)}>
+                <Lane key={p.id} name={p.name} detail={own.length ? `${reached} of ${own.length} ${own.length === 1 ? "goal" : "goals"}` : live ? "no goals yet" : "no goals"} tone={tone} initialsText={letterOf(p.name)}>
                   {first !== undefined && first > span.start && <span aria-hidden className="absolute top-1/2 h-0.5 -translate-y-1/2 bg-[repeating-linear-gradient(90deg,var(--line)_0_4px,transparent_4px_8px)]" style={{ left: 0, width: `${at(first)}%` }} />}
                   {mine.map((t) => <span key={t.jobId} aria-hidden className={`absolute top-1/2 h-2.5 -translate-y-1/2 rounded-md ${live && t.end === now ? "motion-safe:animate-pulse" : ""}`} style={{ left: `${at(t.start)}%`, width: `max(10px, ${at(t.end) - at(t.start)}%)`, background: tone.bar }} />)}
                   {run.marks.filter((m) => m.personaKey === p.id && m.jobKind === "role_session" && m.kind !== "verdict").map((m) => <Marker key={m.id} mark={m} left={at(ms(m.at)!)} tone={tone} findingNumber={findingNumber} />)}
