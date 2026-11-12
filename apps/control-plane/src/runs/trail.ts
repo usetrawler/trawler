@@ -11,7 +11,7 @@ export type TrailEntry = { id: number; turn: string; at: string } & (
   | { kind: "note"; text: string }
   | { kind: "goal"; status: "reached" | "failed" | "not_attempted"; goal: string; note: string }
   | { kind: "finding"; findingKind: "defect" | "friction"; title: string; findingKey: string }
-  | { kind: "blocked"; address: string }
+  | { kind: "blocked"; address: string; cause: string | null }
   | { kind: "bot_protection"; vendor: string; page: string | null }
 );
 
@@ -41,7 +41,7 @@ function entryOf(row: { id: string; job_id: string; at: Date; payload: unknown }
     case "note": return { ...base, kind: "note", text: e.text };
     case "goal_status": return { ...base, kind: "goal", status: e.outcome.status, goal: goalText.get(e.outcome.goal) ?? e.outcome.goal, note: e.outcome.note ?? "" };
     case "finding": return { ...base, kind: "finding", findingKind: e.finding.kind, title: e.finding.title, findingKey: `${personaKey}:${e.finding.id}` };
-    case "blocked_request": return { ...base, kind: "blocked", address: hostOf(e.url) };
+    case "blocked_request": return { ...base, kind: "blocked", address: hostOf(e.url), cause: e.cause ?? null };
     case "bot_protection": return { ...base, kind: "bot_protection", vendor: e.vendor, page: pageLabel(withoutQuery(e.url), target) };
     default: return null;
   }

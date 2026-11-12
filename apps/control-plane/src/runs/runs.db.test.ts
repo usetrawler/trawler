@@ -282,6 +282,22 @@ describe("a whole run", () => {
     expect(summary.botProtection).toEqual({ vendor: "Cloudflare", url: "https://app.acme.test/x" });
   });
 
+  test("the run names what the browser itself could not load, once per origin and cause, and leaves Trawler's own blocks out", async () => {
+    const run = await rolesReport({});
+    const job = await asSystem(t.db, async (tx) => (await tx.selectFrom("jobs").select("id").where("run_id", "=", run.id).where("kind", "=", "role_session").executeTakeFirstOrThrow()).id);
+    const lna = "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS";
+    await asSystem(t.db, (tx) => tx.insertInto("run_events").values([
+      { url: "https://tracker.example/pixel.gif" },
+      { url: "ws://localhost:3000/_next/webpack-hmr", cause: lna },
+      { url: "http://localhost:3000/_next/static/editor.js", cause: lna },
+      { url: "http://localhost:4000/api", cause: "net::ERR_CONNECTION_REFUSED" },
+    ].map((p, i) => ({ org_id: "org-a", run_id: run.id, job_id: job, seq: 900 + i, type: "blocked_request", at: new Date(), payload: JSON.stringify({ seq: 900 + i, at: new Date().toISOString(), jobId: job, type: "blocked_request", ...p }) }))).execute());
+    expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.browserFailures).toEqual([
+      { origin: "http://localhost:3000", cause: lna },
+      { origin: "http://localhost:4000", cause: "net::ERR_CONNECTION_REFUSED" },
+    ]);
+  });
+
   test("a run that met no bot protection says nothing about it", async () => {
     const run = await rolesReport({});
     expect((await withOrg(t.db, "org-a", (tx) => runSummary(tx, "org-a", run.id)))!.botProtection).toBeNull();

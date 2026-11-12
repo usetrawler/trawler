@@ -22,7 +22,8 @@ test("the story shows each step with its tool and page, notes, goals, findings a
     { id: 2, turn: "t1", at: at(3), kind: "note", text: "Send is greyed out." },
     { id: 3, turn: "t1", at: at(4), kind: "goal", status: "failed", goal: "Send an invoice.", note: "It never sent." },
     { id: 4, turn: "t1", at: at(5), kind: "finding", findingKind: "defect", title: "Send does nothing", findingKey: "ana:f1" },
-    { id: 5, turn: "t1", at: at(6), kind: "blocked", address: "tracker.example" },
+    { id: 5, turn: "t1", at: at(6), kind: "blocked", address: "tracker.example", cause: null },
+    { id: 51, turn: "t1", at: at(6), kind: "blocked", address: "localhost:3000", cause: "net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS" },
     { id: 6, turn: "t1", at: at(7), kind: "bot_protection", vendor: "Cloudflare", page: "/login" },
     { id: 7, turn: "t2", at: at(8), kind: "step", step: 1, tool: null, page: null },
     { id: 8, turn: "t2", at: at(9), kind: "step", step: 2, tool: "browser_evaluate", page: null },
@@ -36,6 +37,8 @@ test("the story shows each step with its tool and page, notes, goals, findings a
   expect(t).toContain("✕ Did not reach: Send an invoice. — It never sent.");
   expect(html).toMatch(/<a href="#finding-ana%3Af1"[^>]*>Reported: <!-- -->Send does nothing<\/a>|<a href="#finding-ana%3Af1"[^>]*>Reported: Send does nothing<\/a>/);
   expect(t).toContain("Trawler blocked a request to tracker.example, outside the product.");
+  expect(t).toContain("The browser could not load localhost:3000: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS .");
+  expect(t).not.toContain("Trawler blocked a request to localhost:3000");
   expect(t).toContain("Cloudflare's bot protection stopped the browser at /login.");
   expect(t).toContain("Finished this turn.");
   expect(t).toContain("Ana · turn 2 ·");

@@ -475,6 +475,19 @@ function BotProtectionNotice({ met }: { met: NonNullable<RunSummary["botProtecti
   );
 }
 
+function BrowserFailuresNotice({ failures }: { failures: RunSummary["browserFailures"] }) {
+  return (
+    <section aria-labelledby="browser-failures" className="mt-6 flex max-w-[760px] flex-col gap-2 border border-line border-l-4 border-l-warn bg-panel p-4">
+      <h2 id="browser-failures" className="font-medium">The browser could not load parts of the product</h2>
+      <p className="text-sm">Trawler&apos;s browser itself failed or blocked requests to these addresses, so parts of the product may not have worked in this run. That comes from where the product runs, not from the product, and the people were told not to report it. Check findings about missing or broken parts against it.</p>
+      <ul className="flex flex-col gap-1 text-sm">
+        {failures.map((f) => <li key={`${f.origin} ${f.cause}`} className="break-all"><span className="font-mono">{f.origin}</span> <span className="text-muted">·</span> <span className="font-mono">{f.cause}</span></li>)}
+      </ul>
+      <DocsLink page="docs/reference/troubleshooting/#the-browser-could-not-load-parts-of-the-product" className="text-sm underline">What causes it and how to fix it</DocsLink>
+    </section>
+  );
+}
+
 function spentLine(run: RunSummary): string {
   const payer = run.paidBy === "trawler" ? ", paid by Trawler" : "";
   if (run.tokenCap) return `${(run.tokensUsed / 1_000_000).toFixed(2)}M of ${(run.tokenCap / 1_000_000).toFixed(1)}M tokens${payer}`;
@@ -785,6 +798,7 @@ export function RunLive({ initial, closedBeta, project, ciOnly = false }: { init
         </div>
       )}
       {run.botProtection && <BotProtectionNotice met={run.botProtection} />}
+      {run.browserFailures.length > 0 && <BrowserFailuresNotice failures={run.browserFailures} />}
       <nav aria-label="Run report" hidden={skipped} className={`mt-6 ${tabRow}`}>
         {PANELS.map(([key, name]) => (
           <button key={key} type="button" aria-pressed={panel === key} aria-controls={`run-${key}`} onClick={() => openPanel(key)}

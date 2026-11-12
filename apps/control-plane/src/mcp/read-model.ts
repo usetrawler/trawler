@@ -122,6 +122,7 @@ export function runReport(summary: RunSummary, origin: string) {
     costUsd: summary.costUsd, budgetUsd: summary.budgetUsd,
     pullRequest: summary.pullRequest ? { number: summary.pullRequest.number, repository: summary.pullRequest.repository, url: summary.pullRequest.url, title: summary.pullRequest.title === null ? null : untrusted("pull request title", summary.pullRequest.title) } : null,
     botProtection: summary.botProtection ? { vendor: summary.botProtection.vendor } : null,
+    browserFailures: summary.browserFailures,
     goals: { reached: view.goalsReached, total: view.goalsTotal, notReached: view.unreachedGoals.map((g) => goalOf(summary, g)) },
     people: view.personas.map((p) => ({
       id: p.id, name: p.name, state: p.state, defects: p.defects, friction: p.friction,
@@ -190,7 +191,7 @@ const trailLine = (e: TrailEntry): string => {
     case "note": return `note: ${e.text}`;
     case "goal": return `goal ${e.status}: ${e.goal}${e.note ? ` (${e.note})` : ""}`;
     case "finding": return `filed ${e.findingKind}: ${e.title}`;
-    case "blocked": return `blocked a request to ${e.address}`;
+    case "blocked": return e.cause ? `the browser could not load ${e.address} (${e.cause})` : `blocked a request to ${e.address}`;
     case "bot_protection": return `bot protection (${e.vendor})${e.page ? ` on ${e.page}` : ""}`;
   }
 };

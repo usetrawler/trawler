@@ -433,7 +433,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
   const record = run.pr_plan as unknown as PrPlanRecord | null;
   const pullRequest = run.pull_request as unknown as PullRequest | null;
   const origin = record?.prPlanId ? await tx.selectFrom("plans as p").leftJoin("runs as r", "r.id", "p.created_by_run_id").select("r.number").where("p.id", "=", record.prPlanId).executeTakeFirst() : undefined;
-  const [jobs, findings, goals, activity, screenshots, botProtection, dismissals, said, marks] = await Promise.all([
+  const [jobs, findings, goals, activity, screenshots, botProtection, dismissals, said, marks, failures] = await Promise.all([
     tx.selectFrom("jobs").select(["id", "kind", "status", "persona_key", "finding_key", "usage", "stopped_by", "error", "started_at", "finished_at", sql<number>`coalesce((usage->>'steps')::int, (select count(*)::int from run_events e where e.job_id = jobs.id and e.type = 'step'))`.as("steps"), sql<boolean>`requested_by is not null`.as("requested"), sql<boolean>`status = 'leased' and exists (select 1 from run_events e where e.job_id = jobs.id and e.type = 'standby')`.as("on_standby")]).where("run_id", "=", runId).orderBy("position").execute(),
     tx.selectFrom("findings").select(["key", "persona_key", "kind", "filed_as", "goal", "title", "observed", "reproduction", "severity", "replay", "verdict", "same_as", "url", "quote", "step_people"]).where("run_id", "=", runId).orderBy("created_at").orderBy("key").execute(),
     tx.selectFrom("goal_outcomes").select(["persona_key", "goal", "status", "note"]).where("run_id", "=", runId).orderBy("persona_key").orderBy("goal").execute(),
@@ -492,6 +492,15 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
       .orderBy("e.id", "desc")
       .limit(TIMELINE_MARKS)
       .execute(),
+    tx
+      .selectFrom("run_events as e")
+      .select([sql<string>`e.payload->>'url'`.as("url"), sql<string>`e.payload->>'cause'`.as("cause")])
+      .where("e.run_id", "=", runId)
+      .where("e.type", "=", "blocked_request")
+      .where(sql<boolean>`e.payload ? 'cause'`)
+      .orderBy("e.id")
+      .limit(BROWSER_FAILURES_READ)
+      .execute(),
   ]);
   const dismissal = new Map(dismissals.map((d) => [d.finding_key, {
     reason: d.reason, userId: d.dismissed_by, at: d.dismissed_at, by: null as string | null,
@@ -526,6 +535,7 @@ export async function runSummary(tx: Tx, orgId: string, runId: string) {
     })),
     goals: goals.map((g) => ({ personaKey: g.persona_key, goal: g.goal, status: g.status, note: g.note })),
     botProtection: botProtection ? (({ vendor, url }) => ({ vendor, url }))(botProtection.payload as unknown as Extract<RunEvent, { type: "bot_protection" }>) : null,
+    browserFailures: browserFailuresOf(failures),
     target: snapshot.targetUrl,
     personas: snapshot.personas.map((p) => ({ id: p.id, name: p.name })),
     goalTexts: snapshot.goals.map((g) => ({ id: g.id, instruction: g.instruction, ...(g.personaId ? { personaId: g.personaId } : {}) })),
@@ -568,6 +578,19 @@ function pullRequestOf(pr: PullRequest | null) {
 function plannedFor(record: PrPlanRecord, number: number | null, snapshot: ConfigSnapshot, createdByRun: number | null) {
   const chosen = new Set(record.goalIds);
   return { number, mode: record.mode, note: record.note ?? null, ...(record.leadFailed ? { leadFailed: true } : {}), version: record.version ?? null, reused: record.reused === true, createdByRun, ...(record.signUps?.length ? { signUps: record.signUps } : {}), ...(record.accountReason ? { accountReason: record.accountReason } : {}), ...(record.brief ? { brief: record.brief } : {}), goals: snapshot.goals.filter((g) => chosen.has(g.id)).map((g) => ({ id: g.id, instruction: g.instruction, personaId: g.personaId ?? null })) };
+}
+
+const BROWSER_FAILURES_READ = 500;
+const BROWSER_FAILURES_SHOWN = 10;
+
+function browserFailuresOf(rows: Array<{ url: string; cause: string }>): Array<{ origin: string; cause: string }> {
+  const seen = new Map<string, { origin: string; cause: string }>();
+  for (const { url, cause } of rows) {
+    const address = url.replace(/^ws(s?):/, "http$1:");
+    const origin = URL.canParse(address) ? new URL(address).origin : url;
+    seen.set(`${origin} ${cause}`, { origin, cause });
+  }
+  return [...seen.values()].slice(0, BROWSER_FAILURES_SHOWN);
 }
 
 export type RunSummary = NonNullable<Awaited<ReturnType<typeof runSummary>>>;
