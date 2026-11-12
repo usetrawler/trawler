@@ -217,13 +217,14 @@ async function work(args: string[], deps: CliDeps): Promise<number> {
       unfinished.add(finish);
       const finishOnce = async () => {
         unfinished.delete(finish);
+        const closing = finishSession?.();
         rmSync(outputDir, { recursive: true, force: true });
         try {
           if (downloadsPath) rmSync(downloadsPath, { recursive: true, force: true });
         } catch {
           // the job's end clears what the browser locked in here
         }
-        await finishSession?.();
+        await closing;
       };
       try {
         const browser = await deps.openBrowser({ project, outputDir, headless: true, onBlocked, scrubber, survivesSignals: true, proxy: session?.proxy, executablePath: browserLauncher, downloadsPath });

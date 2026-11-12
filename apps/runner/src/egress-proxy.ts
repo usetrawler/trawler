@@ -29,6 +29,7 @@ const MAX_ORIGINS = 50;
 const MAX_BLOCKED = 100;
 const MAX_CONTROL_BODY = 64 * 1024;
 const CONNECT_TIMEOUT_MS = 15_000;
+const LOCAL_LOOKUP_MS = 2_000;
 const MAX_CONNECTIONS = 128;
 const IDLE_MS = 10 * 60 * 1000;
 const HOP_HEADERS = new Set(["proxy-authorization", "proxy-connection"]);
@@ -95,10 +96,11 @@ export async function startEgressProxy(opts: { token: string; port?: number; res
   async function localOrigins(origins: Set<string>): Promise<Map<string, Address[]>> {
     const local = new Map<string, Address[]>();
     if (!opts.localTargets) return local;
-    for (const origin of origins) {
-      const addresses = await addressesOf(unbracketed(new URL(origin).hostname));
+    const timedOut = () => new Promise<Address[]>((resolveEmpty) => setTimeout(() => resolveEmpty([]), LOCAL_LOOKUP_MS).unref());
+    await Promise.all([...origins].map(async (origin) => {
+      const addresses = await Promise.race([addressesOf(unbracketed(new URL(origin).hostname)), timedOut()]);
       if (addresses.some((a) => isBlockedAddress(a.address, a.family, blocked))) local.set(origin, addresses);
-    }
+    }));
     return local;
   }
 

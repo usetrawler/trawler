@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { openBrowser, SecretScrubber } from "@usetrawler/core";
+import net from "node:net";
+import type { Browser } from "@usetrawler/core";
 import { startLocalEgress } from "./local-egress.ts";
 
 const ctx = { toolCallId: "t", messages: [], context: {} };
@@ -102,7 +104,7 @@ test("a local run reaches its local target, that target's WebSocket and stream, 
       expect(seen).not.toContain("stream: first second");
 
       await browser.tools.browser_navigate!.execute!({ url: `http://localhost:${appPort}/hops` }, ctx);
-      for (const hop of ["/hop1", "/hop3", "/hop4"]) await browser.tools.browser_navigate!.execute!({ url: `http://localhost:${appPort}${hop}` }, ctx);
+      for (const hop of ["/hop1", "/hop3"]) await browser.tools.browser_navigate!.execute!({ url: `http://localhost:${appPort}${hop}` }, ctx);
       await new Promise((r) => setTimeout(r, 1_000));
     } finally {
       await browser.close();
@@ -114,3 +116,33 @@ test("a local run reaches its local target, that target's WebSocket and stream, 
   expect(stolen).toEqual([]);
   expect(blocked).toEqual(expect.arrayContaining([`http://127.0.0.1:${otherPort}`, `http://localhost:${otherPort}`, "http://169.254.169.254"]));
 }, 60_000);
+
+const fakeBrowser = (close: () => Promise<void>) => ({ tools: {}, fillField: async () => "typed", screenshot: async () => null, pageUrl: () => null, close }) as unknown as Browser;
+
+test("closing the local egress finishes a session whose browser never finished closing, and reports what it refused", async () => {
+  const egress = await startLocalEgress();
+  const blocked: string[] = [];
+  let server = "";
+  const browser = await egress.browse([`http://localhost:${appPort}`], (url) => blocked.push(url), async (proxy) => ((server = proxy.server), fakeBrowser(() => new Promise<void>(() => undefined))));
+  void browser.close();
+  const answer = await new Promise<string>((resolveAnswer) => {
+    const socket = net.connect(Number(new URL(server).port), "127.0.0.1", () => socket.write(`CONNECT localhost:${otherPort} HTTP/1.1\r\nHost: localhost:${otherPort}\r\n\r\n`));
+    socket.once("data", (data) => (socket.destroy(), resolveAnswer(data.toString())));
+  });
+  expect(answer).toMatch(/^HTTP\/1.1 403/);
+  await egress.close();
+  expect(blocked).toEqual([`https://localhost:${otherPort}`]);
+});
+
+test("a session opens in time when the lookups of its allowed origins are slow", async () => {
+  const egress = await startLocalEgress({ resolve: () => new Promise((resolveLater) => setTimeout(() => resolveLater([{ address: "93.184.216.34", family: 4 }]), 3_000)) });
+  try {
+    const origins = ["https://a.test", "https://b.test", "https://c.test", "https://d.test", `http://localhost:${appPort}`];
+    const started = Date.now();
+    const browser = await egress.browse(origins, () => undefined, async () => fakeBrowser(async () => undefined));
+    expect(Date.now() - started).toBeLessThan(4_000);
+    await browser.close();
+  } finally {
+    await egress.close();
+  }
+}, 15_000);

@@ -14,7 +14,7 @@ export function forwardBlocked(session: EgressSession, onBlocked: (url: string) 
       onBlocked(url);
     }
   };
-  const polling = setInterval(() => void session.drain().then(report, () => undefined), pollMs);
+  const polling = setInterval(() => void session.drain().then(report, () => undefined), pollMs).unref();
   let finished: Promise<void> | undefined;
   return () =>
     (finished ??= (async () => {
@@ -32,10 +32,16 @@ export async function startLocalEgress(opts: { resolve?: Resolve } = {}): Promis
   const token = randomBytes(32).toString("hex");
   const proxy = await startEgressProxy({ token, resolve: opts.resolve, localTargets: true });
   const egress = egressClient(`http://127.0.0.1:${proxy.port}`, token);
+  const unfinished = new Set<() => Promise<void>>();
   return {
     async browse(origins, onBlocked, open) {
       const session = await egress.open(origins);
-      const finish = forwardBlocked(session, onBlocked);
+      const forwarding = forwardBlocked(session, onBlocked);
+      const finish = () => {
+        unfinished.delete(finish);
+        return forwarding();
+      };
+      unfinished.add(finish);
       try {
         const browser = await open(session.proxy);
         const close = browser.close.bind(browser);
@@ -46,6 +52,9 @@ export async function startLocalEgress(opts: { resolve?: Resolve } = {}): Promis
         throw err;
       }
     },
-    close: proxy.close,
+    close: async () => {
+      await Promise.all([...unfinished].map((finish) => finish()));
+      await proxy.close();
+    },
   };
 }
