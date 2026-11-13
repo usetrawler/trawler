@@ -614,8 +614,10 @@ beforeAll(async () => {
         return html(`<form action="/plain"><label>Quantity of Fern <input name="quantity" type="number" min="1" value="0"></label></form><button onclick="document.getElementById('m').textContent = document.querySelector('form').checkValidity() ? 'fine' : 'not fine'">Check</button><p id="m">cart page</p>`);
       case "/quantity-frame":
         return html(`<p>outer page</p><iframe src="/quantity"></iframe>`);
+      case "/quantity-checked-live":
+        return html(`<form onsubmit="event.preventDefault(); document.getElementById('m').textContent = 'sent ' + this.quantity.value"><label>Quantity of Fern <input name="quantity" type="number" min="1" value="1" oninput="document.getElementById('go').disabled = !this.form.checkValidity()"></label><button id="go">Update</button></form><p id="m">cart page</p>`);
       case "/refused-login":
-        return html(`<form action="/plain"><input aria-label="Email" type="email" name="email"><input aria-label="Password" type="password" name="password" minlength="40"><button>Sign in</button></form>`);
+        return html(`<form action="/plain"><input aria-label="Email" type="email" name="email"><input aria-label="Password" type="password" name="password" minlength="40"><button type="button" onclick="document.querySelector('[name=password]').type = 'text'">Show</button><button>Sign in</button></form>`);
       case "/upload":
         return html(`<input type="file" aria-label="Avatar"><p>upload page</p>`);
       case "/sw-page":
@@ -873,14 +875,14 @@ describe("the browser's own validation", () => {
       expect(await setQuantity(b, "0")).not.toContain(NOTE);
       const clicked = await call(b, "browser_click", { element: "Update", target: await ref(b, "Update") });
       expect(clicked).toContain(NOTE);
-      expect(clicked).toMatch(/At the field "Quantity of Fern" it shows its own message: "[^"]{5,}" A snapshot/);
+      expect(clicked).toMatch(/The browser refused what is in the field "Quantity of Fern" and shows its own message there: "[^"]{5,}" A snapshot/);
       expect(clicked).not.toContain("refused as well");
       expect(await snapshot(b)).toContain("cart page");
       expect(await snapshot(b)).not.toContain("its own message");
 
       expect(await setQuantity(b, "25")).not.toContain(NOTE);
       const again = await call(b, "browser_click", { element: "Update", target: await ref(b, "Update") });
-      expect(again).toContain(`At the field "Quantity of Fern" it shows its own message: "We send at most 20 of a plant." A snapshot`);
+      expect(again).toContain(`the field "Quantity of Fern" and shows its own message there: "We send at most 20 of a plant." A snapshot`);
     });
   }, 60_000);
 
@@ -890,8 +892,8 @@ describe("the browser's own validation", () => {
       await call(b, "browser_type", { element: "Note", target: await ref(b, "Note"), text: "" });
       await setQuantity(b, "30");
       const pressed = await call(b, "browser_press_key", { key: "Enter" });
-      expect(pressed).toContain(`At the field "Quantity of Fern" it shows its own message: "We send at most 20 of a plant."`);
-      expect(pressed).toContain("1 more field of the form is refused as well.");
+      expect(pressed).toContain(`the field "Quantity of Fern" and shows its own message there: "We send at most 20 of a plant."`);
+      expect(pressed).toContain("1 other field is refused as well.");
     });
   }, 60_000);
 
@@ -912,7 +914,7 @@ describe("the browser's own validation", () => {
       await navigate(b, `${origin}/quantity-frame`);
       await setQuantity(b, "0");
       const clicked = await call(b, "browser_click", { element: "Update", target: await ref(b, "Update") });
-      expect(clicked).toMatch(/At the field "Quantity of Fern" it shows its own message: "[^"]{5,}" A snapshot/);
+      expect(clicked).toMatch(/the field "Quantity of Fern" and shows its own message there: "[^"]{5,}" A snapshot/);
     });
   }, 60_000);
 
@@ -931,20 +933,40 @@ describe("the browser's own validation", () => {
     });
   }, 60_000);
 
+  test("a form that asks whether it is valid while the person types gets no note for the typing, nor later for what it kept from then", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/quantity-checked-live`);
+      expect(await setQuantity(b, "0")).not.toContain(NOTE);
+      expect(await snapshot(b)).toMatch(/button \\"Update\\" \[disabled\]/);
+      expect(await call(b, "browser_press_key", { key: "ArrowUp" })).not.toContain(NOTE);
+      await setQuantity(b, "0");
+      await setQuantity(b, "3");
+      const sent = await call(b, "browser_press_key", { key: "Enter" });
+      expect(await snapshot(b)).toContain("sent 3");
+      expect(sent).not.toContain(NOTE);
+    });
+  }, 60_000);
+
   test("the message never carries a value Trawler keeps secret: a password field's message is left out, and a secret quoted by the browser is masked", async () => {
     await withBrowser(async (b) => {
       await navigate(b, `${origin}/refused-login`);
       await call(b, "browser_type", { element: "Email", target: await ref(b, "Email"), text: PASSWORD });
       const byEmail = await call(b, "browser_click", { element: "Sign in", target: await ref(b, "Sign in") });
-      expect(byEmail).toContain(`At the field "Email" it shows its own message: "`);
+      expect(byEmail).toContain(`the field "Email" and shows its own message there: "`);
       expect(byEmail).not.toContain(PASSWORD);
 
       await call(b, "browser_type", { element: "Email", target: await ref(b, "Email"), text: "ana@example.com" });
       expect(await b.fillField(await ref(b, "Password"), PASSWORD, "password")).toBe("typed the password");
       const byPassword = await call(b, "browser_click", { element: "Sign in", target: await ref(b, "Sign in") });
-      expect(byPassword).toContain(`At the field "Password" it shows its own message, left out here because the field holds a password.`);
+      const LEFT_OUT = `the field "Password" and shows its own message there, left out here because the field holds a password.`;
+      expect(byPassword).toContain(LEFT_OUT);
       expect(byPassword).not.toContain(PASSWORD);
-      expect(byPassword).not.toContain(`its own message: "`);
+      expect(byPassword).not.toContain(`its own message there: "`);
+
+      await call(b, "browser_click", { element: "Show", target: await ref(b, "Show") });
+      const shownAsText = await call(b, "browser_click", { element: "Sign in", target: await ref(b, "Sign in") });
+      expect(shownAsText).toContain(LEFT_OUT);
+      expect(shownAsText).not.toContain(`its own message there: "`);
     });
   }, 60_000);
 });

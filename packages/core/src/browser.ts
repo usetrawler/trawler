@@ -68,17 +68,18 @@ const SILENT_LEAVE_PROMPT = /\["beforeunload" dialog with message ""\]/g;
 const LEAVE_PROMPT = '"beforeunload" dialog: the browser asks "Leave site? Changes you made may not be saved."';
 const dialogLine = (dialog: Dialog) =>
   dialog.type() === "beforeunload" && !dialog.message() ? `[${LEAVE_PROMPT}]` : `["${dialog.type()}" dialog with message "${dialog.message()}"]`;
-const MAX_REFUSED_FIELDS = 20;
+const MAX_REFUSED_FIELDS = 50;
 const keepRefusedFields = (key: string) => `(() => {
-  const refused = [];
+  const refused = new Map();
   Object.defineProperty(window, ${JSON.stringify(key)}, { value: refused });
-  document.addEventListener("invalid", (event) => { if (refused.length < ${MAX_REFUSED_FIELDS}) refused.push(event); }, true);
+  document.addEventListener("invalid", (event) => { if (refused.has(event.target) || refused.size < ${MAX_REFUSED_FIELDS}) refused.set(event.target, event); }, true);
 })()`;
 // The browser focuses the field it shows its own message at; checkValidity() fires the same event and shows nothing.
 const SHOWN_VALIDATION = `(key) => {
   const kept = window[key];
-  if (!Array.isArray(kept)) return null;
-  const refused = kept.splice(0).filter((event) => !event.defaultPrevented && event.target instanceof Element).map((event) => event.target);
+  if (!(kept instanceof Map)) return null;
+  const refused = [...kept.values()].filter((event) => !event.defaultPrevented && event.target instanceof Element).map((event) => event.target);
+  kept.clear();
   const shown = refused.find((el) => el.matches(":focus"));
   if (!shown) return null;
   const words = (text) => String(text ?? "").replace(/\\s+/g, " ").trim();
@@ -86,6 +87,7 @@ const SHOWN_VALIDATION = `(key) => {
   const secret = shown.matches("input[type=password i], [${SECRET_MARK}]");
   return { field: field.slice(0, 100), message: secret ? "" : words(shown.validationMessage).slice(0, 300), others: refused.length - 1 };
 }`;
+const SENDS_A_FORM = /^(Numpad)?Enter$/;
 interface ShownValidation {
   field: string;
   message: string;
@@ -93,10 +95,10 @@ interface ShownValidation {
 }
 
 export function validationNote(shown: ShownValidation): string {
-  const at = shown.field ? `At the field "${shown.field}"` : "At a field";
-  const message = shown.message ? `it shows its own message: "${shown.message}"` : "it shows its own message, left out here because the field holds a password.";
-  const others = shown.others > 0 ? ` ${shown.others} more ${shown.others === 1 ? "field of the form is" : "fields of the form are"} refused as well.` : "";
-  return `### The browser's own message\nThe browser did not send the form. ${at} ${message} A snapshot does not show this message, because it is not part of the page, but a user sees it next to the field.${others}`;
+  const field = shown.field ? `the field "${shown.field}"` : "a field";
+  const message = shown.message ? `shows its own message there: "${shown.message}"` : "shows its own message there, left out here because the field holds a password.";
+  const others = shown.others > 0 ? ` ${shown.others} other ${shown.others === 1 ? "field is" : "fields are"} refused as well.` : "";
+  return `### The browser's own message\nThe browser refused what is in ${field} and ${message} A snapshot does not show this message, because it is not part of the page, but a user sees it.${others}`;
 }
 
 const MASK_COLOR = "#17191c";
@@ -747,7 +749,8 @@ export async function openBrowser(opts: {
       const page = actingPage();
       if (!page || disconnected || dialogOnActingPage()) return null;
       const read = (frame: Frame) => within(frame.evaluate<ShownValidation | null>(`(${SHOWN_VALIDATION})(${JSON.stringify(refusedKey)})`).catch(() => null), HANDLE_READ_MS, null);
-      return (await Promise.all(page.frames().map(read))).find((shown) => shown !== null) ?? null;
+      const loaded = page.frames().filter((frame) => !frame.isDetached() && /^https?:/.test(frame.url()));
+      return (await Promise.all(loaded.map(read))).find((shown) => shown !== null) ?? null;
     };
     const modalState = (dialog: Dialog) => `### Modal state\n- ${dialogLine(dialog)}: can be handled by browser_handle_dialog`;
     context.on("page", (page) => {
@@ -951,6 +954,8 @@ export async function openBrowser(opts: {
         if (waiting) {
           return scrubWithFilledValues({ content: [{ type: "text", text: `### Error\nError: Tool "${name}" does not handle the modal state.\n${modalState(waiting)}` }], isError: true });
         }
+        const maySendAForm = name === "browser_click" || (name === "browser_press_key" && SENDS_A_FORM.test(String(safeInput.key))) || (name === "browser_type" && safeInput.submit === true);
+        if (maySendAForm) await shownValidation();
         blockedNavigation = null;
         mitigated = null;
         if (name === "browser_snapshot" && !dialogOnActingPage()) await settled(actingPage());
@@ -969,7 +974,7 @@ export async function openBrowser(opts: {
         if (result?.isError && CLOSED.test(textOf(result))) throw new Error("the browser has closed");
         if (!result?.isError && !textOf(result).trim()) result.content = [{ type: "text", text: "Done. Call browser_snapshot to see the page." }];
         result.content = result.content?.map((part) => (typeof part.text === "string" ? { ...part, text: part.text.replace(SILENT_LEAVE_PROMPT, `[${LEAVE_PROMPT}]`) } : part));
-        const refusedByBrowser = UNPACED.has(name) ? null : await shownValidation();
+        const refusedByBrowser = maySendAForm ? await shownValidation() : null;
         if (refusedByBrowser) result.content = [...(result.content ?? []), { type: "text", text: validationNote(refusedByBrowser) }];
         if (blockedNavigation) {
           result.content = [...(result.content ?? []), { type: "text", text: `### Blocked\n${blockedNavigation} is outside the allowed origins, so the browser did not open it. Go back or navigate to an allowed page.` }];
