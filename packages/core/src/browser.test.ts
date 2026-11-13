@@ -606,6 +606,16 @@ beforeAll(async () => {
         return html(`<button onclick="if (!confirm('Sure?')) alert('Cancelled')">Delete</button>`);
       case "/dialog":
         return html(`<button onclick="document.getElementById('r').textContent = confirm('Sure?') ? 'yes' : 'no'">Delete</button><p id="r">none</p>`);
+      case "/quantity":
+        return html(`<form action="/plain"><label>Quantity of Fern <input name="quantity" type="number" min="1" max="20" value="1" required oninput="this.setCustomValidity(Number(this.value) > 20 ? 'We send at most 20 of a plant.' : '')"></label><label>Note <input name="note" required value="leave at the door"></label><button>Update</button></form><p>cart page</p>`);
+      case "/quantity-own-message":
+        return html(`<form action="/plain"><label>Quantity of Fern <input name="quantity" type="number" min="1" value="1" oninvalid="event.preventDefault(); document.getElementById('m').textContent = 'Order at least one.'"></label><button>Update</button></form><p id="m">cart page</p>`);
+      case "/quantity-checked-quietly":
+        return html(`<form action="/plain"><label>Quantity of Fern <input name="quantity" type="number" min="1" value="0"></label></form><button onclick="document.getElementById('m').textContent = document.querySelector('form').checkValidity() ? 'fine' : 'not fine'">Check</button><p id="m">cart page</p>`);
+      case "/quantity-frame":
+        return html(`<p>outer page</p><iframe src="/quantity"></iframe>`);
+      case "/refused-login":
+        return html(`<form action="/plain"><input aria-label="Email" type="email" name="email"><input aria-label="Password" type="password" name="password" minlength="40"><button>Sign in</button></form>`);
       case "/upload":
         return html(`<input type="file" aria-label="Avatar"><p>upload page</p>`);
       case "/sw-page":
@@ -839,6 +849,102 @@ describe("native dialogs", () => {
       const clicked = await call(b, "browser_click", { element: "Save", target: await linkRef(b, "Save") });
       expect(clicked.text).toContain(`["alert" dialog with message "Saved!"]: can be handled by browser_handle_dialog`);
       expect(await call(b, "browser_handle_dialog", { accept: true })).toMatchObject({ isError: false });
+    });
+  }, 60_000);
+});
+
+describe("the browser's own validation", () => {
+  const NOTE = "### The browser's own message";
+  const call = async (b: Browser, name: string, args: Record<string, unknown> = {}) => {
+    const out = (await b.tools[name]!.execute!(args, ctx)) as { content: Array<{ text: string }>; isError?: boolean };
+    return out.content.map((c) => c.text).join("\n");
+  };
+  const ref = async (b: Browser, label: string) => {
+    const snap = await snapshot(b);
+    const found = new RegExp(`\\\\"${label}\\\\"[^\\n]*?\\[ref=([a-z0-9]+)\\]`).exec(snap)?.[1];
+    if (!found) throw new Error(`no ref for ${label} in ${snap.slice(0, 600)}`);
+    return found;
+  };
+  const setQuantity = async (b: Browser, value: string) => call(b, "browser_type", { element: "Quantity of Fern", target: await ref(b, "Quantity of Fern"), text: value });
+
+  test("a submit the browser refuses names the field and quotes the browser's message, which no snapshot shows", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/quantity`);
+      expect(await setQuantity(b, "0")).not.toContain(NOTE);
+      const clicked = await call(b, "browser_click", { element: "Update", target: await ref(b, "Update") });
+      expect(clicked).toContain(NOTE);
+      expect(clicked).toMatch(/the field "Quantity of Fern" shows the browser's own message "[^"]{5,}"\./);
+      expect(clicked).not.toContain("refused as well");
+      expect(await snapshot(b)).toContain("cart page");
+      expect(await snapshot(b)).not.toContain("browser's own message");
+
+      expect(await setQuantity(b, "25")).not.toContain(NOTE);
+      const again = await call(b, "browser_click", { element: "Update", target: await ref(b, "Update") });
+      expect(again).toContain(`the field "Quantity of Fern" shows the browser's own message "We send at most 20 of a plant."`);
+    });
+  }, 60_000);
+
+  test("Enter in the refused field is told the same, and a second refused field is counted", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/quantity`);
+      await call(b, "browser_type", { element: "Note", target: await ref(b, "Note"), text: "" });
+      await setQuantity(b, "30");
+      const pressed = await call(b, "browser_press_key", { key: "Enter" });
+      expect(pressed).toContain(`the field "Quantity of Fern" shows the browser's own message "We send at most 20 of a plant."`);
+      expect(pressed).toContain("1 more field of the form is refused as well.");
+    });
+  }, 60_000);
+
+  test("a form the browser sends adds nothing, and neither does the next action after a refusal", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/quantity`);
+      await setQuantity(b, "0");
+      expect(await call(b, "browser_click", { element: "Update", target: await ref(b, "Update") })).toContain(NOTE);
+      expect(await setQuantity(b, "3")).not.toContain(NOTE);
+      const sent = await call(b, "browser_click", { element: "Update", target: await ref(b, "Update") });
+      expect(sent).not.toContain(NOTE);
+      expect(await snapshot(b)).toContain("/plain?quantity=3");
+    });
+  }, 60_000);
+
+  test("a field in a frame is told as well", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/quantity-frame`);
+      await setQuantity(b, "0");
+      const clicked = await call(b, "browser_click", { element: "Update", target: await ref(b, "Update") });
+      expect(clicked).toMatch(/the field "Quantity of Fern" shows the browser's own message "[^"]{5,}"\./);
+    });
+  }, 60_000);
+
+  test("a page that replaces the browser's message with its own, or only asks whether the form is valid, gets no note", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/quantity-own-message`);
+      await setQuantity(b, "0");
+      const clicked = await call(b, "browser_click", { element: "Update", target: await ref(b, "Update") });
+      expect(await snapshot(b)).toContain("Order at least one.");
+      expect(clicked).not.toContain(NOTE);
+
+      await navigate(b, `${origin}/quantity-checked-quietly`);
+      const checked = await call(b, "browser_click", { element: "Check", target: await ref(b, "Check") });
+      expect(await snapshot(b)).toContain("not fine");
+      expect(checked).not.toContain(NOTE);
+    });
+  }, 60_000);
+
+  test("the message never carries a value Trawler keeps secret: a password field's message is left out, and a secret quoted by the browser is masked", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/refused-login`);
+      await call(b, "browser_type", { element: "Email", target: await ref(b, "Email"), text: PASSWORD });
+      const byEmail = await call(b, "browser_click", { element: "Sign in", target: await ref(b, "Sign in") });
+      expect(byEmail).toContain(`the field "Email" shows the browser's own message "`);
+      expect(byEmail).not.toContain(PASSWORD);
+
+      await call(b, "browser_type", { element: "Email", target: await ref(b, "Email"), text: "ana@example.com" });
+      expect(await b.fillField(await ref(b, "Password"), PASSWORD, "password")).toBe("typed the password");
+      const byPassword = await call(b, "browser_click", { element: "Sign in", target: await ref(b, "Sign in") });
+      expect(byPassword).toContain(`the field "Password" shows the browser's own message.`);
+      expect(byPassword).not.toContain(PASSWORD);
+      expect(byPassword).not.toMatch(/browser's own message "/);
     });
   }, 60_000);
 });

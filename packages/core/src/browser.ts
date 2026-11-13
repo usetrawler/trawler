@@ -68,6 +68,37 @@ const SILENT_LEAVE_PROMPT = /\["beforeunload" dialog with message ""\]/g;
 const LEAVE_PROMPT = '"beforeunload" dialog: the browser asks "Leave site? Changes you made may not be saved."';
 const dialogLine = (dialog: Dialog) =>
   dialog.type() === "beforeunload" && !dialog.message() ? `[${LEAVE_PROMPT}]` : `["${dialog.type()}" dialog with message "${dialog.message()}"]`;
+const MAX_REFUSED_FIELDS = 20;
+const keepRefusedFields = (key: string) => `(() => {
+  const refused = [];
+  Object.defineProperty(window, ${JSON.stringify(key)}, { value: refused });
+  document.addEventListener("invalid", (event) => { if (refused.length < ${MAX_REFUSED_FIELDS}) refused.push(event); }, true);
+})()`;
+// The browser focuses the field it shows its own message at; checkValidity() fires the same event and shows nothing.
+const SHOWN_VALIDATION = `(key) => {
+  const kept = window[key];
+  if (!Array.isArray(kept)) return null;
+  const refused = kept.splice(0).filter((event) => !event.defaultPrevented && event.target instanceof Element).map((event) => event.target);
+  const shown = refused.find((el) => el.matches(":focus"));
+  if (!shown) return null;
+  const words = (text) => String(text ?? "").replace(/\\s+/g, " ").trim();
+  const field = words(shown.labels?.[0]?.textContent) || words(shown.getAttribute("aria-label")) || words(shown.getAttribute("placeholder")) || words(shown.getAttribute("name"));
+  const secret = shown.matches("input[type=password i], [${SECRET_MARK}]");
+  return { field: field.slice(0, 100), message: secret ? "" : words(shown.validationMessage).slice(0, 300), others: refused.length - 1 };
+}`;
+interface ShownValidation {
+  field: string;
+  message: string;
+  others: number;
+}
+
+export function validationNote(shown: ShownValidation): string {
+  const field = shown.field ? `the field "${shown.field}"` : "a field";
+  const message = shown.message ? `the browser's own message "${shown.message}"` : "the browser's own message";
+  const others = shown.others > 0 ? ` ${shown.others} more ${shown.others === 1 ? "field of the form is" : "fields of the form are"} refused as well.` : "";
+  return `### The browser's own message\nThe browser did not send the form: ${field} shows ${message}. A snapshot does not show this message, because it is not part of the page, but a user sees it next to the field.${others}`;
+}
+
 const MASK_COLOR = "#17191c";
 const MASK_CHECK_MS = 2500;
 const STEADY_MS = 20;
@@ -574,6 +605,8 @@ export async function openBrowser(opts: {
       return route.abort("blockedbyclient");
     };
     await context.addInitScript(STRIP_SPECULATION);
+    const refusedKey = `__${randomUUID()}`;
+    await context.addInitScript(keepRefusedFields(refusedKey));
     await context.route("**/*", async (route) => {
       const request = route.request();
       const url = request.url();
@@ -710,6 +743,12 @@ export async function openBrowser(opts: {
       }
     };
     const dialogOnActingPage = () => [...openDialogs].filter(([, page]) => page === actingPage()).at(-1)?.[0];
+    const shownValidation = async (): Promise<ShownValidation | null> => {
+      const page = actingPage();
+      if (!page || disconnected || dialogOnActingPage()) return null;
+      const read = (frame: Frame) => within(frame.evaluate<ShownValidation | null>(`(${SHOWN_VALIDATION})(${JSON.stringify(refusedKey)})`).catch(() => null), HANDLE_READ_MS, null);
+      return (await Promise.all(page.frames().map(read))).find((shown) => shown !== null) ?? null;
+    };
     const modalState = (dialog: Dialog) => `### Modal state\n- ${dialogLine(dialog)}: can be handled by browser_handle_dialog`;
     context.on("page", (page) => {
       page.on("dialog", (dialog) => {
@@ -930,6 +969,8 @@ export async function openBrowser(opts: {
         if (result?.isError && CLOSED.test(textOf(result))) throw new Error("the browser has closed");
         if (!result?.isError && !textOf(result).trim()) result.content = [{ type: "text", text: "Done. Call browser_snapshot to see the page." }];
         result.content = result.content?.map((part) => (typeof part.text === "string" ? { ...part, text: part.text.replace(SILENT_LEAVE_PROMPT, `[${LEAVE_PROMPT}]`) } : part));
+        const refusedByBrowser = UNPACED.has(name) ? null : await shownValidation();
+        if (refusedByBrowser) result.content = [...(result.content ?? []), { type: "text", text: validationNote(refusedByBrowser) }];
         if (blockedNavigation) {
           result.content = [...(result.content ?? []), { type: "text", text: `### Blocked\n${blockedNavigation} is outside the allowed origins, so the browser did not open it. Go back or navigate to an allowed page.` }];
         }
