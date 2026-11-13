@@ -93,10 +93,10 @@ interface ShownValidation {
 }
 
 export function validationNote(shown: ShownValidation): string {
-  const field = shown.field ? `the field "${shown.field}"` : "a field";
-  const message = shown.message ? `the browser's own message "${shown.message}"` : "the browser's own message";
+  const at = shown.field ? `At the field "${shown.field}"` : "At a field";
+  const message = shown.message ? `it shows its own message: "${shown.message}"` : "it shows its own message, left out here because the field holds a password.";
   const others = shown.others > 0 ? ` ${shown.others} more ${shown.others === 1 ? "field of the form is" : "fields of the form are"} refused as well.` : "";
-  return `### The browser's own message\nThe browser did not send the form: ${field} shows ${message}. A snapshot does not show this message, because it is not part of the page, but a user sees it next to the field.${others}`;
+  return `### The browser's own message\nThe browser did not send the form. ${at} ${message} A snapshot does not show this message, because it is not part of the page, but a user sees it next to the field.${others}`;
 }
 
 const MASK_COLOR = "#17191c";

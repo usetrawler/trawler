@@ -873,14 +873,14 @@ describe("the browser's own validation", () => {
       expect(await setQuantity(b, "0")).not.toContain(NOTE);
       const clicked = await call(b, "browser_click", { element: "Update", target: await ref(b, "Update") });
       expect(clicked).toContain(NOTE);
-      expect(clicked).toMatch(/the field "Quantity of Fern" shows the browser's own message "[^"]{5,}"\./);
+      expect(clicked).toMatch(/At the field "Quantity of Fern" it shows its own message: "[^"]{5,}" A snapshot/);
       expect(clicked).not.toContain("refused as well");
       expect(await snapshot(b)).toContain("cart page");
-      expect(await snapshot(b)).not.toContain("browser's own message");
+      expect(await snapshot(b)).not.toContain("its own message");
 
       expect(await setQuantity(b, "25")).not.toContain(NOTE);
       const again = await call(b, "browser_click", { element: "Update", target: await ref(b, "Update") });
-      expect(again).toContain(`the field "Quantity of Fern" shows the browser's own message "We send at most 20 of a plant."`);
+      expect(again).toContain(`At the field "Quantity of Fern" it shows its own message: "We send at most 20 of a plant." A snapshot`);
     });
   }, 60_000);
 
@@ -890,7 +890,7 @@ describe("the browser's own validation", () => {
       await call(b, "browser_type", { element: "Note", target: await ref(b, "Note"), text: "" });
       await setQuantity(b, "30");
       const pressed = await call(b, "browser_press_key", { key: "Enter" });
-      expect(pressed).toContain(`the field "Quantity of Fern" shows the browser's own message "We send at most 20 of a plant."`);
+      expect(pressed).toContain(`At the field "Quantity of Fern" it shows its own message: "We send at most 20 of a plant."`);
       expect(pressed).toContain("1 more field of the form is refused as well.");
     });
   }, 60_000);
@@ -912,7 +912,7 @@ describe("the browser's own validation", () => {
       await navigate(b, `${origin}/quantity-frame`);
       await setQuantity(b, "0");
       const clicked = await call(b, "browser_click", { element: "Update", target: await ref(b, "Update") });
-      expect(clicked).toMatch(/the field "Quantity of Fern" shows the browser's own message "[^"]{5,}"\./);
+      expect(clicked).toMatch(/At the field "Quantity of Fern" it shows its own message: "[^"]{5,}" A snapshot/);
     });
   }, 60_000);
 
@@ -936,15 +936,15 @@ describe("the browser's own validation", () => {
       await navigate(b, `${origin}/refused-login`);
       await call(b, "browser_type", { element: "Email", target: await ref(b, "Email"), text: PASSWORD });
       const byEmail = await call(b, "browser_click", { element: "Sign in", target: await ref(b, "Sign in") });
-      expect(byEmail).toContain(`the field "Email" shows the browser's own message "`);
+      expect(byEmail).toContain(`At the field "Email" it shows its own message: "`);
       expect(byEmail).not.toContain(PASSWORD);
 
       await call(b, "browser_type", { element: "Email", target: await ref(b, "Email"), text: "ana@example.com" });
       expect(await b.fillField(await ref(b, "Password"), PASSWORD, "password")).toBe("typed the password");
       const byPassword = await call(b, "browser_click", { element: "Sign in", target: await ref(b, "Sign in") });
-      expect(byPassword).toContain(`the field "Password" shows the browser's own message.`);
+      expect(byPassword).toContain(`At the field "Password" it shows its own message, left out here because the field holds a password.`);
       expect(byPassword).not.toContain(PASSWORD);
-      expect(byPassword).not.toMatch(/browser's own message "/);
+      expect(byPassword).not.toContain(`its own message: "`);
     });
   }, 60_000);
 });
