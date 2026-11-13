@@ -440,7 +440,7 @@ test("the lead is told what the first round reported, its plan is masked before 
   const first = [
     toolCall("browser_snapshot", {}),
     toolCall("submit_finding", { kind: "friction", goal: "order", title: "Hidden checkout", observed: "o", reproduction: ["a"], severity: "low" }),
-    ...reached("order"), ...reached("browse"),
+    ...reached("order"), toolCall("browser_snapshot", {}), ...reached("browse"),
   ];
   const agent = scriptedModel([...first, text(JSON.stringify({ passedBy: ["a field holding hunter22-secret"], goals: [{ id: "more", instruction: "Type hunter22-secret into the search.", personaId: "lee" }] })), ...reached("more")]);
   const summary = await localRun({
@@ -534,15 +534,15 @@ test("a second-round session that breaks leaves the person's first round as it e
 });
 
 test("when the budget runs out the report says which second-round goals nobody started, or that the round was not planned", async () => {
-  const session = () => scriptedModel([toolCall("browser_snapshot", {}), ...reached("order"), ...reached("browse"), text(JSON.stringify({ goals: [{ id: "more", instruction: "Try the search.", personaId: "lee" }] }))]);
+  const session = () => scriptedModel([toolCall("browser_snapshot", {}), ...reached("order"), toolCall("browser_snapshot", {}), ...reached("browse"), text(JSON.stringify({ goals: [{ id: "more", instruction: "Try the search.", personaId: "lee" }] }))]);
   const run = (budgetUsd: number) => localRun({
     project: shop, agentModel: session(), agentModelId: "a", judgeModel: scriptedModel([]), judgeModelId: "j", budgetUsd, maxSteps: 10, replaySteps: 10, emit: () => {}, openBrowser: shopBrowser, secondRound: true,
   });
-  const afterPlanning = await run(0.0055);
+  const afterPlanning = await run(0.0065);
   expect(afterPlanning.secondRound!.goals.map((g) => g.id)).toEqual(["more"]);
   expect(afterPlanning.secondRound!.sessions).toEqual([]);
   expect(afterPlanning.roles.find((r) => r.persona === "lee")).toMatchObject({ stoppedBy: "finish", goals: [{ goal: "browse", status: "reached" }, { goal: "more", status: "not_attempted", note: "not started: the budget ran out" }] });
-  const before = await run(0.0045);
+  const before = await run(0.0055);
   expect(before.secondRound).toEqual({ goals: [], passedBy: [], sessions: [], error: "the budget ran out before the second round" });
   expect(before.jobs.map((j) => j.jobId)).toEqual(["role:ana", "role:lee"]);
 });

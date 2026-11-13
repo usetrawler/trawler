@@ -310,7 +310,7 @@ export function secondRoundPrompt(p: {
   const fence = (value: string) => `<website-${tag}>\n${value}\n</website-${tag}>`;
   const nameOf = (id: string) => p.personas.find((person) => person.id === id)?.name ?? id;
   const who = (ids: string[]) => ids.map(nameOf).join(", ");
-  const firstRound = p.outcomes.map((o) => ({ person: o.persona, goal: p.goals.find((g) => g.id === o.goal)?.instruction ?? o.goal, status: o.status, note: o.note, ...(o.blockedBy ? { stoppedBy: o.blockedBy } : {}) }));
+  const firstRound = p.outcomes.map((o) => ({ person: o.persona, goal: p.goals.find((g) => g.id === o.goal)?.instruction ?? o.goal, status: o.status, note: o.note, ...(o.blockedBy ? { blockedBy: o.blockedBy } : {}) }));
   const pages = p.pages.map((page) => `${page.url} (seen by ${who(page.seenBy)})\n${fence(page.snapshot)}`).join("\n\n");
   const unopened = p.unopened.length > 0 ? `\nPlaces those pages link to that nobody opened, by the text of the link and who saw it:\n${fence(p.unopened.map((link) => `${link.name} (seen by ${who(link.seenBy)})`).join("\n"))}\n` : "";
   const setup = p.setup ? `\nHow the product is set up for this test and what it does not have here, as its team wrote it:\n${fence(p.setup)}\n` : "";
@@ -322,7 +322,7 @@ ${setup}
 The people (id, name, brief):
 ${JSON.stringify(p.personas.map(({ id, name, brief }) => ({ id, name, brief })), null, 1)}
 
-The first round's goals and how each ended:
+The first round's goals and how each ended. Where a goal was not reached, blockedBy says what was in the way: the product itself, the setup it runs in here, or the person:
 ${JSON.stringify(firstRound, null, 1)}
 
 What the first round already reported, so do not plan it again:
@@ -339,8 +339,8 @@ Plan the second round:
 - What must still hold is something the pages show or say, or plain consistency: what was saved is shown back, a figure matches the list it sums, what the product says it did can be found afterwards. It is never a rule you think the product ought to have. Say that a bad value is not kept; do not say that a message appears, because a product may refuse with a field that takes no more or with the browser's own prompt.
 - Use only what the pages and the unopened places show. Never ask anyone to use an option, a field or a state they do not show.
 - Give a goal to a person only for a page that person saw, or a place linked from a page that person saw: another person's pages may be out of their reach. Name a place by the text of its link, never by its address.
-- A goal must be doable by its own person alone. When it needs several items or an item in a certain state, it says to make them first with what the pages show.
-- Do not plan a goal that would end a person's way in: deleting their account, or changing its password or the address they sign in with. Do not plan again a goal that was stopped by the setup, or anything the setup says the product does not have here.
+- A goal must be doable by its own person alone. When it needs several items or an item in a certain state, it says to make them first, if the pages show how; otherwise leave the goal out.
+- Do not plan a goal that would end a person's way in: deleting their account, or changing its password or the address they sign in with. Do not plan again a goal whose blockedBy is the setup, or anything the setup says the product does not have here.
 - At most ${p.maxGoals} goals in all and at most ${p.maxPerPerson} for one person, by the person's id as personaId, and at least one. When there is more to try than that, keep first what a user of this product does most and what handles money, saved data or other people, then the places nobody opened. Do not repeat a first-round goal.
 - A goal has an id (lowercase words joined by dashes), an instruction of at most 600 characters, and personaId.`;
 }

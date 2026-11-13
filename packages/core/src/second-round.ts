@@ -11,6 +11,7 @@ export const MAX_PAGE_CHARS = 6000;
 export const MAX_UNOPENED = 30;
 const MAX_LINKED = 300;
 const MAX_INSTRUCTION = 600;
+const SAW_AS_MUCH = 0.5;
 export const MAX_SECOND_ROUND_GOALS = 12;
 const MAX_PER_PERSON = 4;
 const PAGE_URL = /^- Page URL: (\S+)$/m;
@@ -25,7 +26,6 @@ export interface SeenPage {
 
 export interface UnopenedLink {
   name: string;
-  url: string;
   seenBy: string[];
 }
 
@@ -55,6 +55,7 @@ function textOf(result: unknown): string {
 
 export function seenPages(): SeenPages {
   const seen = new Map<string, SeenPage>();
+  const fullestFor = new Map<string, Map<string, number>>();
   const opened = new Set<string>();
   const linked = new Map<string, UnopenedLink>();
   const keep = (result: unknown, person: string) => {
@@ -65,10 +66,13 @@ export function seenPages(): SeenPages {
     if (!url || !place || snapshot === undefined) return;
     opened.add(place);
     const readable = snapshot.replace(/ \[(?:ref=[a-z0-9]+|cursor=pointer)\]/g, "");
+    const cut = readable.slice(0, MAX_PAGE_CHARS);
     const kept = seen.get(place);
-    const seenBy = [...new Set([...(kept?.seenBy ?? []), person])];
-    if (kept && readable.length < kept.snapshot.length) kept.seenBy = seenBy;
-    else if (kept || seen.size < MAX_SEEN_PAGES) seen.set(place, { url, snapshot: readable.slice(0, MAX_PAGE_CHARS), seenBy });
+    if (!kept && seen.size >= MAX_SEEN_PAGES) return;
+    const sizes = fullestFor.get(place) ?? new Map<string, number>();
+    sizes.set(person, Math.max(sizes.get(person) ?? 0, cut.length));
+    fullestFor.set(place, sizes);
+    if (!kept || cut.length >= kept.snapshot.length) seen.set(place, { url, snapshot: cut, seenBy: [] });
     for (const [, name, href] of readable.matchAll(LINK)) {
       let target: URL;
       try {
@@ -84,8 +88,7 @@ export function seenPages(): SeenPages {
         continue;
       }
       if (linked.size >= MAX_LINKED) continue;
-      target.search = "";
-      linked.set(to, { name: clip(name!.replace(/\\(.)/g, "$1"), 100), url: target.href, seenBy: [person] });
+      linked.set(to, { name: clip(name!.replace(/\\(.)/g, "$1"), 100), seenBy: [person] });
     }
   };
   return {
@@ -102,14 +105,18 @@ export function seenPages(): SeenPages {
           return [name, { ...t, execute: watched }];
         }),
       ),
-    pages: () => [...seen.values()],
+    pages: () =>
+      [...seen].map(([place, page]) => ({
+        ...page,
+        seenBy: [...fullestFor.get(place)!].filter(([, size]) => size >= page.snapshot.length * SAW_AS_MUCH).map(([person]) => person),
+      })),
     unopened: () => [...linked].filter(([place]) => !opened.has(place)).map(([, link]) => link).slice(0, MAX_UNOPENED),
   };
 }
 
 function notPlanned(err: unknown): string {
   const said = err instanceof Error ? err.message : String(err);
-  const why = said.replace(/^the setup model could not propose a project: /, "").replace(/, so no project was proposed$/, "").replaceAll("the setup model", "the model");
+  const why = said.replace(/^the setup model could not propose a project: /, "").replace(/, so no project was proposed$/, "").replaceAll("the setup model", "the model").replace("the setup budget is spent", "the budget is spent");
   return `the lead could not plan a second round: ${why}`;
 }
 
@@ -135,6 +142,7 @@ export async function planSecondRound(opts: {
   unopened: UnopenedLink[];
 }): Promise<{ plan: SecondRound; usage: JobUsage }> {
   const people = new Set(opts.project.personas.map((p) => p.id));
+  const sawSomething = new Set([...opts.pages, ...opts.unopened].flatMap((seen) => seen.seenBy));
   const taken = new Set(opts.project.goals.map((g) => g.id));
   const prompt = opts.scrubber.scrub(secondRoundPrompt({ description: opts.project.description, setup: opts.project.setup, personas: opts.project.personas, goals: opts.project.goals, outcomes: opts.outcomes, findings: opts.findings, pages: opts.pages, unopened: opts.unopened, maxGoals: MAX_SECOND_ROUND_GOALS, maxPerPerson: MAX_PER_PERSON }));
   const { answer, usage } = await ask(opts, Answer, prompt, (a) => {
@@ -151,7 +159,7 @@ export async function planSecondRound(opts: {
   for (const g of answer.goals) {
     const instruction = clip(g.instruction, MAX_INSTRUCTION);
     const given = perPerson.get(g.personaId) ?? 0;
-    if (!people.has(g.personaId) || !instruction || given >= MAX_PER_PERSON || goals.length >= MAX_SECOND_ROUND_GOALS) continue;
+    if (!people.has(g.personaId) || !sawSomething.has(g.personaId) || !instruction || given >= MAX_PER_PERSON || goals.length >= MAX_SECOND_ROUND_GOALS) continue;
     const base = g.id.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 50).replace(/^-+|-+$/g, "") || "probe";
     let id = base;
     for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
