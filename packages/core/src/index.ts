@@ -12,3 +12,4 @@ export { triageFindings } from "./triage.ts";
 export { checkAccount } from "./account-check.ts";
 export { browserQueue, runAgentLoop } from "./agent-loop.ts";
 export { pageText, proposeProject, SetupModelFailed } from "./setup.ts";
+export { planSecondRound, seenPages, type SecondRound, type SeenPages } from "./second-round.ts";

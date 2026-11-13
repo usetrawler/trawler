@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { RunEventSchema, type Finding, type JobUsage, type ReplayObservation, type RoleResult, type RunEvent, type RunEventInput, type Verdict } from "@usetrawler/protocol";
+import { RunEventSchema, type Finding, type Goal, type JobUsage, type ReplayObservation, type RoleResult, type RunEvent, type RunEventInput, type Verdict } from "@usetrawler/protocol";
 
 export interface RunSummary {
   project: string;
@@ -19,6 +19,7 @@ export interface RunSummary {
   refusedAccount?: string;
   people?: Record<string, string>;
   browserFailures?: Array<{ jobId: string; url: string; cause: string }>;
+  secondRound?: { goals: Goal[]; passedBy: string[]; sessions: Array<{ persona: string; stoppedBy: string; error?: string }>; error?: string };
 }
 
 export class RunDir {
@@ -75,7 +76,16 @@ function browserFailures(failures: NonNullable<RunSummary["browserFailures"]>): 
   return `\n## The browser could not load\n\nThe browser itself failed or blocked these requests, so parts of the product may not have worked during the run. Errors like these often come from where the product runs rather than from the product itself: check findings about missing or broken parts against this list before acting on them.\n\n${lines}\n`;
 }
 
-function describe(f: Located, people: Record<string, string>, replay?: ReplayObservation, replayError?: string, judgeError?: string): string {
+function secondRound(round: RunSummary["secondRound"], people: Record<string, string>): string {
+  if (!round) return "";
+  if (round.error) return `\n## Second round\n\nNot played: ${oneLine(round.error)}\n`;
+  const passedBy = round.passedBy.length > 0 ? `What the first round passed by:\n\n${round.passedBy.map((p) => `- ${oneLine(p)}`).join("\n")}\n\n` : "";
+  const goals = round.goals.map((g) => `- ${g.id} (${oneLine(people[g.personaId ?? ""] ?? g.personaId ?? "everyone")}): ${oneLine(g.instruction)}`).join("\n");
+  const cutShort = round.sessions.filter((s) => s.stoppedBy !== "finish").map((s) => `- ${oneLine(people[s.persona] ?? s.persona)}'s second-round session was stopped by ${s.stoppedBy}${s.error ? `: ${oneLine(s.error)}` : ""}`).join("\n");
+  return `\n## Second round\n\nGoals written after the first round, from the pages the people saw, to try what they walked past.\n\n${passedBy}${goals}\n${cutShort ? `\n${cutShort}\n` : ""}`;
+}
+
+function describe(f: Located, people: Record<string, string>, secondRoundGoals: Set<string>, replay?: ReplayObservation, replayError?: string, judgeError?: string): string {
   const who = (i: number) => (f.by && f.by.length === f.reproduction.length ? `${oneLine(people[f.by[i]!] ?? f.by[i]!)}: ` : "");
   const steps = f.reproduction.map((step, i) => `${i + 1}. ${who(i)}${oneLine(step)}`).join("\n");
   const replayed = replayError
@@ -88,18 +98,19 @@ function describe(f: Located, people: Record<string, string>, replay?: ReplayObs
   const judged = judgeError ? `\n\nJudge: could not be judged. ${oneLine(judgeError)}` : "";
   const page = f.url ? `\nPage: ${readable(f.url)}` : "";
   const said = f.quote ? `\n\n> ${oneLine(f.quote)}` : "";
-  return `### ${oneLine(f.title)}\n${f.kind}, ${f.severity}, ${oneLine(f.persona)} / ${oneLine(f.goal)}${page}\n\n${oneLine(f.observed)}${said}\n\n${steps}${replayed}${judged}\n`;
+  return `### ${oneLine(f.title)}\n${f.kind}, ${f.severity}, ${oneLine(f.persona)} / ${oneLine(f.goal)}${secondRoundGoals.has(f.goal) ? ", second round" : ""}${page}\n\n${oneLine(f.observed)}${said}\n\n${steps}${replayed}${judged}\n`;
 }
 
 export function renderReport(s: RunSummary): string {
   const findings: Located[] = s.roles.flatMap((r) => r.findings.map((f) => ({ ...f, persona: r.persona })));
+  const secondRoundGoals = new Set((s.secondRound?.goals ?? []).map((g) => g.id));
   const section = (title: string, items: Located[]) =>
-    items.length === 0 ? "" : `## ${title}\n\n${items.map((f) => describe(f, s.people ?? {}, s.replays[f.id], s.replayErrors[f.id], s.judgeErrors[f.id])).join("\n")}\n`;
+    items.length === 0 ? "" : `## ${title}\n\n${items.map((f) => describe(f, s.people ?? {}, secondRoundGoals, s.replays[f.id], s.replayErrors[f.id], s.judgeErrors[f.id])).join("\n")}\n`;
   const defects = findings.filter((f) => f.kind === "defect");
   const by = (v: Verdict) => defects.filter((f) => s.verdicts[f.id] === v);
   const jobs = s.jobs.map((j) => `| ${j.jobId} | ${j.model} | ${j.steps} | ${usd(j.costUsd)} |`).join("\n");
   const goals = s.roles
-    .map((r) => `**${r.persona}** (stopped by ${r.stoppedBy}${r.error ? `: ${oneLine(r.error)}` : ""})\n${r.goals.map((g) => `- ${g.goal}: ${g.status}${g.note ? ` — ${oneLine(g.note)}` : ""}`).join("\n")}`)
+    .map((r) => `**${r.persona}** (stopped by ${r.stoppedBy}${r.error ? `: ${oneLine(r.error)}` : ""})\n${r.goals.map((g) => `- ${g.goal}${secondRoundGoals.has(g.goal) ? " (second round)" : ""}: ${g.status}${g.note ? ` — ${oneLine(g.note)}` : ""}`).join("\n")}`)
     .join("\n\n");
   const stopped = s.totalCostUsd >= s.budgetUsd ? ` The ${usd(s.budgetUsd)} budget ran out, so some jobs did not run.` : "";
   return `# ${oneLine(s.project)}
@@ -109,7 +120,7 @@ ${s.refusedAccount ? `\n**Stopped before anyone started:** ${oneLine(s.refusedAc
 | Job | Model | Steps | Cost |
 |---|---|---|---|
 ${jobs}
-${browserFailures(s.browserFailures ?? [])}
+${browserFailures(s.browserFailures ?? [])}${secondRound(s.secondRound, s.people ?? {})}
 ## Goals
 
 ${goals}

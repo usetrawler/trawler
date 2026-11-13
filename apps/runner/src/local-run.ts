@@ -1,11 +1,13 @@
 import { randomBytes } from "node:crypto";
 import type { LanguageModel } from "ai";
-import { Budget, checkAccount, judge, runReplay, runRoleSession, SecretScrubber, type Browser } from "@usetrawler/core";
-import { ACCOUNT_CHECK_STEPS, trimStory, turnsOf, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
+import { Budget, checkAccount, judge, planSecondRound, runReplay, runRoleSession, SecretScrubber, seenPages, type Browser } from "@usetrawler/core";
+import { ACCOUNT_CHECK_STEPS, trimStory, turnsOf, type Persona, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
 import type { RunSummary } from "./run-dir.ts";
 import { blockedRequest } from "./blocked-request.ts";
 
 const CLOSE_TIMEOUT_MS = 10_000;
+export const SECOND_ROUND_JOB = "plan:second-round";
+const MAX_JOB_ERROR = 2000;
 
 export type OpenBrowser = (opts: { onBlocked: (url: string, cause?: string) => void; scrubber: SecretScrubber }) => Promise<Browser>;
 
@@ -21,6 +23,7 @@ export async function localRun(opts: {
   emit: (e: RunEventInput) => void;
   openBrowser: OpenBrowser;
   look?: boolean;
+  secondRound?: boolean;
 }): Promise<RunSummary> {
   const startedAt = new Date().toISOString();
   const budget = new Budget(opts.budgetUsd);
@@ -90,7 +93,44 @@ export async function localRun(opts: {
   const signUpSeed = randomBytes(24).toString("base64url");
   const story: StoryEntry[] = [];
   const byPersona = new Map<string, RoleResult>();
+  const seen = opts.secondRound ? seenPages() : null;
   let failedTurn: string | null = null;
+  const play = async (session: { persona: Persona; goalIds: string[]; jobId: string; project: ProjectConfig; returning: boolean; secondRound?: boolean }) => {
+    const { persona, jobId } = session;
+    const scrubber = scrubberFor();
+    const told: StoryEntry[] = [];
+    const emit = (e: RunEventInput) => {
+      if (e.type === "note") told.push({ personaId: persona.id, name: persona.name, text: e.text });
+      if (e.type === "goal_status" && e.outcome.status !== "not_attempted") {
+        told.push({ personaId: persona.id, name: persona.name, goal: session.project.goals.find((g) => g.id === e.outcome.goal)?.instruction ?? e.outcome.goal, status: e.outcome.status, text: e.outcome.note });
+      }
+      opts.emit(e);
+    };
+    const { result, usage } = await withBrowser(jobId, scrubber, (b) =>
+      runRoleSession({
+        model: opts.agentModel, modelId: opts.agentModelId, persona, project: session.project,
+        browserTools: seen ? seen.watch(b.tools, persona.id) : b.tools, fillField: b.fillField, accountForm: b.accountForm?.bind(b), scrubber, budget, maxSteps: opts.maxSteps, emit,
+        newFindingId: () => `f${++findingNo}`, pageUrl: () => b.pageUrl(), botProtection: () => b.botProtection?.() ?? null,
+        goalIds: session.goalIds, story: trimStory(story), signUpSeed, jobId,
+        returning: session.returning,
+        ...(opts.look ? { look: true, screenshot: () => b.screenshot() } : {}),
+      }),
+    ).catch((err): { result: RoleResult; usage: ReturnType<typeof noUsage> } => {
+      const error = failure(scrubber, err);
+      recordFailure(jobId, "role_session", error);
+      return {
+        result: { persona: persona.id, goals: session.goalIds.map((goal) => ({ goal, status: "not_attempted", note: "" })), findings: [], stoppedBy: "error", error },
+        usage: noUsage(opts.agentModelId),
+      };
+    });
+    story.push(...told);
+    const earlier = byPersona.get(persona.id);
+    byPersona.set(persona.id, earlier
+      ? { ...(session.secondRound ? earlier : result), goals: [...earlier.goals, ...result.goals], findings: [...earlier.findings, ...result.findings] }
+      : result);
+    summary.jobs.push({ jobId, ...usage });
+    return result;
+  };
   for (const [i, turn] of turns.entries()) {
     if (budget.exceeded) break;
     const persona = opts.project.personas.find((p) => p.id === turn.personaId)!;
@@ -102,40 +142,60 @@ export async function localRun(opts: {
       byPersona.set(persona.id, earlier ? { ...earlier, goals: [...earlier.goals, ...skipped.goals] } : skipped);
       continue;
     }
-    const scrubber = scrubberFor();
-    const told: StoryEntry[] = [];
-    const emit = (e: RunEventInput) => {
-      if (e.type === "note") told.push({ personaId: persona.id, name: persona.name, text: e.text });
-      if (e.type === "goal_status" && e.outcome.status !== "not_attempted") {
-        told.push({ personaId: persona.id, name: persona.name, goal: opts.project.goals.find((g) => g.id === e.outcome.goal)?.instruction ?? e.outcome.goal, status: e.outcome.status, text: e.outcome.note });
-      }
-      opts.emit(e);
-    };
-    const { result, usage } = await withBrowser(jobId, scrubber, (b) =>
-      runRoleSession({
-        model: opts.agentModel, modelId: opts.agentModelId, persona, project: opts.project,
-        browserTools: b.tools, fillField: b.fillField, accountForm: b.accountForm?.bind(b), scrubber, budget, maxSteps: opts.maxSteps, emit,
-        newFindingId: () => `f${++findingNo}`, pageUrl: () => b.pageUrl(), botProtection: () => b.botProtection?.() ?? null,
-        goalIds: turn.goalIds, story: trimStory(story), signUpSeed, jobId,
-        returning: turns.slice(0, i).some((t) => t.personaId === persona.id),
-        ...(opts.look ? { look: true, screenshot: () => b.screenshot() } : {}),
-      }),
-    ).catch((err): { result: RoleResult; usage: ReturnType<typeof noUsage> } => {
-      const error = failure(scrubber, err);
-      recordFailure(jobId, "role_session", error);
-      return {
-        result: { persona: persona.id, goals: turn.goalIds.map((goal) => ({ goal, status: "not_attempted", note: "" })), findings: [], stoppedBy: "error", error },
-        usage: noUsage(opts.agentModelId),
-      };
-    });
+    const result = await play({ persona, goalIds: turn.goalIds, jobId, project: opts.project, returning: turns.slice(0, i).some((t) => t.personaId === persona.id) });
     if (result.stoppedBy === "error") failedTurn = `the turn of ${persona.name} (${jobId})`;
-    story.push(...told);
-    const earlier = byPersona.get(persona.id);
-    byPersona.set(persona.id, earlier
-      ? { ...result, goals: [...earlier.goals, ...result.goals], findings: [...earlier.findings, ...result.findings] }
-      : result);
-    summary.jobs.push({ jobId, ...usage });
   }
+
+  const notPlayed = !seen ? null
+    : budget.exceeded ? "the budget ran out before the second round"
+    : teamed && failedTurn ? `${failedTurn} ended in an error, so nobody went on to a second round`
+    : seen.pages().length === 0 ? "nobody saw a page to plan it from"
+    : null;
+  if (notPlayed) summary.secondRound = { goals: [], passedBy: [], sessions: [], error: notPlayed };
+  if (seen && !notPlayed) {
+    const firstRound = [...byPersona.values()];
+    const tell = (e: RunEventInput) => {
+      try {
+        opts.emit(e);
+      } catch {
+        return;
+      }
+    };
+    const spentBefore = budget.spent;
+    tell({ type: "job_started", jobId: SECOND_ROUND_JOB, kind: "setup" });
+    const planned = await planSecondRound({
+      model: opts.agentModel, modelId: opts.agentModelId, budget, scrubber: scrubberFor(), project: opts.project,
+      outcomes: firstRound.flatMap((r) => r.goals.map((g) => ({ ...g, persona: r.persona }))),
+      findings: firstRound.flatMap((r) => r.findings.map((f) => ({ persona: r.persona, kind: f.kind, title: f.title }))),
+      pages: seen.pages(), unopened: seen.unopened(),
+    }).catch((err) => failure(scrubberFor(), err));
+    if (typeof planned === "string") {
+      const usage = { ...noUsage(opts.agentModelId), costUsd: Math.max(0, budget.spent - spentBefore) };
+      tell({ type: "job_finished", jobId: SECOND_ROUND_JOB, usage, stoppedBy: "error", error: planned.slice(0, MAX_JOB_ERROR) });
+      summary.jobs.push({ jobId: SECOND_ROUND_JOB, ...usage });
+      summary.secondRound = { goals: [], passedBy: [], sessions: [], error: planned };
+    } else {
+      const plan = scrubberFor().scrub(planned.plan);
+      tell({ type: "job_finished", jobId: SECOND_ROUND_JOB, usage: planned.usage, stoppedBy: "done" });
+      summary.jobs.push({ jobId: SECOND_ROUND_JOB, ...planned.usage });
+      const sessions: NonNullable<RunSummary["secondRound"]>["sessions"] = [];
+      summary.secondRound = { goals: plan.goals, passedBy: plan.passedBy, sessions };
+      const project = { ...opts.project, goals: [...opts.project.goals, ...plan.goals] };
+      for (const persona of opts.project.personas) {
+        const goalIds = plan.goals.filter((g) => g.personaId === persona.id).map((g) => g.id);
+        if (goalIds.length === 0) continue;
+        if (budget.exceeded) {
+          const earlier = byPersona.get(persona.id);
+          const goals = goalIds.map((goal) => ({ goal, status: "not_attempted" as const, note: "not started: the budget ran out" }));
+          byPersona.set(persona.id, earlier ? { ...earlier, goals: [...earlier.goals, ...goals] } : { persona: persona.id, goals, findings: [], stoppedBy: "budget" });
+          continue;
+        }
+        const result = await play({ persona, goalIds, jobId: `role:${persona.id}#second-round`, project, returning: byPersona.has(persona.id), secondRound: true });
+        sessions.push({ persona: persona.id, stoppedBy: result.stoppedBy, ...(result.error ? { error: result.error } : {}) });
+      }
+    }
+  }
+
   summary.roles.push(...byPersona.values());
 
   for (const role of summary.roles) {
