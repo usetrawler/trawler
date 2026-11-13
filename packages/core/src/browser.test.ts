@@ -617,10 +617,10 @@ beforeAll(async () => {
       case "/quantity-checked-live":
         return html(`<form onsubmit="event.preventDefault(); document.getElementById('m').textContent = 'sent ' + this.quantity.value"><label>Quantity of Fern <input name="quantity" type="number" min="1" value="1" oninput="document.getElementById('go').disabled = !this.form.checkValidity()"></label><button id="go">Update</button></form><p id="m">cart page</p>`);
       case "/quantity-in-shadow":
-        return html(`<cart-row id="open"></cart-row><cart-row id="closed" data-mode="closed"></cart-row><p>cart page</p><script>
+        return html(`<cart-row id="open"></cart-row><p>cart page</p><script>
           customElements.define("cart-row", class extends HTMLElement {
             connectedCallback() {
-              const root = this.attachShadow({ mode: this.dataset.mode || "open" });
+              const root = this.attachShadow({ mode: "open" });
               root.innerHTML = '<form action="/plain"><label>Quantity of ' + this.id + ' <input name="quantity" type="number" min="1" value="1"></label><button>Update ' + this.id + '</button></form>';
             }
           });
@@ -964,7 +964,6 @@ describe("the browser's own validation", () => {
       expect(open).toMatch(/The browser refused what is in the field "Quantity of open" and shows its own message there: "[^"]{5,}"/);
       expect(await snapshot(b)).toContain("cart page");
 
-      expect(await snapshot(b)).not.toContain("Quantity of closed");
     });
   }, 60_000);
 

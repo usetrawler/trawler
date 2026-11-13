@@ -77,7 +77,7 @@ const keepRefusedFields = (key: string) => `(() => {
   const attachShadow = Element.prototype.attachShadow;
   Element.prototype.attachShadow = function (init) {
     const root = attachShadow.call(this, init);
-    if (init && init.mode === "open") root.addEventListener("invalid", keep, true);
+    if (root.mode === "open") root.addEventListener("invalid", keep, true);
     return root;
   };
 })()`;
