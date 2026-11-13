@@ -182,16 +182,16 @@ test("a defect is left unjudged when the budget is gone after its replay or the 
     text("no report"), text("still none"), text("nothing"),
     toolCall("report_replay", { completed: true, observed: "It broke", blockedAt: null }),
   ], 0.001);
-  const judgeModel = scriptedModel([text(JSON.stringify({ verdict: "confirmed" }))]);
+  const judgeModel = scriptedModel([toolCall("report_groups", { groups: [["f1"], ["f2"]] }), text(JSON.stringify({ verdict: "confirmed" }))]);
   const summary = await localRun({
-    project, agentModel: agent, agentModelId: "a", judgeModel, judgeModelId: "j", budgetUsd: 0.0115, maxSteps: 10, replaySteps: 10,
+    project, agentModel: agent, agentModelId: "a", judgeModel, judgeModelId: "j", budgetUsd: 0.0125, maxSteps: 10, replaySteps: 10,
     emit: () => {}, openBrowser: fakeBrowsers().open,
   });
   expect(summary.replays.f1?.completed).toBe(false);
   expect(summary.verdicts.f1).toBeUndefined();
   expect(summary.replays.f2?.completed).toBe(true);
   expect(summary.verdicts.f2).toBeUndefined();
-  expect(judgeModel.doGenerateCalls).toHaveLength(0);
+  expect(judgeModel.doGenerateCalls).toHaveLength(1);
 });
 
 test("a defect whose judge never gives a verdict is left unjudged with the judge's error", async () => {
@@ -556,4 +556,54 @@ test("when nobody saw a page there is nothing to plan a second round from", asyn
   expect(summary.jobs.map((j) => j.jobId)).toEqual(["role:ana", "role:lee"]);
   expect(summary.secondRound).toEqual({ goals: [], passedBy: [], sessions: [], error: "nobody saw a page to plan it from" });
   expect(renderReport(summary)).toContain("Not played: nobody saw a page to plan it from");
+});
+
+const reportsOfOneCause = [
+  toolCall("browser_snapshot", {}),
+  toolCall("submit_finding", { kind: "defect", goal: "order", title: "Total stale after quantity change", observed: "o1", reproduction: ["a", "b"], severity: "high" }),
+  toolCall("browser_snapshot", {}),
+  toolCall("submit_finding", { kind: "defect", goal: "order", title: "Search is case-sensitive", observed: "o2", reproduction: ["c", "d"], severity: "medium" }),
+  ...reached("order"),
+  toolCall("browser_snapshot", {}),
+  toolCall("submit_finding", { kind: "defect", goal: "browse", title: "Cart total never updates", observed: "o3", reproduction: ["d", "e"], severity: "high" }),
+  ...reached("browse"),
+];
+
+test("reports of the same defect are grouped, one of each group is replayed and judged, and the report shows the others under it", async () => {
+  const agent = scriptedModel([...reportsOfOneCause, toolCall("report_replay", { completed: true, observed: "Stale", blockedAt: null }), toolCall("report_replay", { completed: true, observed: "Nothing for fern", blockedAt: null })]);
+  const judgeModel = scriptedModel([toolCall("report_groups", { groups: [["f3", "f1"], ["f2"]] }), text(JSON.stringify({ verdict: "confirmed" })), text(JSON.stringify({ verdict: "confirmed" }))]);
+  const summary = await localRun({ project: shop, agentModel: agent, agentModelId: "a", judgeModel, judgeModelId: "j", budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: () => {}, openBrowser: shopBrowser });
+  expect(summary.jobs.map((j) => j.jobId)).toEqual(["role:ana", "role:lee", "group", "replay:f1", "judge:f1", "replay:f2", "judge:f2"]);
+  expect(summary.sameAs).toEqual({ f3: "f1" });
+  expect(summary.verdicts).toEqual({ f1: "confirmed", f2: "confirmed" });
+  const grouping = JSON.stringify(judgeModel.doGenerateCalls[0]!.prompt);
+  expect(grouping).toContain("Cart total never updates");
+  expect(grouping).toContain("A plant is ordered.");
+  const md = renderReport(summary);
+  expect(md.match(/^### /gm)).toHaveLength(2);
+  expect(md).toContain("Also reported, as the same defect:\n- Lee / browse: Cart total never updates\n\nReplay: carried out every step. Stale");
+  expect(md).not.toContain("### Cart total never updates");
+});
+
+test("when the replay of a group's first report writes no report, the next report of the group is replayed and stands for the group", async () => {
+  const agent = scriptedModel([...reportsOfOneCause, text("lost"), text("still lost"), text("gone"), toolCall("report_replay", { completed: true, observed: "Stale", blockedAt: null }), toolCall("report_replay", { completed: true, observed: "Nothing", blockedAt: null })]);
+  const judgeModel = scriptedModel([toolCall("report_groups", { groups: [["f1", "f3"], ["f2"]] }), text(JSON.stringify({ verdict: "confirmed" })), text(JSON.stringify({ verdict: "refuted" }))]);
+  const summary = await localRun({ project: shop, agentModel: agent, agentModelId: "a", judgeModel, judgeModelId: "j", budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: () => {}, openBrowser: shopBrowser });
+  expect(summary.jobs.map((j) => j.jobId)).toEqual(["role:ana", "role:lee", "group", "replay:f1", "replay:f3", "judge:f3", "replay:f2", "judge:f2"]);
+  expect(summary.sameAs).toEqual({ f1: "f3" });
+  expect(summary.verdicts).toEqual({ f3: "confirmed", f2: "refuted" });
+  const md = renderReport(summary);
+  expect(md).toMatch(/## Confirmed defects\n\n### Cart total never updates[\s\S]*Also reported, as the same defect:\n- Ana \/ order: Total stale after quantity change/);
+});
+
+test("a grouping that fails leaves every report to be replayed on its own, and one report is not sent to be grouped", async () => {
+  const agent = scriptedModel([...reportsOfOneCause, ...["Stale", "Nothing", "Stale"].map((observed) => toolCall("report_replay", { completed: true, observed, blockedAt: null }))]);
+  const judgeModel = scriptedModel([text("no"), text("no"), ...Array.from({ length: 3 }, () => text(JSON.stringify({ verdict: "confirmed" })))]);
+  const summary = await localRun({ project: shop, agentModel: agent, agentModelId: "a", judgeModel, judgeModelId: "j", budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: () => {}, openBrowser: shopBrowser });
+  expect(summary.sameAs).toEqual({});
+  expect(Object.keys(summary.verdicts)).toEqual(["f1", "f2", "f3"]);
+
+  const single = scriptedModel([toolCall("browser_snapshot", {}), toolCall("submit_finding", { kind: "defect", goal: "order", title: "One", observed: "o", reproduction: ["a"], severity: "high" }), ...reached("order"), ...reached("browse"), toolCall("report_replay", { completed: true, observed: "x", blockedAt: null })]);
+  const once = await localRun({ project: shop, agentModel: single, agentModelId: "a", judgeModel: scriptedModel([text(JSON.stringify({ verdict: "confirmed" }))]), judgeModelId: "j", budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: () => {}, openBrowser: shopBrowser });
+  expect(once.jobs.map((j) => j.jobId)).not.toContain("group");
 });
