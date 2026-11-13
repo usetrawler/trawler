@@ -609,7 +609,7 @@ beforeAll(async () => {
       case "/quantity":
         return html(`<form action="/plain"><label>Quantity of Fern <input name="quantity" type="number" min="1" max="20" value="1" required oninput="this.setCustomValidity(Number(this.value) > 20 ? 'We send at most 20 of a plant.' : '')"></label><label>Note <input name="note" required value="leave at the door"></label><button>Update</button></form><p>cart page</p>`);
       case "/quantity-own-message":
-        return html(`<form action="/plain"><label>Quantity of Fern <input name="quantity" type="number" min="1" value="1" oninvalid="event.preventDefault(); document.getElementById('m').textContent = 'Order at least one.'"></label><button>Update</button></form><p id="m">cart page</p>`);
+        return html(`<form action="/plain"><label>Quantity of Fern <input name="quantity" type="number" min="1" value="1" oninvalid="event.preventDefault(); this.focus(); document.getElementById('m').textContent = 'Order at least one.'"></label><button>Update</button></form><p id="m">cart page</p>`);
       case "/quantity-checked-quietly":
         return html(`<form action="/plain"><label>Quantity of Fern <input name="quantity" type="number" min="1" value="0"></label></form><button onclick="document.getElementById('m').textContent = document.querySelector('form').checkValidity() ? 'fine' : 'not fine'">Check</button><p id="m">cart page</p>`);
       case "/quantity-frame":
