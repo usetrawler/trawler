@@ -419,7 +419,8 @@ test("with a second round the lead plans from the pages the people saw, the peop
   const plan = prompts.find((p) => p.includes("you plan a second round"))!;
   expect(plan).toContain(String.raw`- searchbox \"Search plants\"`);
   expect(plan).not.toContain("ref=e2");
-  expect(plan).toContain("Account: https://a.test/account");
+  expect(plan).toContain("Account (seen by Ana)");
+  expect(plan).toContain("https://a.test/shop (seen by Ana)");
   expect(plan).toContain("order done");
   const second = prompts.filter((p) => p.includes("[search-any-case] Search in any letter case"));
   expect(second.length).toBeGreaterThan(0);
@@ -432,6 +433,44 @@ test("with a second round the lead plans from the pages the people saw, the peop
   expect(md).toContain("defect, high, ana / search-any-case, second round");
   expect(md).toContain("- order: reached");
   expect(md).not.toContain("second-round session was stopped");
+});
+
+test("the lead is told what the first round reported, its plan is masked before anyone sees it, and a failed plan leaves its events", async () => {
+  const secret = ProjectConfigSchema.parse({ ...shop, accounts: [{ ref: "acct", username: "a@a.test", password: "hunter22-secret" }] });
+  const first = [
+    toolCall("browser_snapshot", {}),
+    toolCall("submit_finding", { kind: "friction", goal: "order", title: "Hidden checkout", observed: "o", reproduction: ["a"], severity: "low" }),
+    ...reached("order"), ...reached("browse"),
+  ];
+  const agent = scriptedModel([...first, text(JSON.stringify({ passedBy: ["a field holding hunter22-secret"], goals: [{ id: "more", instruction: "Type hunter22-secret into the search.", personaId: "lee" }] })), ...reached("more")]);
+  const summary = await localRun({
+    project: secret, agentModel: agent, agentModelId: "a", judgeModel: scriptedModel([]), judgeModelId: "j", budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: () => {}, openBrowser: shopBrowser, secondRound: true,
+  });
+  expect(summary.secondRound!.goals).toEqual([{ id: "more", instruction: "Type ••• into the search.", personaId: "lee" }]);
+  expect(summary.secondRound!.passedBy).toEqual(["a field holding •••"]);
+  const plan = agent.doGenerateCalls.map((c) => JSON.stringify(c.prompt)).find((p) => p.includes("you plan a second round"))!;
+  expect(plan).toContain("Hidden checkout");
+  expect(plan).toMatch(/person[^}]*ana[^}]*order done/);
+
+  const events: RunEventInput[] = [];
+  await localRun({
+    project: shop, agentModel: scriptedModel([...first, text("no"), text("no")]), agentModelId: "a", judgeModel: scriptedModel([]), judgeModelId: "j", budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: (e) => void events.push(e), openBrowser: shopBrowser, secondRound: true,
+  });
+  expect(events.filter((e) => e.jobId === "plan:second-round")).toMatchObject([{ type: "job_started", kind: "setup" }, { type: "job_finished", stoppedBy: "error", error: "the lead could not plan a second round: the model gave no usable plan (2 tries)" }]);
+});
+
+test("after a team plan's turn ended in an error nobody goes on to a second round", async () => {
+  const team = ProjectConfigSchema.parse({ ...shop, goals: [...shop.goals, { id: "again", instruction: "The plant is ordered again.", personaId: "ana" }] });
+  let opened = 0;
+  const summary = await localRun({
+    project: team, agentModel: scriptedModel([toolCall("browser_snapshot", {}), ...reached("order")]), agentModelId: "a", judgeModel: scriptedModel([]), judgeModelId: "j", budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: () => {}, secondRound: true,
+    openBrowser: async (o) => {
+      if (++opened === 2) throw new Error("the browser would not start");
+      return shopBrowser(o);
+    },
+  });
+  expect(summary.jobs.map((j) => j.jobId)).toEqual(["role:ana#1", "role:lee#2"]);
+  expect(summary.secondRound).toEqual({ goals: [], passedBy: [], sessions: [], error: "the turn of Lee (role:lee#2) ended in an error, so nobody went on to a second round" });
 });
 
 test("without --second-round nobody is asked for more goals", async () => {

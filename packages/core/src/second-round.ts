@@ -3,6 +3,7 @@ import { z } from "zod";
 import { type Finding, type Goal, type GoalOutcome, type JobUsage, type ProjectConfig } from "@usetrawler/protocol";
 import type { Budget } from "./llm.ts";
 import { secondRoundPrompt } from "./prompts.ts";
+import type { SecretScrubber } from "./secrets.ts";
 import { ask, clip } from "./setup.ts";
 
 export const MAX_SEEN_PAGES = 30;
@@ -19,15 +20,17 @@ const LINK = /- link "((?:[^"\\]|\\.)*)"[^\n]*:\n\s*- \/url: (\S+)/g;
 export interface SeenPage {
   url: string;
   snapshot: string;
+  seenBy: string[];
 }
 
 export interface UnopenedLink {
   name: string;
   url: string;
+  seenBy: string[];
 }
 
 export interface SeenPages {
-  watch(tools: ToolSet): ToolSet;
+  watch(tools: ToolSet, person: string): ToolSet;
   pages(): SeenPage[];
   unopened(): UnopenedLink[];
 }
@@ -54,7 +57,7 @@ export function seenPages(): SeenPages {
   const seen = new Map<string, SeenPage>();
   const opened = new Set<string>();
   const linked = new Map<string, UnopenedLink>();
-  const keep = (result: unknown) => {
+  const keep = (result: unknown, person: string) => {
     const text = textOf(result);
     const url = PAGE_URL.exec(text)?.[1];
     const snapshot = SNAPSHOT.exec(text)?.[1];
@@ -63,7 +66,9 @@ export function seenPages(): SeenPages {
     opened.add(place);
     const readable = snapshot.replace(/ \[(?:ref=[a-z0-9]+|cursor=pointer)\]/g, "");
     const kept = seen.get(place);
-    if (kept ? readable.length >= kept.snapshot.length : seen.size < MAX_SEEN_PAGES) seen.set(place, { url, snapshot: readable.slice(0, MAX_PAGE_CHARS) });
+    const seenBy = [...new Set([...(kept?.seenBy ?? []), person])];
+    if (kept && readable.length < kept.snapshot.length) kept.seenBy = seenBy;
+    else if (kept || seen.size < MAX_SEEN_PAGES) seen.set(place, { url, snapshot: readable.slice(0, MAX_PAGE_CHARS), seenBy });
     for (const [, name, href] of readable.matchAll(LINK)) {
       let target: URL;
       try {
@@ -72,20 +77,26 @@ export function seenPages(): SeenPages {
         continue;
       }
       const to = placeOf(target.href);
-      if (!to || target.origin !== new URL(url).origin || linked.has(to) || linked.size >= MAX_LINKED) continue;
+      if (!to || target.origin !== new URL(url).origin) continue;
+      const known = linked.get(to);
+      if (known) {
+        if (!known.seenBy.includes(person)) known.seenBy.push(person);
+        continue;
+      }
+      if (linked.size >= MAX_LINKED) continue;
       target.search = "";
-      linked.set(to, { name: clip(name!.replace(/\\(.)/g, "$1"), 100), url: target.href });
+      linked.set(to, { name: clip(name!.replace(/\\(.)/g, "$1"), 100), url: target.href, seenBy: [person] });
     }
   };
   return {
-    watch: (tools) =>
+    watch: (tools, person) =>
       Object.fromEntries(
         Object.entries(tools).map(([name, t]) => {
           const execute = t.execute;
           if (!execute) return [name, t];
           const watched: NonNullable<Tool["execute"]> = async (input, options) => {
             const result = await execute(input, options);
-            keep(result);
+            keep(result, person);
             return result;
           };
           return [name, { ...t, execute: watched }];
@@ -116,6 +127,7 @@ export async function planSecondRound(opts: {
   model: LanguageModel;
   modelId: string;
   budget: Budget;
+  scrubber: SecretScrubber;
   project: ProjectConfig;
   outcomes: Array<GoalOutcome & { persona: string }>;
   findings: Array<Pick<Finding, "kind" | "title"> & { persona: string }>;
@@ -124,7 +136,8 @@ export async function planSecondRound(opts: {
 }): Promise<{ plan: SecondRound; usage: JobUsage }> {
   const people = new Set(opts.project.personas.map((p) => p.id));
   const taken = new Set(opts.project.goals.map((g) => g.id));
-  const { answer, usage } = await ask(opts, Answer, secondRoundPrompt({ description: opts.project.description, personas: opts.project.personas, goals: opts.project.goals, outcomes: opts.outcomes, findings: opts.findings, pages: opts.pages, unopened: opts.unopened, maxGoals: MAX_SECOND_ROUND_GOALS, maxPerPerson: MAX_PER_PERSON }), (a) => {
+  const prompt = opts.scrubber.scrub(secondRoundPrompt({ description: opts.project.description, setup: opts.project.setup, personas: opts.project.personas, goals: opts.project.goals, outcomes: opts.outcomes, findings: opts.findings, pages: opts.pages, unopened: opts.unopened, maxGoals: MAX_SECOND_ROUND_GOALS, maxPerPerson: MAX_PER_PERSON }));
+  const { answer, usage } = await ask(opts, Answer, prompt, (a) => {
     const unknown = [...new Set(a.goals.map((g) => g.personaId).filter((id) => !people.has(id)))];
     return [
       ...(a.goals.length === 0 ? ["there were no goals: give at least one"] : []),

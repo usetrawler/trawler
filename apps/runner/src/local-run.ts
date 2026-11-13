@@ -109,7 +109,7 @@ export async function localRun(opts: {
     const { result, usage } = await withBrowser(jobId, scrubber, (b) =>
       runRoleSession({
         model: opts.agentModel, modelId: opts.agentModelId, persona, project: session.project,
-        browserTools: seen ? seen.watch(b.tools) : b.tools, fillField: b.fillField, accountForm: b.accountForm?.bind(b), scrubber, budget, maxSteps: opts.maxSteps, emit,
+        browserTools: seen ? seen.watch(b.tools, persona.id) : b.tools, fillField: b.fillField, accountForm: b.accountForm?.bind(b), scrubber, budget, maxSteps: opts.maxSteps, emit,
         newFindingId: () => `f${++findingNo}`, pageUrl: () => b.pageUrl(), botProtection: () => b.botProtection?.() ?? null,
         goalIds: session.goalIds, story: trimStory(story), signUpSeed, jobId,
         returning: session.returning,
@@ -164,7 +164,7 @@ export async function localRun(opts: {
     const spentBefore = budget.spent;
     tell({ type: "job_started", jobId: SECOND_ROUND_JOB, kind: "setup" });
     const planned = await planSecondRound({
-      model: opts.agentModel, modelId: opts.agentModelId, budget, project: opts.project,
+      model: opts.agentModel, modelId: opts.agentModelId, budget, scrubber: scrubberFor(), project: opts.project,
       outcomes: firstRound.flatMap((r) => r.goals.map((g) => ({ ...g, persona: r.persona }))),
       findings: firstRound.flatMap((r) => r.findings.map((f) => ({ persona: r.persona, kind: f.kind, title: f.title }))),
       pages: seen.pages(), unopened: seen.unopened(),
