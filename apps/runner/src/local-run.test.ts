@@ -607,3 +607,39 @@ test("a grouping that fails leaves every report to be replayed on its own, and o
   const once = await localRun({ project: shop, agentModel: single, agentModelId: "a", judgeModel: scriptedModel([text(JSON.stringify({ verdict: "confirmed" }))]), judgeModelId: "j", budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: () => {}, openBrowser: shopBrowser });
   expect(once.jobs.map((j) => j.jobId)).not.toContain("group");
 });
+
+test("when two replays of a group in a row write no report, every earlier report ends up under the third, and none drops out of the report", async () => {
+  const three = [
+    toolCall("browser_snapshot", {}),
+    toolCall("submit_finding", { kind: "defect", goal: "order", title: "Total stale", observed: "o1", reproduction: ["a", "b"], severity: "high" }),
+    toolCall("browser_snapshot", {}),
+    toolCall("submit_finding", { kind: "defect", goal: "order", title: "Total frozen", observed: "o2", reproduction: ["c", "d"], severity: "high" }),
+    ...reached("order"),
+    toolCall("browser_snapshot", {}),
+    toolCall("submit_finding", { kind: "defect", goal: "browse", title: "Total never updates", observed: "o3", reproduction: ["e", "f"], severity: "high" }),
+    ...reached("browse"),
+  ];
+  const lost = [text("lost"), text("still lost"), text("gone")];
+  const agent = scriptedModel([...three, ...lost, ...lost, toolCall("report_replay", { completed: true, observed: "Stale", blockedAt: null })]);
+  const judgeModel = scriptedModel([toolCall("report_groups", { groups: [["f1", "f2", "f3"]] }), text(JSON.stringify({ verdict: "confirmed" }))]);
+  const summary = await localRun({ project: shop, agentModel: agent, agentModelId: "a", judgeModel, judgeModelId: "j", budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: () => {}, openBrowser: shopBrowser });
+  expect(summary.jobs.map((j) => j.jobId)).toEqual(["role:ana", "role:lee", "group", "replay:f1", "replay:f2", "replay:f3", "judge:f3"]);
+  expect(summary.sameAs).toEqual({ f1: "f3", f2: "f3" });
+  const md = renderReport(summary);
+  expect(md.match(/^### /gm)).toHaveLength(1);
+  expect(md).toContain("Also reported, as the same defect:\n- Ana / order: Total stale\n- Ana / order: Total frozen\n");
+});
+
+test("a replay stopped by bot protection is judged inconclusive and the group's other reports are not replayed into the same wall", async () => {
+  let opened = 0;
+  const walled: OpenBrowser = async (o) => {
+    const browser = await shopBrowser(o);
+    return ++opened > 2 ? { ...browser, botProtection: () => ({ vendor: "Cloudflare", url: "https://a.test/" }) } : browser;
+  };
+  const agent = scriptedModel([...reportsOfOneCause, toolCall("browser_snapshot", {}), toolCall("browser_snapshot", {})]);
+  const judgeModel = scriptedModel([toolCall("report_groups", { groups: [["f1", "f3"], ["f2"]] })]);
+  const summary = await localRun({ project: shop, agentModel: agent, agentModelId: "a", judgeModel, judgeModelId: "j", budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: () => {}, openBrowser: walled });
+  expect(summary.jobs.map((j) => j.jobId)).toEqual(["role:ana", "role:lee", "group", "replay:f1", "judge:f1", "replay:f2", "judge:f2"]);
+  expect(summary.verdicts).toEqual({ f1: "inconclusive", f2: "inconclusive" });
+  expect(summary.sameAs).toEqual({ f3: "f1" });
+});

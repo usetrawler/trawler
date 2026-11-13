@@ -247,18 +247,18 @@ export async function localRun(opts: {
 
   const reported = summary.roles.flatMap((role) => role.findings.filter((f) => f.kind === "defect").map((finding) => ({ finding, persona: role.persona })));
   const groups = await groupsOf(reported);
-  for (const [first, ...same] of groups) for (const other of same) summary.sameAs![other.finding.id] = first!.finding.id;
+  const sameAs = (summary.sameAs = {} as Record<string, string>);
+  for (const [first, ...same] of groups) for (const other of same) sameAs[other.finding.id] = first!.finding.id;
   for (const group of groups) {
     for (const [i, { finding, persona }] of group.entries()) {
       if (budget.exceeded) break;
       const replayed = await replay(finding, persona);
       if (!replayed) break;
-      const wroteNoReport = !replayed.completed && replayed.blockedAt === null;
+      const wroteNoReport = !replayed.completed && replayed.blockedAt === null && !replayed.botProtection;
       const next = group[i + 1];
       if (wroteNoReport && next) {
-        for (const other of group.slice(i + 1)) summary.sameAs![other.finding.id] = next.finding.id;
-        delete summary.sameAs![next.finding.id];
-        summary.sameAs![finding.id] = next.finding.id;
+        for (const member of group) sameAs[member.finding.id] = next.finding.id;
+        delete sameAs[next.finding.id];
         continue;
       }
       if (wroteNoReport || budget.exceeded) break;
