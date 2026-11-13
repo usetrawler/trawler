@@ -23,7 +23,7 @@ const EGRESS_DOWN = "stopped: the egress proxy is not answering, so no browser c
 
 const USAGE = `Usage:
   trawler-runner setup <url> [--docs <url>] [--focus <text>] [--model <id>] [--out project.yaml] [--force]
-  trawler-runner run --config project.yaml [--model <id>] [--judge-model <id>] [--budget <usd>] [--max-steps <n>] [--replay-steps <n>] [--headed]
+  trawler-runner run --config project.yaml [--model <id>] [--judge-model <id>] [--budget <usd>] [--max-steps <n>] [--replay-steps <n>] [--second-round] [--headed]
 
   trawler-runner work --control-plane https://app.usetrawler.com [--once]
 
@@ -31,7 +31,9 @@ Set OPENROUTER_API_KEY for setup and run. work needs only TRAWLER_RUNNER_TOKEN: 
 Set TRAWLER_RUN_ID to a run's id for work to take jobs of that run only.
 Set TRAWLER_ACCOUNTS_FILE to a JSON file of {"<person>": {"username", "password"}} for work to sign in people whose accounts come from the CI job.
 Set TRAWLER_LOOK=1 for run or work to let people and replays see the page as a picture, or to a comma-separated list of
-target origins to allow it only for those products (experimental; the model must take images).`;
+target origins to allow it only for those products (experimental; the model must take images).
+--second-round has run plan more goals after the people's first sessions, from the pages they saw, to try what they
+walked past; the same people play them under the same budget (experimental).`;
 
 export interface CliDeps {
   env: Record<string, string | undefined>;
@@ -272,7 +274,7 @@ async function run(args: string[], deps: CliDeps, apiKey: () => string): Promise
     allowPositionals: true,
     options: {
       config: { type: "string" }, model: { type: "string" }, "judge-model": { type: "string" }, budget: { type: "string" },
-      "max-steps": { type: "string" }, "replay-steps": { type: "string" }, headed: { type: "boolean" }, help: { type: "boolean", short: "h" },
+      "max-steps": { type: "string" }, "replay-steps": { type: "string" }, headed: { type: "boolean" }, "second-round": { type: "boolean" }, help: { type: "boolean", short: "h" },
     },
   });
   if (values.help) return help(deps);
@@ -294,7 +296,7 @@ async function run(args: string[], deps: CliDeps, apiKey: () => string): Promise
   try {
     summary = await localRun({
     project, agentModel: deps.model(agentModelId, key), agentModelId, judgeModel: deps.model(judgeModelId, key), judgeModelId,
-    budgetUsd, maxSteps, replaySteps, look: look(project.targetUrl),
+    budgetUsd, maxSteps, replaySteps, look: look(project.targetUrl), secondRound: values["second-round"] === true,
     emit: (e) => {
       runDir.emit(e);
       progress(deps.err, e);

@@ -152,6 +152,25 @@ test("a run whose test account the product refuses exits 1 and says which accoun
   expect(run.err.join("\n")).toContain("The product refused the username and password of p@a.test: Username and password do not match. Check that account in the project file and run again.");
 });
 
+test("run --second-round asks for more goals after the people's sessions, and run without it does not", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cfg-"));
+  writeFileSync(join(dir, "p.yaml"), YAML.stringify({ name: "A", targetUrl: "https://a.test", personas: [{ id: "p", name: "P", brief: "b" }], goals: [{ id: "g", instruction: "x" }] }));
+  const seeing = { content: [{ type: "text", text: "### Page\n- Page URL: https://a.test/\n### Snapshot\n```yaml\n- heading \"Home\"\n```" }] };
+  const session = [toolCall("browser_snapshot", {}), toolCall("goal_status", { goal: "g", status: "reached", note: "" }), toolCall("finish", { summary: "done" })];
+  const browser = async () => ({ tools: { browser_snapshot: tool({ inputSchema: z.object({}), execute: async () => seeing }) }, fillField: async () => "typed" as const, screenshot: async () => null, pageUrl: () => null, close: async () => {} });
+  const egress = async () => startLocalEgress({ resolve: async () => Promise.reject(new Error("ENOTFOUND")) });
+  const plain = scriptedModel(session);
+  const without = deps({ model: () => plain, startLocalEgress: egress, openBrowser: browser });
+  expect(await runCli(["run", "--config", join(dir, "p.yaml")], without.d)).toBe(0);
+  expect(plain.doGenerateCalls).toHaveLength(3);
+
+  const asked = scriptedModel([...session, text(JSON.stringify({ goals: [{ id: "more", instruction: "Try the heading.", personaId: "p" }] })), toolCall("goal_status", { goal: "more", status: "reached", note: "" }), toolCall("finish", { summary: "done" })]);
+  const withIt = deps({ model: () => asked, startLocalEgress: egress, openBrowser: browser });
+  expect(await runCli(["run", "--config", join(dir, "p.yaml"), "--second-round"], withIt.d)).toBe(0);
+  expect(asked.doGenerateCalls).toHaveLength(6);
+  expect(withIt.err.join("\n")).toContain("plan:second-round");
+});
+
 test("run passes --judge-model, --headed and the budget through, and browses through its own egress proxy", async () => {
   const dir = mkdtempSync(join(tmpdir(), "cfg-"));
   writeFileSync(join(dir, "p.yaml"), YAML.stringify({ name: "A", targetUrl: "https://a.test", personas: [{ id: "p", name: "P", brief: "b" }], goals: [{ id: "g", instruction: "x" }] }));
