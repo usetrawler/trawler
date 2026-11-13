@@ -1,6 +1,6 @@
 import type { LanguageModel, Tool, ToolSet } from "ai";
 import { z } from "zod";
-import { MAX_GOALS_PER_PERSONA, type Finding, type Goal, type GoalOutcome, type JobUsage, type ProjectConfig } from "@usetrawler/protocol";
+import { type Finding, type Goal, type GoalOutcome, type JobUsage, type ProjectConfig } from "@usetrawler/protocol";
 import type { Budget } from "./llm.ts";
 import { secondRoundPrompt } from "./prompts.ts";
 import { ask, clip } from "./setup.ts";
@@ -8,6 +8,8 @@ import { ask, clip } from "./setup.ts";
 export const MAX_SEEN_PAGES = 30;
 export const MAX_PAGE_CHARS = 6000;
 export const MAX_UNOPENED = 30;
+const MAX_LINKED = 300;
+const MAX_INSTRUCTION = 600;
 export const MAX_SECOND_ROUND_GOALS = 12;
 const MAX_PER_PERSON = 4;
 const PAGE_URL = /^- Page URL: (\S+)$/m;
@@ -33,7 +35,10 @@ export interface SeenPages {
 function placeOf(url: string): string | null {
   try {
     const parsed = new URL(url);
-    return /^https?:$/.test(parsed.protocol) ? `${parsed.origin}${parsed.pathname.replace(/\/\d+(?=\/|$)/g, "/{n}").replace(/\/+$/, "") || "/"}` : null;
+    if (!/^https?:$/.test(parsed.protocol)) return null;
+    const numbered = (path: string) => path.replace(/\/\d+(?=\/|$)/g, "/{n}").replace(/\/+$/, "");
+    const route = /^#!?\//.test(parsed.hash) ? numbered(parsed.hash.split("?")[0]!) : "";
+    return `${parsed.origin}${numbered(parsed.pathname) || "/"}${route}`;
   } catch {
     return null;
   }
@@ -47,6 +52,7 @@ function textOf(result: unknown): string {
 
 export function seenPages(): SeenPages {
   const seen = new Map<string, SeenPage>();
+  const opened = new Set<string>();
   const linked = new Map<string, UnopenedLink>();
   const keep = (result: unknown) => {
     const text = textOf(result);
@@ -54,18 +60,21 @@ export function seenPages(): SeenPages {
     const snapshot = SNAPSHOT.exec(text)?.[1];
     const place = url ? placeOf(url) : null;
     if (!url || !place || snapshot === undefined) return;
-    if (!seen.has(place) && seen.size >= MAX_SEEN_PAGES) return;
+    opened.add(place);
     const readable = snapshot.replace(/ \[(?:ref=[a-z0-9]+|cursor=pointer)\]/g, "");
-    seen.set(place, { url, snapshot: readable.slice(0, MAX_PAGE_CHARS) });
+    const kept = seen.get(place);
+    if (kept ? readable.length >= kept.snapshot.length : seen.size < MAX_SEEN_PAGES) seen.set(place, { url, snapshot: readable.slice(0, MAX_PAGE_CHARS) });
     for (const [, name, href] of readable.matchAll(LINK)) {
-      let target: string;
+      let target: URL;
       try {
-        target = new URL(href!, url).href;
+        target = new URL(href!, url);
       } catch {
         continue;
       }
-      const to = placeOf(target);
-      if (to && new URL(target).origin === new URL(url).origin && !linked.has(to)) linked.set(to, { name: clip(name!, 100), url: target });
+      const to = placeOf(target.href);
+      if (!to || target.origin !== new URL(url).origin || linked.has(to) || linked.size >= MAX_LINKED) continue;
+      target.search = "";
+      linked.set(to, { name: clip(name!.replace(/\\(.)/g, "$1"), 100), url: target.href });
     }
   };
   return {
@@ -83,8 +92,14 @@ export function seenPages(): SeenPages {
         }),
       ),
     pages: () => [...seen.values()],
-    unopened: () => [...linked].filter(([place]) => !seen.has(place)).map(([, link]) => link).slice(0, MAX_UNOPENED),
+    unopened: () => [...linked].filter(([place]) => !opened.has(place)).map(([, link]) => link).slice(0, MAX_UNOPENED),
   };
+}
+
+function notPlanned(err: unknown): string {
+  const said = err instanceof Error ? err.message : String(err);
+  const why = said.replace(/^the setup model could not propose a project: /, "").replace(/, so no project was proposed$/, "").replaceAll("the setup model", "the model");
+  return `the lead could not plan a second round: ${why}`;
 }
 
 const Answer = z.object({
@@ -115,20 +130,22 @@ export async function planSecondRound(opts: {
       ...(a.goals.length === 0 ? ["there were no goals: give at least one"] : []),
       ...(unknown.length > 0 ? [`these personaId values are not people of this run: ${unknown.join(", ")}. Use only ${[...people].join(", ")}`] : []),
     ];
+  }).catch((err: unknown) => {
+    throw new Error(notPlanned(err), { cause: err });
   });
   const goals: Goal[] = [];
   const perPerson = new Map<string, number>();
   for (const g of answer.goals) {
-    const instruction = clip(g.instruction, 1000);
+    const instruction = clip(g.instruction, MAX_INSTRUCTION);
     const given = perPerson.get(g.personaId) ?? 0;
-    if (!people.has(g.personaId) || !instruction || given >= Math.min(MAX_PER_PERSON, MAX_GOALS_PER_PERSONA) || goals.length >= MAX_SECOND_ROUND_GOALS) continue;
-    const base = g.id.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50) || "probe";
+    if (!people.has(g.personaId) || !instruction || given >= MAX_PER_PERSON || goals.length >= MAX_SECOND_ROUND_GOALS) continue;
+    const base = g.id.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 50).replace(/^-+|-+$/g, "") || "probe";
     let id = base;
     for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
     taken.add(id);
     perPerson.set(g.personaId, given + 1);
     goals.push({ id, instruction, personaId: g.personaId });
   }
-  if (goals.length === 0) throw new Error("the second round's plan had no goal for a person of this run");
+  if (goals.length === 0) throw new Error("the lead's plan for the second round had no goal for a person of this run");
   return { plan: { goals, passedBy: answer.passedBy.map((p) => clip(p, 200)).filter(Boolean).slice(0, 30) }, usage };
 }

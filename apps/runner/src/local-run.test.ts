@@ -411,7 +411,7 @@ test("with a second round the lead plans from the pages the people saw, the peop
     budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: (e) => void events.push(e), openBrowser: shopBrowser, secondRound: true,
   });
   expect(summary.jobs.map((j) => j.jobId)).toEqual(["role:ana", "role:lee", "plan:second-round", "role:ana#second-round", "replay:f1", "judge:f1"]);
-  expect(summary.secondRound).toEqual({ passedBy: ["the search box"], goals: [{ id: "search-any-case", instruction: "Search in any letter case; the list holds what matches.", personaId: "ana" }] });
+  expect(summary.secondRound).toEqual({ passedBy: ["the search box"], goals: [{ id: "search-any-case", instruction: "Search in any letter case; the list holds what matches.", personaId: "ana" }], sessions: [{ persona: "ana", stoppedBy: "finish" }] });
   expect(summary.roles.find((r) => r.persona === "ana")!.goals.map((g) => `${g.goal}:${g.status}`)).toEqual(["order:reached", "search-any-case:failed"]);
   expect(summary.roles.find((r) => r.persona === "lee")!.goals.map((g) => g.goal)).toEqual(["browse"]);
   expect(summary.verdicts).toEqual({ f1: "confirmed" });
@@ -431,6 +431,7 @@ test("with a second round the lead plans from the pages the people saw, the peop
   expect(md).toContain("- search-any-case (second round): failed");
   expect(md).toContain("defect, high, ana / search-any-case, second round");
   expect(md).toContain("- order: reached");
+  expect(md).not.toContain("second-round session was stopped");
 });
 
 test("without --second-round nobody is asked for more goals", async () => {
@@ -456,11 +457,55 @@ test("a second round the lead could not plan is said in the report, and what the
     project: shop, agentModel: agent, agentModelId: "a", judgeModel: scriptedModel([text(JSON.stringify({ verdict: "confirmed" }))]), judgeModelId: "j",
     budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: () => {}, openBrowser: shopBrowser, secondRound: true,
   });
-  expect(summary.secondRound?.goals).toEqual([]);
-  expect(summary.secondRound?.error).toBeTruthy();
+  expect(summary.secondRound).toEqual({ goals: [], passedBy: [], sessions: [], error: "the lead could not plan a second round: the model gave no usable plan (2 tries)" });
   expect(summary.jobs.map((j) => j.jobId)).toEqual(["role:ana", "role:lee", "plan:second-round", "replay:f1", "judge:f1"]);
+  expect(summary.jobs.find((j) => j.jobId === "plan:second-round")!.costUsd).toBeCloseTo(0.002, 10);
   expect(summary.verdicts).toEqual({ f1: "confirmed" });
-  expect(renderReport(summary)).toMatch(/## Second round\n\nNot played: /);
+  expect(renderReport(summary)).toContain("## Second round\n\nNot played: the lead could not plan a second round: the model gave no usable plan (2 tries)\n");
+});
+
+test("a provider error too long for an event does not take the run down with it", async () => {
+  const agent = scriptedModel([toolCall("browser_snapshot", {}), ...reached("order"), ...reached("browse"), new Error("x".repeat(3000))]);
+  const dir = new RunDir(mkdtempSync(join(tmpdir(), "run-")));
+  const summary = await localRun({
+    project: shop, agentModel: agent, agentModelId: "a", judgeModel: scriptedModel([]), judgeModelId: "j",
+    budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: (e) => void dir.emit(e), openBrowser: shopBrowser, secondRound: true,
+  });
+  expect(summary.roles.map((r) => r.stoppedBy)).toEqual(["finish", "finish"]);
+  expect(summary.secondRound!.error).toHaveLength("the lead could not plan a second round: ".length + 3000);
+  const finished = readFileSync(dir.path("events.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l)).find((e) => e.jobId === "plan:second-round" && e.type === "job_finished");
+  expect(finished.error).toHaveLength(2000);
+});
+
+test("a second-round session that breaks leaves the person's first round as it ended, and the report says what happened", async () => {
+  const solo = ProjectConfigSchema.parse({ ...shop, personas: [shop.personas[0]], goals: [shop.goals[0]] });
+  const agent = scriptedModel([toolCall("browser_snapshot", {}), ...reached("order"), text(JSON.stringify({ goals: [{ id: "more", instruction: "Try the search.", personaId: "ana" }] }))]);
+  let opened = 0;
+  const summary = await localRun({
+    project: solo, agentModel: agent, agentModelId: "a", judgeModel: scriptedModel([]), judgeModelId: "j", budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: () => {}, secondRound: true,
+    openBrowser: async (o) => {
+      if (++opened === 2) throw new Error("the browser would not start");
+      return shopBrowser(o);
+    },
+  });
+  expect(summary.roles).toMatchObject([{ persona: "ana", stoppedBy: "finish", goals: [{ goal: "order", status: "reached" }, { goal: "more", status: "not_attempted" }] }]);
+  expect(summary.roles[0]!.error).toBeUndefined();
+  expect(summary.secondRound!.sessions).toEqual([{ persona: "ana", stoppedBy: "error", error: "the browser would not start" }]);
+  expect(renderReport(summary)).toContain("- Ana's second-round session was stopped by error: the browser would not start\n");
+});
+
+test("when the budget runs out the report says which second-round goals nobody started, or that the round was not planned", async () => {
+  const session = () => scriptedModel([toolCall("browser_snapshot", {}), ...reached("order"), ...reached("browse"), text(JSON.stringify({ goals: [{ id: "more", instruction: "Try the search.", personaId: "lee" }] }))]);
+  const run = (budgetUsd: number) => localRun({
+    project: shop, agentModel: session(), agentModelId: "a", judgeModel: scriptedModel([]), judgeModelId: "j", budgetUsd, maxSteps: 10, replaySteps: 10, emit: () => {}, openBrowser: shopBrowser, secondRound: true,
+  });
+  const afterPlanning = await run(0.0055);
+  expect(afterPlanning.secondRound!.goals.map((g) => g.id)).toEqual(["more"]);
+  expect(afterPlanning.secondRound!.sessions).toEqual([]);
+  expect(afterPlanning.roles.find((r) => r.persona === "lee")).toMatchObject({ stoppedBy: "finish", goals: [{ goal: "browse", status: "reached" }, { goal: "more", status: "not_attempted", note: "not started: the budget ran out" }] });
+  const before = await run(0.0045);
+  expect(before.secondRound).toEqual({ goals: [], passedBy: [], sessions: [], error: "the budget ran out before the second round" });
+  expect(before.jobs.map((j) => j.jobId)).toEqual(["role:ana", "role:lee"]);
 });
 
 test("when nobody saw a page there is nothing to plan a second round from", async () => {
@@ -470,5 +515,6 @@ test("when nobody saw a page there is nothing to plan a second round from", asyn
     budgetUsd: 5, maxSteps: 10, replaySteps: 10, emit: () => {}, openBrowser: shopBrowser, secondRound: true,
   });
   expect(summary.jobs.map((j) => j.jobId)).toEqual(["role:ana", "role:lee"]);
-  expect(summary.secondRound).toBeUndefined();
+  expect(summary.secondRound).toEqual({ goals: [], passedBy: [], sessions: [], error: "nobody saw a page to plan it from" });
+  expect(renderReport(summary)).toContain("Not played: nobody saw a page to plan it from");
 });

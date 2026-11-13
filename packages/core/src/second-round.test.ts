@@ -52,6 +52,28 @@ test("a place the pages link to that nobody opened is listed once, and not a pla
   expect(seen.unopened()).toEqual([{ name: "Account", url: "https://a.test/account" }, { name: "Orders", url: "https://a.test/orders" }]);
 });
 
+test("a place keeps its fullest page, an address with a route after # is a place of its own, and a link keeps neither its query nor the escapes of its name", async () => {
+  const { seen, look } = browsing([
+    page("https://a.test/cart", `- row "Monstera"\n- row "Terracotta Pot"\n- link "Say \\"hi\\"" [ref=e1]:\n  - /url: /hello?token=abc123`),
+    page("https://a.test/cart?removed=7", `- paragraph: Your cart is empty.`),
+    page("https://a.test/app#/orders/12?tab=open", `- heading "Order 12"`),
+    page("https://a.test/app#/settings", `- heading "Settings"`),
+    page("https://a.test/app#top", `- heading "Welcome"`),
+  ]);
+  for (let i = 0; i < 5; i++) await look();
+  expect(seen.pages().map((p) => p.url)).toEqual(["https://a.test/cart", "https://a.test/app#/orders/12?tab=open", "https://a.test/app#/settings", "https://a.test/app#top"]);
+  expect(seen.pages()[0]!.snapshot).toContain(`- row "Monstera"`);
+  expect(seen.unopened()).toEqual([{ name: `Say "hi"`, url: "https://a.test/hello" }]);
+});
+
+test("a place somebody opened is not listed as unopened even when the cap kept its page out", async () => {
+  const many = Array.from({ length: MAX_SEEN_PAGES }, (_, i) => page(`https://a.test/p${i}`, `- link "Late" [ref=e1]:\n  - /url: /late`));
+  const { seen, look } = browsing([...many, page("https://a.test/late", `- heading "Late"`)]);
+  for (let i = 0; i < many.length + 1; i++) await look();
+  expect(seen.pages().map((p) => p.url)).not.toContain("https://a.test/late");
+  expect(seen.unopened()).toEqual([]);
+});
+
 test("no more pages are kept than the cap, a page already kept is still refreshed, and a long page is cut", async () => {
   const many = Array.from({ length: MAX_SEEN_PAGES + 2 }, (_, i) => page(`https://a.test/p${i}`, `- heading "Page ${i}"`));
   const { seen, look } = browsing([...many, page("https://a.test/p0", "x".repeat(MAX_PAGE_CHARS + 500))]);
@@ -101,7 +123,12 @@ test("an answer naming someone who is not in the run is sent back once with the 
 
 test("a plan with no goal for anyone in the run is an error, not an empty round", async () => {
   const none = text(JSON.stringify({ goals: [{ id: "a", instruction: "Try the search.", personaId: "sam" }] }));
-  await expect(planning(scriptedModel([none, none]))).rejects.toThrow("no goal for a person of this run");
+  await expect(planning(scriptedModel([none, none]))).rejects.toThrow("the lead's plan for the second round had no goal for a person of this run");
+});
+
+test("a lead that cannot be read says so in its own words, not setup's", async () => {
+  await expect(planning(scriptedModel([text("not a plan"), text("still not a plan")]))).rejects.toThrow(/^the lead could not plan a second round: the model gave no usable plan \(2 tries\)$/);
+  await expect(planning(scriptedModel([new Error("provider down")]))).rejects.toThrow(/^the lead could not plan a second round: provider down$/);
 });
 
 test("the lead is shown the pages as data, the first round's outcomes with the goals' own words, what was reported and the places nobody opened", () => {
