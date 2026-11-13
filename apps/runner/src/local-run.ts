@@ -1,13 +1,17 @@
 import { randomBytes } from "node:crypto";
 import type { LanguageModel } from "ai";
-import { Budget, checkAccount, judge, planSecondRound, runReplay, runRoleSession, SecretScrubber, seenPages, type Browser } from "@usetrawler/core";
-import { ACCOUNT_CHECK_STEPS, trimStory, turnsOf, type Persona, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
+import { Budget, checkAccount, groupDefects, judge, planSecondRound, runReplay, runRoleSession, SecretScrubber, seenPages, type Browser } from "@usetrawler/core";
+import { ACCOUNT_CHECK_STEPS, MAX_GROUPED_DEFECTS, trimStory, turnsOf, type DefectToGroup, type Finding, type Persona, type ProjectConfig, type RoleResult, type RunEventInput, type StoryEntry } from "@usetrawler/protocol";
 import type { RunSummary } from "./run-dir.ts";
 import { blockedRequest } from "./blocked-request.ts";
 
 const CLOSE_TIMEOUT_MS = 10_000;
 export const SECOND_ROUND_JOB = "plan:second-round";
 const MAX_JOB_ERROR = 2000;
+const GROUPED_OBSERVED_CHARS = 600;
+const GROUPED_STEPS = 12;
+const GROUPED_STEP_CHARS = 200;
+const GROUPED_GOAL_CHARS = 300;
 
 export type OpenBrowser = (opts: { onBlocked: (url: string, cause?: string) => void; scrubber: SecretScrubber }) => Promise<Browser>;
 
@@ -29,7 +33,7 @@ export async function localRun(opts: {
   const budget = new Budget(opts.budgetUsd);
   const summary: RunSummary = {
     project: opts.project.name, agentModel: opts.agentModelId, judgeModel: opts.judgeModelId,
-    startedAt, finishedAt: startedAt, budgetUsd: opts.budgetUsd, totalCostUsd: 0, jobs: [], roles: [], replays: {}, replayErrors: {}, verdicts: {}, judgeErrors: {},
+    startedAt, finishedAt: startedAt, budgetUsd: opts.budgetUsd, totalCostUsd: 0, jobs: [], roles: [], replays: {}, replayErrors: {}, verdicts: {}, judgeErrors: {}, sameAs: {},
     people: Object.fromEntries(opts.project.personas.map((p) => [p.id, p.name])),
     browserFailures: [],
   };
@@ -87,6 +91,49 @@ export async function localRun(opts: {
       return summary;
     }
   }
+
+  const goalsSeen = () => [...opts.project.goals, ...(summary.secondRound?.goals ?? [])];
+  const clipped = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+  const groupsOf = async (reported: Array<{ finding: Finding; persona: string }>) => {
+    const alone = reported.map((r) => [r]);
+    if (reported.length < 2 || reported.length > MAX_GROUPED_DEFECTS || budget.exceeded) return alone;
+    const defects: DefectToGroup[] = reported.map(({ finding, persona }) => ({
+      key: finding.id,
+      person: opts.project.personas.find((p) => p.id === persona)?.name ?? persona,
+      goal: clipped(goalsSeen().find((g) => g.id === finding.goal)?.instruction ?? finding.goal, GROUPED_GOAL_CHARS),
+      title: finding.title,
+      observed: clipped(finding.observed, GROUPED_OBSERVED_CHARS),
+      reproduction: finding.reproduction.slice(0, GROUPED_STEPS).map((step) => clipped(step, GROUPED_STEP_CHARS)),
+    }));
+    const grouped = await groupDefects({ model: opts.judgeModel, modelId: opts.judgeModelId, defects, scrubber: scrubberFor(), budget, emit: opts.emit });
+    summary.jobs.push({ jobId: "group", ...grouped.usage });
+    if (!grouped.groups) return alone;
+    const byId = new Map(reported.map((r) => [r.finding.id, r]));
+    const order = reported.map((r) => r.finding.id);
+    return grouped.groups.map((keys) => keys.toSorted((x, y) => order.indexOf(x) - order.indexOf(y)).map((key) => byId.get(key)!)).toSorted((x, y) => order.indexOf(x[0]!.finding.id) - order.indexOf(y[0]!.finding.id));
+  };
+  const replay = async (finding: Finding, persona: string) => {
+    const accountRef = opts.project.personas.find((p) => p.id === persona)?.accountRef;
+    const scrubber = scrubberFor();
+    const replayed = await withBrowser(`replay:${finding.id}`, scrubber, (b) =>
+      runReplay({
+        model: opts.agentModel, modelId: opts.agentModelId, finding, project: opts.project, accountRef,
+        browserTools: b.tools, fillField: b.fillField, botProtection: () => b.botProtection?.() ?? null, scrubber, budget,
+        ...(opts.look ? { look: true, screenshot: () => b.screenshot() } : {}), maxSteps: opts.replaySteps * Math.max(1, new Set(finding.by ?? []).size), emit: opts.emit,
+        openBrowser: () => opts.openBrowser({ scrubber, onBlocked: blockedFor(`replay:${finding.id}`, scrubber) }),
+      }),
+    ).catch((err) => {
+      const error = failure(scrubber, err);
+      recordFailure(`replay:${finding.id}`, "replay", error);
+      summary.replayErrors[finding.id] = error;
+      summary.jobs.push({ jobId: `replay:${finding.id}`, ...noUsage(opts.agentModelId) });
+      return null;
+    });
+    if (!replayed) return null;
+    summary.jobs.push({ jobId: `replay:${finding.id}`, ...replayed.usage });
+    summary.replays[finding.id] = replayed.observation;
+    return replayed.observation;
+  };
 
   const turns = turnsOf(opts.project);
   const teamed = turns.length > opts.project.personas.length;
@@ -198,35 +245,28 @@ export async function localRun(opts: {
 
   summary.roles.push(...byPersona.values());
 
-  for (const role of summary.roles) {
-    const accountRef = opts.project.personas.find((p) => p.id === role.persona)?.accountRef;
-    for (const finding of role.findings.filter((f) => f.kind === "defect")) {
+  const reported = summary.roles.flatMap((role) => role.findings.filter((f) => f.kind === "defect").map((finding) => ({ finding, persona: role.persona })));
+  const groups = await groupsOf(reported);
+  const sameAs = (summary.sameAs = {} as Record<string, string>);
+  for (const [first, ...same] of groups) for (const other of same) sameAs[other.finding.id] = first!.finding.id;
+  for (const group of groups) {
+    for (const [i, { finding, persona }] of group.entries()) {
       if (budget.exceeded) break;
-      const scrubber = scrubberFor();
-      const replayed = await withBrowser(`replay:${finding.id}`, scrubber, (b) =>
-        runReplay({
-          model: opts.agentModel, modelId: opts.agentModelId, finding, project: opts.project, accountRef,
-          browserTools: b.tools, fillField: b.fillField, botProtection: () => b.botProtection?.() ?? null, scrubber, budget,
-          ...(opts.look ? { look: true, screenshot: () => b.screenshot() } : {}), maxSteps: opts.replaySteps * Math.max(1, new Set(finding.by ?? []).size), emit: opts.emit,
-          openBrowser: () => opts.openBrowser({ scrubber, onBlocked: blockedFor(`replay:${finding.id}`, scrubber) }),
-        }),
-      ).catch((err) => {
-        const error = failure(scrubber, err);
-        recordFailure(`replay:${finding.id}`, "replay", error);
-        summary.replayErrors[finding.id] = error;
-        summary.jobs.push({ jobId: `replay:${finding.id}`, ...noUsage(opts.agentModelId) });
-        return null;
-      });
-      if (!replayed) continue;
-      const { observation, usage } = replayed;
-      summary.jobs.push({ jobId: `replay:${finding.id}`, ...usage });
-      summary.replays[finding.id] = observation;
-      const wroteNoReport = !observation.completed && observation.blockedAt === null;
-      if (wroteNoReport || budget.exceeded) continue;
-      const judged = await judge({ model: opts.judgeModel, modelId: opts.judgeModelId, finding, observation, scrubber, budget, emit: opts.emit });
+      const replayed = await replay(finding, persona);
+      if (!replayed) break;
+      const wroteNoReport = !replayed.completed && replayed.blockedAt === null && !replayed.botProtection;
+      const next = group[i + 1];
+      if (wroteNoReport && next) {
+        for (const member of group) sameAs[member.finding.id] = next.finding.id;
+        delete sameAs[next.finding.id];
+        continue;
+      }
+      if (wroteNoReport || budget.exceeded) break;
+      const judged = await judge({ model: opts.judgeModel, modelId: opts.judgeModelId, finding, observation: replayed, scrubber: scrubberFor(), budget, emit: opts.emit });
       summary.jobs.push({ jobId: `judge:${finding.id}`, ...judged.usage });
       if (judged.verdict) summary.verdicts[finding.id] = judged.verdict;
       else if (judged.error) summary.judgeErrors[finding.id] = judged.error;
+      break;
     }
   }
 

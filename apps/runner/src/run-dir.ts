@@ -16,6 +16,7 @@ export interface RunSummary {
   replayErrors: Record<string, string>;
   verdicts: Record<string, Verdict>;
   judgeErrors: Record<string, string>;
+  sameAs?: Record<string, string>;
   refusedAccount?: string;
   people?: Record<string, string>;
   browserFailures?: Array<{ jobId: string; url: string; cause: string }>;
@@ -85,7 +86,7 @@ function secondRound(round: RunSummary["secondRound"], people: Record<string, st
   return `\n## Second round\n\nGoals written after the first round, from the pages the people saw, to try what they walked past.\n\n${passedBy}${goals}\n${cutShort ? `\n${cutShort}\n` : ""}`;
 }
 
-function describe(f: Located, people: Record<string, string>, secondRoundGoals: Set<string>, replay?: ReplayObservation, replayError?: string, judgeError?: string): string {
+function describe(f: Located, people: Record<string, string>, secondRoundGoals: Set<string>, same: Located[], replay?: ReplayObservation, replayError?: string, judgeError?: string): string {
   const who = (i: number) => (f.by && f.by.length === f.reproduction.length ? `${oneLine(people[f.by[i]!] ?? f.by[i]!)}: ` : "");
   const steps = f.reproduction.map((step, i) => `${i + 1}. ${who(i)}${oneLine(step)}`).join("\n");
   const replayed = replayError
@@ -98,14 +99,18 @@ function describe(f: Located, people: Record<string, string>, secondRoundGoals: 
   const judged = judgeError ? `\n\nJudge: could not be judged. ${oneLine(judgeError)}` : "";
   const page = f.url ? `\nPage: ${readable(f.url)}` : "";
   const said = f.quote ? `\n\n> ${oneLine(f.quote)}` : "";
-  return `### ${oneLine(f.title)}\n${f.kind}, ${f.severity}, ${oneLine(f.persona)} / ${oneLine(f.goal)}${secondRoundGoals.has(f.goal) ? ", second round" : ""}${page}\n\n${oneLine(f.observed)}${said}\n\n${steps}${replayed}${judged}\n`;
+  const also = same.length > 0 ? `\n\nAlso reported, as the same defect:\n${same.map((o) => `- ${oneLine(people[o.persona] ?? o.persona)} / ${oneLine(o.goal)}: ${oneLine(o.title)}`).join("\n")}` : "";
+  return `### ${oneLine(f.title)}\n${f.kind}, ${f.severity}, ${oneLine(f.persona)} / ${oneLine(f.goal)}${secondRoundGoals.has(f.goal) ? ", second round" : ""}${page}\n\n${oneLine(f.observed)}${said}\n\n${steps}${also}${replayed}${judged}\n`;
 }
 
 export function renderReport(s: RunSummary): string {
-  const findings: Located[] = s.roles.flatMap((r) => r.findings.map((f) => ({ ...f, persona: r.persona })));
+  const all: Located[] = s.roles.flatMap((r) => r.findings.map((f) => ({ ...f, persona: r.persona })));
+  const sameAs = s.sameAs ?? {};
+  const findings = all.filter((f) => !sameAs[f.id]);
+  const sameAsOf = (f: Located) => all.filter((o) => sameAs[o.id] === f.id);
   const secondRoundGoals = new Set((s.secondRound?.goals ?? []).map((g) => g.id));
   const section = (title: string, items: Located[]) =>
-    items.length === 0 ? "" : `## ${title}\n\n${items.map((f) => describe(f, s.people ?? {}, secondRoundGoals, s.replays[f.id], s.replayErrors[f.id], s.judgeErrors[f.id])).join("\n")}\n`;
+    items.length === 0 ? "" : `## ${title}\n\n${items.map((f) => describe(f, s.people ?? {}, secondRoundGoals, sameAsOf(f), s.replays[f.id], s.replayErrors[f.id], s.judgeErrors[f.id])).join("\n")}\n`;
   const defects = findings.filter((f) => f.kind === "defect");
   const by = (v: Verdict) => defects.filter((f) => s.verdicts[f.id] === v);
   const jobs = s.jobs.map((j) => `| ${j.jobId} | ${j.model} | ${j.steps} | ${usd(j.costUsd)} |`).join("\n");
