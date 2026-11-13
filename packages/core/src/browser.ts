@@ -72,13 +72,20 @@ const MAX_REFUSED_FIELDS = 50;
 const keepRefusedFields = (key: string) => `(() => {
   const refused = new Map();
   Object.defineProperty(window, ${JSON.stringify(key)}, { value: refused });
-  document.addEventListener("invalid", (event) => { if (refused.has(event.target) || refused.size < ${MAX_REFUSED_FIELDS}) refused.set(event.target, event); }, true);
+  const keep = (event) => { if (refused.has(event.target) || refused.size < ${MAX_REFUSED_FIELDS}) refused.set(event.target, event); };
+  document.addEventListener("invalid", keep, true);
+  const attachShadow = Element.prototype.attachShadow;
+  Element.prototype.attachShadow = function (init) {
+    const root = attachShadow.call(this, init);
+    if (init && init.mode === "open") root.addEventListener("invalid", keep, true);
+    return root;
+  };
 })()`;
 // The browser focuses the field it shows its own message at; checkValidity() fires the same event and shows nothing.
 const SHOWN_VALIDATION = `(key) => {
   const kept = window[key];
   if (!(kept instanceof Map)) return null;
-  const refused = [...kept.values()].filter((event) => !event.defaultPrevented && event.target instanceof Element).map((event) => event.target);
+  const refused = [...kept].filter(([field, event]) => !event.defaultPrevented && field instanceof Element).map(([field]) => field);
   kept.clear();
   const shown = refused.find((el) => el.matches(":focus"));
   if (!shown) return null;

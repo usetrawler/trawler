@@ -616,6 +616,15 @@ beforeAll(async () => {
         return html(`<p>outer page</p><iframe src="/quantity"></iframe>`);
       case "/quantity-checked-live":
         return html(`<form onsubmit="event.preventDefault(); document.getElementById('m').textContent = 'sent ' + this.quantity.value"><label>Quantity of Fern <input name="quantity" type="number" min="1" value="1" oninput="document.getElementById('go').disabled = !this.form.checkValidity()"></label><button id="go">Update</button></form><p id="m">cart page</p>`);
+      case "/quantity-in-shadow":
+        return html(`<cart-row id="open"></cart-row><cart-row id="closed" data-mode="closed"></cart-row><p>cart page</p><script>
+          customElements.define("cart-row", class extends HTMLElement {
+            connectedCallback() {
+              const root = this.attachShadow({ mode: this.dataset.mode || "open" });
+              root.innerHTML = '<form action="/plain"><label>Quantity of ' + this.id + ' <input name="quantity" type="number" min="1" value="1"></label><button>Update ' + this.id + '</button></form>';
+            }
+          });
+        </script>`);
       case "/refused-login":
         return html(`<form action="/plain"><input aria-label="Email" type="email" name="email"><input aria-label="Password" type="password" name="password" minlength="40"><button type="button" onclick="document.querySelector('[name=password]').type = 'text'">Show</button><button>Sign in</button></form>`);
       case "/upload":
@@ -944,6 +953,18 @@ describe("the browser's own validation", () => {
       const sent = await call(b, "browser_press_key", { key: "Enter" });
       expect(await snapshot(b)).toContain("sent 3");
       expect(sent).not.toContain(NOTE);
+    });
+  }, 60_000);
+
+  test("a field inside an open shadow root is told as well", async () => {
+    await withBrowser(async (b) => {
+      await navigate(b, `${origin}/quantity-in-shadow`);
+      await call(b, "browser_type", { element: "Quantity of open", target: await ref(b, "Quantity of open"), text: "0" });
+      const open = await call(b, "browser_click", { element: "Update open", target: await ref(b, "Update open") });
+      expect(open).toMatch(/The browser refused what is in the field "Quantity of open" and shows its own message there: "[^"]{5,}"/);
+      expect(await snapshot(b)).toContain("cart page");
+
+      expect(await snapshot(b)).not.toContain("Quantity of closed");
     });
   }, 60_000);
 
