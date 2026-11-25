@@ -24,7 +24,7 @@
 <p align="center">
   <a href="https://github.com/usetrawler/trawler/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/usetrawler/trawler/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <a href="#use-it-in-the-app"><img alt="Hosted runs: free to start" src="https://img.shields.io/badge/hosted_runs-free_to_start-B03711"></a>
-  <img alt="Node.js 24 or later" src="https://img.shields.io/badge/node-%E2%89%A5_24-17191C">
+  <img alt="Node.js 24.22.1 or 26.12.1 and later" src="https://img.shields.io/badge/node-24.22.1%2B_%7C_26.12.1%2B-17191C">
   <a href="#licence"><img alt="Licence: Apache-2.0 and FSL-1.1-ALv2" src="https://img.shields.io/badge/licence-Apache--2.0_%2B_FSL--1.1--ALv2-2C4A57"></a>
 </p>
 
@@ -88,7 +88,7 @@ Screen by screen: [Your first run](https://usetrawler.com/docs/getting-started/f
 
 The runner is the program that actually uses your product: it opens the browser, plays the people, replays the defects and asks the judge. The same program carries out hosted runs, and it can also run entirely on your machine — no Trawler account, no Trawler server — reaching whatever your machine can reach: `localhost`, a VPN, staging behind a password. Model calls go from your machine to OpenRouter, asking the providers behind it not to keep or train on the data; nothing goes to Trawler.
 
-You need Node.js 24 or later and an [OpenRouter API key](https://openrouter.ai/keys); the local runner calls models through OpenRouter only. On Linux, add `--with-deps` to the Playwright command so it installs the libraries Chromium needs.
+You need Node.js 24.22.1 or a later 24, or 26.12.1 or later, and an [OpenRouter API key](https://openrouter.ai/keys); the local runner calls models through OpenRouter only. On Linux, add `--with-deps` to the Playwright command so it installs the libraries Chromium needs.
 
 ```bash
 git clone https://github.com/usetrawler/trawler.git
@@ -221,7 +221,7 @@ Built with TypeScript on Node.js 24, Next.js, Postgres with Flyway and Kysely, B
 
 ## Development
 
-You need Node.js 24 or later, and Docker, which runs Postgres 18 and Flyway for the database tests. On Linux, add `--with-deps` to the Playwright command.
+You need Node.js 24.22.1 or a later 24, or 26.12.1 or later, and Docker, which runs Postgres 18 and Flyway for the database tests. On Linux, add `--with-deps` to the Playwright command.
 
 ```bash
 npm ci

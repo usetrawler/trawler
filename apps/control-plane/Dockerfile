@@ -1,7 +1,7 @@
 FROM node:24-slim AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-COPY package.json package-lock.json tsconfig.base.json tsconfig.json ./
+COPY package.json package-lock.json .npmrc tsconfig.base.json tsconfig.json ./
 COPY packages/core/package.json packages/core/
 COPY packages/protocol/package.json packages/protocol/
 COPY apps/control-plane/package.json apps/control-plane/

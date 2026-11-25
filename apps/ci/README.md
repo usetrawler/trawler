@@ -14,7 +14,7 @@ Starts a Trawler run for a pull request, waits for it, comments the result on th
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # job needs pull-requests: write
 ```
 
-Needs Node 24 or newer and `npm ci` at the repository root. No build step.
+Needs Node 24.22.1 or a later 24, or 26.12.1 or later, and `npm ci` at the repository root. No build step.
 
 ```
 node apps/ci/src/main.ts run --project <uuid> [--plan <uuid>] [--url <address>] [--runner hosted|own]

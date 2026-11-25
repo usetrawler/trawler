@@ -5,7 +5,7 @@ RUN useradd --system --no-create-home --shell /usr/sbin/nologin egress \
   && groupadd --system trawler-downloads && usermod -aG trawler-downloads node && usermod -aG trawler-downloads browser \
   && install -d -o root -g trawler-downloads -m 2770 /var/lib/trawler-downloads
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright NODE_ENV=production TRAWLER_REQUIRE_EGRESS=1 TRAWLER_BROWSER_LAUNCHER=/usr/local/bin/trawler-chromium TRAWLER_BROWSER_DOWNLOADS=/var/lib/trawler-downloads
-COPY package.json package-lock.json tsconfig.base.json tsconfig.json ./
+COPY package.json package-lock.json .npmrc tsconfig.base.json tsconfig.json ./
 COPY packages/core/package.json packages/core/
 COPY packages/protocol/package.json packages/protocol/
 COPY apps/control-plane/package.json apps/control-plane/
